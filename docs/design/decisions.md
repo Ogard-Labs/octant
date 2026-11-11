@@ -2341,7 +2341,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
 - The dock may show several open tools together as tiles, each live, beside a thread: at most two columns of three tiles, one Browser tile whose page is the chosen Browser tab, the focused tile's tab always selected, a tile that cannot be described for the active pane saying so in its tile, and the narrow modal drawing only the focused tile. A layout is window-local presentation, never reaches the bottom panel, and moves nothing about what an agent may do. Tile changes apply to the tools on screen, a column is never narrower than 280px while there is room, and two columns let the dock take what the thread's own minimum leaves.
-- A **Show a tool beside** control in the dock head, and each tab's menu, drag and Shift+F10, show a tool beside the focused tile, so a tool in the strip's overflow can be tiled.
+- A **Show another tool** control in the dock head, and each tab's menu, drag and Shift+F10, show a tool with the focused tile, so a tool in the strip's overflow can be tiled.
 - Opening a dock tool leaves the bottom panel open; a tool the panel already shows is the only one that leaves it. A tool is on screen in one region at a time.
 - A new Code task's pane starts with the dock closed until the person opens it there; that choice belongs to the draft and is never saved as the window's.
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
@@ -2353,7 +2353,6 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 
 - Code Review turns a person-selected captured diff line into a local finding without execution approval, and selected findings into an editable unsent draft in the owning thread. Checkout/revision/side identity and outside-content references survive ordinary send and queue; missing provenance refuses, and only the person resolves a finding. Receipt links never infer a missing checkout or retarget after rebind. [Workspace](workspace.md) owns the detailed rule.
 - Running Code turns expose bounded versioned comparisons from their recorded starting tree after typed edit activity. Captured Review stays on an exact immutable version while newer/final captures are announced, preserves view preferences, and keeps original note anchors. Passive reads never capture; current authority, cancellation, unavailable source and final-capture failure remain explicit. [Workspace](workspace.md) owns the lifecycle and view-only whitespace rule.
-- Tool tiles are built and covered by component tests; the rendered check in the packaged app (the native Browser tile beside other tiles, dividers dragged across it, a tab dropped on the body) is owed.
 
 Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout).
 

@@ -642,6 +642,28 @@ describe("dock tool tiles", () => {
     ]);
   });
 
+  it("selects and closes tabs on the tools on screen when the bottom panel holds the focused tile's tool", () => {
+    // Terminal | Files with Terminal focused, Review open but hidden; the panel takes Terminal.
+    const stored = showUtilityTabBeside(
+      selectUtilityTabState(opened("files", "terminal", "plan"), "files"),
+      "terminal",
+    );
+    expect(columnsOf(stored).flat().sort()).toEqual(["files", "terminal"]);
+    const panel = new Set<"terminal">(["terminal"]);
+    const displayed = removeUtilityTabs(stored, panel);
+    expect(shownUtilityTabIds(displayed)).toEqual(["files"]);
+
+    const selected = changeDisplayedUtilityState(stored, displayed, (state) =>
+      selectUtilityTabState(state, "plan"),
+    );
+    expect(shownUtilityTabIds(removeUtilityTabs(selected, panel))).toEqual(["plan"]);
+
+    const closed = changeDisplayedUtilityState(stored, displayed, (state) =>
+      closeUtilityTabState(state, "files"),
+    );
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["terminal", "plan"]);
+  });
+
   it("counts the columns a state shows", () => {
     expect(shownTileColumns(opened("files"))).toBe(1);
     expect(shownTileColumns(showUtilityTabBeside(opened("files", "canvas"), "files"))).toBe(2);

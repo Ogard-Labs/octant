@@ -697,11 +697,17 @@
    its name, not by an outline: the focused one reads in the full ink and the
    rest a step back, with no ring and no fill. */
 .dock-tiles {
-  position: relative;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: hidden auto;
+}
+
+/* Taller than the dock only when the tiles cannot all keep their floor inside
+   it; the area then scrolls instead of squeezing a tile under its floor. */
+.dock-tiles__surface {
+  position: relative;
+  min-height: 100%;
 }
 
 /* Every tile is a child of this one element, placed by percentages from its

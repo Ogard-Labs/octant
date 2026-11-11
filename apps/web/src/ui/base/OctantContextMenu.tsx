@@ -39,7 +39,17 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
   const labelId = (index: number) => `${menuId}-item-${index}-label`;
   const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
   return (
-    <ContextMenu onOpenChange={setOpen}>
+    <ContextMenu
+      onOpenChange={(next, details) => {
+        // No items, no menu: a caller keeps one trigger whatever its menu
+        // holds, and an empty list opens nothing on the web or the OS path.
+        if (next && props.items.length === 0) {
+          details.cancel();
+          return;
+        }
+        setOpen(next);
+      }}
+    >
       <ContextMenuTrigger
         aria-expanded={open}
         className={cn(props.triggerClassName, "window-no-drag")}

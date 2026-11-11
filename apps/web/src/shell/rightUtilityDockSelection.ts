@@ -352,10 +352,15 @@ export function changeDisplayedUtilityState(
 ): ThreadUtilityDockState {
   const next = change(displayed);
   if (next === displayed) return stored;
+  const kept = new Set(next.tabs.map((tab) => tab.id));
+  const gone = new Set(displayed.tabs.filter((tab) => !kept.has(tab.id)).map((tab) => tab.id));
   const known = new Set(stored.tabs.map((tab) => tab.id));
   return {
     ...next,
-    tabs: [...stored.tabs, ...next.tabs.filter((tab) => !known.has(tab.id))],
+    tabs: [
+      ...stored.tabs.filter((tab) => !gone.has(tab.id)),
+      ...next.tabs.filter((tab) => !known.has(tab.id)),
+    ],
   };
 }
 

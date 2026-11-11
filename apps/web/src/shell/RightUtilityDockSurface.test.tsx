@@ -547,7 +547,7 @@ describe("tool tiles in the right sidebar", () => {
     render(<TiledDock initial={tiledState()} />);
     await user.click(
       within(screen.getByRole("region", { name: "iOS Simulator" })).getByRole("button", {
-        name: "Hide iOS Simulator",
+        name: "Hide iOS Simulator from view",
       }),
     );
     expect(screen.queryByText("Live ios-simulator")).not.toBeInTheDocument();
@@ -694,7 +694,7 @@ describe("tool tiles in the right sidebar", () => {
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
     await user.click(
       within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-        name: "Hide Files",
+        name: "Hide Files from view",
       }),
     );
     expect(screen.queryByRole("region", { name: "Files" })).not.toBeInTheDocument();
@@ -708,7 +708,7 @@ describe("tool tiles in the right sidebar", () => {
     render(<TiledDock initial={tiledState()} />);
     await user.click(
       within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-        name: "Hide Files",
+        name: "Hide Files from view",
       }),
     );
     expect(screen.getByText("Live ios-simulator")).toBeVisible();
@@ -774,7 +774,7 @@ describe("tool tiles in the right sidebar", () => {
     render(<TiledDock initial={tiledState()} />);
     await user.click(
       within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-        name: "Hide Files",
+        name: "Hide Files from view",
       }),
     );
     expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
@@ -838,7 +838,7 @@ describe("tool tiles in the right sidebar", () => {
     expect(document.querySelector(".dock-tiles__drag-shield")).not.toBeNull();
     fireEvent.click(
       within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-        name: "Hide Files",
+        name: "Hide Files from view",
       }),
     );
     rerender(<TiledDock initial={tiledState()} />);
@@ -876,7 +876,10 @@ describe("tool tiles in the right sidebar", () => {
     try {
       render(<TiledDock initial={tiledState()} />);
       expect(document.querySelector(".dock-tiles")).toHaveAttribute("data-stacked", "true");
-      expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+      // The columns stay resizable, along the vertical axis.
+      expect(
+        screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }),
+      ).toHaveAttribute("aria-orientation", "horizontal");
       expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
     } finally {
       width.mockRestore();
@@ -891,8 +894,8 @@ describe("tool tiles in the right sidebar", () => {
         launchable={[surface("plan"), surface("browser"), surface("canvas")]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Show a tool beside" }));
-    const menu = await screen.findByRole("menu", { name: "Show beside" });
+    await user.click(screen.getByRole("button", { name: "Show another tool" }));
+    const menu = await screen.findByRole("menu", { name: "Show another tool" });
     expect(
       within(menu)
         .getAllByRole("menuitem")
@@ -907,7 +910,7 @@ describe("tool tiles in the right sidebar", () => {
   it("shows an open tool beside the focused tile from the header menu", async () => {
     const user = userEvent.setup();
     render(<TiledDock initial={opened("files", "canvas")} />);
-    await user.click(screen.getByRole("button", { name: "Show a tool beside" }));
+    await user.click(screen.getByRole("button", { name: "Show another tool" }));
     await user.click(await screen.findByRole("menuitem", { name: "Files" }));
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Canvas" })).toBeVisible();
@@ -915,7 +918,7 @@ describe("tool tiles in the right sidebar", () => {
 
   it("has no show-beside button in the narrow dock or when no more tiles fit", () => {
     const { unmount } = render(<TiledDock initial={opened("files", "canvas")} narrow />);
-    expect(screen.queryByRole("button", { name: "Show a tool beside" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show another tool" })).not.toBeInTheDocument();
     unmount();
     let full = opened("ios-simulator", "canvas", "files", "plan", "terminal", "tests");
     full = showUtilityTabBeside(full, "ios-simulator");
@@ -924,6 +927,141 @@ describe("tool tiles in the right sidebar", () => {
     full = showUtilityTabBeside(full, "plan");
     expect(full.layout?.columns.map((column) => column.tiles.length)).toEqual([1, 3]);
     render(<TiledDock initial={full} />);
-    expect(screen.queryByRole("button", { name: "Show a tool beside" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show another tool" })).not.toBeInTheDocument();
+  });
+
+  const pixelsOf = (name: string, total: number) =>
+    (Number.parseFloat(screen.getByRole("region", { name }).style.height) / 100) * total;
+
+  function tileState(
+    columns: ReadonlyArray<ReadonlyArray<readonly [RightUtilityDockSurfaceId, number]>>,
+    shares: ReadonlyArray<number>,
+    active: RightUtilityDockSurfaceId,
+  ): ThreadUtilityDockState {
+    return {
+      tabs: columns.flat().map(([id]) => ({ id, surface: id })),
+      active,
+      layout: {
+        columns: columns.map((tiles, index) => ({
+          share: shares[index] ?? 1,
+          tiles: tiles.map(([tabId, share]) => ({ tabId, share })),
+        })),
+      },
+    };
+  }
+
+  it("keeps every tile at its floor height when one is added to a column already near it", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 848, height: 848 }));
+    try {
+      // The shares an added third tile leaves a tile that was at its floor.
+      render(
+        <TiledDock
+          initial={tileState(
+            [
+              [
+                ["files", 0.11],
+                ["canvas", 0.557],
+                ["plan", 0.333],
+              ],
+              [["ios-simulator", 1]],
+            ],
+            [0.5, 0.5],
+            "plan",
+          )}
+        />,
+      );
+      for (const name of ["Files", "Canvas", "Plan"]) {
+        expect(pixelsOf(name, 848)).toBeGreaterThanOrEqual(139.5);
+      }
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("keeps every tile at its floor height when the columns stack", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 500, height: 700 }));
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-tiles") ? 500 : 0;
+      });
+    try {
+      render(
+        <TiledDock
+          initial={tileState(
+            [
+              [
+                ["files", 0.9],
+                ["canvas", 0.1],
+              ],
+              [["ios-simulator", 1]],
+            ],
+            [0.6, 0.4],
+            "files",
+          )}
+        />,
+      );
+      expect(document.querySelector(".dock-tiles")).toHaveAttribute("data-stacked", "true");
+      for (const name of ["Files", "Canvas", "iOS Simulator"]) {
+        expect(pixelsOf(name, 700)).toBeGreaterThanOrEqual(139.5);
+      }
+    } finally {
+      width.mockRestore();
+      rect.mockRestore();
+    }
+  });
+
+  it("scrolls with every tile at its floor when stacked tiles cannot fit the dock", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 500, height: 200 }));
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-tiles") ? 500 : 0;
+      });
+    try {
+      render(<TiledDock initial={tiledState()} />);
+      const surfaceEl = document.querySelector<HTMLElement>(".dock-tiles__surface");
+      expect(surfaceEl?.style.height).toBe("280px");
+      expect(pixelsOf("Files", 280)).toBeCloseTo(140);
+      expect(pixelsOf("iOS Simulator", 280)).toBeCloseTo(140);
+    } finally {
+      width.mockRestore();
+      rect.mockRestore();
+    }
+  });
+
+  it("abandons a divider drag on Escape and commits nothing when the pointer is released", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 1000, height: 600 }));
+    try {
+      render(<TiledDock initial={tiledState()} />);
+      const name = "Resize Files and iOS Simulator";
+      const divider = screen.getByRole("separator", { name });
+      pointer("pointerDown", divider, 500);
+      pointer("pointerMove", divider, 700);
+      expect(Number(divider.getAttribute("aria-valuenow"))).toBeGreaterThan(50);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+      pointer("pointerUp", divider, 700);
+      expect(screen.getByRole("separator", { name })).toHaveAttribute("aria-valuenow", "50");
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("keeps keyboard focus on a tab when a header choice leaves the control nothing to offer", async () => {
+    const user = userEvent.setup();
+    render(<TiledDock initial={opened("files")} launchable={[surface("terminal")]} />);
+    await user.click(screen.getByRole("button", { name: "Show another tool" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Terminal" }));
+    expect(screen.getByRole("region", { name: "Terminal" })).toBeVisible();
+    expect(document.activeElement?.getAttribute("role")).toBe("tab");
   });
 });

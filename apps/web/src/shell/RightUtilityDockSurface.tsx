@@ -168,10 +168,14 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   useEffect(() => {
     if (refocus === undefined) return;
     const tabs = [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])];
+    // The tool's own tab, else the selected one, else the overflow count:
+    // a tab in the overflow list is not rendered, and the active tab never is.
     const target =
-      refocus.tab === undefined
-        ? tabs.find((tab) => tab.getAttribute("aria-selected") === "true")
-        : tabs.find((tab) => tab.dataset.dockTab === refocus.tab);
+      (refocus.tab === undefined
+        ? undefined
+        : tabs.find((tab) => tab.dataset.dockTab === refocus.tab)) ??
+      tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ??
+      root.current?.querySelector<HTMLElement>(".dock-tool-strip__more");
     target?.focus();
     setRefocus(undefined);
   }, [refocus]);
@@ -367,8 +371,16 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           (candidate) =>
             candidate.id !== "browser" || (!browserOnScreen && browserTabs.length === 0),
         )}
-        onOpen={tiles.onOpenBeside}
-        onShowOpen={(stripId) => tiles.onShowBeside(toolOf(stripId))}
+        // The menu's own focus return target disappears when the choice leaves
+        // nothing more to offer, so the keyboard goes to the tool chosen.
+        onOpen={(surface) => {
+          setRefocus({ tab: surface });
+          tiles.onOpenBeside(surface);
+        }}
+        onShowOpen={(stripId) => {
+          setRefocus({ tab: stripId });
+          tiles.onShowBeside(toolOf(stripId));
+        }}
         open={stripTabs
           .filter((tab) => !onScreenInStrip.has(tab.id))
           .map((tab) => ({ id: tab.id, label: tab.label, surface: dockTabSurface(tab).id }))}

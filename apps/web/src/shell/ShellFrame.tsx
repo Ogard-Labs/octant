@@ -99,6 +99,9 @@ export function ShellFrame(props: ShellFrameProps) {
                   : ""
               }`
         }
+        data-dock-tile-columns={
+          props.standaloneSurface === undefined && props.dockTileColumns === 2 ? "2" : undefined
+        }
         data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
         data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
         data-transcript-text-size={props.transcriptTextSize ?? "small"}

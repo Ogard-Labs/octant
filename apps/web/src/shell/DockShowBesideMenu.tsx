@@ -27,7 +27,7 @@ export interface DockShowBesideMenuProps {
 }
 
 /**
- * Puts another tool beside the one in front. The tab strip fits two or three
+ * Shows another tool with the one in front, beside it when the dock has the width and below it when the columns stack. The tab strip fits two or three
  * tabs at a usual dock width, so a tool in its overflow list had neither a
  * menu nor a drop target to tile from; this is the control that always can.
  */
@@ -37,8 +37,9 @@ export function DockShowBesideMenu(props: DockShowBesideMenuProps) {
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
-        aria-label="Show a tool beside"
+        aria-label="Show another tool"
         className="shell-icon-button window-no-drag"
+        title="Show another tool"
       >
         <Columns2 aria-hidden="true" size={16} strokeWidth={1.5} />
       </OctantMenuTrigger>
@@ -48,7 +49,7 @@ export function DockShowBesideMenu(props: DockShowBesideMenuProps) {
               trigger says what the button does, not what the menu holds. */}
           <OctantMenuPopup aria-labelledby={labelId}>
             <span className="sr-only" id={labelId}>
-              Show beside
+              Show another tool
             </span>
             {props.open.map((tool) => (
               <OctantMenuItem

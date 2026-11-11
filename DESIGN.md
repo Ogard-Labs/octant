@@ -2211,7 +2211,7 @@ the one tab strip. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
 puts the tool below in the last column. A tile is a region named for its tool,
 with a 26px caption bar (the tool's icon and name, as in the strip's tab recipe)
-and a Hide control that takes the tile out of view without closing the tool. The
+and a **Hide <tool> from view** control that takes the tile out of view without closing the tool (the strip tab's own Hide control closes it). The
 focused tile (the one whose tab is selected) is told apart by its caption
 reading in the full ink, with no ring and no fill, so a see-through theme shows
 through every tile; the dock's own surface is the tiles' ground. Dividers
@@ -2221,7 +2221,13 @@ of the range the floors allow), each named for the two tools it sits between
 ("Resize Environment and Vitals") and reporting the range it can really reach; no tile
 is shorter than 140px or column narrower than 280px (the dock's own minimum
 width) while the dock has the room, and the columns stack when the tile area
-cannot give two columns 280px each. Choosing a tab that is shown
+cannot give two columns 280px each. Columns therefore stand side by side only
+when the tile area has the width: at 1440px with the sidebar open the dock is
+500px and "beside" stacks, which is why the head control promises no direction;
+the strip menu keeps explicit Show beside and Show below. Stacked columns stay
+resizable by a separator between them along the vertical axis, and no tile is
+ever under its floor: when stacked tiles cannot all fit the dock, the tile area
+scrolls with every tile at the floor. Choosing a tab that is shown
 focuses its tile; choosing one that is not replaces the focused tile's tool.
 All Browser tabs are pages of one Browser tool, so there is at most one Browser
 tile and choosing another page changes that tile's page. A tile resolves its own
@@ -2237,10 +2243,11 @@ that is not selected says "Shown" to assistive technology. A tab's context menu
 (right click or the menu key) offers **Show beside** and **Show below** for a
 tool that is not the focused tile, and **Show alone** and **Hide from view** for
 a tool that is shown while tiles exist; Shift+F10 opens the menu as the menu key
-does. A **Show a tool beside** button in the dock head, before Close, opens a
-menu ("Show beside") that lists first the open tools that are not on screen and,
+does. A **Show another tool** button in the dock head, before Close, opens a
+menu of the same name that lists first the open tools that are not on screen and,
 after a separator, the other tools the thread can launch; it shows the choice
-beside the focused tile in one step (opening it first when needed), leaves Browser
+with the focused tile in one step (opening it first when needed), beside it when
+the columns stand side by side and below it when they stack, leaves Browser
 out while a Browser is on screen, and is absent in the narrow dock and when the
 tile caps are full. It exists because a strip with four tools open fits two tabs
 at a usual dock width, and a tool in the overflow list has neither a menu nor a
@@ -2253,7 +2260,8 @@ narrow modal presentation has room for one tool and draws only the focused tile;
 the layout stays stored. The layout is window-local presentation, stored with
 each thread's open tools, and the bottom panel never has one. Tile changes are
 made on the tools on screen, so a tool the bottom panel holds never counts
-toward a cap or a divider's shares.
+toward a cap or a divider's shares. A tool the bottom panel takes, or one that
+becomes unavailable, loses its tile and comes back as a tab, not as a tile.
 
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 

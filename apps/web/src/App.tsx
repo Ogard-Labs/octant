@@ -391,7 +391,6 @@ import {
 import {
   addThreadUtilityTab,
   addUtilityTabState,
-  closeThreadUtilityTab,
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
@@ -402,7 +401,6 @@ import {
   resizeUtilityTileColumn,
   resizeUtilityTileColumns,
   retainAvailableUtilityTabs,
-  selectThreadUtilityTab,
   selectUtilityTabState,
   shownTileColumns,
   shownUtilityTabIds,
@@ -4180,14 +4178,8 @@ function LaunchedShell(
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
   function selectDockTab(tabId: string) {
-    if (dockState.tabs.some((tab) => tab.id === tabId && tab.surface === "terminal")) {
-      dockTabActivation.noteActivated(workspaceDockTabId(tabId, "terminal"));
-    }
-    if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => selectUtilityTabState(current, tabId));
-    } else {
-      setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, tabId));
-    }
+    noteTerminalShown(tabId);
+    changeDockTiles((state) => selectUtilityTabState(state, tabId));
   }
   /**
    * Applies a tile change to the dock the pane's thread keeps, or the
@@ -4203,7 +4195,11 @@ function LaunchedShell(
         const state = threadUtilityDockState(current, dockThreadKey);
         const next = apply(state);
         if (next === state) return current;
-        return new Map(current).set(dockThreadKey, next);
+        const states = new Map(current);
+        // A thread with no open tool keeps no entry, as closing its last tab always did.
+        if (next.tabs.length === 0) states.delete(dockThreadKey);
+        else states.set(dockThreadKey, next);
+        return states;
       });
     }
   }
@@ -4256,29 +4252,24 @@ function LaunchedShell(
     changeDockTiles((state) => resizeUtilityTileColumn(state, columnIndex, shares));
   }
   function closeDockTab(tabId: string) {
-    if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => closeUtilityTabState(current, tabId));
-    } else {
-      const closedTab = threadUtilityDockState(dockStatesByThread, dockThreadKey).tabs.find(
-        (tab) => tab.id === tabId,
-      );
-      setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, tabId));
-      // A dock Browser tab bound to a context owns it: closing the tab is the
-      // only close path a dedicated context has, so the context stops here.
-      // The shared tab binds the thread's context the same way once it exists,
-      // so closing it stops the thread's session too.
-      if (
-        closedTab?.browserContextId !== undefined &&
-        dockThread !== undefined &&
-        browserAutomationClient !== undefined
-      ) {
-        void browserAutomationClient
-          .stop({
-            contextId: decodeBrowserContextId(closedTab.browserContextId),
-            threadId: decodeBrowserThreadId(dockThread.threadId),
-          })
-          .catch(() => undefined);
-      }
+    const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
+    changeDockTiles((state) => closeUtilityTabState(state, tabId));
+    // A dock Browser tab bound to a context owns it: closing the tab is the
+    // only close path a dedicated context has, so the context stops here.
+    // The shared tab binds the thread's context the same way once it exists,
+    // so closing it stops the thread's session too.
+    if (
+      dockThreadKey !== undefined &&
+      closedTab?.browserContextId !== undefined &&
+      dockThread !== undefined &&
+      browserAutomationClient !== undefined
+    ) {
+      void browserAutomationClient
+        .stop({
+          contextId: decodeBrowserContextId(closedTab.browserContextId),
+          threadId: decodeBrowserThreadId(dockThread.threadId),
+        })
+        .catch(() => undefined);
     }
   }
   /**

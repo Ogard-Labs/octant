@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { MIN_DOCK_TILE_SHARE, type DockTileLayout } from "./rightUtilityDockSelection";
@@ -68,28 +69,105 @@ interface Box {
 }
 
 /**
- * Where every tile and divider sits, as fractions of the area. Tiles are
+ * Pulls every share up to the floor and takes the difference from the larger
+ * ones, so a tile that was added, or a column that stacked, never ends under
+ * its floor while the span can hold them all. When it cannot, the caller
+ * grows the span instead and every share sits at the floor.
+ */
+function applyFloor(shares: ReadonlyArray<number>, floor: number): ReadonlyArray<number> {
+  const count = shares.length;
+  if (count < 2 || floor <= 0) return shares;
+  if (floor * count >= 1) return shares.map(() => 1 / count);
+  const result = [...shares];
+  const pinned = new Set<number>();
+  // Pinning one share to the floor shrinks what the rest may take, which can
+  // push another under it, so the pass repeats until none moves.
+  for (let pass = 0; pass <= count; pass += 1) {
+    const free = result.flatMap((_, index) => (pinned.has(index) ? [] : [index]));
+    const freeTotal = free.reduce((sum, index) => sum + (shares[index] ?? 0), 0);
+    const room = 1 - floor * pinned.size;
+    const under = free.filter((index) => ((shares[index] ?? 0) / freeTotal) * room < floor);
+    if (under.length === 0) {
+      for (const index of free) result[index] = ((shares[index] ?? 0) / freeTotal) * room;
+      break;
+    }
+    for (const index of under) {
+      pinned.add(index);
+      result[index] = floor;
+    }
+  }
+  return result;
+}
+
+/**
+ * Where every tile and divider sits, as fractions of the surface. Tiles are
  * positioned rather than nested in columns, so they are all children of one
  * element: a tool that moves between columns, or whose neighbour leaves, keeps
- * its place in the React tree and is never remounted.
+ * its place in the React tree and is never remounted. The floors apply here,
+ * wherever the shares came from.
  */
-function arrange(layout: DockTileLayout, preview: Preview | undefined, stacked: boolean) {
+function arrange(
+  layout: DockTileLayout,
+  preview: Preview | undefined,
+  stacked: boolean,
+  size: { readonly width: number; readonly height: number },
+) {
+  const columns = layout.columns;
+  const rawColumns = columns.map((column, index) =>
+    preview?.kind === "columns" ? (preview.shares[index] ?? column.share) : column.share,
+  );
+  const rawTiles = columns.map((column, columnIndex) =>
+    column.tiles.map((tile, tileIndex) =>
+      preview?.kind === "tiles" && preview.column === columnIndex
+        ? (preview.shares[tileIndex] ?? tile.share)
+        : tile.share,
+    ),
+  );
+  const tileCount = columns.reduce((sum, column) => sum + column.tiles.length, 0);
+  const tallest = Math.max(...columns.map((column) => column.tiles.length));
+  const required = size.height <= 0 ? 0 : (stacked ? tileCount : tallest) * MIN_TILE_HEIGHT;
+  // The surface grows past the visible area, and scrolls, when the tiles
+  // cannot all have their floor inside it.
+  const total = Math.max(size.height, required);
+  let columnShares: ReadonlyArray<number> = rawColumns;
+  let tileShares: ReadonlyArray<ReadonlyArray<number>> = rawTiles;
+  if (!stacked) {
+    if (size.width > 0) columnShares = applyFloor(rawColumns, MIN_COLUMN_WIDTH / size.width);
+    if (total > 0)
+      tileShares = rawTiles.map((shares) => applyFloor(shares, MIN_TILE_HEIGHT / total));
+  } else if (total > 0) {
+    // Stacked, every tile runs down one axis, so the floor applies to them all.
+    const flat = applyFloor(
+      rawTiles.flatMap((shares, columnIndex) =>
+        shares.map((share) => (rawColumns[columnIndex] ?? 0) * share),
+      ),
+      MIN_TILE_HEIGHT / total,
+    );
+    let at = 0;
+    const columnSums: number[] = [];
+    const tileRows: ReadonlyArray<number>[] = [];
+    for (const shares of rawTiles) {
+      const part = flat.slice(at, at + shares.length);
+      at += shares.length;
+      const sum = part.reduce((acc, value) => acc + value, 0);
+      columnSums.push(sum);
+      tileRows.push(part.map((value) => value / sum));
+    }
+    columnShares = columnSums;
+    tileShares = tileRows;
+  }
   const tiles: { tabId: string; box: Box }[] = [];
   const columnDividers: { index: number; at: number }[] = [];
   const tileDividers: { column: number; index: number; box: Box }[] = [];
   let columnStart = 0;
-  layout.columns.forEach((column, columnIndex) => {
-    const share =
-      preview?.kind === "columns" ? (preview.shares[columnIndex] ?? column.share) : column.share;
+  columns.forEach((column, columnIndex) => {
+    const share = columnShares[columnIndex] ?? column.share;
     const span: Box = stacked
       ? { left: 0, top: columnStart, width: 1, height: share }
       : { left: columnStart, top: 0, width: share, height: 1 };
     let tileStart = 0;
     column.tiles.forEach((tile, tileIndex) => {
-      const tileShare =
-        preview?.kind === "tiles" && preview.column === columnIndex
-          ? (preview.shares[tileIndex] ?? tile.share)
-          : tile.share;
+      const tileShare = tileShares[columnIndex]?.[tileIndex] ?? tile.share;
       const box: Box = {
         left: span.left,
         top: span.top + tileStart * span.height,
@@ -101,11 +179,18 @@ function arrange(layout: DockTileLayout, preview: Preview | undefined, stacked: 
       tileStart += tileShare;
     });
     columnStart += share;
-    if (!stacked && columnIndex < layout.columns.length - 1) {
+    if (columnIndex < columns.length - 1)
       columnDividers.push({ index: columnIndex, at: columnStart });
-    }
   });
-  return { tiles, columnDividers, tileDividers };
+  return {
+    tiles,
+    columnDividers,
+    tileDividers,
+    columnShares,
+    tileShares,
+    total,
+    scrollHeight: required > size.height ? required : undefined,
+  };
 }
 
 const percent = (fraction: number) => `${fraction * 100}%`;
@@ -159,86 +244,106 @@ export function DockTiles(props: DockTilesProps) {
     setPreview(undefined);
   }, [shape]);
 
-  const placed = arrange(props.layout, preview, stacked);
+  const placed = arrange(props.layout, preview, stacked, size);
   const labelOf = (tabId: string | undefined) =>
     (tabId === undefined ? undefined : props.renderTile(tabId)?.label) ?? "tool";
-  const columnShares = props.layout.columns.map((column, index) =>
-    preview?.kind === "columns" ? (preview.shares[index] ?? column.share) : column.share,
-  );
+
+  // A native page is placed by its element's rectangle, which no observer sees
+  // change when a tile keeps its size and only moves.
+  const boxKey = `${stacked}|${placed.scrollHeight ?? ""}|${placed.tiles
+    .map(({ box }) => [box.left, box.top, box.width, box.height].map((n) => n.toFixed(4)).join(","))
+    .join(";")}`;
+  useLayoutEffect(() => {
+    signalNativeSurfaceLayoutChange();
+  }, [boxKey]);
 
   return (
-    <div className="dock-tiles" data-stacked={stacked ? "true" : undefined} ref={area}>
-      {placed.tiles.map(({ tabId, box }) => {
-        const content = props.renderTile(tabId);
-        if (content === undefined) return null;
-        return (
-          <Tile
-            box={box}
-            content={content}
-            focused={tabId === props.focusedTabId}
-            key={`tile:${content.key}`}
-            onFocusTile={() => {
-              if (tabId !== props.focusedTabId) props.onFocusTile(tabId);
-            }}
-            onHide={() => props.onHideTile(tabId)}
-            panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
-            single={tileCount === 1}
-          />
-        );
-      })}
-      {placed.columnDividers.map(({ index, at }) => (
-        <TileDivider
-          at={at}
-          floorPx={MIN_COLUMN_WIDTH}
-          index={index}
-          key={`columns:${index}`}
-          label={`Resize ${labelOf(props.layout.columns[index]?.tiles[0]?.tabId)} and ${labelOf(
-            props.layout.columns[index + 1]?.tiles[0]?.tabId,
-          )}`}
-          onCancel={() => setPreview(undefined)}
-          onCommit={(shares) => {
-            setPreview(undefined);
-            props.onResizeColumns(shares);
-          }}
-          onDraggingChange={setDragging}
-          onPreview={(shares) => setPreview({ kind: "columns", shares })}
-          orientation="vertical"
-          shares={columnShares}
-          sizeOf={() => size.width}
-        />
-      ))}
-      {placed.tileDividers.map(({ column, index, box }) => {
-        const tiles = props.layout.columns[column]?.tiles ?? [];
-        const shares =
-          preview?.kind === "tiles" && preview.column === column
-            ? preview.shares
-            : tiles.map((tile) => tile.share);
-        return (
+    <div
+      className="dock-tiles"
+      data-stacked={stacked ? "true" : undefined}
+      onScroll={signalNativeSurfaceLayoutChange}
+      ref={area}
+    >
+      <div
+        className="dock-tiles__surface"
+        style={placed.scrollHeight === undefined ? undefined : { height: placed.scrollHeight }}
+      >
+        {placed.tiles.map(({ tabId, box }) => {
+          const content = props.renderTile(tabId);
+          if (content === undefined) return null;
+          return (
+            <Tile
+              box={box}
+              content={content}
+              focused={tabId === props.focusedTabId}
+              key={`tile:${content.key}`}
+              onFocusTile={() => {
+                if (tabId !== props.focusedTabId) props.onFocusTile(tabId);
+              }}
+              onHide={() => props.onHideTile(tabId)}
+              panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
+              single={tileCount === 1}
+            />
+          );
+        })}
+        {placed.columnDividers.map(({ index, at }) => (
           <TileDivider
-            at={box.top}
-            extent={{ left: box.left, width: box.width }}
-            floorPx={MIN_TILE_HEIGHT}
+            at={at}
+            floorPx={
+              stacked
+                ? MIN_TILE_HEIGHT *
+                  Math.max(
+                    props.layout.columns[index]?.tiles.length ?? 1,
+                    props.layout.columns[index + 1]?.tiles.length ?? 1,
+                  )
+                : MIN_COLUMN_WIDTH
+            }
             index={index}
-            key={`tiles:${column}:${tiles[index]?.tabId ?? index}`}
-            label={`Resize ${labelOf(tiles[index]?.tabId)} and ${labelOf(tiles[index + 1]?.tabId)}`}
+            key={`columns:${index}`}
+            label={`Resize ${labelOf(props.layout.columns[index]?.tiles[0]?.tabId)} and ${labelOf(
+              props.layout.columns[index + 1]?.tiles[0]?.tabId,
+            )}`}
             onCancel={() => setPreview(undefined)}
-            onCommit={(next) => {
+            onCommit={(shares) => {
               setPreview(undefined);
-              props.onResizeColumn(column, next);
+              props.onResizeColumns(shares);
             }}
             onDraggingChange={setDragging}
-            onPreview={(next) => setPreview({ kind: "tiles", column, shares: next })}
-            orientation="horizontal"
-            shares={shares}
-            sizeOf={() => size.height * (stacked ? (props.layout.columns[column]?.share ?? 1) : 1)}
+            onPreview={(shares) => setPreview({ kind: "columns", shares })}
+            orientation={stacked ? "horizontal" : "vertical"}
+            shares={placed.columnShares}
+            sizeOf={() => (stacked ? placed.total : size.width)}
           />
-        );
-      })}
-      {/* A native page is a window-level view that swallows the pointer over
-          it, so a divider dragged across the Browser tile stopped following
-          the pointer. This shield is in the renderer's overlay selector, which
-          takes the native page out of the window for the length of the drag. */}
-      {dragging ? <div aria-hidden="true" className="dock-tiles__drag-shield" /> : null}
+        ))}
+        {placed.tileDividers.map(({ column, index, box }) => {
+          const tiles = props.layout.columns[column]?.tiles ?? [];
+          return (
+            <TileDivider
+              at={box.top}
+              extent={{ left: box.left, width: box.width }}
+              floorPx={MIN_TILE_HEIGHT}
+              index={index}
+              key={`tiles:${column}:${tiles[index]?.tabId ?? index}`}
+              label={`Resize ${labelOf(tiles[index]?.tabId)} and ${labelOf(tiles[index + 1]?.tabId)}`}
+              onCancel={() => setPreview(undefined)}
+              onCommit={(next) => {
+                setPreview(undefined);
+                props.onResizeColumn(column, next);
+              }}
+              onDraggingChange={setDragging}
+              onPreview={(next) => setPreview({ kind: "tiles", column, shares: next })}
+              orientation="horizontal"
+              shares={placed.tileShares[column] ?? []}
+              sizeOf={() => placed.total * (stacked ? (placed.columnShares[column] ?? 1) : 1)}
+            />
+          );
+        })}
+        {/* A native page is a window-level view that swallows the pointer over
+            it, so a divider dragged across the Browser tile stopped following
+            the pointer. This shield is in the renderer's overlay selector, which
+            takes the native page out of the window for the length of the drag. */}
+        {dragging ? <div aria-hidden="true" className="dock-tiles__drag-shield" /> : null}
+      </div>
     </div>
   );
 }
@@ -298,7 +403,7 @@ function Tile(props: {
           <IconButton
             className="dock-tile__hide text-muted-foreground"
             icon={X}
-            label={`Hide ${content.label}`}
+            label={`Hide ${content.label} from view`}
             onClick={props.onHide}
           />
         </div>
@@ -340,14 +445,32 @@ function TileDivider(props: {
         readonly start: number;
         readonly size: number;
         readonly first: number;
+        readonly target: HTMLElement;
         last?: ReadonlyArray<number>;
       }
     | undefined
   >(undefined);
   const latest = useRef(props);
   latest.current = props;
+  // Escape abandons a drag in progress: the previewed sizes go, the stored ones
+  // stay, and releasing the pointer afterwards commits nothing.
+  const escape = useRef((event: globalThis.KeyboardEvent) => {
+    if (event.key !== "Escape" || drag.current === undefined) return;
+    event.preventDefault();
+    const current = drag.current;
+    drag.current = undefined;
+    window.removeEventListener("keydown", escape.current);
+    try {
+      current.target.releasePointerCapture?.(current.pointerId);
+    } catch {
+      // The pointer was already released.
+    }
+    latest.current.onDraggingChange(false);
+    latest.current.onCancel();
+  });
   useEffect(
     () => () => {
+      window.removeEventListener("keydown", escape.current);
       if (drag.current === undefined) return;
       drag.current = undefined;
       latest.current.onDraggingChange(false);
@@ -385,7 +508,9 @@ function TileDivider(props: {
       start: vertical ? event.clientX : event.clientY,
       size: props.sizeOf(),
       first,
+      target: event.currentTarget,
     };
+    window.addEventListener("keydown", escape.current);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     props.onDraggingChange(true);
   }
@@ -403,6 +528,7 @@ function TileDivider(props: {
     const current = drag.current;
     if (current === undefined || current.pointerId !== event.pointerId) return;
     drag.current = undefined;
+    window.removeEventListener("keydown", escape.current);
     props.onDraggingChange(false);
     if (commit && current.last !== undefined) props.onCommit(current.last);
     else props.onCancel();

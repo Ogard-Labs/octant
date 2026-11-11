@@ -834,7 +834,10 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Opening a dock tool leaves the bottom panel open; only a tool the panel
+has one. Columns stand side by side only when the tile area can give each 280px and
+otherwise stack (at 1440px with the sidebar open the dock is 500px, so they
+stack), and stacked columns stay resizable. A tool the bottom panel takes, or one
+that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
 already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
 `apps/web/src/dockModules` receive only declared inputs and contain render

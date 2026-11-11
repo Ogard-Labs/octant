@@ -196,6 +196,20 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
   );
 }
 
+/* With two columns of tools the dock may be wider than half, so the strip ends
+   where the dock's own width rule does, not at half the window. */
+html[data-octant-native-host="true"]
+  .shell--wide-context-open[data-dock-tile-columns="2"]
+  .shell-frame__native-drag-strip {
+  right: max(
+    var(--octant-window-chrome-reserved-width, 148px),
+    min(
+      var(--octant-context-sidebar-width, 0px),
+      calc(100% - var(--octant-rendered-sidebar-width, 0px) - var(--octant-wide-primary-min))
+    )
+  );
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
