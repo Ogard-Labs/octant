@@ -1,4 +1,6 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
+import type { DesignSystemList } from "@octant/contracts/design-systems";
+import type { CanvasDesignSystem } from "@octant/contracts/canvas";
 import { canvasMockupsTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
@@ -141,6 +143,18 @@ export interface CanvasRouteDependencies {
    * or when its path no longer resolves inside the authorized root.
    */
   readonly resolveFolderCandidate?: (windowId: WindowId, input: unknown) => Promise<string>;
+  /**
+   * Reads one of a Project's design systems as a Canvas carries it: its name,
+   * where it came from, and its tokens. Absent on a host without design
+   * systems, which refuses every switch to one; undefined when the file is
+   * not there or not in a folder the Project lends.
+   */
+  readonly resolveDesignSystem?: (
+    projectId: string,
+    location: unknown,
+  ) => Promise<CanvasDesignSystem | undefined>;
+  /** The design systems of a Project, for a Canvas in it to switch between. */
+  readonly listDesignSystems?: (projectId: string) => Promise<DesignSystemList | undefined>;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
   /**
@@ -238,6 +252,8 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "layout-revise" &&
       route !== "plan-revise" &&
       route !== "deck-propose" &&
+      route !== "design-system-apply" &&
+      route !== "design-systems" &&
       route !== "comments" &&
       route !== "comment" &&
       route !== "refresh" &&
@@ -417,6 +433,33 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return jsonResponse(decodePublishedSnapshotRunOutcome(outcome), 200, origin);
       }
 
+      // The design systems a Canvas may switch to: its own Project's. Like
+      // the switch itself, only the host window reaches this (the remote
+      // classifier names neither), and the Project is the Canvas's, never one
+      // the window names.
+      if (route === "design-systems" && request.method === "GET") {
+        if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+          return failureResponse("Canvas design systems request is invalid.", 400, origin);
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+        } catch {
+          return failureResponse("Canvas ID is invalid.", 400, origin);
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        const projectId = context.kind === "ok" ? context.activeContext.projectId : null;
+        const listed =
+          projectId === null || dependencies.listDesignSystems === undefined
+            ? undefined
+            : await dependencies.listDesignSystems(String(projectId)).catch(() => undefined);
+        return jsonResponse(listed ?? { systems: [], truncated: false }, 200, origin);
+      }
+
       if (route === "history" && request.method === "GET") {
         if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
           return failureResponse("Canvas history request is invalid.", 400, origin);
@@ -538,7 +581,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       // device (the remote classifier names none of them), so each is the
       // host window's own act.
       if (
-        (route === "layout-revise" || route === "plan-revise" || route === "deck-propose") &&
+        (route === "layout-revise" ||
+          route === "plan-revise" ||
+          route === "deck-propose" ||
+          route === "design-system-apply") &&
         request.method === "POST"
       ) {
         const what =
@@ -546,7 +592,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             ? "plan revision"
             : route === "deck-propose"
               ? "deck proposal"
-              : "layout revision";
+              : route === "design-system-apply"
+                ? "design system switch"
+                : "layout revision";
         const body = await readJson(request);
         const malformed = () =>
           jsonResponse(
@@ -599,6 +647,44 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ? null
               : String(context.activeContext.projectId),
         };
+        if (route === "design-system-apply") {
+          // The host reads the chosen file itself, under the Canvas's own
+          // Project, so a window names a location and never hands over tokens.
+          const location = (body.value as { designSystem?: unknown }).designSystem;
+          let designSystem: CanvasDesignSystem | undefined;
+          if (location !== null) {
+            const projectId = context.activeContext.projectId;
+            designSystem =
+              projectId === null || dependencies.resolveDesignSystem === undefined
+                ? undefined
+                : await dependencies
+                    .resolveDesignSystem(String(projectId), location)
+                    .catch(() => undefined);
+            if (designSystem === undefined) {
+              return jsonResponse(
+                decodeCanvasDiagramLayoutReviseResult({
+                  kind: "denied",
+                  denialCode: "unavailable",
+                  message: "That design system cannot be read from this Project.",
+                }),
+                200,
+                origin,
+              );
+            }
+          }
+          return jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult(
+              dependencies.canvasService.applyDesignSystem(
+                body.value,
+                authorization,
+                context.project,
+                designSystem,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         const result =
           route === "plan-revise"
             ? dependencies.canvasService.revisePlanTask(body.value, authorization, context.project)

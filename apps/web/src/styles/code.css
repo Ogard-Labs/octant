@@ -155,6 +155,28 @@ html:not([data-octant-reduced-transparency="true"])
   background: color-mix(in srgb, var(--octant-workspace), var(--octant-text-primary) 12%);
 }
 
+/* The code editor and the terminal draw their scrollbars as elements of their
+   own, so the one scrollbar rule in styles.css cannot reach them. Their
+   runtimes ask each library for the thumb's colours, and the editor for its
+   lane and thumb width (code/scrollbarTreatment.ts). These two rules give the
+   thumb the shape neither library has an option for, and they hold on the
+   libraries' own class names: `.monaco-scrollable-element > .scrollbar >
+   .slider` from monaco-editor and `.xterm-scrollable-element > .scrollbar >
+   .slider` from @xterm/xterm. */
+.monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: var(--oct-radius-pill);
+}
+
+/* The editor's thumb is narrower than its lane by option. The terminal's
+   fills its lane and has no such option, so it is cut here to the same
+   picture: 2px clear at the edge, and everything further than 8px from the
+   edge cut away, which leaves a 6px thumb however wide the engine's lane is. */
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  clip-path: inset(
+    0 calc(var(--oct-space-1) / 2) 0 calc(100% - var(--oct-space-2)) round var(--oct-radius-pill)
+  );
+}
+
 .code-terminal-pane__actions-menu {
   position: absolute;
   z-index: 3;
@@ -2608,4 +2630,60 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 /* The owned references list shares the pane with the editor. */
 .code-editor-pane:has(> .code-editor-pane__references) > [aria-label^="Editor for"] {
   min-height: 0;
+}
+.editor-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  flex-shrink: 0;
+}
+
+.editor-tools .editor-preference {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.text-editor-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.text-editor-layout > .code-editor-pane,
+.text-editor-layout > .preview-viewer {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 20rem;
+}
+
+.text-editor-layout > .preview-viewer {
+  overflow: auto;
+  padding: var(--oct-space-4);
+}
+
+.text-editor-layout > [hidden] {
+  display: none;
+}
+
+.code-editor-pane [aria-label$="comparison"] {
+  height: 18rem;
+  min-height: 12rem;
+}
+
+@media (max-width: 600px) {
+  .text-editor-layout {
+    flex-direction: column;
+  }
+  .text-editor-layout > .code-editor-pane,
+  .text-editor-layout > .preview-viewer {
+    flex: 0 0 24rem;
+    width: 100%;
+    height: auto;
+  }
 }

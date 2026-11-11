@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
@@ -9,6 +9,90 @@ import {
 } from "./MonacoEditorAdapter";
 
 describe("MonacoEditorAdapter", () => {
+  it("navigates the project outline directly and invalidates it when the draft changes", async () => {
+    const revealRange = vi.fn();
+    const intelligence = vi.fn(
+      async () =>
+        ({
+          status: "intelligence",
+          feature: "symbols",
+          items: [
+            {
+              label: "projectSymbol",
+              range: { start: { line: 2, character: 3 }, end: { line: 2, character: 8 } },
+            },
+          ],
+          truncated: false,
+        }) as never,
+    );
+    const props = {
+      ariaLabel: "Sample editor",
+      language: "typescript",
+      modelUri: "octant-code://checkout/file",
+      onChange: vi.fn(),
+      readOnly: false,
+      loadRuntime: async () => ({ mount: () => ({ ...session(), revealRange }) }),
+      languageBridge: { definitions: async () => [], open: vi.fn(), intelligence },
+    };
+    const view = render(<MonacoEditorAdapter {...props} value="const value = 1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Outline" }));
+    fireEvent.click(await screen.findByRole("button", { name: "projectSymbol" }));
+    expect(revealRange).toHaveBeenCalledWith({
+      startLineNumber: 3,
+      startColumn: 4,
+      endLineNumber: 3,
+      endColumn: 9,
+    });
+    view.rerender(<MonacoEditorAdapter {...props} value="changed" />);
+    expect(screen.queryByRole("button", { name: "projectSymbol" })).not.toBeInTheDocument();
+  });
+  it("uses the same format-before-save path for an external Save button and the keyboard", async () => {
+    localStorage.setItem("octant.editor-preferences.v1", JSON.stringify({ formatOnSave: true }));
+    const order: string[] = [];
+    let save: (() => Promise<void>) | undefined;
+    const props = {
+      ariaLabel: "Sample editor",
+      language: "typescript",
+      modelUri: "octant-code://checkout/file",
+      onChange: vi.fn(),
+      readOnly: false,
+      value: "draft",
+      loadRuntime: async () => ({
+        mount: () => ({
+          ...session(),
+          command: async () => {
+            order.push("format");
+          },
+        }),
+      }),
+      onSave: async () => {
+        order.push("save");
+      },
+      onReadySave: (callback: (() => Promise<void>) | undefined) => {
+        save = callback;
+      },
+    };
+    const view = render(<MonacoEditorAdapter {...props} />);
+    await act(async () => undefined);
+    await act(async () => {
+      await save?.();
+    });
+    expect(order).toEqual(["format", "save"]);
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("region", { name: "Sample editor" }), {
+        key: "s",
+        ctrlKey: true,
+      });
+    });
+    expect(order).toEqual(["format", "save", "format", "save"]);
+    view.rerender(<MonacoEditorAdapter {...props} readOnly />);
+    await act(async () => {
+      await save?.();
+    });
+    expect(order).toHaveLength(4);
+    localStorage.removeItem("octant.editor-preferences.v1");
+  });
+
   it("renders an actionable unavailable state when the runtime cannot load", async () => {
     render(
       <MonacoEditorAdapter

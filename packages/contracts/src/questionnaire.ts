@@ -14,7 +14,8 @@ const Option = Schema.Struct({
   description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   recommended: Schema.optional(Schema.Boolean),
 }).annotations(strict);
-const Question = Schema.Struct({
+/** One question, shared by the `ask-user` questionnaire and a Canvas choice block. */
+export const QuestionnaireQuestion = Schema.Struct({
   id: Id,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
   selection: Schema.Literal("single", "multiple"),
@@ -38,10 +39,26 @@ const Question = Schema.Struct({
     }),
   );
 
+export type QuestionnaireQuestion = typeof QuestionnaireQuestion.Type;
+export const MAX_QUESTIONNAIRE_QUESTIONS = 4;
+
+/** One to four questions with distinct ids, as a Canvas choice block carries them. */
+export const QuestionnaireQuestions = Schema.Array(QuestionnaireQuestion).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_QUESTIONNAIRE_QUESTIONS),
+  Schema.filter(
+    (questions) => new Set(questions.map((question) => question.id)).size === questions.length,
+    { message: () => "Question ids must be distinct." },
+  ),
+);
+
 export const Questionnaire = Schema.Struct({
   /** Absent preserves the app-owned form's existing optional comment. */
   allowComment: Schema.optional(Schema.Boolean),
-  questions: Schema.Array(Question).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  questions: Schema.Array(QuestionnaireQuestion).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_QUESTIONNAIRE_QUESTIONS),
+  ),
 })
   .annotations(strict)
   .pipe(

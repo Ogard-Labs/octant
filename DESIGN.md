@@ -67,8 +67,8 @@ meaning, or decoration on a control that already reads, is not. A feature that i
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground: a first-party picture or a
 person's photo, shown plain or through one print effect, or the field of
-Pulsing characters or Dithered pixels, behind the start screens or behind
-every page.
+Pulsing characters, Dithered pixels, or Flowing colour, behind the start
+screens or behind every page.
 
 ## Language
 
@@ -347,8 +347,12 @@ does for a dialog. It closes with the
 close control in its corner, with Escape, or with a press on the window behind
 it, and focus returns to where it was. It carries no "Back to app": the person
 never left. The presentation is decided when Settings opens and kept until it
-closes. While Settings loads, the sheet shows the loading line on its own
-fill, inside its own box. In a window at the narrow breakpoint Settings covers the window, as
+closes. The sheet arrives and leaves with the shared
+[overlay motion](#motion-and-interaction); it stays mounted while Settings is
+closed so that its leaving can be seen. While Settings loads, the sheet shows
+Settings in outline on its own fill, inside its own box: a rail and a page of
+skeleton bars (`SettingsLoading`), styled with the shell and not with
+Settings, whose own stylesheet is part of what is still loading. In a window at the narrow breakpoint Settings covers the window, as
 before, with "Back to app"; a sheet open while the window is made narrow
 fills the window and keeps its page. The Usage page still covers the
 workspace at every width.
@@ -365,7 +369,18 @@ Surface (reading measure 880px, or wide for boards)
     surface-row   label + detail on the left, control on the right
   SurfaceEmpty    a quiet icon, one line of text, and a real outline button
                   for the next step; not a card
+  SurfaceLoading  the page in outline while it loads: a title bar and rows
 ```
+
+A destination that is still loading shows its own outline (`SurfaceLoading`):
+a skeleton bar where the title will be and a few rows under it, in the frame
+the page itself draws in, so nothing changes place when the page arrives. A
+line of text in the middle of the pane ("Opening Inbox…") gave way to a title
+in the corner, and the pane jumped. The words stay in a `status` region for
+assistive technology and are not drawn; the bars are hidden from it. The
+skeleton's sheen stops under reduced motion, from the system or from the
+setting, and the shape stays. A page's own first read of its data keeps the
+state that page already draws.
 
 The header is a window toolbar, not a page heading: one 40px row at the Settings
 page title's size (`oct-page-title`, 14px, weight 600). The sidebar row already
@@ -853,11 +868,11 @@ exists.
 **Composer popups.** Every popup the composer opens (Project, base branch,
 checkout, Create from…, access, model) uses one recipe. The face is the
 popover fill with the overlay shadow and a 12px corner, a 6px inset, and it
-fades and settles in from 98% over 150ms from the side it opens on (instant
-under reduced motion). A search field is `.octant-popover-search`: a filled
+arrives and leaves with the shared [overlay motion](#motion-and-interaction).
+A search field is `.octant-popover-search`: a filled
 32px field with a leading 14px icon and no border; it takes focus as the popup
 opens, so it brightens rather than drawing the keyboard edge. Rows are
-`.octant-popover-option`: one line, at least 30px, an icon, the name, and any
+`.octant-popover-option`: one line at the shared menu row height (28px), an icon, the name, and any
 detail (a folder, visibility, state) trailing in the meta ink and cut from the
 end. A choice is a check mark at the row's end and never a fill; a fill means
 only that the pointer or the keyboard is on the row. Group headings are
@@ -941,7 +956,8 @@ accepting another edit, so the next configuration choice uses the confirmed pair
 
 The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, a field of dithered pixels, or the plain page. A fresh install starts on Soft glow, one of three Gradient
+of pulsing characters, a field of dithered pixels, a flowing colour field, or
+the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -958,8 +974,21 @@ two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
 frames a second and prints through a 4×4 ordered dither (or plain pixels) at
 the chosen pixel size and number of shades; a click on a start screen sends
 the same pushing, accent-lit ring through it at twenty-four frames a second,
-for under two seconds. Motion Still holds either drawn field on one frame and
-takes no clicks. Pulsing characters is the other drawn ground, and only when a person
+for under two seconds. Flowing is a drawn ground of large, soft, edgeless
+colour that drifts like ink in water, and only when a person picks it. Four
+stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
+dark saturated reading of the accent, a brighter accent tone, and a vivid glow
+with a slight hue shift — so a change of accent recolours the field over about
+600 ms. Dark mode is predominantly dark: near-black at the top-left, the dark
+accent through the middle, and one luminous corner at the bottom-right, never
+a pastel wash. Light mode inverts that ramp into a pale wash whose every stop
+still clears WCAG AA against primary text. The field is painted in one GPU pass at about half
+resolution and thirty frames a second, paused while the window is hidden or
+the ground is off-screen, and falls back to a few blurred radial gradients
+that use the same stops when that path is unavailable. A static grain at a few
+percent of opacity and a quiet vignette sit on top of either path so the wash
+does not band. It answers no clicks. Motion Still holds it on one frame; Wave
+lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the other drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twenty-four frames a second while a few glyphs swap. The field is
@@ -1353,8 +1382,8 @@ so an edge is never guessed. The renderer fallback in
 
 The code editor and its diff draw from the same resolved roles through the
 editor projection in `packages/theme/src/editorColors.ts`: the workspace
-ground, primary ink, muted line numbers, the selection role, and floating
-widgets. Under increased contrast it takes the same high-contrast ink as the
+ground, primary ink, muted line numbers, the selection role, floating
+widgets, and the two border roles of its scrollbar thumb. Under increased contrast it takes the same high-contrast ink as the
 rest of the window. Syntax colours come from the editor's own light or dark
 base, because the palette roles are checked only for interface contrast. A
 theme, mode, contrast, or system appearance change repaints open editors in
@@ -1362,8 +1391,8 @@ place.
 
 The terminal draws from the terminal projection in
 `packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
-under translucency), primary ink, the selection role, and the palette roles
-as its ANSI hues, with ANSI black and white kept dark and light in either
+under translucency), primary ink, the selection role, the two border roles of
+its scrollbar thumb, and the palette roles as its ANSI hues, with ANSI black and white kept dark and light in either
 mode and bright black as the muted ink. Because the palette roles are only
 checked as interface marks, the projection also sets a contrast floor the
 terminal engine enforces per cell against the background it is drawn on:
@@ -1558,7 +1587,10 @@ count badge stay neutral, and under Mono and increased contrast the icons stay
 grey), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
-Projects, More (the menu-only destinations and Customize sidebar), the usage
+Projects, a tile for each Project the person pinned (its icon or initial on the
+same 32px face, after the divider; a context menu on the tile unpins it; the
+collapsed rail lists pinned Projects first and draws six Project tiles at most
+so Settings and the rings stay in the window), More (the menu-only destinations and Customize sidebar), the usage
 rings, and Settings. The sidebar keeps its header (modes, search, new thread,
 hide), the Project list with its view, filter, and Activity controls, the
 threads, and the profile, so nothing is offered twice. Rail icons are 16px on
@@ -1758,7 +1790,11 @@ stage), defined once on every shell in `shell.css`:
   card is the card step below.
 - **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
   Automations, Artifacts, Image generator) are clear over the sheet, and their
-  cards drawn with the raised step (`--oct-surface`) take the card step.
+  cards drawn with the raised step (`--oct-surface`) take the card step. The
+  Inbox is the model: a display-size page title (the `oct-title` size) with its one line of state
+  on the baseline, then raised cards in a 980px left-aligned column, two
+  columns by container query and one when narrow, rows without rules (see
+  [Inbox page](docs/design/workspace.md#inbox-page)).
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
   the sheet: the primary text at 4%.
 - **An outline button** rests on that card step instead of the page colour
@@ -2117,6 +2153,17 @@ progress across relaunch. Setup is optional and never grants an agent app access
 it changes no setting or readiness answer. It adds no step or progress count.
 [Start screen](docs/design/start-screen.md#optional-capability-card-in-your-first-task)
 owns its behavior.
+
+File editors share a compact command toolbar and one Editor settings disclosure.
+The primary Save and the unsaved/saving/error state stay visible above the
+source; preferences are secondary. Source/preview switching retains selection
+and undo, and a Markdown split stacks at narrow widths. Each source/preview
+region owns its scrolling. Conflicts show a bounded disk-versus-draft comparison
+with explicit keep-draft or discard actions. A selection proposal or replacement
+review remains a separate disclosure above the editor, with its own before/after
+comparison and an explicit apply action. Colors and typography come from the
+existing editor projection and shared controls. Behavioral detail is in
+[Workspace: File editing](docs/design/workspace.md#file-editing).
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
@@ -2661,6 +2708,18 @@ and Tooltip. Composition rules:
   layer, so the one opened last paints on top: a menu or popover opened inside
   a dialog or the narrow dock sheet appears above it, and Escape closes the
   innermost surface first.
+- A list a person picks from draws one row. One line is 28px
+  (`--oct-menu-row-h`), its words stand 8px in from the row's edge
+  (`--oct-menu-row-inset`), and the rows stand 4px in from the popup's edge
+  (`--oct-menu-inset`). The menu, context menu, select and combobox recipes
+  share that row (`ui/shadcn/menu-row.ts`), and the command palette, the `#`
+  and `/` typeaheads and the composer's picker rows take the same tokens. A
+  row with a description under its label grows to two lines; no row is shorter
+  than the height. The tokens are pixels on purpose: the recipes' rem steps
+  followed the interface size, and one line of text was 24px in a menu, 26px
+  in a context menu and a select, 30px in a combobox and a picker, 34px in the
+  palette and 24px in a typeahead, on a 6.5, 8 or 12px inset. A feature sizes
+  no row of its own.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
@@ -2756,12 +2815,34 @@ interfaces. Revealing them must not move the transcript.
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
 ambient motion behind the work by default; an animated built-in picture, the
-Pulsing characters and Dithered pixels grounds, and a printed picture set to
-Wave are the moving grounds a person may choose, and reduced motion holds each
-on a still frame. Running state
+Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
+set to Wave are the moving grounds a person may choose, and reduced motion holds
+each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
+
+**Overlays.** Everything that opens over the window arrives and leaves one
+way, declared once (`components.css`, Overlay motion): a menu, a context
+menu, a select or combobox list, a popover, a tooltip, a hover card, a dialog,
+Settings' sheet, and the scrim under a dialog or a sheet. It fades in over
+150ms (`--oct-dur-base`, `--oct-ease-motion`) and out over 100ms
+(`--oct-dur-fast`, `--oct-ease-color`): nobody waits for a thing to leave. A
+popup settles from 98% at the point it is anchored to and a dialog from 98%
+about its centre; the sheet rises 8px instead, since a surface that size reads
+a scale as a zoom. Only opacity, scale and translate change, on the overlay
+alone, so nothing behind it is laid out again, and no overlay rests on a scale
+of its own. This is feedback, not a decorative entrance: before it a menu and
+a popover settled in while a context menu, a select, a tooltip, a dialog and
+the sheet appeared and vanished in one frame. A tooltip or hover card the
+library closes at once, on a press of its trigger, does not fade over what the
+press opened. Under reduced motion, from the system or from the setting, there
+is no transition at all: an overlay is there or it is not. A recipe carries no
+arrival or departure classes of its own. A dialog that a feature renders only
+while it is open arrives the same way (`@starting-style`) and leaves at once,
+because a stylesheet cannot hold an element that is gone; a surface whose
+leaving should be seen stays mounted and is told when it is open, as Settings'
+sheet is.
 
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
 control. Words in the chrome do not select when the pointer drags across them,
@@ -2992,10 +3073,41 @@ request from the person.
 
 ## Accessibility and reliability
 
-- Every product-owned scroll surface inherits the global thin scrollbar
-  baseline: a tokenized visible thumb, transparent track, hover state, and
-  forced-colors fallback. Feature CSS may adjust gutter or density but does not
-  hide the scrollbar or introduce a second theme.
+- Every product-owned scroll surface inherits one scrollbar, declared once
+  in `styles.css`: a thin thumb in a theme token and no painted track, in a
+  pane, a menu, a popup and a sheet alike, with a forced-colors fallback.
+  Where the system floats scrollbars over content the thumb floats; where it
+  keeps a strip for them the strip is clear. The two standard properties are
+  the rule; the `::-webkit-scrollbar` parts beside them speak only for an
+  engine that does not know the properties. Feature CSS may reserve the strip
+  (`scrollbar-gutter`) so a page does not shift when it starts to scroll, and
+  hides a scrollbar only on the named strips of tabs and icons that scroll
+  sideways; it never sets a scrollbar colour or another width.
+- The code editor and the terminal draw their scrollbars as elements of their
+  own, out of reach of that rule, and are set to the same picture through each
+  library's own options and theme colours: a thumb 6px wide with round ends,
+  standing 2px in from the edge, in the strong border role. The role travels
+  through the editor and terminal projections, so both modes and a custom
+  theme reach it.
+  Nothing else is painted at the edge: no track, no shadow where the text has
+  scrolled, no outline or cursor mark on the editor's ruler, and no strip
+  beside a comparison for a map of its changes. The editor's ruler still marks
+  errors and search matches under the thumb. Where the system floats
+  scrollbars the thumb shows while the surface scrolls or the pointer is over
+  it and hides at rest; where the system keeps a strip for them the editor's
+  thumb stays for as long as its text overflows. Three things still differ
+  from a pane, because neither library has an option for them. The thumb
+  cannot widen under the pointer as a floating system thumb does, so it takes
+  the strong divider role there and while it is dragged. The terminal's thumb
+  hides at rest even where the system keeps scrollbars on screen. And the
+  terminal keeps its engine's 14px lane clear of text, where a pane's text
+  runs under a floating thumb: the one option that narrows that lane stops the
+  terminal opening where a canvas is refused. A fourth is not built: under
+  forced colours a pane's scrollbar falls back to the system's, and theirs
+  keeps the theme's roles. The measurements are in
+  `apps/web/src/code/scrollbarTreatment.ts`; the two rules that shape the
+  thumb where no option exists are in `styles/code.css` and name the library
+  classes they hold on.
 - Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
 - Status, diff, provider, and activity states always include text, shape,
   pattern, or an accessible label in addition to colour.

@@ -133,6 +133,41 @@ describe("share service", () => {
     expect(created.expiresAt).toBe(new Date(START + 30 * DAY_MS).toISOString());
   });
 
+  test("shows a choice as its options with no control to answer it", async () => {
+    start();
+    const created = await create(
+      createBody([
+        {
+          blockId: "pick",
+          schemaVersion: 27,
+          kind: "choice",
+          prompt: "Which rollout?",
+          questions: [
+            {
+              id: "rollout",
+              prompt: "Rollout",
+              selection: "single",
+              options: [
+                { id: "staged", label: "Staged", description: "Ten percent a day" },
+                { id: "all", label: "<b>All</b> at once" },
+              ],
+            },
+          ],
+        },
+      ]),
+    );
+    const page = await (await fetch(created.url)).text();
+    expect(page).toContain("Which rollout?");
+    expect(page).toContain("<strong>Staged</strong> Ten percent a day");
+    expect(page).toContain("&lt;b&gt;All&lt;/b&gt; at once");
+    expect(page).toContain("Answers are sent from the Canvas in Octant, not from this page.");
+    // The page's own report form sits in the footer; the choice offers none.
+    const block = page.slice(page.indexOf('<section class="block block-choice"'));
+    expect(block.slice(0, block.indexOf("</section>"))).not.toMatch(
+      /<(form|button|input|textarea)\b/i,
+    );
+  });
+
   test("durably cancels its exact owned id before a slow create completes and refuses replay", async () => {
     start();
     const ownerSecret = "k".repeat(43);

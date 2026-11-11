@@ -3389,7 +3389,6 @@ function LaunchedShell(
     () =>
       launchedClients.providerUsageLimitsClient === undefined ? undefined : (
         <RailUsageRings
-          client={launchedClients.providerUsageLimitsClient}
           instances={providerController.instances}
           onOpenUsage={() => void latestShellActions.current.openSettings({ section: "usage" })}
         />
@@ -5097,6 +5096,7 @@ function LaunchedShell(
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectBrandKit: projectController.setBrandKit,
+      setProjectDesignSystem: projectController.setDesignSystem,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
@@ -7328,16 +7328,17 @@ function LaunchedShell(
               : undefined
         }
         sheet={
-          settingsAsSheet ? (
-            <OctantSheet
-              {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
-              label="Settings"
-              onClose={controller.closeSettings}
-              open
-            >
-              {settingsContainer("settings", "sheet")}
-            </OctantSheet>
-          ) : undefined
+          // The sheet stays in the tree and is told when it is open, so it can
+          // leave the way it arrived. Rendered only while Settings was open, it
+          // was gone the moment Settings closed, with nothing to fade.
+          <OctantSheet
+            {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
+            label="Settings"
+            onClose={controller.closeSettings}
+            open={settingsAsSheet}
+          >
+            {settingsContainer("settings", "sheet")}
+          </OctantSheet>
         }
         {...(shellBackdrop === undefined
           ? {}
@@ -8088,6 +8089,7 @@ function LaunchedShell(
                                             <PlanUsageProvider
                                               barStyle={controller.settings?.usageBars ?? "smooth"}
                                               client={launchedClients.providerUsageLimitsClient}
+                                              instances={providerController.instances}
                                             >
                                               <HostPlatformContext.Provider value={hostPlatform}>
                                                 <ServerCodeProjectsContext.Provider

@@ -594,6 +594,29 @@ const timer = setInterval(() => {
       );
       throw Error(`The real packaged ${stage} state was not observed.`);
     };
+    // Settings is a sheet over the app in a wide window, left by an icon-only
+    // "Close Settings" button; in a narrow window it is the page with a visible
+    // "Back to app". The controller's OCR cannot read an icon, so the sheet's
+    // button is found by its accessibility description (click-described, which
+    // keeps the unique-target, window and hit-owner checks). Escape is not
+    // used: while the Settings search holds a query it clears the query first.
+    const leaveSettings = async (stage: string) => {
+      const settings = await observeUntil(`${stage}-observe`, (snapshot) =>
+        hasText(snapshot, "Settings"),
+      );
+      const page = hasText(settings, "Back to app");
+      await runBoundedCommand(
+        nativeControllerPath,
+        [
+          page ? "click" : "click-described",
+          String(ownPid),
+          join(artifacts, `${stage}.png`),
+          page ? "Back to app" : "Close Settings",
+        ],
+        process.env,
+        8000,
+      );
+    };
     const SettingsRow = Schema.Struct({ payload_json: Schema.String });
     const Settings = Schema.Struct({ enabled: Schema.Boolean, serviceUrl: Schema.String });
     const waitForSettings = (enabled: boolean) =>
@@ -634,18 +657,15 @@ const timer = setInterval(() => {
         process.env,
         8000,
       );
+      // Settings is known by its own search field, as the later stage knows
+      // it. The route waited for the General page's description, a sentence
+      // that was rewritten when Profile and Notifications were folded into
+      // General, so the stage could never be observed.
       await observeUntil(
         "settings",
-        (snapshot) =>
-          hasText(snapshot, "Settings") &&
-          hasText(snapshot, "Choose app-wide defaults, updates, and network behavior."),
+        (snapshot) => hasText(snapshot, "Settings") && hasText(snapshot, "Search settings"),
       );
-      await runBoundedCommand(
-        nativeControllerPath,
-        ["click", String(ownPid), join(artifacts, "back-to-app-target.png"), "Back to app"],
-        process.env,
-        8000,
-      );
+      await leaveSettings("back-to-app-target");
     }
     await observeUntil("fixture-project", (snapshot) => hasText(snapshot, "Canvas fixtures"));
     await runBoundedCommand(
@@ -732,12 +752,7 @@ const timer = setInterval(() => {
       await observeUntil("public-links-configured", (snapshot) =>
         hasText(snapshot, ownService.publicUrl),
       );
-      await runBoundedCommand(
-        nativeControllerPath,
-        ["click", String(ownPid), join(artifacts, "configured-back-to-app.png"), "Back to app"],
-        process.env,
-        8000,
-      );
+      await leaveSettings("configured-back-to-app");
     }
     await waitForSettings(true);
     if ((await readdir(join(root, "share", "shares"))).length !== 0)
@@ -772,24 +787,17 @@ const timer = setInterval(() => {
       "canvas-tab",
       (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
     );
+    // The tab's actions menu is opened by its own name. The route used to
+    // focus whatever control came before the Canvas's first text and press
+    // Enter; since the tab gained a tool rail that control is a tool, so the
+    // menu never opened.
     await runBoundedCommand(
       nativeControllerPath,
       [
-        "focus-before-text",
-        String(ownPid),
-        join(artifacts, "canvas-actions-focus-target.png"),
-        "Signups this week",
-      ],
-      process.env,
-      8000,
-    );
-    await runBoundedCommand(
-      nativeControllerPath,
-      [
-        "enter",
+        "click-described",
         String(ownPid),
         join(artifacts, "canvas-actions-menu-target.png"),
-        "Signups this week",
+        "More Canvas actions",
       ],
       process.env,
       8000,
@@ -961,8 +969,9 @@ const timer = setInterval(() => {
         `${stage}-canvas-tab`,
         (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
       );
-      await nativeInput(`${stage}-focus-actions`, "focus-before-text", "Signups this week");
-      await nativeInput(`${stage}-open-actions`, "enter", "Signups this week");
+      // By name, as the first opening of this menu is: the control before the
+      // Canvas's first text is a tool now.
+      await nativeInput(`${stage}-open-actions`, "click-described", "More Canvas actions");
       await observeUntil(`${stage}-actions`, (snapshot) => hasText(snapshot, "Share"));
       await nativeInput(`${stage}-share`, "choose-native-menu-item", "Share", "Share…");
       await observeUntil(`${stage}-share-dialog`, (snapshot) => hasExactText(snapshot, "Share"));

@@ -23,6 +23,7 @@ import {
   type CanvasPresentation,
   type CanvasVersion,
   type CanvasVersionId,
+  type CanvasDesignSystem,
 } from "@octant/contracts/canvas";
 import type { AgentRunAuthority } from "@octant/contracts/agent-run";
 import { effectiveCanvasPresentation } from "./canvasPresentationPolicy";
@@ -317,6 +318,8 @@ export interface BuildCreateVersionInput {
   readonly blocks?: ReadonlyArray<CanvasBlock>;
   /** Where the author asked the thread to show it, recorded as asked; the card applies the inline bound. */
   readonly presentation?: CanvasPresentation;
+  /** The design system its Project follows, stamped by the host. */
+  readonly designSystem?: CanvasDesignSystem;
 }
 
 export function buildCreateVersion(input: BuildCreateVersionInput): CanvasVersion {
@@ -351,6 +354,7 @@ export function buildCreateVersion(input: BuildCreateVersionInput): CanvasVersio
     },
     sourceManifest: input.request.sourceManifest,
     ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
+    ...(input.designSystem === undefined ? {} : { designSystem: input.designSystem }),
     blocks,
   };
   const version = decodeCanvasVersion({

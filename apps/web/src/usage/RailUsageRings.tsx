@@ -1,4 +1,3 @@
-import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { ProviderInstance } from "@octant/contracts";
 import { useMemo, type CSSProperties } from "react";
 import { ProviderGlyph, providerGlyphColor } from "../providers/ProviderGlyph";
@@ -10,7 +9,7 @@ import {
   resetPhrase,
   type RailUsageReading,
 } from "./railUsageReading";
-import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
+import { usePlanUsageReading } from "./PlanUsageContext";
 import "../styles/usage.css";
 
 const OUTER_RADIUS = 11;
@@ -23,11 +22,10 @@ const INNER_RADIUS = 7;
  * opens a card with every window and when it resets.
  */
 export function RailUsageRings(props: {
-  readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly onOpenUsage?: () => void;
 }) {
-  const { snapshot, now } = useProviderUsageSnapshot(props.client);
+  const { snapshot, now } = usePlanUsageReading();
   const instances = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],

@@ -3,6 +3,7 @@ import { MAX_CODE_EVIDENCE_BATCH_ITEMS } from "@octant/contracts";
 import {
   MOBILE_CODE_CONVERSATION_TURNS,
   loadMobileCodeConversation,
+  loadMobileCoordinatorProposals,
   loadMobilePullRequestMergeState,
   mergeMobilePullRequest,
   setMobileMergeWhenReady,
@@ -752,5 +753,50 @@ describe("mobile Code follow-through", () => {
       kind: "start-provider-turn",
       attachmentIds: [photoId],
     });
+  });
+});
+
+describe("a coordinator's proposals on a paired phone", () => {
+  it("reads only the coordinator's own pending proposals from the planner view", async () => {
+    const projectId = "20000000-0000-4000-8000-000000000001";
+    const coordinatorId = "84000000-0000-4000-8000-000000000009";
+    const proposal = (id: string, overrides: Record<string, unknown> = {}) => ({
+      proposal: {
+        id: `70000000-0000-4000-8000-0000000001${id}`,
+        projectId,
+        plannerThreadId: coordinatorId,
+        fromCoordinator: true,
+        title: `Worker ${id}`,
+        intent: "Do it.",
+        status: "pending",
+        proposedAt: "2026-11-10T00:00:00.000Z",
+        ...overrides,
+      },
+      proposalVersion: 1,
+    });
+    const paths: string[] = [];
+    const transport: MobileRemoteTransport = {
+      hostId: "host-1",
+      authenticatedFetch: (async ({ method, path }: { method: string; path: string }) => {
+        paths.push(`${method} ${path}`);
+        return jsonResponse({
+          designation: { kind: "none", projectId, updatedAt: "2026-11-10T00:00:00.000Z" },
+          designationVersion: 0,
+          proposals: [
+            proposal("01"),
+            proposal("02", { plannerThreadId: threadId }),
+            proposal("03", { fromCoordinator: undefined }),
+          ],
+        });
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+
+    const proposals = await loadMobileCoordinatorProposals(transport, {
+      id: coordinatorId as never,
+      projectId: projectId as never,
+    });
+
+    expect(paths).toEqual([`GET /api/code/planner/${projectId}`]);
+    expect(proposals.map((entry) => entry.title)).toEqual(["Worker 01"]);
   });
 });

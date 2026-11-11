@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ApprovedWorkingFolders } from "./workingDirectory";
 import { CanvasDesignBrand } from "./canvasBrand";
+import { DesignSystemChoice } from "./designSystems";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -246,6 +247,11 @@ const BoundProjectFields = {
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
   /** Absent on every Project made before extra folders existed, and read as none. */
   extraFolders: Schema.optional(ProjectExtraFolders),
+  /**
+   * The design system (`DESIGN.md`) a person chose for this Project, or that
+   * they turned design systems off. Absent follows the automatic rule.
+   */
+  designSystem: Schema.optional(DesignSystemChoice),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -444,6 +450,7 @@ const WorkProjectSummary = Schema.Struct({
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
+  designSystem: Schema.optional(DesignSystemChoice),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -467,6 +474,7 @@ const CodeProjectSummary = Schema.Struct({
   providerPolicy: Schema.optional(ProjectProviderPolicy),
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
   extraFolders: Schema.optional(ProjectExtraFolders),
+  designSystem: Schema.optional(DesignSystemChoice),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -761,6 +769,12 @@ export const ProjectCommand = Schema.Union(
     brandKit: CanvasDesignBrand,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-project-design-system"),
+    ...ProjectCommandFields,
+    /** `null` returns the Project to the automatic rule. */
+    designSystem: Schema.NullOr(DesignSystemChoice),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-desktop-recipe"),
     ...ProjectCommandFields,
     /** `null` removes the recipe. */
@@ -862,6 +876,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("code-project-desktop-recipe-changed"),
     project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-design-system-changed"),
+    project: Project,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -1121,6 +1139,8 @@ export const WorkProjectActionsChanged = Schema.Struct({ project: WorkProject })
 export type WorkProjectActionsChanged = typeof WorkProjectActionsChanged.Type;
 export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
+export const ProjectDesignSystemChanged = Schema.Struct({ project: Project }).annotations(strict);
+export type ProjectDesignSystemChanged = typeof ProjectDesignSystemChanged.Type;
 /** Journaled once per person's save or removal; the lease service reads the Project it leaves. */
 export const CodeProjectDesktopRecipeChanged = Schema.Struct({
   project: CodeProject,
@@ -1162,6 +1182,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.work-permission-mode-changed@1",
   "project.work-actions-changed@1",
   "project.brand-kit-changed@1",
+  "project.design-system-changed@1",
   "project.code-desktop-recipe-changed@1",
   "project.code-actions-changed@1",
   "project.extra-folder-added@1",
@@ -1246,6 +1267,9 @@ export const decodeWorkProjectPermissionModeChanged = Schema.decodeUnknownSync(
 );
 export const decodeWorkProjectActionsChanged = Schema.decodeUnknownSync(WorkProjectActionsChanged);
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
+export const decodeProjectDesignSystemChanged = Schema.decodeUnknownSync(
+  ProjectDesignSystemChanged,
+);
 export const decodeCodeProjectDesktopRecipeChanged = Schema.decodeUnknownSync(
   CodeProjectDesktopRecipeChanged,
 );

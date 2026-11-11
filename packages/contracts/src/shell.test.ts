@@ -85,6 +85,7 @@ const settings = {
     vibrancyMode: "off",
   },
   sidebarDestinations: { order: [], visibility: [] },
+  sidebarPinnedProjects: [],
   sidebarMoreEnabled: true,
   sidebarCountTiles: true,
   sidebarSearchPresentation: "icon",
@@ -1275,6 +1276,36 @@ describe("sidebar destination customization", () => {
         visibility: [
           { id: "inbox", visibility: "shown" },
           { id: "inbox", visibility: "hidden" },
+        ],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("sidebar pinned Projects", () => {
+  it("decodes a store saved before pins to no pins", () => {
+    const { sidebarPinnedProjects: _pins, ...predatesPins } = settings;
+    expect(decodeShellSettings(predatesPins).sidebarPinnedProjects).toEqual([]);
+  });
+
+  it("keeps pins in the order they were pinned and rejects a repeated Project", () => {
+    const kept = decodeShellSettings({
+      ...settings,
+      sidebarPinnedProjects: [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+      ],
+    });
+    expect(kept.sidebarPinnedProjects).toEqual([
+      "22222222-2222-4222-8222-222222222222",
+      "11111111-1111-4111-8111-111111111111",
+    ]);
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        sidebarPinnedProjects: [
+          "11111111-1111-4111-8111-111111111111",
+          "11111111-1111-4111-8111-111111111111",
         ],
       }),
     ).toThrow();

@@ -1,4 +1,5 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
+import { canvasDesignSystemStyle } from "./canvasDesignSystemStyle";
 import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
@@ -17,6 +18,7 @@ import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 import type { DesignRunRuntime } from "./blocks/designRunningFrame";
+import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;
@@ -43,6 +45,11 @@ export interface CanvasDocumentProps {
    * script says it cannot run here.
    */
   readonly designRunRuntime?: DesignRunRuntime;
+  /**
+   * Sends a person's answer to a choice block to the Canvas's own thread, or
+   * says why this surface cannot. Without it a choice reads only.
+   */
+  readonly choiceRuntime?: CanvasChoiceRuntime;
   /**
    * Comment markers beside each block and on each table row that carries an
    * id. Offered only when the host journals comments; `openCounts` holds the
@@ -89,6 +96,7 @@ export function CanvasDocument({
   planRuntime,
   designAssetRuntime,
   designRunRuntime,
+  choiceRuntime,
   comments,
   placement = "document",
 }: CanvasDocumentProps) {
@@ -99,6 +107,7 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
+  const designSystemStyle = canvasDesignSystemStyle(definition.designSystem);
   // What comments add to a block: its marker in the margin and the marks
   // people drew on it.
   const commentMarks = (block: CanvasDefinition["blocks"][number]) =>
@@ -128,6 +137,7 @@ export function CanvasDocument({
         {...(actionRuntime === undefined ? {} : { actionRuntime })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
         {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+        {...(choiceRuntime === undefined ? {} : { choiceRuntime })}
         {...(comments === undefined || block.kind !== "table"
           ? {}
           : {
@@ -195,6 +205,7 @@ export function CanvasDocument({
       <DeckBlock
         block={item.deck}
         blocks={definition.blocks}
+        {...(designSystemStyle === undefined ? {} : { designSystemStyle })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
       />
       {commentMarks(item.deck)}
@@ -240,6 +251,8 @@ export function CanvasDocument({
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
       aria-label={definition.title}
+      data-design-system={definition.designSystem?.name}
+      style={designSystemStyle}
     >
       {placement === "thread" ? null : (
         <header className="canvas-view__header">

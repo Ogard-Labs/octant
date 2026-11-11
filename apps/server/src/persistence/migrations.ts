@@ -2436,6 +2436,28 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 94,
+    name: "create_coordinator_count_store",
+    // A coordinator's hourly start and wake bounds and its hop count were
+    // held in memory, so a restart let a chain of wake turns start counting
+    // again from zero. These are host-local counters, not journaled facts:
+    // nothing replays them, and a row older than an hour bounds nothing.
+    sql: `
+      CREATE TABLE coordinator_count_store (
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        kind TEXT NOT NULL CHECK(kind IN ('start', 'wake')),
+        at INTEGER NOT NULL CHECK(at >= 0)
+      ) STRICT;
+      CREATE INDEX coordinator_count_store_thread_idx
+        ON coordinator_count_store(thread_id, kind, at);
+      CREATE TABLE coordinator_host_turn_store (
+        thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+        operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+        hop INTEGER NOT NULL CHECK(hop >= 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

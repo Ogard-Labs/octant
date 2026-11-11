@@ -23,6 +23,7 @@ import {
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
   decodeProjectBrandKitChanged,
+  decodeProjectDesignSystemChanged,
   decodeWorkProjectDeveloperToolsChanged,
   decodeWorkProjectActionsChanged,
   decodeWorkProjectPermissionModeChanged,
@@ -202,6 +203,8 @@ const projectDecoders = {
     decodeWorkProjectActionsChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
+  "project.design-system-changed@1": (payload: unknown) =>
+    decodeProjectDesignSystemChanged(payload).project,
   "project.extra-folder-added@1": (payload: unknown) =>
     decodeProjectExtraFolderAdded(payload).project,
   "project.extra-folder-removed@1": (payload: unknown) =>

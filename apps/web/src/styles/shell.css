@@ -440,6 +440,12 @@ html[data-octant-native-host="true"]
   color: var(--oct-fg);
 }
 
+/* The context-menu trigger around a pinned Project tile; it adds no box of its own. */
+.sidebar-rail__tile {
+  display: flex;
+  flex: 0 0 auto;
+}
+
 .sidebar-rail__divider {
   display: block;
   width: 28px;

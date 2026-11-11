@@ -1,3 +1,4 @@
+import { installMonacoIntelligence } from "./monacoIntelligence";
 import * as monaco from "monaco-editor";
 import type {
   MonacoAdapterRuntime,
@@ -11,6 +12,11 @@ import type {
 } from "./MonacoEditorAdapter";
 import { installNativeEditorMenu } from "./nativeEditorMenu";
 import { installMonacoEnvironment } from "./monacoEnvironment";
+import {
+  SCROLLBAR_LANE_WIDTH,
+  SCROLLBAR_THUMB_WIDTH,
+  systemFloatsScrollbars,
+} from "./scrollbarTreatment";
 import {
   DEFAULT_EDITOR_TYPOGRAPHY,
   type EditorTypographyProjection,
@@ -30,7 +36,8 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
   installMonacoEnvironment();
   installLanguageBridging();
   const uri = monaco.Uri.parse(options.modelUri, true);
-  if (uri.scheme !== "octant-code") throw new Error("Monaco model URI must be Octant-owned.");
+  if (!["octant-code", "octant-text"].includes(uri.scheme))
+    throw new Error("Monaco model URI must be Octant-owned.");
   const key = uri.toString();
   const lease = acquireModelLease(key, uri, options.value, options.language);
   setControlledValue(lease, options.value);
@@ -49,6 +56,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
+    ...editorScrollbarOptions(),
     glyphMargin: options.onToggleBreakpoint !== undefined,
     theme: OCTANT_EDITOR_THEME,
   });
@@ -80,7 +88,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
       ? undefined
       : installBreakpointGutter(editor, options.onToggleBreakpoint);
   const change = lease.model.onDidChangeContent(() => {
-    if (lease.controlledUpdateDepth === 0) options.onChange(lease.model.getValue());
+    if (lease.controlledUpdateDepth === 0) options.onChange(lease.model.getValue(undefined, true));
   });
   const bridge = options.languageBridge;
   if (bridge !== undefined) {
@@ -136,8 +144,36 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
       if (lease.references === 1) setLanguageMarkers(lease.model, key, undefined);
       releaseModelLease(key, lease);
     },
+    selection: () => {
+      const range = editor.getSelection();
+      if (range === null || range.isEmpty()) return undefined;
+      const bom = lease.model.getValue(undefined, true).startsWith("\ufeff") ? 1 : 0;
+      return {
+        text: lease.model.getValueInRange(range),
+        range,
+        startOffset: bom + lease.model.getOffsetAt(range.getStartPosition()),
+        endOffset: bom + lease.model.getOffsetAt(range.getEndPosition()),
+      };
+    },
     focus: () => editor.focus(),
     setReadOnly: (readOnly) => editor.updateOptions({ readOnly }),
+    command: async (id) => {
+      const action = editor.getAction(id);
+      if (action === null || !action.isSupported()) throw new Error("unsupported");
+      editor.focus();
+      await action.run();
+    },
+    setPreferences: (preferences) => {
+      editor.updateOptions({
+        wordWrap: preferences.wordWrap,
+        renderWhitespace: preferences.renderWhitespace,
+        minimap: { enabled: preferences.minimap },
+      });
+      lease.model.updateOptions({
+        tabSize: preferences.tabSize,
+        insertSpaces: preferences.insertSpaces,
+      });
+    },
     setTypography: (next) => updateEditorTypography(editor, next),
     setColors: applyEditorColors,
     setValue: (value) => setControlledValue(lease, value),
@@ -245,6 +281,7 @@ let languageBridgingInstalled = false;
 function installLanguageBridging(): void {
   if (languageBridgingInstalled) return;
   languageBridgingInstalled = true;
+  installMonacoIntelligence((uri) => modelBridges.get(uri)?.at(-1));
   // Monaco merges every provider's definitions. The worker reads one file, so
   // on a file a server serves its guess (an import's own binding) sat beside
   // the server's location and turned each jump into a two-entry peek
@@ -491,9 +528,15 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
+    ...editorScrollbarOptions(),
+    // The comparison kept a 30px strip down its right edge for a map of the
+    // changes, painted whether or not anything scrolled. No pane keeps a
+    // strip there; the changes stay marked on their lines and in the gutter.
+    renderOverviewRuler: false,
     theme: OCTANT_EDITOR_THEME,
   });
-  editor.setModel({ original, modified });
+  const viewModel = editor.createViewModel({ original, modified });
+  editor.setModel(viewModel);
   const disposeOriginalMenu = installNativeEditorMenu(editor.getOriginalEditor());
   const disposeModifiedMenu = installNativeEditorMenu(editor.getModifiedEditor());
   const lineSelections =
@@ -517,6 +560,9 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
       disposeOriginalMenu();
       disposeModifiedMenu();
       for (const selection of lineSelections) selection.dispose();
+      // Monaco defers releasing its view model. Cancel its worker before the
+      // text models disappear, including a comparison closed immediately.
+      viewModel.dispose();
       editor.dispose();
       original.dispose();
       modified.dispose();
@@ -535,12 +581,51 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     },
     setValues: (values) => {
       const viewState = editor.saveViewState();
-      if (original.getValue() !== values.original) original.setValue(values.original);
-      if (modified.getValue() !== values.modified) modified.setValue(values.modified);
+      if (original.getValue(undefined, true) !== values.original)
+        original.setValue(values.original);
+      if (modified.getValue(undefined, true) !== values.modified)
+        modified.setValue(values.modified);
       if (viewState !== null) editor.restoreViewState(viewState);
     },
   } satisfies MonacoDiffSession;
 };
+
+/**
+ * Monaco draws its scrollbars itself, so the one scrollbar rule in styles.css
+ * cannot reach them. These options ask it for the picture that rule draws in a
+ * pane: the same thumb in the same lane, and nothing else painted at the edge.
+ * Its colours travel with the theme below, and the thumb's round ends are in
+ * styles/code.css, because Monaco has no option for them.
+ */
+function editorScrollbarOptions(): Pick<
+  monaco.editor.IEditorOptions,
+  "scrollbar" | "overviewRulerBorder" | "hideCursorInOverviewRuler"
+> {
+  // "auto" hides the thumb until the editor scrolls or the pointer is over
+  // it, as a floating system thumb hides at rest. "visible" keeps it there
+  // for as long as the text overflows, as a pane's stays in a system strip.
+  // Read once per editor: one already open keeps what it was mounted with if
+  // the system setting changes under it.
+  const shown = systemFloatsScrollbars() ? "auto" : "visible";
+  return {
+    scrollbar: {
+      vertical: shown,
+      horizontal: shown,
+      verticalScrollbarSize: SCROLLBAR_LANE_WIDTH,
+      horizontalScrollbarSize: SCROLLBAR_LANE_WIDTH,
+      verticalSliderSize: SCROLLBAR_THUMB_WIDTH,
+      horizontalSliderSize: SCROLLBAR_THUMB_WIDTH,
+      // Monaco shades the top edge once the text has scrolled. No pane does.
+      useShadows: false,
+    },
+    // The ruler under the thumb still marks errors and search matches where
+    // they are. Its outline was a hairline down the whole pane, 14px in from
+    // the edge, and its cursor mark a dash beside it, both there at rest
+    // (measured in a rendered editor).
+    overviewRulerBorder: false,
+    hideCursorInOverviewRuler: true,
+  };
+}
 
 /**
  * Monaco keeps one theme for the whole page, so every editor and diff wears
@@ -579,6 +664,10 @@ function applyEditorColors(colors: EditorColorProjection): void {
       "editorSuggestWidget.border": colors.widgetBorder,
       "peekViewEditor.background": colors.widgetBackground,
       "peekViewResult.background": colors.widgetBackground,
+      // Every scrollbar Monaco draws, its popups' included, takes the thumb.
+      "scrollbarSlider.background": colors.scrollbarThumb,
+      "scrollbarSlider.hoverBackground": colors.scrollbarThumbHover,
+      "scrollbarSlider.activeBackground": colors.scrollbarThumbHover,
       focusBorder: colors.focusBorder,
       "editorError.foreground": colors.error,
       // A fifth of the role, not the role itself: diff text is read on it.
@@ -638,7 +727,7 @@ function releaseModelLease(key: string, lease: ModelLease): void {
 }
 
 function setControlledValue(lease: ModelLease, value: string): void {
-  if (lease.model.getValue() === value) return;
+  if (lease.model.getValue(undefined, true) === value) return;
   lease.controlledUpdateDepth += 1;
   try {
     lease.model.setValue(value);

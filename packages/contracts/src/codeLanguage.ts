@@ -67,7 +67,53 @@ export const CodeLanguageEditPreview = Schema.Struct({
 }).annotations(strict);
 export type CodeLanguageEditPreview = typeof CodeLanguageEditPreview.Type;
 
+export const CodeIntelligenceFeature = Schema.Literal(
+  "completion",
+  "hover",
+  "signature",
+  "symbols",
+  "formatting",
+);
+export type CodeIntelligenceFeature = typeof CodeIntelligenceFeature.Type;
+export const CodeIntelligenceItem = Schema.Struct({
+  label: Schema.String.pipe(Schema.maxLength(512)),
+  text: Schema.optional(Schema.String.pipe(Schema.maxLength(16_384))),
+  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(8_192))),
+  kind: Schema.optional(Schema.Int.pipe(Schema.between(1, 26))),
+  range: Schema.optional(CodeLanguageRange),
+  parameters: Schema.optional(
+    Schema.Array(Schema.String.pipe(Schema.maxLength(512))).pipe(Schema.maxItems(64)),
+  ),
+}).annotations(strict);
+export type CodeIntelligenceItem = typeof CodeIntelligenceItem.Type;
+export const CodeIntelligenceAnswer = Schema.Struct({
+  status: Schema.Literal("intelligence"),
+  feature: CodeIntelligenceFeature,
+  ...scope,
+  documentVersion: Schema.Int.pipe(Schema.positive()),
+  documentRevision: Schema.UUID,
+  items: Schema.Array(CodeIntelligenceItem).pipe(Schema.maxItems(256)),
+  activeSignature: Schema.optional(Schema.Int.pipe(Schema.between(0, 255))),
+  activeParameter: Schema.optional(Schema.Int.pipe(Schema.between(0, 63))),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type CodeIntelligenceAnswer = typeof CodeIntelligenceAnswer.Type;
+
 export const CodeLanguageReadRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("intelligence"),
+    feature: CodeIntelligenceFeature,
+    formatting: Schema.optional(
+      Schema.Struct({
+        tabSize: Schema.Int.pipe(Schema.between(1, 8)),
+        insertSpaces: Schema.Boolean,
+      }).annotations(strict),
+    ),
+    ...scope,
+    position: CodeLanguagePosition,
+    expectedVersion: Schema.Int.pipe(Schema.positive()),
+    expectedRevision: Schema.UUID,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename"),
     ...scope,
@@ -175,12 +221,14 @@ export const CodeLanguageReferenceSupport = Schema.Literal("supported", "unsuppo
 export type CodeLanguageReferenceSupport = typeof CodeLanguageReferenceSupport.Type;
 
 export const CodeLanguageReadResult = Schema.Union(
+  CodeIntelligenceAnswer,
   Schema.Struct({
     status: Schema.Literal("capabilities"),
     ...scope,
     references: CodeLanguageReferenceSupport,
     rename: Schema.optional(CodeLanguageReferenceSupport),
     quickFixes: Schema.optional(CodeLanguageReferenceSupport),
+    intelligence: Schema.optional(Schema.Array(CodeIntelligenceFeature).pipe(Schema.maxItems(5))),
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("edit-previews"),
@@ -213,7 +261,7 @@ export const CodeLanguageReadResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("unsupported"),
-    capability: Schema.Literal("references", "rename", "quick-fixes"),
+    capability: Schema.Literal("references", "rename", "quick-fixes", "intelligence"),
     support: Schema.Literal("unsupported", "unknown"),
   }).annotations(strict),
   Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),

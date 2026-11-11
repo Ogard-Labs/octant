@@ -1,5 +1,6 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import type { ComponentProps } from "react";
+import { menuRow } from "./menu-row";
 import { cn } from "./utils";
 
 export const Combobox = ComboboxPrimitive.Root;
@@ -73,7 +74,7 @@ export function ComboboxPopup({
   return (
     <ComboboxPrimitive.Popup
       className={cn(
-        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="combobox-content"
@@ -88,7 +89,10 @@ export function ComboboxEmpty({
 }: ComponentProps<typeof ComboboxPrimitive.Empty>) {
   return (
     <ComboboxPrimitive.Empty
-      className={cn("px-2 py-3 text-center text-sm text-muted-foreground", className)}
+      // The library keeps this element in the list while there are matches, so
+      // its padding is only for when it has words: empty, it stood as a 20px gap
+      // above the first row.
+      className={cn("px-2 py-3 text-center text-sm text-muted-foreground empty:p-0", className)}
       data-slot="combobox-empty"
       {...props}
     />
@@ -103,10 +107,7 @@ export function ComboboxItem({
 }: ComponentProps<typeof ComboboxPrimitive.Item>) {
   return (
     <ComboboxPrimitive.Item
-      className={cn(
-        "relative flex min-h-[round(2.25rem,2px)] cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-        className,
-      )}
+      className={cn(menuRow, className)}
       data-slot="combobox-item"
       {...props}
     />

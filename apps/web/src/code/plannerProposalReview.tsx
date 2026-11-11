@@ -1,9 +1,20 @@
-import type { CodePlannerView, ProjectId } from "@octant/contracts";
+import type {
+  CodePlannerView,
+  PermissionMode,
+  ProjectId,
+  ProviderExecutionPolicy,
+} from "@octant/contracts";
 import { useEffect, useRef, useState } from "react";
-import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
+import { ACCESS_POSTURE_RANK } from "@octant/domain/code-policy";
+import {
+  defaultPermissionModeFor,
+  permissionModeOf,
+  threadAccessOf,
+} from "@octant/domain/guardrail-policy";
 import { isDraftSelectionSelectable } from "@octant/domain";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
 import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import type { CodeOverviewProps } from "./CodeOverview";
 import { CodeComposerAdapter } from "./composer/CodeComposerAdapter";
@@ -194,11 +205,29 @@ export function PlannerProposalReviewDialog(
     projectId: props.projectId,
     enabled: ready,
   });
+  const requested = review.proposal.workerOptions;
+  const providerGroups = props.providerGroups ?? [];
+  // A coordinator's proposal names the provider and model it asked for:
+  // choose them once when the review opens, if this window can select them.
+  // The person can still choose another before approving.
+  const preselected = useRef<string>(undefined);
+  const onSelectProvider = props.onSelectProvider;
+  useEffect(() => {
+    const proposalId = String(review.proposal.id);
+    if (preselected.current === proposalId) return;
+    if (requested?.providerInstanceId === undefined || requested.modelId === undefined) return;
+    const selection = {
+      providerInstanceId: requested.providerInstanceId,
+      modelId: requested.modelId,
+    };
+    if (!isDraftSelectionSelectable(providerGroups, selection)) return;
+    preselected.current = proposalId;
+    onSelectProvider?.(selection);
+  }, [review.proposal.id, requested, providerGroups, onSelectProvider]);
   const bootstrap = props.controller.bootstrap;
   if (bootstrap === undefined) return null;
   const current = planner.current;
   const disabled = !current || planner.busy || props.creating === true;
-  const providerGroups = props.providerGroups ?? [];
   const providerSelection =
     props.selectedProviderInstanceId !== undefined && props.selectedModelId !== undefined
       ? { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId }
@@ -273,7 +302,18 @@ export function PlannerProposalReviewDialog(
             ? {}
             : { newThreadWorkspace: props.newThreadWorkspace })}
           {...(remoteFacts === undefined ? {} : { worktreeRemoteFacts: remoteFacts })}
-          defaultPermissionMode={defaultPermissionModeFor({ settings: bootstrap.settings })}
+          {...(requested === undefined
+            ? {
+                defaultPermissionMode: defaultPermissionModeFor({ settings: bootstrap.settings }),
+              }
+            : {
+                // The host refuses an approval above the requested level
+                // (creation-above-proposed-level), so higher modes are not offered.
+                defaultPermissionMode: permissionModeOf({
+                  executionPolicy: requested.executionPolicy,
+                }),
+                permissionModes: permissionModesAtOrBelow(requested.executionPolicy),
+              })}
           defaultPermissionPersistence={bootstrap.settings.defaultPermissionPersistence}
           {...(props.selectedProviderInstanceId === undefined
             ? {}
@@ -313,6 +353,16 @@ export function PlannerProposalReviewDialog(
         </OctantAlert>
       ) : null}
     </OctantDialog>
+  );
+}
+
+/** The picker's modes whose stored level is at or below a requested level, in picker order. */
+export function permissionModesAtOrBelow(
+  level: ProviderExecutionPolicy,
+): ReadonlyArray<PermissionMode> {
+  return PERMISSION_MODE_OPTIONS.map((option) => option.id).filter(
+    (mode) =>
+      ACCESS_POSTURE_RANK[threadAccessOf(mode).executionPolicy] <= ACCESS_POSTURE_RANK[level],
   );
 }
 

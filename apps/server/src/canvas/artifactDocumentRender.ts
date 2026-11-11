@@ -58,6 +58,9 @@ import {
   EXPORT_INK,
   type CanvasExportDrawing,
   type CanvasExportLegendEntry,
+  EXPORT_SERIES_COLORS,
+  exportSeriesPalette,
+  type ExportPalette,
 } from "./canvasExportChart";
 import {
   drawCanvasExportBarList,
@@ -105,7 +108,7 @@ export interface ArtifactDocumentOptions {
 }
 
 export function renderArtifactMarkdown(
-  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  definition: Pick<CanvasDefinition, "title" | "blocks" | "designSystem">,
 ): ArtifactDocumentRender {
   return finish(renderDocument(definition, "markdown", {}), CANVAS_EXPORT_BODY_MAX_BYTES);
 }
@@ -118,7 +121,7 @@ export function renderArtifactMarkdown(
  * written as that reading alone, and styled blocks as their text.
  */
 export function renderArtifactHtml(
-  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  definition: Pick<CanvasDefinition, "title" | "blocks" | "designSystem">,
   options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
   const drawn = finish(renderDocument(definition, "html", options), CANVAS_EXPORT_BODY_MAX_BYTES);
@@ -146,7 +149,7 @@ export type CanvasHtmlFileRender =
   | { readonly kind: "too-large" };
 
 export function renderCanvasHtmlFile(
-  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  definition: Pick<CanvasDefinition, "title" | "blocks" | "designSystem">,
   options: ArtifactDocumentOptions & {
     /** The declared images of each design, by block id, resolved for the reader. */
     readonly designAssets: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
@@ -167,7 +170,7 @@ export function renderCanvasHtmlFile(
 }
 
 export function renderArtifactDocument(
-  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  definition: Pick<CanvasDefinition, "title" | "blocks" | "designSystem">,
   format: CanvasExportImplementedFormat,
   options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
@@ -434,19 +437,21 @@ function comparisonMatrixPieces(
 }
 
 function renderDocument(
-  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  definition: Pick<CanvasDefinition, "title" | "blocks" | "designSystem">,
   format: CanvasExportImplementedFormat,
   options: RenderOptions,
 ): DocumentBody {
   const pieces: Piece[] = [];
+  // Typed blocks draw with the Canvas's design system, as they do on screen.
+  const palette = exportSeriesPalette(definition.designSystem);
   // A design's frames are drawn only in the HTML form and only as written by
   // acknowledgement; a design the export cannot draw reads as its titles.
   const read = (block: CanvasBlock): ReadonlyArray<Piece> =>
     block.kind === "design" && format === "html" && options.frames === "as-written"
-      ? (designFramePieces(block, options.frameTheme, options.images) ?? piecesFor(block))
+      ? (designFramePieces(block, options.frameTheme, options.images) ?? piecesFor(block, palette))
       : block.kind === "mockup" && format === "html" && options.pictures !== "reading"
         ? mockupPagePieces(block)
-        : piecesFor(block);
+        : piecesFor(block, palette);
   // A dashboard reads where it sits: its title, then each placed block in
   // cell order, which is the order the screen's grid reads at one column. A
   // tab reads under its label and a column in track order, and a dashboard in
@@ -677,7 +682,10 @@ function flowPieces(
   ];
 }
 
-function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
+function piecesFor(
+  block: CanvasBlock,
+  palette: ExportPalette = EXPORT_SERIES_COLORS,
+): ReadonlyArray<Piece> {
   switch (block.kind) {
     case "heading":
       return [{ kind: "heading", level: Math.min(6, block.level + 1), text: reading(block.text) }];
@@ -770,7 +778,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       ];
       return [
         ...heading,
-        ...pictured(drawCanvasExportChart(block, reading), [{ kind: "list", items }]),
+        ...pictured(drawCanvasExportChart(block, reading, palette), [{ kind: "list", items }]),
       ];
     }
     case "timeline":
@@ -945,7 +953,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         for (const child of children.get(nodeId) ?? []) walk(child, depth + 1);
       };
       walk(rootId, 0);
-      return pictured(drawCanvasExportTreemap(block, reading), [
+      return pictured(drawCanvasExportTreemap(block, reading, palette), [
         {
           kind: "table",
           headers: ["Item", ...block.measures.map((measure) => reading(measure.label))],
@@ -1176,6 +1184,24 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(" — "),
       );
+    case "choice":
+      // A file has no thread to answer to, so the question reads as its options.
+      return [
+        ...paragraph(reading(block.prompt)),
+        ...block.questions.flatMap(
+          (question): ReadonlyArray<Piece> => [
+            { kind: "heading", level: 3, text: reading(question.prompt) },
+            {
+              kind: "list",
+              items: question.options.map((option) =>
+                option.description === undefined
+                  ? reading(option.label)
+                  : `${reading(option.label)} — ${reading(option.description)}`,
+              ),
+            },
+          ],
+        ),
+      ];
     default: {
       const unhandled: never = block;
       return unhandled;

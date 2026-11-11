@@ -1,3 +1,4 @@
+import { PreviewTextEditor } from "./PreviewTextEditor";
 import { useMemo, type ReactNode } from "react";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { PreviewTarget } from "@octant/contracts/previews";
@@ -51,7 +52,7 @@ export function PreviewWorkspaceTab(props: PreviewWorkspaceTabProps): ReactNode 
     // bound to the tab's visibility. Reauthorization happens on every open.
     enabled: true,
   });
-  return (
+  const preview = (
     <PreviewShell
       target={target}
       model={controller.model}
@@ -64,5 +65,18 @@ export function PreviewWorkspaceTab(props: PreviewWorkspaceTabProps): ReactNode 
         ? {}
         : { handoffMessage: controller.handoffMessage })}
     />
+  );
+  return props.client?.text !== undefined &&
+    target.kind === "file" &&
+    controller.model.manifest?.capabilities.canEditInMonaco === true ? (
+    <PreviewTextEditor
+      key={`${target.hostId}:${target.projectId}:${target.opaqueRef}`}
+      target={target}
+      client={props.client}
+    >
+      {preview}
+    </PreviewTextEditor>
+  ) : (
+    preview
   );
 }

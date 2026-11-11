@@ -2124,17 +2124,23 @@ describe("Code planner routes", () => {
     );
   });
 
-  it("refuses planner designation and proposal resolution from an agent-gated principal", async () => {
+  it("lets a paired device read a coordinator's proposals but refuses its designation and resolution", async () => {
     const executePlanner = vi.fn();
     const executePlannerProposal = vi.fn();
-    const route = routeFixture({ executePlanner, executePlannerProposal });
+    const readPlanner = vi.fn(() => plannerView);
+    const route = routeFixture({ executePlanner, executePlannerProposal, readPlanner });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000915";
-    const asRemote = (path: string, body: Record<string, unknown>) => {
-      const remoteRequest = request(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+    const asRemote = (path: string, body?: Record<string, unknown>) => {
+      const remoteRequest = request(
+        path,
+        body === undefined
+          ? {}
+          : {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            },
+      );
       bindPrincipalRouteContext(remoteRequest, {
         principal: createRemoteDevicePrincipal({
           hostId: "local" as never,
@@ -2166,6 +2172,10 @@ describe("Code planner routes", () => {
       }),
     );
 
+    const view = await route(asRemote(`/api/code/planner/${projectId}`));
+
+    expect(view?.status).toBe(200);
+    expect(readPlanner).toHaveBeenCalledTimes(1);
     expect(designation?.status).toBe(401);
     expect(resolution?.status).toBe(401);
     expect(executePlanner).not.toHaveBeenCalled();

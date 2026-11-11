@@ -1,3 +1,4 @@
+import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
   CodeReviewFindingReference,
@@ -671,7 +672,6 @@ export function useCodeController(options: CodeControllerOptions) {
       return updated;
     });
   }, []);
-  const editorDraftValues = useRef(new Map<string, string>());
   const firstTurnFailures = useRef(
     new Map<string, Readonly<{ prompt: string; message: string }>>(),
   );
@@ -683,12 +683,8 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const turnAbort = useRef<AbortController | undefined>(undefined);
   const editorDrafts = useMemo(
-    () => ({
-      clear: (key: string) => editorDraftValues.current.delete(key),
-      read: (key: string) => editorDraftValues.current.get(key),
-      write: (key: string, value: string) => editorDraftValues.current.set(key, value),
-    }),
-    [],
+    () => createEditorDraftStore(options.serverUrl ?? "local"),
+    [options.serverUrl],
   );
   const mounted = useRef(true);
   const bootstrapGeneration = useRef(0);

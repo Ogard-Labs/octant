@@ -11,6 +11,7 @@ import type { CanvasDocumentComments } from "./CanvasDocument";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
+import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 import { decodeCanvasForRender } from "./canvasRuntime";
@@ -82,6 +83,8 @@ export interface CanvasViewProps {
   readonly designAssetRuntime?: DesignAssetRuntime;
   /** Host-owned tickets for a prototype's page; omitted when the host has none. */
   readonly designRunRuntime?: DesignRunRuntime;
+  /** Sends a choice to the Canvas's thread, or says why not; omitted, a choice reads only. */
+  readonly choiceRuntime?: CanvasChoiceRuntime;
   readonly comments?: CanvasDocumentComments;
   readonly placement?: "document" | "thread";
 }
@@ -93,6 +96,7 @@ export function CanvasView({
   planRuntime,
   designAssetRuntime,
   designRunRuntime,
+  choiceRuntime,
   comments,
   placement,
 }: CanvasViewProps) {
@@ -124,6 +128,7 @@ export function CanvasView({
           {...(planRuntime === undefined ? {} : { planRuntime })}
           {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
           {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+          {...(choiceRuntime === undefined ? {} : { choiceRuntime })}
           {...(comments === undefined ? {} : { comments })}
           {...(placement === undefined ? {} : { placement })}
         />

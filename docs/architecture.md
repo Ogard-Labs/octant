@@ -512,6 +512,15 @@ seconds apart), and the systemd unit restarts it on failure, which includes a
 kill by signal. A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
+**Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
+the shared embedded editor and a local-window-only, Project-confined source
+read/save route. Full source, physical identity and revision are checked
+independently of preview chunks; no agent or remote write authority is added.
+Draft recovery remains on the client. Code keeps its authoritative file-helper
+save path. [Workspace: File editing](design/workspace.md#file-editing) owns
+source restrictions, recovery, conflict comparison, reviewed workspace
+replacements and selection-to-agent proposals.
+
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.
@@ -1716,6 +1725,20 @@ validates every value with the same rule a design's own brand passes
 declaration or load a resource. A kit carries no filesystem, shell, or provider
 authority, so Chat Projects hold one too. See [Canvas](design/canvas.md) for how
 it reaches an agent and a frame.
+
+A Work or Code Project's **design system** is a `DESIGN.md` in its folder,
+whose content is read from the file and never stored on the record or
+journaled. Which file speaks for the Project (or none) is the person's choice,
+kept on the record as `designSystem` and journaled as
+`project.design-system-changed@1`; without one, the top-level file does. Every
+Work and Code turn is told to follow it and carries the Project's own file as
+keyed standing context; Canvas designs draw with its tokens, which take the
+place of the brand kit when present, and a Canvas that follows it (Canvas
+schema version 28) draws its typed blocks' colours from it. Only a window on this host lists, reads, creates, or
+saves one, a save replaces only the revision it was opened at, and no read or
+write follows a link. This is product context, not an agent brief: the rule
+below that Octant writes no agent brief and a Work turn reads no `AGENTS.md`
+is unchanged. See [Project design systems](design/design-systems.md).
 
 A Work Project may opt into a **status file**: `STATUS.md` at the top of its
 folder, where the work stands, with dated follow-ups and deadlines. The setting
@@ -3882,8 +3905,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     otherwise. A message whose hop count is three or more is delivered but
     wakes nothing, so two agents answering each other stop waking each other
     after three rounds and continue only when a person runs a turn. The host
-    holds hop counts and the hourly count in memory, so a restart starts them
-    again from zero.
+    records wake turns and each thread's latest host turn with its hop in its
+    own store, so a restart keeps the hourly count and the hop count
+    ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
   - Turning the switch off stops new wake turns; one already running finishes
     like any turn, and cancelling it is the ordinary cancel.
 
@@ -15753,6 +15777,15 @@ unauthenticated code-delivery channel, and on macOS Squirrel.Mac refuses a
 replacement that does not satisfy the running app's designated requirement. A
 ring publishes a signed feed or publishes none. A local package built without
 signing credentials a maintainer holds is unsigned.
+
+The Octant app also ships as a disk image for first install,
+`Octant-<version>-darwin-arm64.dmg`: the app, an Applications link, and a
+prebuilt Finder layout (picture background, fixed icon positions, volume
+`Octant`), made with `hdiutil` and files in `scripts/dmg/`, with no Finder
+automation at build time. The disk image is signed, notarized and stapled on
+the same condition as the app, and unsigned when the app is. The zip stays the
+only artifact the update feed lists; the disk image is a download, never an
+update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and

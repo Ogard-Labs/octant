@@ -119,6 +119,7 @@ export * from "./providerUsageHistoryClient";
 export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClient";
 
 export * from "./ownerPosture";
+export * from "./ownerThreadWake";
 export { createBrowserPresentationClient } from "./browserPresentationClient";
 
 export * from "./ownerApprovals";

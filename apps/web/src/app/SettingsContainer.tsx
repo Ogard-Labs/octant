@@ -13,6 +13,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { UsageWorkspace } from "../shell/deferredSurfaces";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { ShellSettingsSurface } from "../shell/ShellSettingsSurface";
+import { SurfaceLoading } from "../surface/SurfaceLoading";
 import type { useShellController } from "../shell/useShellController";
 import type { useBackgroundImageLibrary } from "../shell/useShellPresentation";
 import type { useThemeController } from "../theme/useThemeController";
@@ -204,13 +205,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
   };
 
   const usageSurface = (
-    <Suspense
-      fallback={
-        <div aria-label="Opening usage" className="workspace-rail-loading" role="status">
-          Opening usage…
-        </div>
-      }
-    >
+    <Suspense fallback={<SurfaceLoading label="Opening usage" measure="reading" />}>
       <UsageWorkspace
         client={usageDashboardClient}
         {...(localUsageHistoryClient === undefined
