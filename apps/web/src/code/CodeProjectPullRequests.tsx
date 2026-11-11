@@ -250,9 +250,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     view?.rows.filter(
       (row) => projectId === undefined || String(row.projectId) === String(projectId),
     ) ?? [];
-  const filterCount = activeFilterCount(filters);
   // The dock lists one Project's rows in the page's default order; sorting,
-  // grouping and filtering are the page's.
+  // grouping and filtering are the page's. So the dock counts no filter either:
+  // counting the page's saved ones, an empty dock said nothing matched "these
+  // filters" and offered to clear them, which could show no row and erased the
+  // page's choices.
+  const filterCount = dock ? 0 : activeFilterCount(filters);
   const visibleRows = sortPullRequests(
     filterPullRequests(
       scopedRows.filter((row) => pullRequestMatches(row, normalizedSearch)),

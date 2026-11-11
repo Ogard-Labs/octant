@@ -895,6 +895,28 @@ describe("CodeProjectPullRequests", () => {
     expect(onSelectRow).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
   });
 
+  it("leaves the page's saved filters alone in an empty dock", async () => {
+    const storage = memoryStorage({ "octant.code.pull-requests.filter-checks": "failing" });
+    const { container } = render(
+      <CodeProjectPullRequests
+        load={async () => view({ rows: [] })}
+        presentation="dock"
+        projectId={projectAId}
+        refresh={async () => view({ rows: [] })}
+        storage={storage}
+      />,
+    );
+
+    // The dock filters nothing, so it says its own empty state and offers no
+    // way to clear filters that are the page's.
+    await waitFor(() =>
+      expect(container.querySelector(".code-project-pull-requests__empty")).not.toBeNull(),
+    );
+    expect(screen.queryByText("No pull requests match these filters")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(storage.getItem("octant.code.pull-requests.filter-checks")).toBe("failing");
+  });
+
   it("names the snapshot as the scope of a truncated dock list, not the Project", async () => {
     const truncated = view({ repositoriesTruncated: true, pullRequestsTruncated: true });
     render(
