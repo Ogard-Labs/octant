@@ -268,6 +268,11 @@ describe("the public-block visual language", () => {
     expect(withoutComments).toMatch(
       /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{]*\{[^}]*--oct-focus-edge-on-accent/,
     );
+    // A control filled with the primary text colour would do the same, so it
+    // draws the edge in the page colour.
+    expect(withoutComments).toMatch(
+      /\[data-slot="button"\]\[data-variant="solid"\]:focus-visible\s*\{[^}]*outline-color:[^;]*--octant-workspace/,
+    );
 
     // A feature stylesheet may move the edge (an inline link, a drawn mark)
     // but may not suppress it, colour it, or draw a second ring of its own.

@@ -181,7 +181,7 @@ export function ThemeAppearanceEditor(props: {
             </OctantToggleGroup>
           </SettingRow>
           <SettingRow
-            description="Switches, the send button, and selected states. Mono is the grey look and sets Style to Mono."
+            description="Switches, primary buttons, and selected states. Mono is the grey look and sets Style to Mono."
             focused={focusedSetting === "appearance.scheme.accent"}
             label="Accent"
             scope="app"

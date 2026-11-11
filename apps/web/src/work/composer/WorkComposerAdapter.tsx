@@ -475,21 +475,20 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }
             row={{
               className: "work-composer-adapter__composer-bar",
-              leading: (
-                <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={props.creating === true}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
-                  />
-                </>
+              attach: (
+                <ComposerAttachButton
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  busy={props.creating === true}
+                  refusedReason={
+                    imageSupport === false
+                      ? "The selected model does not accept images. Choose an image-capable model."
+                      : undefined
+                  }
+                  onRefused={images.refuse}
+                  onFileSelected={(file) => images.attach([file])}
+                />
               ),
+              leading: <></>,
               trailing: (
                 <>
                   <ComposerModelPicker

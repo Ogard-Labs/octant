@@ -734,18 +734,20 @@ export function ChatComposer(props: ChatComposerProps) {
     </>
   );
 
+  const rowAttach = (
+    <ComposerAttachButton
+      busy={props.attachmentBusy}
+      refusedReason={attachment.kind === "unavailable" ? attachment.reason : undefined}
+      onRefused={setAttachmentNotice}
+      onFileSelected={(file) => {
+        setAttachmentNotice(undefined);
+        props.onFileSelected(file);
+      }}
+    />
+  );
   const rowLeading = (
     <>
       <div className="chat-composer__leading">
-        <ComposerAttachButton
-          busy={props.attachmentBusy}
-          refusedReason={attachment.kind === "unavailable" ? attachment.reason : undefined}
-          onRefused={setAttachmentNotice}
-          onFileSelected={(file) => {
-            setAttachmentNotice(undefined);
-            props.onFileSelected(file);
-          }}
-        />
         {props.imageGeneration === undefined ? null : (
           <ImageGenerationAction
             client={props.imageGeneration.client}
@@ -940,6 +942,7 @@ export function ChatComposer(props: ChatComposerProps) {
         ariaLabel: "Composer controls",
         className: "chat-composer__bar",
         toolbar: true,
+        attach: rowAttach,
         leading: rowLeading,
         trailing: rowTrailing,
         actions: {

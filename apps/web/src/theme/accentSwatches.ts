@@ -79,7 +79,7 @@ export type AccentSwatchId = (typeof ACCENT_SWATCHES)[number]["id"];
 
 const SWATCHES: ReadonlyArray<AccentSwatch & { readonly id: AccentSwatchId }> = ACCENT_SWATCHES;
 
-// Primary controls (the send button among them) put `primary-foreground` on
+// Primary controls (a dialog's acting answer among them) put `primary-foreground` on
 // the accent, so it takes the swatch's ink too.
 const ACCENT_ROLES = new Set(["accent", "accent-text", "accent-foreground", "primary-foreground"]);
 

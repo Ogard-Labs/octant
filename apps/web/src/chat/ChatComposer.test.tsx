@@ -69,7 +69,7 @@ describe("ChatComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("offers dictation beside the attach control only when transcription is ready, and appends the words to the draft", async () => {
+  it("offers dictation in the composer's row only when transcription is ready, and appends the words to the draft", async () => {
     const user = userEvent.setup();
     renderComposer({ draft: "Please" });
     expect(screen.queryByRole("button", { name: "Dictate message" })).toBeNull();
@@ -107,7 +107,14 @@ describe("ChatComposer", () => {
       );
       const toolbar = screen.getAllByRole("toolbar", { name: "Composer controls" })[1]!;
       const mic = within(toolbar).getByRole("button", { name: "Dictate message" });
-      expect(within(toolbar).getByRole("button", { name: "Add attachment" })).toBeVisible();
+      // Attach rides the card beside the prompt; the row holds the microphone.
+      const composer = toolbar.closest<HTMLElement>(".composer");
+      expect(composer).not.toBeNull();
+      const attach = within(composer as HTMLElement).getByRole("button", {
+        name: "Add attachment",
+      });
+      expect(attach).toBeVisible();
+      expect(toolbar).not.toContainElement(attach);
       await user.click(mic);
       await user.click(await within(toolbar).findByRole("button", { name: "Stop dictating" }));
       await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith("Please fix the flaky test"));

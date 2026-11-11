@@ -23,6 +23,10 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80 active:bg-primary/70",
+        // The primary text colour as a fill, with the page colour on it: the
+        // one action a surface is for, where the accent would compete with
+        // the content beside it (a composer's send, next to the prompt).
+        solid: "bg-foreground text-background hover:bg-foreground/85 active:bg-foreground/75",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/25",
         outline:

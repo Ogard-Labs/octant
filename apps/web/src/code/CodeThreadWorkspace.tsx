@@ -2639,21 +2639,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }
           row={{
             ariaLabel: "Thread context",
+            attach: (
+              <ComposerAttachButton
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                busy={attachments.busy}
+                refusedReason={
+                  props.attachmentClient === undefined
+                    ? "Image attachments are unavailable on this host."
+                    : boundModelReadsImages(providerGroups, thread) === false
+                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                      : undefined
+                }
+                onRefused={attachments.refuse}
+                onFileSelected={(file) => void attachments.attach([file])}
+              />
+            ),
             leading: (
               <>
-                <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  busy={attachments.busy}
-                  refusedReason={
-                    props.attachmentClient === undefined
-                      ? "Image attachments are unavailable on this host."
-                      : boundModelReadsImages(providerGroups, thread) === false
-                        ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
-                        : undefined
-                  }
-                  onRefused={attachments.refuse}
-                  onFileSelected={(file) => void attachments.attach([file])}
-                />
                 {props.imageGenerationClient === undefined ||
                 props.imageGenerationProfiles === undefined ? null : (
                   <ImageGenerationAction
