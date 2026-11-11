@@ -1208,6 +1208,49 @@ describe("single owner control socket", () => {
     }
   });
 
+  it("refuses and names a receipt copied in from another data folder instead of taking over", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-copied-receipt-"));
+    temporaryRoots.push(root);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: join(root, "data") },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    const copied = {
+      schemaVersion: 1 as const,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      instanceId: "22222222-2222-4222-8222-222222222222",
+      endpoint: join(root, "original-folder", "owner.sock"),
+      pid: 999_999,
+      processStart: "owner-of-the-original-folder",
+      serverVersion: "1.2.2",
+      wireVersion: "1",
+      serviceMode: "foreground" as const,
+      nonceDigest: createHash("sha256").update("original-folder").digest("hex"),
+      createdAt: "2026-08-09T10:00:00.000Z",
+    };
+    await writeFile(paths.ownerReceiptPath, encodeOwnerReceipt(copied), { mode: 0o600 });
+
+    await expect(
+      acquireHostRuntimeOwner({
+        paths,
+        hostId: copied.hostId,
+        instanceId: "33333333-3333-4333-8333-333333333333",
+        serverVersion: "1.2.3",
+        wireVersion: "1",
+        serviceMode: "foreground",
+        processStart: "replacement-start",
+        processAlive: () => false,
+      }),
+    ).rejects.toMatchObject({ code: "owner-unhealthy", path: paths.ownerReceiptPath });
+
+    expect(decodeOwnerReceipt(await readFile(paths.ownerReceiptPath, "utf8"))).toEqual(copied);
+  });
+
   it("preserves a receipt-only owner when its process identity is still live", async () => {
     const runtimeBase = await realpath(tmpdir());
     const root = await mkdtemp(join(runtimeBase, "octant-receipt-only-live-owner-"));

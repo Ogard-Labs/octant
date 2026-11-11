@@ -9,6 +9,7 @@ import {
 } from "@octant/host-runtime";
 import {
   AutomaticHostStartupDisabled,
+  DESKTOP_HOST_READY_TIMEOUT_MS,
   ServerExitedBeforeReady,
   ServerReadyTimeout,
   createStderrTail,
@@ -721,6 +722,54 @@ describe("waitForStorageReady", () => {
     expect(sleep).toHaveBeenCalledOnce();
     expect(sleep).toHaveBeenCalledWith(20);
     expect(now).toBe(20);
+  });
+
+  it("keeps waiting for a live desktop host that is still replaying after 15 seconds", async () => {
+    let now = 0;
+    const listensAt = 40_000;
+    const fetch = vi.fn(async () => {
+      if (now < listensAt) throw new Error("connection refused");
+      return Response.json({
+        product: "Octant",
+        status: "ok",
+        instanceId: "desktop-child",
+        storage: "ready",
+      });
+    });
+
+    await expect(
+      waitForStorageReady({
+        serverUrl: "http://127.0.0.1:43123/",
+        instanceId: "desktop-child",
+        fetch,
+        child: { exitCode: null, signalCode: null, kill: vi.fn() },
+        timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
+        now: () => now,
+        sleep: async (milliseconds) => {
+          now += milliseconds;
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(now).toBeGreaterThanOrEqual(listensAt);
+  });
+
+  it("gives up on a live desktop host that never opens its store within the desktop bound", async () => {
+    let now = 0;
+    const failure = await waitForStorageReady({
+      serverUrl: "http://127.0.0.1:43123/",
+      instanceId: "desktop-child",
+      fetch: vi.fn().mockRejectedValue(new Error("connection refused")),
+      child: { exitCode: null, signalCode: null, kill: vi.fn() },
+      timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServerReadyTimeout);
+    expect((failure as Error).message).toContain(`within ${DESKTOP_HOST_READY_TIMEOUT_MS}ms`);
+    expect(now).toBe(DESKTOP_HOST_READY_TIMEOUT_MS);
   });
 
   it("keeps the one-argument ServerReadyTimeout constructor compatible", () => {

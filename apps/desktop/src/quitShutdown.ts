@@ -88,3 +88,52 @@ export function armQuitDeadline(options: {
   const timer = setTimeout(options.forceExit, options.boundMs ?? QUIT_DEADLINE_MS);
   return () => clearTimeout(timer);
 }
+
+/**
+ * Ends the app after a start-up that cannot proceed. The reason is logged and
+ * what the failed start still holds is released before the failure is shown,
+ * because the error box is modal: on a packaged macOS build a launch whose
+ * host missed its readiness deadline sat behind that box with nothing on
+ * stdout or stderr, and a SIGTERM sent meanwhile was not acted on until the
+ * box was dismissed. A quit requested while the app is releasing (SIGTERM,
+ * SIGINT, logout) ends it without showing the box; one that reaches the app
+ * while the box is open ends it without waiting for dismissal.
+ */
+export async function quitAfterStartupFailure(options: {
+  readonly message: string;
+  readonly log: (message: string) => void;
+  /** Resolves when the person dismisses the failure. */
+  readonly showFailure: (message: string) => Promise<void>;
+  /** Releases what the failed start still holds; bounded and never rejects. */
+  readonly shutDown: () => Promise<unknown>;
+  /** Receives the call that ends the app on a quit requested from now on. */
+  readonly onQuitRequested: (quit: () => void) => void;
+  /** Arms the quit deadline once the app is committed to ending. */
+  readonly armDeadline: () => void;
+  readonly finish: () => void;
+}): Promise<void> {
+  options.log(`Octant could not start: ${options.message}`);
+  let released = false;
+  let quitRequested = false;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    options.armDeadline();
+    options.finish();
+  };
+  options.onQuitRequested(() => {
+    quitRequested = true;
+    if (released) end();
+  });
+  await options.shutDown();
+  released = true;
+  if (!quitRequested) {
+    try {
+      await options.showFailure(options.message);
+    } catch {
+      options.log("Octant could not show why it did not start.");
+    }
+  }
+  end();
+}

@@ -118,7 +118,11 @@ shutdown. The Browser runtime broker shares one close completion for failed
 listen and ordinary shutdown, attempts every acquired cleanup stage even after
 an earlier failure, awaits its HTTP listener and closes held connections.
 Startup and cleanup failures are reported without widening the existing quit
-deadline or taking ownership of borrowed hosts.
+deadline or taking ownership of borrowed hosts. The desktop gives the host it
+spawned 60 seconds to open its store, and a start-up failure is logged and its
+launch released before the failure box is shown. A signal quit after the
+failure ends the app instead of being swallowed; whether a packaged macOS build
+acts on it while the modal box is open is not yet verified.
 
 Status: Built. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 

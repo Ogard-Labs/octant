@@ -4,6 +4,7 @@ import {
   QUIT_DEADLINE_MS,
   WINDOW_STATE_FLUSH_BOUND_MS,
   armQuitDeadline,
+  quitAfterStartupFailure,
   saveWindowStateWithoutBlocking,
   shutDownForQuit,
 } from "./quitShutdown";
@@ -134,5 +135,104 @@ describe("the quit deadline", () => {
     vi.advanceTimersByTime(5_000);
 
     expect(forceExit).not.toHaveBeenCalled();
+  });
+});
+
+describe("quitting after a start-up that cannot proceed", () => {
+  const startupFailure = (showFailure: () => Promise<void>) => {
+    const order: string[] = [];
+    let requestQuit: (() => void) | undefined;
+    let release: () => void = () => undefined;
+    const pending = quitAfterStartupFailure({
+      message: "Octant storage did not become ready within 60000ms.",
+      log: (message) => void order.push(`log: ${message}`),
+      showFailure: async () => {
+        order.push("shown");
+        await showFailure();
+        order.push("dismissed");
+      },
+      shutDown: () => {
+        order.push("releasing");
+        return new Promise<void>((resolve) => {
+          release = () => {
+            order.push("released");
+            resolve();
+          };
+        });
+      },
+      onQuitRequested: (quit) => {
+        requestQuit = quit;
+      },
+      armDeadline: () => void order.push("deadline"),
+      finish: () => void order.push("finished"),
+    });
+    return {
+      order,
+      pending,
+      requestQuit: () => requestQuit?.(),
+      release: () => release(),
+    };
+  };
+
+  it("logs the reason and releases the failed start before showing it, then quits on dismissal", async () => {
+    const run = startupFailure(async () => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.order).toEqual([
+      "log: Octant could not start: Octant storage did not become ready within 60000ms.",
+      "releasing",
+    ]);
+
+    run.release();
+    await run.pending;
+
+    expect(run.order.slice(2)).toEqual(["released", "shown", "dismissed", "deadline", "finished"]);
+  });
+
+  it("quits without showing the failure when a signal arrives while it is being released", async () => {
+    const run = startupFailure(never);
+    run.requestQuit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.order).not.toContain("finished");
+
+    run.release();
+    await run.pending;
+
+    expect(run.order).not.toContain("shown");
+    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
+  });
+
+  it("quits on a signal while the failure is shown without waiting for dismissal", async () => {
+    const run = startupFailure(never);
+    run.release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.order.at(-1)).toBe("shown");
+
+    run.requestQuit();
+    run.requestQuit();
+
+    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
+    expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
+  });
+
+  it("ends the app once when a signal arrives and the failure is then dismissed", async () => {
+    let dismiss: () => void = () => undefined;
+    const run = startupFailure(() => new Promise<void>((resolve) => (dismiss = resolve)));
+    run.release();
+    await vi.advanceTimersByTimeAsync(0);
+    run.requestQuit();
+    dismiss();
+    await run.pending;
+
+    expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
+    expect(run.order.filter((step) => step === "deadline")).toHaveLength(1);
+  });
+
+  it("still ends the app when the failure cannot be shown", async () => {
+    const run = startupFailure(() => Promise.reject(new Error("no display")));
+    run.release();
+    await run.pending;
+
+    expect(run.order).toContain("log: Octant could not show why it did not start.");
+    expect(run.order.at(-1)).toBe("finished");
   });
 });

@@ -463,6 +463,16 @@ function closeLoopbackPort(listener: ReturnType<typeof createServer>): Promise<v
   });
 }
 
+/**
+ * How long the desktop waits for the host it spawned to open its store. The
+ * host backs up and replays its journal before it listens; with a large
+ * journal on a loaded machine (load average above 60) that took longer than
+ * the former 15 s, so the desktop stopped the host mid-start and the next
+ * launch started over. A host that exits ends the wait at once, so this bound
+ * only holds a start that is still running.
+ */
+export const DESKTOP_HOST_READY_TIMEOUT_MS = 60_000;
+
 export async function waitForStorageReady(
   options: WaitForStorageReadyOptions,
 ): Promise<LocalHostProbe | undefined> {

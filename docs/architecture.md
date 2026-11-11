@@ -410,6 +410,20 @@ broker APIs does not itself prove every tracked managed-tool process exited.
 This preserves the existing emergency termination path and its deadline;
 it does not add a process-exit guarantee for managed tools.
 
+The desktop waits up to 60 seconds for the host it spawned to open its store;
+a host that exits first ends the wait at once with its last error output. The
+host backs up and replays its journal before it listens, and on a loaded
+machine (load average above 60) a large journal outlasted the former 15
+seconds, so each launch stopped the host mid-start and showed a failure. A
+start-up that cannot proceed writes its reason to stderr and releases the
+launch (bounded by the quit stop bounds) before the "Octant could not start"
+box is shown, then quits when the box is dismissed. A quit requested during
+the release, such as SIGTERM or SIGINT, ends the app without showing the box;
+one delivered while the box is open ends it without waiting for dismissal. On
+a packaged macOS build the modal box was observed to hold a SIGTERM until it
+was dismissed, so the release comes first and nothing is left running behind
+the box.
+
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a

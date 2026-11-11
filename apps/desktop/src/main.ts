@@ -256,6 +256,7 @@ import {
   resolveStableHostAttachment,
   serverSpawnSpec,
   shutdownManagedServer,
+  DESKTOP_HOST_READY_TIMEOUT_MS,
   waitForStorageReady,
 } from "./serverProcess";
 import {
@@ -287,6 +288,7 @@ import {
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
+  quitAfterStartupFailure,
   saveWindowStateWithoutBlocking,
   shutDownForQuit,
 } from "./quitShutdown";
@@ -1423,6 +1425,9 @@ let preparingQuit = false;
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
 // AppleScript "quit", logout) cannot answer a dialog and must still proceed.
 let quitCanPrompt = false;
+// Set once a start-up has failed: a signal quit then ends the app instead of
+// being swallowed while the failure is released and shown.
+let quitAfterFailedStartup: (() => void) | undefined;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -2073,6 +2078,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const attached = await waitForStorageReady({
       serverUrl,
       instanceId,
+      timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
       ...(server === undefined
         ? {}
         : {
@@ -4768,17 +4774,23 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   desktopQuitAccepted = true;
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
-  dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
-  armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit(),
-  });
-  await shutDownForQuit({
-    closeAdmission: closeBrowserAdmissionForQuit,
-    flushWindowState: async () => undefined,
-    stopHost: stopHostForQuit,
+  await quitAfterStartupFailure({
+    message: formatDesktopStartupFailure(error),
     log: logQuitProblem,
+    showFailure: async (message) => dialog.showErrorBox("Octant could not start", message),
+    shutDown: () =>
+      shutDownForQuit({
+        closeAdmission: closeBrowserAdmissionForQuit,
+        flushWindowState: async () => undefined,
+        stopHost: stopHostForQuit,
+        log: logQuitProblem,
+      }),
+    onQuitRequested: (quit) => {
+      quitAfterFailedStartup = quit;
+    },
+    armDeadline: () => armQuitDeadline({ forceExit: forceExitAfterStalledQuit() }),
+    finish: finishQuit,
   });
-  finishQuit();
 }
 
 const requestWindow = createSingleFlight(() => desktopClientLifetime.openLocalWindow(createWindow));
@@ -5037,6 +5049,10 @@ app.on("activate", requestActiveWindow);
 app.on("before-quit", (event) => {
   if (quitPrepared) return;
   event.preventDefault();
+  if (quitAfterFailedStartup !== undefined) {
+    quitAfterFailedStartup();
+    return;
+  }
   if (preparingQuit) return;
   if (quitCanPrompt) {
     quitCanPrompt = false;
