@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 8         | 2       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 7       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **194** | **32**       | **4**               |
+| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -473,6 +473,18 @@ The host watches its own size and the system's memory pressure and eases itself 
 - Only a clean shutdown marks the host's memory record clean, so the next start reports an unexpected stop without claiming a cause.
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+
+### Other agents start work through the local CLI
+
+Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
+
+- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
+- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access, and adds a folder as a Project only when the call says the person asked to work there.
+- Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
+- `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.
+- Remote callers have no path here; a scoped grant for a bot on another machine would be its own decision.
+
+Status: Built. Since: 2026-11-11. Detail: [Architecture: Native harness, scripted callers and other agents](../architecture.md#native-harness).
 
 ## App-managed tools
 

@@ -678,7 +678,7 @@ an `ssh -L` forward, a proxy that rewrites `Host`, or a local service account
 all arrive that way, and a forged `Origin` header costs a non-browser caller
 nothing. The secret is the desktop bridge secret, which the host owner projects
 into the owner-only runtime directory. Electron windows and every CLI command
-(`octant agent`, `octant listener`, pairing, `octant web`) present it on the
+(`octant agent`, `octant agent mcp`, `octant listener`, pairing, `octant web`) present it on the
 `/api/desktop/*` routes. A browser gets a session only through a one-time
 launch token: the launcher (`octant web`, `octant web --dev`, or the desktop's
 "Open in browser" action) mints it through `/api/desktop/launch-sessions` with
@@ -8479,6 +8479,41 @@ the model at another size.
   `/agent N text`), the terminal UI panel, and `octant harness agents` share
   it, and the host authorizes each call against the window that opened the
   thread.
+- **Scripted callers and other agents.** `octant agent --prompt … --detach`
+  starts a Work or Code turn and returns once the host lists it, and
+  `octant agent status <thread>` reads where a thread got to: its newest
+  turn, whether it is running, the questions open on it, and what waits on
+  the person in Octant (the `/api/pending-requests` rows for that thread). A
+  Chat send answers only when its turn ends, so `--detach` refuses Chat
+  before creating anything. `octant agent mcp` is the same client as a stdio
+  MCP server, so another agent (a coding CLI, a bot) can start work in
+  Octant and follow it: `start_work` (a prompt and a folder or Project name;
+  the folder's Project decides Code or Work, none means Chat), `send_message`,
+  `read_thread`, `answer_question`, `stop_turn`, `list_projects`,
+  `add_project`, `list_threads`, and `list_waiting` (the host's whole Needs
+  you list, each row marked whether `answer_question` may answer it). The
+  host lists a Work or Code Project's requests only to a window that has
+  that Project open, so `list_waiting` opens each active Project in turn and
+  merges what each read lists, and a thread's own read happens in the
+  window that opened it. A read that fails or comes back cut off is reported
+  as incomplete, never as nothing waiting. `agentStart.ts` holds the start, wait,
+  read, and answer steps both share, over the thread ports above. Each tool
+  call opens its own window authority with the bridge secret, as a CLI
+  command does, and revokes it when the call ends; a Chat send keeps its
+  window until the send answers. A turn keeps running on the host after the
+  window that started it is revoked. The caller is another agent, not the
+  person, so the server keeps three rules of its own: it never answers an
+  approval or any other request listed for the person (only a harness
+  question or a Chat turn's question, through the routes line mode uses);
+  it refuses `full-access`, which would save Full access on the Project, so
+  a thread starts at Full access only where the person already set it; and
+  it adds a folder as a Project only when the call says the person asked to
+  work there (`addProject`). A folder must be an absolute path, and a Work or
+  Code thread needs a folder or Project named: the server's own working
+  directory is the MCP client's, never the caller's, so it is never guessed
+  from. A call that finds the host stopped starts it as `octant agent`
+  does, one start at a time. Remote callers have no path here: the MCP
+  server speaks only stdio on the host's machine.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`. A
