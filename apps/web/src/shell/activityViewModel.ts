@@ -165,6 +165,41 @@ export function writeFoldedStatusGroups(
   }
 }
 
+const FOLDED_COORDINATORS_STORAGE_KEY = "octant.sidebar.folded-coordinators.v1";
+
+/**
+ * The coordinators whose workers this window has folded away. Session storage
+ * keeps the choice per window, as a folded Project or Status group is.
+ */
+export function readFoldedCoordinators(
+  storageHolder: { readonly sessionStorage?: Storage } = globalThis,
+): ReadonlySet<string> {
+  try {
+    const stored: unknown = JSON.parse(
+      storageHolder.sessionStorage?.getItem(FOLDED_COORDINATORS_STORAGE_KEY) ?? "[]",
+    );
+    return new Set(
+      Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeFoldedCoordinators(
+  folded: ReadonlySet<string>,
+  storageHolder: { readonly sessionStorage?: Storage } = globalThis,
+): void {
+  try {
+    storageHolder.sessionStorage?.setItem(
+      FOLDED_COORDINATORS_STORAGE_KEY,
+      JSON.stringify([...folded]),
+    );
+  } catch {
+    // Presentation persistence is best-effort; the current window still folds.
+  }
+}
+
 /**
  * Sidebar Search is an in-place filter of the rows already on screen.
  * Project, Recents, and Unfiled are folder words on a thread, so a query
@@ -259,7 +294,14 @@ export function buildSidebarStatusView(input: {
     readonly label: string;
     readonly holds: (thread: SidebarActivityThread) => boolean;
   }> = [
-    { id: "pinned", label: "Pinned", holds: (thread) => thread.pinned === true },
+    // A coordinator stays open for as long as its line of work lasts, so it
+    // keeps a fixed place with the pins rather than moving between headings
+    // as its turns start and end (docs/design/workspace.md#coordinators).
+    {
+      id: "pinned",
+      label: "Pinned",
+      holds: (thread) => thread.pinned === true || thread.coordinator === true,
+    },
     { id: "needs-input", label: "Needs input", holds: (thread) => thread.activity === "attention" },
     {
       id: "ready-for-review",

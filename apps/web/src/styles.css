@@ -2522,7 +2522,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .endpoint-add__title {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
 }
 
 .endpoint-add__result {
@@ -3435,6 +3435,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   text-align: center;
 }
 
+/* Inside a Glass shell the boundary is the shell reporting on itself, on the
+   shell's own surface. Painting the theme's opaque page there turned the whole
+   window black for the moment Settings took to load. */
+html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent .shell-boundary {
+  background: transparent;
+}
+
 .workspace-pane__panel > [data-slot="empty"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
@@ -3623,9 +3630,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .folder-picker__header h2 {
   margin: 0;
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.02em;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .folder-picker__header > button {

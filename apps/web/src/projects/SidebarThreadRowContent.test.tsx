@@ -32,6 +32,32 @@ describe("SidebarThreadRowContent", () => {
     expect(screen.getByRole("img", { name: "Pull request #1205 · open" })).toBeInTheDocument();
   });
 
+  it("names a worker's coordinator under its title and marks a coordinator in the icon column", () => {
+    const { container, rerender } = render(
+      <SidebarThreadRowContent
+        coordinatorName="Backlog"
+        provider={{ displayName: "Claude", driverKind: "claude" }}
+        title="Fix the flaky test"
+      />,
+    );
+    expect(container.querySelector(".sidebar-navigation__thread-facts")).toHaveTextContent(
+      "Backlog",
+    );
+
+    rerender(
+      <SidebarThreadRowContent
+        coordinator
+        provider={{ displayName: "Claude", driverKind: "claude" }}
+        title="Backlog"
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Coordinator" })).toBeInTheDocument();
+    expect(container.querySelector(".sidebar-navigation__thread-provider")).toHaveAttribute(
+      "title",
+      "Coordinator",
+    );
+  });
+
   it("leaves no second line when the view shows no facts, and keeps the age beside the status", () => {
     const { container } = render(
       <SidebarThreadRowContent

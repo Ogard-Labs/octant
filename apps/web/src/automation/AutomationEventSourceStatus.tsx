@@ -149,7 +149,7 @@ export function AutomationEventSourceStatus(props: {
         )}
         <OctantButton
           type="button"
-          variant="secondary"
+          variant="outline"
           disabled={busy}
           onClick={() => setReview(undefined)}
         >

@@ -226,20 +226,37 @@ export function threadsToolOperations(input: {
   /** Whether the host carries messages into this mode's turns. */
   readonly messagingCarried: boolean;
   readonly plannerThread: boolean;
+  /**
+   * The thread's own stored level when it is a coordinator, `undefined`
+   * otherwise. A coordinator's turn always runs under Plan's read-only gate,
+   * so its messaging and `start` follow the level a person gave the thread,
+   * not the turn's posture; a coordinator a person set to Plan gets neither.
+   */
+  readonly coordinatorLevel?: string;
+  readonly profileAllowsStart?: boolean;
 }): ReadonlyArray<ThreadsToolOperation> {
   if (input.mode !== "work" && input.mode !== "code") return [];
   const operations: ThreadsToolOperation[] = [];
   if (input.profileAllowsRead) operations.push("list", "read", "wait");
+  const writingLevel = input.coordinatorLevel ?? input.posture;
   if (
     input.mode === "code" &&
     input.messagingCarried &&
     input.profileAllowsSend &&
-    input.posture !== "plan"
+    writingLevel !== "plan"
   ) {
     operations.push("send", "acknowledge", "receipts");
   }
   if (input.mode === "code" && input.plannerThread && input.profileAllowsBoard) {
     operations.push("board");
+  }
+  if (
+    input.mode === "code" &&
+    input.coordinatorLevel !== undefined &&
+    input.coordinatorLevel !== "plan" &&
+    input.profileAllowsStart === true
+  ) {
+    operations.push("start");
   }
   return operations.length === 0 ? [] : ["help", ...operations];
 }

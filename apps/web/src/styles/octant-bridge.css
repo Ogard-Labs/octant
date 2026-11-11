@@ -186,3 +186,61 @@ html[data-octant-theme-mode="light"] {
    sizes, z-index, breakpoints — static in both systems. Mapping a
    constant onto another constant buys indirection and nothing else.
    ────────────────────────────────────────────────────────────────────── */
+
+/* ─── window Glass ──────────────────────────────────────────────────
+   Under window Glass the page is the desktop seen through the window, and it
+   is as light as whatever sits behind it. The theme's control and floating
+   colours are opaque and were chosen against the theme's own page: on an
+   OLED preset over a bright desktop every button, segmented control and
+   select, the composer and each of the person's messages stood as a
+   near-black block on mid-grey glass. Here those fills are tints of the
+   foreground instead, at the step the theme's own control sits above its
+   page, so they stay one small step off whatever the glass shows.
+
+   The shadcn roles are restated because a custom property that names
+   another is resolved where it is declared: left at the root they would keep
+   the opaque colour. Menus, popovers and dialogs are portalled outside the
+   shell and keep the opaque floating surface. */
+html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent {
+  --octant-control: color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
+  --octant-control-hover: color-mix(in srgb, var(--octant-text-primary) 11%, transparent);
+  --octant-control-pressed: color-mix(in srgb, var(--octant-text-primary) 15%, transparent);
+  --secondary: var(--octant-control);
+  --muted: var(--octant-control);
+  --accent: var(--octant-control-hover);
+  --oct-surface-warm: var(--octant-control);
+  /* What is chosen (the mode in the switch, a selected row) is one step
+     above the control tint, for the same reason. */
+  --octant-selection: color-mix(in srgb, var(--octant-text-primary) 12%, transparent);
+  --oct-selection: var(--octant-selection);
+  /* A switch's track at rest, and the grounds behind a toned notice: each was
+     an opaque dark made for the theme's page. */
+  --input: var(--octant-control-pressed);
+  --oct-success-soft: color-mix(in oklab, var(--oct-success-fg) 14%, transparent);
+  --oct-warn-soft: color-mix(in oklab, var(--oct-warn-fg) 14%, transparent);
+  --oct-accent-soft: color-mix(in oklab, var(--oct-accent-fg) 14%, transparent);
+
+  /* The composer and the person's messages: a light veil of the page colour
+     for legibility over the ground, then a tint of the foreground, so the
+     surface reads as a pane of the same glass and not as a slab laid on it. */
+  --oct-glass-floor: color-mix(in srgb, var(--octant-workspace) 30%, transparent);
+  --oct-glass-thick: color-mix(in srgb, var(--octant-text-primary) 6%, transparent);
+  --oct-glass-chrome: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
+}
+
+/* A plain notice inside the shell is drawn on the raised surface, which is
+   opaque; under Glass it takes the control tint. A switch that is off keeps a
+   thumb the eye can find: the page colour it is drawn in was the same black as
+   its track. */
+html:not([data-octant-reduced-transparency="true"])
+  .shell--material-translucent
+  .callout[data-tone="neutral"] {
+  background: var(--octant-control);
+}
+
+html:not([data-octant-reduced-transparency="true"])
+  .shell--material-translucent
+  .octant-switch[data-unchecked]
+  [data-slot="switch-thumb"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 62%, transparent);
+}

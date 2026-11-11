@@ -344,7 +344,7 @@ export function FolderPicker(props: FolderPickerProps) {
           disabled={selecting}
           onClick={requestClose}
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           Cancel
         </OctantButton>

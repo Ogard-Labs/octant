@@ -186,19 +186,18 @@ export function WindowCaptureDialog(props: WindowCaptureDialogProps) {
           ))}
         </ul>
       ) : null}
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="octant-dialog__actions">
         <OctantButton
           disabled={phase.kind === "capturing" || phase.kind === "asking"}
           onClick={close}
           ref={cancel}
-          size="sm"
           type="button"
           variant="outline"
         >
           {phase.kind === "settings" ? "Close" : "Cancel"}
         </OctantButton>
         {phase.kind === "explain" ? (
-          <OctantButton onClick={() => void allow()} size="sm" type="button">
+          <OctantButton onClick={() => void allow()} type="button">
             {phase.access === "not-determined" ? "Continue" : "Open System Settings"}
           </OctantButton>
         ) : null}

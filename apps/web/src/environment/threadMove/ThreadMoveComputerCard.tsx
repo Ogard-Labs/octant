@@ -851,7 +851,7 @@ function ThreadMoveSheet(props: {
             Hand over instead
           </OctantButton>
         )}
-        <OctantButton onClick={props.onClose} variant="ghost">
+        <OctantButton onClick={props.onClose} variant="outline">
           Cancel
         </OctantButton>
         {props.unlock === undefined ? (
@@ -1038,7 +1038,7 @@ function HandoverSheet(props: {
         </OctantAlert>
       )}
       <footer className="thread-move-sheet__foot">
-        <OctantButton onClick={props.onClose} variant="ghost">
+        <OctantButton onClick={props.onClose} variant="outline">
           Cancel
         </OctantButton>
         <OctantButton

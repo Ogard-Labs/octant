@@ -40,6 +40,8 @@ import {
   decodeOwnerPostureChangeRequest,
   decodeOwnerPostureReadRequest,
   decodeOwnerRemovalRequest,
+  decodeOwnerThreadWakeChangeRequest,
+  decodeOwnerThreadWakeReadRequest,
   decodeOwnerUnlockProof,
   decodeHubSignInAsk,
   decodeHubSignInDecisionRequest,
@@ -61,6 +63,7 @@ import type { HubService } from "./hubService";
 import type { HostOwnerRecord } from "./hubStateStore";
 import type { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import type { OwnerPostureHost } from "./ownerPostureHost";
+import type { OwnerThreadWakeHost } from "./ownerThreadWakeHost";
 import { ownerEntries } from "./ownerRecords";
 import type { OwnerSessionCheck, OwnerUnlockService, OwnerUnlockVerification } from "./ownerUnlock";
 import type { SignInService } from "./signInService";
@@ -90,6 +93,8 @@ export const HUB_OWNER_ROUTES = {
   session: `${HUB_OWNER_ROUTE_PREFIX}/session`,
   postureRead: `${HUB_OWNER_ROUTE_PREFIX}/posture/read`,
   postureChange: `${HUB_OWNER_ROUTE_PREFIX}/posture/change`,
+  threadWakeRead: `${HUB_OWNER_ROUTE_PREFIX}/code-threads/wake/read`,
+  threadWakeChange: `${HUB_OWNER_ROUTE_PREFIX}/code-threads/wake/change`,
   credentialReceive: `${HUB_OWNER_ROUTE_PREFIX}/credentials/receive`,
   credentialCopy: `${HUB_OWNER_ROUTE_PREFIX}/credentials/copy`,
   provisionApply: `${HUB_OWNER_ROUTE_PREFIX}/provision/apply`,
@@ -179,6 +184,9 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.browserTakeOver,
   // A move erases the thread on the source, so it never rides an open session.
   HUB_OWNER_ROUTES.threadMoveTicket,
+  // A wake switch lets other threads start turns on this one while nobody is
+  // watching, so each change is its own decision, never part of a session.
+  HUB_OWNER_ROUTES.threadWakeChange,
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
@@ -217,6 +225,8 @@ export interface HubOwnerRouteOptions {
   readonly spoke: SpokeLinkService;
   readonly unlock: OwnerUnlockService;
   readonly postures: OwnerPostureHost;
+  /** A Code thread's wake switches; absent on a host that runs no Code service. */
+  readonly threadWakes?: OwnerThreadWakeHost;
   readonly credentials: OwnerCredentialCopyService;
   readonly threadMoves: ThreadMoveService;
   /** The moves a window on this host holds until an owner phone confirms them. */
@@ -675,6 +685,28 @@ export function createHubOwnerRouteHandler(
             actingPrincipal: principal,
             memberId: input.senderMemberId,
             posture: change.posture,
+          });
+        }
+        return outcome(result);
+      }
+      case HUB_OWNER_ROUTES.threadWakeRead: {
+        if (options.threadWakes === undefined) return refused(409, "unsupported");
+        return outcome(
+          await options.threadWakes.read(decodeOwnerThreadWakeReadRequest(json()).threadId),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadWakeChange: {
+        if (options.threadWakes === undefined) return refused(409, "unsupported");
+        const change = decodeOwnerThreadWakeChangeRequest(json());
+        const result = await options.threadWakes.change(change, {
+          ownerMemberId: String(input.senderMemberId),
+          fresh: input.freshFull,
+        });
+        if (result.status === "changed") {
+          options.record({
+            change: "owner-thread-wake-changed",
+            actingPrincipal: principal,
+            memberId: input.senderMemberId,
           });
         }
         return outcome(result);

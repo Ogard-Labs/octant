@@ -25,7 +25,7 @@ import type {
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
-import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
+import type { CodeBoardCoordinators, CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues";
 import type { InboxAttentionItem } from "../inbox/inboxModel";
@@ -123,6 +123,8 @@ export interface WorkspaceRailLayersProps {
   readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
+  /** Coordinators to leave off the Code board, and each worker's coordinator. */
+  readonly codeBoardCoordinators?: CodeBoardCoordinators;
   readonly providerLabels?: ReadonlyMap<string, string>;
   /** Driver kinds by provider instance id; the boards draw the provider mark from them. */
   readonly providerKinds?: ReadonlyMap<string, string>;
@@ -299,6 +301,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.boardPendingRequests === undefined
                 ? {}
                 : { pendingRequests: props.boardPendingRequests })}
+              {...(props.codeBoardCoordinators === undefined
+                ? {}
+                : { coordinators: props.codeBoardCoordinators })}
             />
           </LazyRailSurface>
         </div>

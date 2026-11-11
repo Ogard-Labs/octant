@@ -28,6 +28,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
+import { CodeProjectCoordinatorStarting } from "./CodeProjectCoordinatorStarting";
 import { CodeProjectPlanner } from "./CodeProjectPlanner";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
 
@@ -380,6 +381,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         {...(props.showQuickStart === undefined ? {} : { showQuickStart: props.showQuickStart })}
       />
       <CodeProjectPlanner {...props} />
+      <CodeProjectCoordinatorStarting controller={props.controller} projectId={props.projectId} />
       {props.showQuickStart === false ? null : (
         <CodeProjectQuickStart
           controller={props.controller}

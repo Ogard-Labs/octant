@@ -746,6 +746,8 @@ export interface CodeOperationRuntimeOptions {
   readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
   /** Reads the agent messages waiting for a thread into its next turn. */
   readonly carryAgentMessages?: CodeOperationServiceOptions["carryAgentMessages"];
+  readonly isCoordinatorThread?: CodeOperationServiceOptions["isCoordinatorThread"];
+  readonly coordinatorContext?: CodeOperationServiceOptions["coordinatorContext"];
   /** Records that a provider has accepted the turn carrying those messages. */
   readonly confirmAgentMessagesDelivered?: CodeOperationServiceOptions["confirmAgentMessagesDelivered"];
   /**
@@ -1330,6 +1332,12 @@ export function createCodeOperationRuntime(
     ...(options.consumeIssueContextFramed === undefined
       ? {}
       : { consumeIssueContextFramed: options.consumeIssueContextFramed }),
+    ...(options.isCoordinatorThread === undefined
+      ? {}
+      : { isCoordinatorThread: options.isCoordinatorThread }),
+    ...(options.coordinatorContext === undefined
+      ? {}
+      : { coordinatorContext: options.coordinatorContext }),
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),

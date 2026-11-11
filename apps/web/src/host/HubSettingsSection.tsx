@@ -1437,6 +1437,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
           {removing === undefined ? null : (
             <OctantConfirmDialog
               cancelLabel="Keep it"
+              destructive
               confirmLabel={`Remove ${removing.name}`}
               onCancel={() => setRemoving(undefined)}
               onConfirm={() => void removeMember(removing)}
@@ -2152,6 +2153,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
               {!leaving ? null : (
                 <OctantConfirmDialog
                   cancelLabel="Stay"
+                  destructive
                   confirmLabel="Leave the hub"
                   onCancel={() => setLeaving(false)}
                   onConfirm={() => void leave()}

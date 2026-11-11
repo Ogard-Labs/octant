@@ -3221,6 +3221,30 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("runs a coordinator's turn under Plan's read-only gate and carries its roster", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access", coordinator: true }),
+      isCoordinatorThread: () => true,
+      coordinatorContext: () => "Coordinator roster, written by Octant.",
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "full-access",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "plan" }),
+        context: expect.arrayContaining([
+          { kind: "user-message", text: "Coordinator roster, written by Octant." },
+        ]),
+      }),
+    );
+  });
+
   it("lets a full-access thread run one turn under auto-accept edits without raising the thread", async () => {
     const fixture = providerTurnFixture();
 
@@ -3402,6 +3426,8 @@ function providerTurnFixture(
       | "consumeIssueContextFramed"
       | "carryAgentMessages"
       | "confirmAgentMessagesDelivered"
+      | "isCoordinatorThread"
+      | "coordinatorContext"
       | "takeProductFeedbackForTurn"
       | "holdsServerThread"
       | "serverGit"

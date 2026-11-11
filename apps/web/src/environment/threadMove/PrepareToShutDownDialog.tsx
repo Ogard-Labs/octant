@@ -748,7 +748,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         <div className="shutdown-dialog__buttons">
           {done && leftOver > 0 ? (
             <>
-              <OctantButton onClick={props.onClose} variant="ghost">
+              <OctantButton onClick={props.onClose} variant="outline">
                 Done
               </OctantButton>
               <OctantButton onClick={chooseAgain} ref={primary}>
@@ -757,7 +757,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
             </>
           ) : done && props.onQuit !== undefined ? (
             <>
-              <OctantButton onClick={props.onClose} variant="ghost">
+              <OctantButton onClick={props.onClose} variant="outline">
                 Done
               </OctantButton>
               <OctantButton onClick={props.onQuit} ref={primary}>
@@ -769,12 +769,12 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
               {done || rows.length === 0 ? "Done" : "Close"}
             </OctantButton>
           ) : phase === "running" ? (
-            <OctantButton onClick={props.onClose} variant="ghost">
+            <OctantButton onClick={props.onClose} variant="outline">
               Hide
             </OctantButton>
           ) : (
             <>
-              <OctantButton onClick={props.onClose} variant="ghost">
+              <OctantButton onClick={props.onClose} variant="outline">
                 Cancel
               </OctantButton>
               {/* A phone on each destination's owner list unlocks there itself;

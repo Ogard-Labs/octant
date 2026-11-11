@@ -34,7 +34,14 @@ import {
 import { ChevronDown, CirclePause, FileOutput, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
@@ -273,6 +280,11 @@ export interface CodeThreadWorkspaceProps {
   ) => void;
   /** Starts a new Code thread in the same Project, such as when this one's provider session cannot be resumed. */
   readonly onNewThreadInProject?: (projectId: CodeThread["projectId"]) => void;
+  /**
+   * A coordinator's proposed workers, shown above the composer with the other
+   * prompts that wait for the person's decision. Absent on any other thread.
+   */
+  readonly coordinatorProposals?: ReactNode;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -2286,6 +2298,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={busy}
         />
+        {props.coordinatorProposals}
         <ImageGenerationOfferPrompt
           className="thread-column"
           client={props.imageGenerationClient}

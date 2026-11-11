@@ -18,6 +18,37 @@ describe("local server health probe", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("lets go of the page a listener answers with, without reading it", async () => {
+    const cancelled = vi.fn();
+    const page = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+      cancel: cancelled,
+    });
+    const probe = createLiveLocalServerHealthProbe({
+      fetch: (async () => new Response(page)) as unknown as typeof globalThis.fetch,
+    });
+
+    expect((await probe.probe({ port: 4322 })).health).toBe("listening");
+    // An unread page kept the connection open and paused; a server that then
+    // closed its end stopped the packaged host.
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it("still calls a listener answering when letting go of its page fails", async () => {
+    const page = new ReadableStream<Uint8Array>({
+      cancel() {
+        throw new Error("already closed");
+      },
+    });
+    const probe = createLiveLocalServerHealthProbe({
+      fetch: (async () => new Response(page)) as unknown as typeof globalThis.fetch,
+    });
+
+    expect((await probe.probe({ port: 4322 })).health).toBe("listening");
+  });
+
   it("probes the loopback family the host observed for the listener", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url !== "http://[::1]:5174/") throw new Error("ECONNREFUSED");

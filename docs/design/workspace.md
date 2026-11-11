@@ -280,7 +280,7 @@ list-side counterpart, so no second priority group is added to the Projects tree
 ### Coordinators
 
 [Coordinator threads](coordinator-threads.md) own the role; this section owns
-where a coordinator and its workers appear. Designed, not built.
+where a coordinator and its workers appear. Built; rendered against mocked threads, not yet on the desktop app.
 
 - **Sidebar.** A Code Project with coordinators shows a **Coordinators**
   section at the top of its Project tree, above its other threads. Each
@@ -291,21 +291,41 @@ where a coordinator and its workers appear. Designed, not built.
   folded coordinator never hides a request. Its open workers are listed only
   under it, never again among the Project's other threads; finished workers
   follow the ordinary completion and put-away rules. The window remembers each
-  coordinator's fold state as session storage.
+  coordinator's fold state as session storage. The Project's designated planner
+  is listed among its coordinators.
 - **Status arrangement.** Coordinators are listed under **Pinned**. Workers
   keep their ordinary headings, with their coordinator's name as secondary text
   on the row.
-- **Board.** A coordinator is never a board card. A worker's card names its
-  coordinator, and the board's filter can show one coordinator's workers.
-- **Menus.** A Code Project's sidebar menu has **New coordinator**; a Code
-  thread's header and row menus have **Make coordinator**, or **Stop
-  coordinating** on a coordinator; a worker's header menu has **Wake for
-  coordinator**. Settings › Code › Coordinators holds **Starting workers** and
-  the open-worker bound, and a Code Project's overview holds its own
-  **Starting workers** choice beside the Project planner section.
+- **Board.** A coordinator is never a board card: the host's board read
+  leaves it out, the designated planner included. Each card carries its
+  worker's coordinator id from the host and names that coordinator. The board's
+  Filters popover has a **Coordinator** choice, shown when the window has
+  coordinators, that asks the host for one coordinator's workers.
+- **Menus.** A Code Project's sidebar menu has **New coordinator**, which
+  opens the ordinary Code draft under a "New coordinator" heading and makes the
+  thread a coordinator once its creation is confirmed, before the first
+  message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
+  coordinating** on a coordinator (never on a worker), the **Wake when a message
+  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  The same items appear in a Code thread pane's header menu (right-click the
+  header), above Close pane, through the same handlers. On the designated
+  planner the role item is left out, since its role follows the designation.
+  Settings › Code › Coordinators holds **Starting workers** and **Open workers
+  per coordinator**, and a Code Project's overview holds its own **Starting
+  workers** choice (Use Settings, Start without asking, Propose for approval)
+  after the Project planner section.
 - **Requests.** A coordinator's composer lists its workers' pending approvals
   and questions in the same bounded region as its child runs' requests, each
-  naming its worker, with an Open worker action.
+  naming its worker, with an Open worker action. The rows come from the
+  window's pending-requests read filtered to the coordinator's workers in the
+  window's thread list, one request at a time with a choice between them; a
+  finished turn's decision is not listed there.
+- **Proposals.** A coordinator's pending proposals show as cards above its
+  composer (title, intent, **Review and approve**, **Decline**), beside the
+  routine and memory proposal prompts, sharing the Project planner section's
+  read, review dialog, and one-decision-at-a-time guard.
+- **Needs you.** A worker's row in Needs you and the Inbox shows "via" its
+  coordinator beside the worker's title, from the window's thread list.
 
 ### Sidebar thread status
 
@@ -492,12 +512,23 @@ kept tab stays when another thread opens in the pane, which then opens beside
 it as a new tab. A tab opened from anywhere else (a link, a search result, a
 drop) is kept.
 
+A thread row drags out of the sidebar the same way from either arrangement,
+Status or the Project tree. Chat and Work threads share that list but not a
+layout, so a row is dragged as the kind of thread it is, and a row of the
+other mode dropped on a pane opens the way its click does, the window
+following it to that mode, where the host would refuse to place it.
+
 **Moving tabs and showing them side by side.** A tab drags the way a pane's
 title row does, through the same drop rules: dropped on another pane's edge it
 splits that pane and opens there, dropped on a pane's centre it opens in that
-pane, and a tab that is not the pane's open one may split its own pane, so a
-tab dragged to its pane's right edge lands beside the open thread. A tab that
-moved out of a pane leaves that pane's tab row. ⌘-click (Ctrl-click off Apple
+pane, and any tab of a pane that holds more than one may split its own pane,
+so a tab dragged to its pane's right edge lands beside the thread the pane
+shows. The pane's open tab does so too: the pane first shows the neighbour a
+close would show, then the tab is placed. (Carried with its pane, the open tab
+had no drop target anywhere in the pane it was in, and dropped on another pane
+it took the whole pane, its other tabs with it.) A pane's only tab moves its
+pane, as the title row does. A tab that moved out of a pane leaves that pane's
+tab row. ⌘-click (Ctrl-click off Apple
 platforms) adds a tab to a selection or takes it out; Shift-click selects the
 run of tabs from the open one to the clicked one; a plain click clears the
 selection and opens the tab. Selected tabs carry a wash between the plain and
@@ -1352,9 +1383,9 @@ precreation failure allows progress; an explicit retry reviews that new version.
 A disconnect disables decisions until the
 current host state has been refreshed. Resulting tasks remain reachable from
 approved proposals. See the [Project planner rule](../architecture.md#modes-chat-work-and-code).
-When [coordinator threads](coordinator-threads.md) are built, this section
-designates coordinators and its proposals are the approval path for a
-coordinator whose starts need approval.
+The designated planner is a [coordinator](coordinator-threads.md) whose starts
+always need approval, and coordinators' proposals appear both here and as a
+card in the coordinator's own thread.
 
 ## Local-server ownership
 

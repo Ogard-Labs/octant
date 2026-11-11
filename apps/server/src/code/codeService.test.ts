@@ -413,6 +413,18 @@ describe("CodeService reads", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("names the visible threads that are their Project's designated planner", async () => {
+    const planner = thread();
+    const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [planner, other] });
+    Object.assign(fixture.persistence, {
+      readCodePlannerThreadId: (projectId: unknown) =>
+        String(projectId) === String(ids.project) ? planner.id : undefined,
+    });
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.plannerThreadIds).toEqual([planner.id]);
+  });
+
   it("carries a thread's linked pull requests onto its navigation row from the cached snapshot", async () => {
     const linked = thread();
     const quiet = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
@@ -2234,6 +2246,121 @@ describe("CodeService commands", () => {
     const after =
       fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
     expect("pinned" in after).toBe(false);
+  });
+
+  it("makes a thread a coordinator with its wake switch on, and stops it again", async () => {
+    const fixture = serviceFixture({ project: rememberedFullAccessProject });
+    const made = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      coordinator: true,
+    });
+    expect(made).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ coordinator: true, messageWake: true, version: 2 }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    fixture.persistence.readCodeThread.mockReturnValue(stored);
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      coordinator: false,
+    });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinator" in after).toBe(false);
+    expect(after.messageWake).toBe(true);
+  });
+
+  it("counts the designated planner toward the Project's four coordinators", async () => {
+    const others = [1, 2, 3, 4].map((index) =>
+      thread({ id: decodeCodeThreadId(`20000000-0000-4000-8000-00000000010${String(index)}`) }),
+    );
+    const [planner, ...rest] = others;
+    if (planner === undefined) throw new Error("expected a planner thread");
+    const fixture = serviceFixture({
+      project: rememberedFullAccessProject,
+      threads: [
+        thread(),
+        planner,
+        ...rest.map((other) => ({ ...other, coordinator: true as const })),
+      ],
+    });
+    const make = () =>
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        coordinator: true,
+      });
+    Object.assign(fixture.persistence, { readCodePlannerThreadId: () => planner.id });
+    await expect(make()).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringContaining("at most 4 coordinators") },
+    });
+    Object.assign(fixture.persistence, { readCodePlannerThreadId: () => undefined });
+    await expect(make()).resolves.toMatchObject({ kind: "thread-updated" });
+  });
+
+  it("answers setting the role a thread already has without appending anything", async () => {
+    const already = thread({ coordinator: true, messageWake: true });
+    const fixture = serviceFixture({ threads: [already], project: rememberedFullAccessProject });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: already.id,
+        expectedVersion: 1,
+        coordinator: true,
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ coordinator: true, version: 1 }),
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to make a worker a coordinator, or a wake-for-coordinator switch on a thread with none", async () => {
+    const worker = thread({
+      coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+    });
+    const fixture = serviceFixture({ threads: [worker] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: worker.id,
+        expectedVersion: 1,
+        coordinator: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    const plain = serviceFixture();
+    await expect(
+      plain.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-wake",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        wake: false,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to create a thread that names a coordinator or a wake switch", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    for (const role of [
+      { coordinator: true as const },
+      { coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff") },
+      { messageWake: true as const },
+    ]) {
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "create-code-thread",
+          thread: thread({ executionPolicy: "approval-gated", ...role }),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    }
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("erases harness-delegated approvals rather than storing a false", async () => {

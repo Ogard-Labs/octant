@@ -14,15 +14,15 @@ and its bounds. Architecture owns the boundaries it extends:
 sidebar and board presentation is in
 [Workspace: Coordinators](workspace.md#coordinators).
 
-**Status: approved design 2026-11-10 (maintainer request); designed, not built.**
-The Project planner, `octant_threads` (`list`, `read`, `wait`, `send`,
-`acknowledge`, `receipts`, `board`), the planner's proposals, child runs, and
-the composer's list of child requests are built and are the parts this design
-reuses. Nothing below is built yet: not the coordinator role, the `start`
-operation, the start setting, state notices, the worker roster, or the sidebar
-grouping. It also depends on the **Wake when a message arrives** switch, which
-is designed and not built
-([agent-to-agent messaging](../architecture.md#modes-chat-work-and-code)).
+**Status: approved design 2026-11-10 (maintainer request); built.** The host
+side, the workspace surfaces recorded in
+[Workspace: Coordinators](workspace.md#coordinators), the planner carry-over,
+the proposal card in the coordinator thread, workers' requests in the
+coordinator's composer, the coordinator named on Needs you rows, and the owner
+device's routes for the wake switches are built. An owner device has no screen
+that calls those routes yet. None of it has run against a real provider or on
+the desktop app; whether each runtime's own tools honour the read-only gate is
+a maintainer live check.
 
 ## What a coordinator is
 
@@ -31,19 +31,28 @@ is designed and not built
   that is one from the start, or with **Make coordinator** in an existing
   thread's header or row menu. **Stop coordinating** in the same menus makes it
   an ordinary thread again. Only a person does any of this, from a local window
-  on the host; an agent, a routine, a paired device, or a peer cannot. Each
-  change is journaled on the Project's coordinator aggregate with its principal
-  and expected version, and a stale version is refused.
+  on the host; an agent, a routine, a paired device, or a peer cannot. The role
+  is a field on the thread's own record: each change is journaled as
+  `code.thread-updated@1` under the thread's expected version (commands
+  `set-code-thread-coordinator`, `set-code-thread-message-wake`, and
+  `set-code-thread-coordinator-wake`), a stale version is refused, and the
+  Code commands route refuses all three from anything but a local window. A
+  new thread's creation command may not carry the role, lineage, or switches.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
-- **It replaces the planner role.** The Project planner becomes a coordinator
-  whose starts need approval. Once coordinators are built, the designated
-  planner thread reads as a coordinator, its pending proposals stay pending,
-  and the planner's routes, versioned proposals, and **Review and approve**
-  flow become the coordinator's approval path (below). The planner's rule of
-  one per Project and its lack of creation authority are replaced by this
-  specification.
+- **It replaces the planner role.** The Project's designated planner reads as a
+  coordinator whose starts always need approval, derived from the designation
+  with no journal change: it takes the read-only gate and the roster, its
+  `start` always proposes whatever the start setting, its pending proposals
+  stay pending, and it counts toward the four per Project. Designating a worker
+  or a fifth coordinator is refused (`thread-is-worker`,
+  `coordinator-limit-reached`). Its role follows the designation, so **Make
+  coordinator** and **Stop coordinating** are not offered on it; removing the
+  designation ends it. Designation does not turn on its **Wake when a message
+  arrives** switch. The planner's `board` read and board offers keep working;
+  since the board leaves coordinators out, that read no longer lists the
+  planner's own card.
 - **Code only.** Work threads neither send nor receive messages, because only
   Code turns carry them, so a Work coordinator could start workers but never
   follow up with them. Work coordinators wait for the rule that lets a Work turn
@@ -109,10 +118,11 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   opening prompt is its first message, sent through the normal first-message
   path. Its first turn has the `agent` initiator with the kind
   `coordinator-start`, the way a routine's turn starts, so every approval waits
-  for a person. The provider and model resolve against the Project's eligible
-  catalog the way delegation does: with none named, the worker takes the
-  Project's default for new Code threads; a named one that is unavailable or
-  disallowed refuses rather than falling back.
+  for a person. With no provider named, the worker runs on the coordinator's
+  own provider and model; a named provider the host does not know refuses
+  `provider-unavailable`, a provider or model the Project's policy disallows
+  is refused by the ordinary creation command, and nothing falls back to
+  another model.
 - **Authority.** The worker's guardrail level is the one named, or the
   coordinator's level when none is named, and never higher than the
   coordinator's. A worker started by a marked coordinator never starts at Full
@@ -123,10 +133,10 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   coordinator stops coordinating, is archived, or is deleted, its workers stay
   as ordinary threads; they keep the lineage as history, and nothing wakes them
   for that coordinator any more.
-- **Journal.** An admitted start journals `coordinator.worker-started@1` with
-  the coordinator, the worker, the start setting that applied, and the resolved
-  provider, model, and level, never the prompt. The prompt lives where any first
-  message lives.
+- **Journal.** An admitted start is journaled as the worker's own
+  `code.thread-created@1`, whose thread record carries the coordinator, the
+  provider, model, and level, never the prompt. The prompt lives where any
+  first message lives.
 - **Refusals.** A refused call returns one closed reason: `unauthorized` (the
   caller is not a coordinator), `policy` (Plan, a profile without the operation,
   a malformed input, a level above the ceiling), `limit-reached` (the open-worker
@@ -151,9 +161,12 @@ restrict that can do it for the whole host or for one Project.
 - Under **Propose for approval**, `start` creates nothing. It journals a pending
   proposal with the title, the prompt as its intent, and the requested provider,
   model, and level, through the planner's proposal path, with its bound of ten
-  waiting proposals per Project. The coordinator is told `proposed`. A person
-  approves or declines it from a card in the coordinator thread or from the
-  Project overview, with the planner's **Review and approve** controls; an
+  waiting proposals per Project; the proposal keeps the provider and model the
+  call named and the level it resolved, and approving it cannot start the
+  worker above that level (`creation-above-proposed-level`). The coordinator is
+  told `proposed`. A person approves or declines it from a card above the
+  coordinator's composer or from the Project overview, with the same **Review
+  and approve** and versioned decline; an
   approved proposal creates the worker exactly as an unasked start would,
   recorded as that coordinator's worker.
 
@@ -171,7 +184,8 @@ approval flow with one switch.
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most twelve `start` calls per coordinator in any hour,
-  admitted or proposed.
+  admitted or proposed. The host counts them in memory, as it counts wake
+  turns and hops, so a restart starts the counts again.
 - **Ordinary gates.** Each worker's turns take ordinary turn admission: capacity
   gating, spend ceilings, usage limits, and the Done lock all apply unchanged.
 
@@ -201,7 +215,15 @@ Full access cap keeps that confirmation from being switched off at the start.
   coordinator to drive the threads it starts. A message from any other thread
   wakes the worker only when its switch is on. A person can stop a worker from
   waking for its coordinator with **Wake for coordinator** in the worker's
-  header menu, journaled with its principal.
+  row menu or pane header menu, journaled with its principal.
+- **From an owner device.** An owner device may set **Wake when a message
+  arrives** and **Wake for coordinator** (never the coordinator role) through
+  the owner routes `code-threads/wake/read` and `code-threads/wake/change`. Each
+  change needs its own fresh unlock, is checked against a digest of the current
+  thread and Project, and is journaled as the owner device; refusals are
+  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. A plain paired
+  device and any agent still cannot set them. No owner-device screen calls the
+  routes yet.
 - **Worker to coordinator.** A worker uses `send` to its coordinator. Making a
   thread a coordinator turns on its **Wake when a message arrives** switch, as
   part of the person's journaled change; the person can turn it off as on any
@@ -238,7 +260,14 @@ reaches the person through the coordinator they are already talking to.
   `ask-user`, and `send` the worker what the person decided, but a pending
   approval stays the person's.
 - **Needs you.** A worker's request stays a Needs you row naming the worker,
-  with its coordinator named beside it.
+  with "via" its coordinator beside it, in Needs you and the Inbox. The board's
+  and Review's embedded rows show no thread title, and a board card names the
+  coordinator itself.
+- **Where the composer's list comes from.** The window's existing
+  pending-requests read, filtered to the coordinator's workers in the window's
+  thread list, so a window sees no request it could not already see. It shows
+  one request at a time with a choice between them. A finished turn's decision
+  stays in Needs you and the worker, since it is not the worker waiting.
 
 ## Not in this design
 

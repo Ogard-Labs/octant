@@ -12,7 +12,9 @@ import {
   decodeCodePlannerProposalDraft,
   decodeCodePlannerProposalId,
   decodeCodePlannerView,
+  decodeCodePlannerWorkProposal,
   decodeProjectId,
+  MAX_PENDING_CODE_PLANNER_PROPOSALS,
   type CodeCommandResult,
   type CodeFailure,
   type CodePlannerCommandOutcome,
@@ -35,6 +37,8 @@ import {
   type CodePlannerProjectFacts,
   type CodePlannerThreadFacts,
 } from "@octant/domain/code-planner-policy";
+import { readsAsCoordinator } from "@octant/domain";
+import { ACCESS_POSTURE_RANK } from "@octant/domain/code-policy";
 import { Schema } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -184,10 +188,30 @@ export class CodePlannerService {
 
     const timestamp = decodeTimestamp(this.#clock());
     if (command.kind === "designate-code-planner-thread") {
+      const candidate = this.#persistence.readCodeThread(command.threadId);
       const decision = decideCodePlannerDesignation({
         project,
         thread: this.#threadFacts(command.threadId),
         currentDesignation,
+        ...(candidate === undefined
+          ? {}
+          : {
+              coordinatorFacts: {
+                startedByCoordinator: candidate.coordinatorThreadId !== undefined,
+                threadIsCoordinator: candidate.coordinator === true,
+                // No planner is designated here (the policy refused that), so
+                // the Project's coordinators are the threads holding the role.
+                otherCoordinators: this.#persistence
+                  .readCodeThreads()
+                  .filter(
+                    (thread) =>
+                      String(thread.projectId) === String(command.projectId) &&
+                      String(thread.id) !== String(command.threadId) &&
+                      thread.coordinator === true &&
+                      thread.lifecycle !== "archived",
+                  ).length,
+              },
+            }),
       });
       if (decision.status === "refused") return decision;
       const designation: CodePlannerDesignation = {
@@ -304,6 +328,77 @@ export class CodePlannerService {
     return { status: "proposed", proposal };
   }
 
+  /**
+   * Records a coordinator's `start` as a pending proposal because a person
+   * chose Propose for approval, or because the caller is the designated
+   * planner, which reads as a coordinator whose starts always need approval.
+   * The pending cap is the planner's.
+   */
+  proposeForCoordinator(
+    coordinatorThreadId: CodeThreadId,
+    draftInput: { readonly title: string; readonly intent: string },
+    workerOptions?: {
+      readonly providerInstanceId?: string;
+      readonly modelId?: string;
+      readonly executionPolicy: string;
+    },
+  ):
+    | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
+    | { readonly status: "refused"; readonly message: string } {
+    let draft: ReturnType<typeof decodeCodePlannerProposalDraft>;
+    try {
+      draft = decodeCodePlannerProposalDraft(draftInput);
+    } catch {
+      return { status: "refused", message: "The proposal is invalid or over its bounds." };
+    }
+    const thread = this.#persistence.readCodeThread(coordinatorThreadId);
+    if (
+      thread === undefined ||
+      !readsAsCoordinator({
+        lifecycle: thread.lifecycle,
+        coordinator: thread.coordinator === true,
+        startedByCoordinator: thread.coordinatorThreadId !== undefined,
+        designatedPlanner: this.isPlannerThread(coordinatorThreadId),
+      })
+    ) {
+      return { status: "refused", message: "Only a coordinator thread may propose a worker." };
+    }
+    if (
+      countPendingCodePlannerProposals(this.#persistence.connection, thread.projectId) >=
+      MAX_PENDING_CODE_PLANNER_PROPOSALS
+    ) {
+      return {
+        status: "refused",
+        message: "This Project already has the maximum number of unresolved proposals.",
+      };
+    }
+    const proposal: CodePlannerWorkProposal = {
+      id: decodeCodePlannerProposalId(this.#uuid()),
+      projectId: thread.projectId,
+      plannerThreadId: coordinatorThreadId,
+      title: draft.title,
+      intent: draft.intent,
+      fromCoordinator: true,
+      status: "pending",
+      proposedAt: decodeTimestamp(this.#clock()),
+    };
+    let withOptions: CodePlannerWorkProposal;
+    try {
+      withOptions =
+        workerOptions === undefined
+          ? proposal
+          : decodeCodePlannerWorkProposal({ ...proposal, workerOptions });
+    } catch {
+      return { status: "refused", message: "The proposed worker's options are invalid." };
+    }
+    try {
+      this.#appendProposal(withOptions, 0, this.#agentActor(coordinatorThreadId));
+    } catch {
+      return { status: "refused", message: "Planner storage is unavailable." };
+    }
+    return { status: "proposed", proposal: withOptions };
+  }
+
   async resolveProposal(
     authenticatedWindowId: WindowId,
     input: unknown,
@@ -347,6 +442,20 @@ export class CodePlannerService {
         status: "refused",
         reason: "proposal-changed",
         message: "The proposal changed; reload and retry.",
+      };
+    }
+    // A coordinator's start resolved a level; approving it cannot start the
+    // worker any higher, whatever the creation controls were set to.
+    const proposedLevel = decision.proposal.workerOptions?.executionPolicy;
+    if (
+      command.kind === "confirm-planner-work-proposal" &&
+      proposedLevel !== undefined &&
+      ACCESS_POSTURE_RANK[creationLevel(command.creation)] > ACCESS_POSTURE_RANK[proposedLevel]
+    ) {
+      return {
+        status: "refused",
+        reason: "creation-above-proposed-level",
+        message: "This worker was proposed at a lower guardrail level. Choose that level or lower.",
       };
     }
     if (decision.proposal.creationAttempt?.status === "creating")
@@ -505,11 +614,17 @@ export class CodePlannerService {
    */
   #inheritedMarkFor(proposal: CodePlannerWorkProposal): CodeServiceExecutionContext {
     const plannerThreadId = String(proposal.plannerThreadId);
-    if (!this.#isMarkedWithOutsideContent(plannerThreadId)) return {};
+    // A coordinator's proposal creates its worker: the host records the
+    // lineage, and the mark carries the coordinator-start label.
+    const lineage =
+      proposal.fromCoordinator === true ? { coordinatorThreadId: proposal.plannerThreadId } : {};
+    if (!this.#isMarkedWithOutsideContent(plannerThreadId)) return lineage;
+    const label = proposal.fromCoordinator === true ? "coordinator-start" : "planner-proposal";
     return {
+      ...lineage,
       inheritedMark: {
-        sourceLabel: "planner-proposal",
-        contentReference: `planner-proposal-${plannerThreadId}-${String(proposal.id)}`,
+        sourceLabel: label,
+        contentReference: `${label}-${plannerThreadId}-${String(proposal.id)}`,
       },
     };
   }
@@ -652,6 +767,12 @@ function creationProjectId(creation: CodePlannerThreadCreation): ProjectId {
   return creation.kind === "create-managed-code-thread"
     ? creation.projectId
     : creation.thread.projectId;
+}
+
+function creationLevel(creation: CodePlannerThreadCreation) {
+  return creation.kind === "create-managed-code-thread"
+    ? creation.executionPolicy
+    : creation.thread.executionPolicy;
 }
 
 function createdThreadId(creation: CodePlannerThreadCreation): CodeThreadId {

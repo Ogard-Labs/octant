@@ -22,18 +22,20 @@
   font-size: inherit;
 }
 .continuation-dialog {
-  width: min(40rem, calc(100vw - var(--oct-space-6)));
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 40rem;
   max-height: calc(100dvh - var(--oct-space-6));
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: var(--oct-space-5);
 }
 .continuation-dialog h2,
 .continuation-dialog h3 {
   margin-block: var(--oct-space-3);
 }
 .continuation-dialog h2 {
-  font-size: var(--oct-text-lg);
+  margin-top: 0;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
 }
 .continuation-dialog h3 {
   font-size: var(--oct-text-base);

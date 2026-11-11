@@ -1,7 +1,12 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
-import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
+import {
+  decideCoordinatorRole,
+  projectExtraFolderRoots,
+  readsAsCoordinator,
+  unsupportedModelOptionValues,
+} from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
   guardrailLowered,
@@ -411,6 +416,8 @@ export interface CodePersistencePort {
   /** The modes whose journaled thread answers to this id. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  /** The thread a Code Project designated as its planner; absent where the host keeps none. */
+  readonly readCodePlannerThreadId?: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
@@ -654,6 +661,12 @@ export interface CodeServiceExecutionContext {
    * this clone. Host-resolved only, like a fork's files; no command carries it.
    */
   readonly movedFiles?: CodeForkFiles;
+  /**
+   * The coordinator a worker this command creates belongs to, set only by the
+   * host's coordinator start and a confirmed coordinator proposal. No wire
+   * command carries it, and a created thread's own record never may.
+   */
+  readonly coordinatorThreadId?: CodeThreadId;
 }
 
 export interface CodeServiceOptions {
@@ -1063,6 +1076,7 @@ export class CodeService {
       threads,
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
+      ...this.#visiblePlanners(threads),
     };
   }
 
@@ -1202,6 +1216,7 @@ export class CodeService {
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
+      ...this.#visiblePlanners(threads),
     };
   }
 
@@ -1232,6 +1247,31 @@ export class CodeService {
    * cheap. The chip appears only for a thread's own managed worktree. A running
    * turn also carries its start time and latest step, read from memory.
    */
+  /**
+   * The visible threads that are their Project's designated planner, which the
+   * renderer shows as coordinators. Drawn from the authority-filtered list, so
+   * a window learns nothing about a Project it cannot browse.
+   */
+  #visiblePlanners(threads: ReadonlyArray<CodeThread>): {
+    readonly plannerThreadIds?: ReadonlyArray<CodeThreadId>;
+  } {
+    const read = this.#persistence.readCodePlannerThreadId;
+    if (read === undefined) return {};
+    const plannerThreadIds = threads
+      .filter((thread) => {
+        const planner = read(thread.projectId);
+        return planner !== undefined && String(planner) === String(thread.id);
+      })
+      .map((thread) => thread.id);
+    return { plannerThreadIds };
+  }
+
+  /** Whether a thread is its Project's designated planner, which reads as a coordinator. */
+  #isDesignatedPlanner(thread: CodeThread): boolean {
+    const planner = this.#persistence.readCodePlannerThreadId?.(thread.projectId);
+    return planner !== undefined && String(planner) === String(thread.id);
+  }
+
   #visibleRuntime(
     threads: ReadonlyArray<CodeThread>,
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
@@ -1362,6 +1402,62 @@ export class CodeService {
       );
     });
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return next;
+  }
+
+  /**
+   * Called only by the host's owner route after verifying a fresh action-bound
+   * unlock. It sets the same wake switches a window sets, journaled as the
+   * owner device; the coordinator role itself is never set this way.
+   */
+  changeOwnerWake(input: {
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly switch: "message-wake" | "coordinator-wake";
+    readonly wake: boolean;
+    readonly ownerMemberId: string;
+  }): CodeThread {
+    const current = this.#persistence.readCodeThread(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
+    if (current.version !== input.expectedVersion) {
+      throw this.#failure("stale", "Code state changed; reload and unlock again.");
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    if (
+      project?.type !== "code" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    ) {
+      throw this.#failure("unauthorized", "The Code thread or Project is unavailable.");
+    }
+    const next = this.#coordinatorSwitches(
+      current,
+      {
+        kind:
+          input.switch === "message-wake"
+            ? "set-code-thread-message-wake"
+            : "set-code-thread-coordinator-wake",
+        threadId: current.id,
+        expectedVersion: current.version,
+        wake: input.wake,
+      },
+      decodeTimestamp(this.#clock()),
+    );
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        "code-thread",
+        current.id,
+        current.version,
+        "code.thread-updated@1",
+        { kind: "thread-updated", thread: next },
+        actor,
+      );
+    });
     return next;
   }
 
@@ -1564,6 +1660,9 @@ export class CodeService {
               ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
               ...profileToolSnapshot(managedAuthority),
               ...profileContextSnapshot(managedAuthority),
+              ...(executionContext?.coordinatorThreadId === undefined
+                ? {}
+                : { coordinatorThreadId: executionContext.coordinatorThreadId }),
               version: 1,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -1841,6 +1940,23 @@ export class CodeService {
             : (command.shieldModel ?? current.shieldModel) === undefined
               ? {}
               : { shieldModel: command.shieldModel ?? current.shieldModel }),
+          ...((command.coordinatorStarting ?? current.coordinatorStarting) === undefined
+            ? {}
+            : { coordinatorStarting: command.coordinatorStarting ?? current.coordinatorStarting }),
+          ...((command.coordinatorStartingByProject ?? current.coordinatorStartingByProject) ===
+          undefined
+            ? {}
+            : {
+                coordinatorStartingByProject:
+                  command.coordinatorStartingByProject ?? current.coordinatorStartingByProject,
+              }),
+          ...((command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit) ===
+          undefined
+            ? {}
+            : {
+                coordinatorOpenWorkerLimit:
+                  command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit,
+              }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1885,6 +2001,20 @@ export class CodeService {
         }
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
+        }
+        // The coordinator role and its switches are a person's later choice,
+        // and a worker's lineage is the host's record; a new thread's own
+        // record carries none of them.
+        if (
+          command.thread.coordinator !== undefined ||
+          command.thread.coordinatorThreadId !== undefined ||
+          command.thread.messageWake !== undefined ||
+          command.thread.coordinatorWakeOff !== undefined
+        ) {
+          throw this.#failure(
+            "unauthorized",
+            "A new Code thread starts without a coordinator role or wake switches.",
+          );
         }
         this.#assertThreadIdFree(command.thread.id);
         const inheritedMark =
@@ -1990,6 +2120,38 @@ export class CodeService {
         return await this.#moveThread(authenticatedWindowId, current, command);
       }
       const updatedAt = decodeTimestamp(this.#clock());
+      if (
+        command.kind === "set-code-thread-coordinator" ||
+        command.kind === "set-code-thread-message-wake" ||
+        command.kind === "set-code-thread-coordinator-wake"
+      ) {
+        const next = this.#coordinatorSwitches(current, command, updatedAt);
+        // Setting the role to what it already is changes nothing: appending
+        // the unchanged record at the next version would disagree with its
+        // own version and fail in the projection.
+        if (next === current) {
+          return {
+            kind: "thread-updated",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, current),
+          };
+        }
+        this.#inUnit(() => {
+          this.#append(
+            "code-thread",
+            current.id,
+            command.expectedVersion,
+            "code.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: next,
+            },
+          );
+        });
+        return {
+          kind: "thread-updated",
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
+        };
+      }
       if (command.kind === "schedule-code-usage-resume") {
         if (current.lifecycle !== "active") {
           throw this.#failure("invalid", "Only an active Code thread can resume at reset.");
@@ -3647,6 +3809,95 @@ export class CodeService {
       kind: "thread-updated",
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, moved),
     };
+  }
+
+  /**
+   * A person's coordinator role and wake switches. Making a thread a
+   * coordinator also turns its Wake when a message arrives switch on, so its
+   * workers' messages and state reach it while it is idle; stopping it leaves
+   * the switch as the person last set it.
+   */
+  #coordinatorSwitches(
+    current: CodeThread,
+    command: Extract<
+      CodeCommand,
+      {
+        readonly kind:
+          | "set-code-thread-coordinator"
+          | "set-code-thread-message-wake"
+          | "set-code-thread-coordinator-wake";
+      }
+    >,
+    updatedAt: UtcTimestamp,
+  ): CodeThread {
+    const {
+      coordinator: _coordinator,
+      messageWake: _messageWake,
+      coordinatorWakeOff: _wakeOff,
+      ...rest
+    } = current;
+    const stamp = { version: command.expectedVersion + 1, updatedAt };
+    if (command.kind === "set-code-thread-message-wake") {
+      return decodeCodeThread({
+        ...rest,
+        ...(current.coordinator === true ? { coordinator: true } : {}),
+        ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+        ...(command.wake ? { messageWake: true } : {}),
+        ...stamp,
+      });
+    }
+    if (command.kind === "set-code-thread-coordinator-wake") {
+      if (current.coordinatorThreadId === undefined) {
+        throw this.#failure("invalid", "Only a worker thread has a coordinator to wake for.");
+      }
+      return decodeCodeThread({
+        ...rest,
+        ...(current.messageWake === true ? { messageWake: true } : {}),
+        ...(command.wake ? {} : { coordinatorWakeOff: true }),
+        ...stamp,
+      });
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    // The designated planner reads as a coordinator, so it counts toward the
+    // Project's limit. The thread itself is left out: the count matters only
+    // when it is not yet a coordinator, and a planner made one adds nothing.
+    const coordinatorsInProject = this.#persistence.readCodeThreads().filter(
+      (thread) =>
+        String(thread.projectId) === String(current.projectId) &&
+        String(thread.id) !== String(current.id) &&
+        readsAsCoordinator({
+          lifecycle: thread.lifecycle,
+          coordinator: thread.coordinator === true,
+          startedByCoordinator: thread.coordinatorThreadId !== undefined,
+          designatedPlanner: this.#isDesignatedPlanner(thread),
+        }),
+    ).length;
+    const decision = decideCoordinatorRole({
+      thread: {
+        lifecycle: current.lifecycle,
+        coordinator: current.coordinator === true,
+        startedByCoordinator: current.coordinatorThreadId !== undefined,
+        // The thread command was already authorized against its Project;
+        // a host without a Project read (tests, a route service) relies on that.
+        projectActive:
+          this.#persistence.readProject === undefined ||
+          (project?.type === "code" && project.lifecycle === "active"),
+      },
+      make: command.coordinator,
+      coordinatorsInProject,
+    });
+    if (decision.status === "refused") throw this.#failure("invalid", decision.message);
+    if (decision.status === "unchanged") return current;
+    return decodeCodeThread({
+      ...rest,
+      ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+      ...(command.coordinator
+        ? { coordinator: true, messageWake: true }
+        : current.messageWake === true
+          ? { messageWake: true }
+          : {}),
+      ...stamp,
+    });
   }
 
   #rebindRefused(

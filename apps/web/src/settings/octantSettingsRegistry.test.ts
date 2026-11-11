@@ -258,6 +258,8 @@ describe("octantSettingsRegistry", () => {
       "code-require-git",
       "code-default-diff-layout",
       "code-language-services",
+      "code-coordinator-starting",
+      "code-coordinator-open-workers",
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",

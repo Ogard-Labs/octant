@@ -9,6 +9,7 @@ import {
 } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
+import { ProviderExecutionPolicy, ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -65,6 +66,24 @@ const CodePlannerProposalFields = {
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_PLANNER_PROPOSAL_RATIONALE_LENGTH)),
   ),
   proposedAt: UtcTimestamp,
+  /**
+   * Set when a coordinator's `start` became this proposal because a person
+   * chose Propose for approval; `plannerThreadId` then names that
+   * coordinator, and confirming records the new thread as its worker.
+   */
+  fromCoordinator: Schema.optional(Schema.Literal(true)),
+  /**
+   * What the coordinator's `start` asked for: the worker's provider and
+   * model when it named them, and the level it resolved. A confirm may not
+   * start the worker above that level.
+   */
+  workerOptions: Schema.optional(
+    Schema.Struct({
+      providerInstanceId: Schema.optional(ProviderInstanceId),
+      modelId: Schema.optional(ProviderModelId),
+      executionPolicy: ProviderExecutionPolicy,
+    }).annotations(strict),
+  ),
   /** Host-authored admission; a draft cannot assert that creation did not start. */
   creationAttempt: Schema.optional(
     Schema.Struct({
@@ -134,6 +153,10 @@ export const CodePlannerDesignationRefusalReason = Schema.Literal(
   "thread-not-found",
   "thread-in-another-project",
   "thread-archived",
+  /** A worker thread follows its coordinator and cannot read as one. */
+  "thread-is-worker",
+  /** The planner reads as a coordinator, and the Project already has its four. */
+  "coordinator-limit-reached",
   "planner-already-designated",
   "no-planner-designated",
   "designation-changed",
@@ -189,6 +212,7 @@ export const CodePlannerProposalRefusalReason = Schema.Literal(
   "proposal-not-found",
   "proposal-not-pending",
   "creation-project-mismatch",
+  "creation-above-proposed-level",
   "proposal-changed",
   "creation-not-started",
 );
