@@ -134,6 +134,11 @@
   flex: 0 1 auto;
 }
 
+/* A tool shown in a tile reads in the full ink without being the selected tab. */
+.dock-tool-strip__tab:has([data-shown="true"]) {
+  color: var(--oct-fg);
+}
+
 .dock-tool-strip__select > span {
   min-width: 0;
   overflow: hidden;
@@ -681,8 +686,174 @@
 /* Tools with their own headers and scrolling meet the dock rail directly.
    Prose panels opt into an inset without shifting Files or Environment. */
 .right-utility-dock__content {
+  position: relative;
   padding: 0;
   overflow: hidden;
+}
+
+/* Tool tiles: several open tools drawn together beside a thread, each one
+   live. The dock's own ground is the tiles' ground, so a see-through theme
+   shows through them, and the dividers are hairlines. A tile is told apart by
+   its name, not by an outline: the focused one reads in the full ink and the
+   rest a step back, with no ring and no fill. */
+.dock-tiles {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  container-type: inline-size;
+}
+
+.dock-tiles__columns {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.dock-tiles__column {
+  display: flex;
+  min-width: 240px;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.dock-tiles__stack {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.dock-tile {
+  display: flex;
+  min-width: 0;
+  min-height: 140px;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+.dock-tile > .right-utility-dock__tool {
+  height: auto;
+  flex: 1 1 0;
+}
+
+.dock-tile__caption {
+  display: flex;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.dock-tile[data-focused="true"] > .dock-tile__caption {
+  color: var(--oct-fg);
+}
+
+.dock-tile__caption > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+  flex: none;
+}
+
+.dock-tile__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tile__hide {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  opacity: 0;
+}
+
+.dock-tile:hover .dock-tile__hide,
+.dock-tile:focus-within .dock-tile__hide,
+.dock-tile[data-focused="true"] .dock-tile__hide {
+  opacity: 1;
+}
+
+/* The hit area is the dock's own 7px edge; the line inside it is a hairline
+   that takes the accent ink while grabbed, as the dock's edge does. */
+.dock-tiles__divider {
+  position: relative;
+  flex: 0 0 7px;
+  background: transparent;
+}
+
+.dock-tiles__divider[data-orientation="vertical"] {
+  cursor: col-resize;
+}
+
+.dock-tiles__divider[data-orientation="horizontal"] {
+  cursor: row-resize;
+}
+
+.dock-tiles__divider::before {
+  position: absolute;
+  background: var(--oct-border);
+  content: "";
+}
+
+.dock-tiles__divider[data-orientation="vertical"]::before {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+}
+
+.dock-tiles__divider[data-orientation="horizontal"]::before {
+  top: 3px;
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.dock-tiles__divider:hover::before,
+.dock-tiles__divider:focus-visible::before {
+  background: var(--oct-accent-fg);
+}
+
+/* Below two column floors the columns stack rather than shrink under them. */
+@container (max-width: 479px) {
+  .dock-tiles__columns {
+    flex-direction: column;
+  }
+
+  .dock-tiles__column {
+    min-width: 0;
+  }
+
+  .dock-tiles__divider[data-orientation="vertical"] {
+    display: none;
+  }
+}
+
+/* Covers the dock body while a divider or a tab is being dragged: it keeps a
+   native page from taking the pointer, and it is where a dropped tab lands. */
+.dock-tiles__drag-shield {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+}
+
+/* A tab dropped on the right third or the lower third becomes a tile there. */
+.workspace-drop-overlay.dock-tiles__drop[data-drop-edge="right"] {
+  left: 66.667%;
+}
+
+.workspace-drop-overlay.dock-tiles__drop[data-drop-edge="bottom"] {
+  top: 66.667%;
 }
 
 .right-utility-dock__tool[data-dock-inset="true"] {

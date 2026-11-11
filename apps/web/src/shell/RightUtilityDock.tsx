@@ -1,7 +1,7 @@
 import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
+import { RightUtilityDockSurface, type DockTileControls } from "./RightUtilityDockSurface";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import {
@@ -47,6 +47,7 @@ export interface RightUtilityDockProps {
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
+  readonly tiles?: DockTileControls;
   readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
@@ -111,6 +112,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
+      {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
         : { toolsAwaitingThread: props.toolsAwaitingThread })}

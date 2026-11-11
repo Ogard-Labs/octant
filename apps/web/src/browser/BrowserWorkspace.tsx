@@ -74,6 +74,8 @@ import {
  */
 export const RENDERER_OVERLAY_SELECTOR = [
   ".code-board-layer",
+  // A divider being dragged across a tile, or a tab being dragged onto the dock.
+  ".dock-tiles__drag-shield",
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",

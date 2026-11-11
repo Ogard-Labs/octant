@@ -223,6 +223,13 @@ export type ShellActions = {
   readonly selectChatThread: (threadId: string) => void;
   readonly selectCodeThread: (threadId: string) => void;
   readonly selectDockTab: (tabId: string) => void;
+  /** Takes a tile out of view; the tool stays open in the strip. */
+  readonly hideDockTile: (tabId: string) => void;
+  readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
+  readonly resizeDockTileColumns: (shares: ReadonlyArray<number>) => void;
+  readonly showDockTabAlone: (tabId: string) => void;
+  readonly showDockTabBelow: (tabId: string) => void;
+  readonly showDockTabBeside: (tabId: string) => void;
   readonly selectMode: (mode: OctantMode) => void;
   readonly selectProjectPullRequest: (row: CodeProjectPullRequestRow) => void;
   readonly selectProjectPullRequestIdentity: (identity: ThreadBoardPullRequestIdentity) => void;

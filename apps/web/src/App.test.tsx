@@ -6155,6 +6155,35 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
   });
 
+  it("keeps the bottom panel open when a tool opens in the dock beside it", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    const panel = await screen.findByRole("region", { name: "Bottom panel" });
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+
+    await openQuickDockTool(user, dock, "Environment");
+
+    expect(await within(dock).findByRole("tab", { name: "Environment" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Bottom panel" })).toBe(panel);
+    expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
+  });
+
   it("retains the restored Terminal tab when another bottom tool opens", async () => {
     window.localStorage.clear();
     window.localStorage.setItem(

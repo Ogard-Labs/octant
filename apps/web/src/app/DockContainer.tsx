@@ -69,9 +69,15 @@ export interface DockContainerProps {
     | "closeBottomPanelTab"
     | "closeDock"
     | "closeDockTab"
+    | "hideDockTile"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
     | "openBottomTool"
+    | "resizeDockTileColumn"
+    | "resizeDockTileColumns"
+    | "showDockTabAlone"
+    | "showDockTabBelow"
+    | "showDockTabBeside"
     | "openCodeSurface"
     | "openDockTab"
     | "openLinkedProjectPullRequestThread"
@@ -136,6 +142,8 @@ export interface DockContainerProps {
   readonly dockPresentedOpen: boolean;
   readonly dockPullRequests: ReturnType<typeof useRepositoryPullRequests>;
   readonly dockResolution: RightUtilityDockResolution;
+  /** Whether one tool could be shown for the pane, so each tile answers for itself. */
+  readonly dockResolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
   readonly dockSidecarsByThread: ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>;
   readonly dockTabs: ReturnType<typeof describeUtilityTabs>;
   readonly dockThread?: {
@@ -220,6 +228,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockPresentedOpen,
     dockPullRequests,
     dockResolution,
+    dockResolveSurface,
     dockSidecarsByThread,
     dockTabs,
     dockThread,
@@ -711,6 +720,17 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("tests")
         }
         tabs={dockTabs}
+        tiles={{
+          ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),
+          narrow: isNarrow,
+          onHideTile: actions.hideDockTile,
+          onResizeColumn: actions.resizeDockTileColumn,
+          onResizeColumns: actions.resizeDockTileColumns,
+          onShowAlone: actions.showDockTabAlone,
+          onShowBelow: actions.showDockTabBelow,
+          onShowBeside: actions.showDockTabBeside,
+          resolveSurface: dockResolveSurface,
+        }}
         width={dockPresentationWidth}
       />
       {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (

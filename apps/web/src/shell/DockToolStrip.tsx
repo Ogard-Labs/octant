@@ -15,6 +15,8 @@ import { DockToolIcon } from "./dockToolIcons";
 import { partitionDockTools } from "./dockToolStripModel";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantContextMenu } from "../ui/base/OctantContextMenu";
+import type { OctantMenuItem } from "../ui/base/OctantMenu";
 import type {
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
@@ -28,7 +30,15 @@ export interface DockToolStripProps {
   readonly active?: string;
   readonly capacity?: number;
   readonly onClose: (tabId: string) => void;
+  /** What a tab's context menu offers; no items means the tab has no menu. */
+  readonly menuFor?: (tabId: string) => ReadonlyArray<OctantMenuItem>;
+  readonly onMenuAction?: (tabId: string, value: string) => void;
   readonly onSelect: (tabId: string) => void;
+  /** A tab was picked up to be dropped on the dock body, and the drag ended. */
+  readonly onTabDragEnd?: () => void;
+  readonly onTabDragStart?: (tabId: string) => void;
+  /** Tabs whose tool is on screen in a tile, the focused one included. */
+  readonly shown?: ReadonlySet<string>;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
 }
 
@@ -177,30 +187,59 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
       ref={strip}
       role="tablist"
     >
-      {visible.map((tool) => (
-        <span className="dock-tool-strip__tab content-tab" key={tool.id}>
-          <OctantButton
-            aria-selected={tool.id === props.active}
-            className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
-            onClick={() => props.onSelect(tool.id)}
-            role="tab"
-            title={tool.label}
-            size="sm"
-            tabIndex={tool.id === props.active ? 0 : -1}
-            type="button"
-            variant="ghost"
+      {visible.map((tool) => {
+        const items = props.menuFor?.(tool.id) ?? [];
+        const tab = (
+          <>
+            <OctantButton
+              aria-description={
+                props.shown?.has(tool.id) === true && tool.id !== props.active ? "Shown" : undefined
+              }
+              aria-selected={tool.id === props.active}
+              className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
+              data-shown={props.shown?.has(tool.id) === true ? "true" : undefined}
+              draggable={props.onTabDragStart === undefined ? undefined : true}
+              onClick={() => props.onSelect(tool.id)}
+              onDragEnd={() => props.onTabDragEnd?.()}
+              onDragStart={(event) => {
+                // Some engines refuse to start a drag that carries no data.
+                event.dataTransfer.setData("text/plain", tool.label);
+                event.dataTransfer.effectAllowed = "move";
+                props.onTabDragStart?.(tool.id);
+              }}
+              role="tab"
+              title={tool.label}
+              size="sm"
+              tabIndex={tool.id === props.active ? 0 : -1}
+              type="button"
+              variant="ghost"
+            >
+              <DockToolIcon surface={dockToolSurface(tool)} />
+              <span>{tool.label}</span>
+            </OctantButton>
+            <IconButton
+              className="dock-tool-strip__close content-tab__close text-muted-foreground"
+              icon={X}
+              label={`Hide ${tool.label}`}
+              onClick={() => props.onClose(tool.id)}
+            />
+          </>
+        );
+        return items.length === 0 ? (
+          <span className="dock-tool-strip__tab content-tab" key={tool.id}>
+            {tab}
+          </span>
+        ) : (
+          <OctantContextMenu
+            items={items}
+            key={tool.id}
+            onValueChange={(value) => props.onMenuAction?.(tool.id, value)}
+            triggerClassName="dock-tool-strip__tab content-tab"
           >
-            <DockToolIcon surface={dockToolSurface(tool)} />
-            <span>{tool.label}</span>
-          </OctantButton>
-          <IconButton
-            className="dock-tool-strip__close content-tab__close text-muted-foreground"
-            icon={X}
-            label={`Hide ${tool.label}`}
-            onClick={() => props.onClose(tool.id)}
-          />
-        </span>
-      ))}
+            {tab}
+          </OctantContextMenu>
+        );
+      })}
       {overflow.length === 0 ? null : (
         <span
           className="dock-tool-strip__overflow"
