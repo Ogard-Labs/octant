@@ -96,7 +96,7 @@
 
 .github-issue-browser__body {
   display: grid;
-  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, min(720px, 46%)) minmax(0, 1fr);
   /* The surface scrolls as a page, so the panes claim most of the viewport
      up front rather than growing with the four rows a short list holds. */
   min-height: min(72vh, 760px);
@@ -117,7 +117,12 @@
 }
 
 .github-issue-browser__list-pane {
-  padding: var(--oct-space-1) 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* The list sits inside the card, so its rows need no outward reach. */
+.github-issue-browser__list-pane .work-list__list {
+  margin-inline: 0;
 }
 
 .github-issue-browser__detail-pane {
@@ -129,61 +134,6 @@
 .github-issue-browser__list-pane > .github-issue-browser__stale,
 .github-issue-browser__list-pane > .github-issue-browser__across-notes {
   padding: var(--oct-space-2) var(--oct-space-4);
-}
-
-.github-issue-browser__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-}
-
-.github-issue-browser__list > li + li {
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.github-issue-browser__row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: var(--oct-space-3);
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  padding: var(--oct-space-3) var(--oct-space-4);
-  border: 0;
-  border-radius: 0;
-  text-align: start;
-  color: inherit;
-  background: transparent;
-  /* The button recipe keeps labels on one line; an issue title wraps. */
-  white-space: normal;
-}
-
-.github-issue-browser__row:hover {
-  background: var(--oct-fg-soft);
-}
-
-.github-issue-browser__row[aria-current="true"] {
-  background: var(--octant-selection);
-  box-shadow: inset 2px 0 0 var(--oct-fg);
-}
-
-.github-issue-browser__row-state {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--oct-meta);
-}
-
-.github-issue-browser__row-state[data-state="open"] {
-  color: var(--octant-success-text);
-}
-
-.github-issue-browser__row-copy {
-  display: grid;
-  min-width: 0;
-  gap: var(--oct-space-1);
 }
 
 .github-issue-browser__row-repository {
@@ -382,7 +332,7 @@
   }
 }
 
-html[data-octant-increased-contrast="true"] .github-issue-browser__row[aria-current="true"] {
+html[data-octant-increased-contrast="true"] .work-list__row[aria-current="true"] {
   background: var(--octant-control-hover);
   text-decoration: underline;
 }

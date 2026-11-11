@@ -1230,6 +1230,73 @@ sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
 host restart and is cleared when GitHub authority is revoked.
 
+**The Pull requests and Issues lists.** The Pull requests page is a dense, calm list in the reading
+measure, at most 720px and left-aligned in the page. Its title band carries the
+count; at the trailing edge sit a Sort menu, a Filter menu, Repository settings
+(only while the list is not grouped) and Refresh, each an icon button with a
+tooltip. A row is two lines. Line one is the title at medium weight, cut after
+two lines, and at its trailing edge the one thing that needs attention, in
+words and as the quiet chip (Draft, Conflicts, Checks failing, Changes
+requested, Checks pending, Review pending), or a small check when the pull
+request is mergeable and nothing blocks it. Line two is one meta line: a state
+glyph coloured by state, the repository's name, the author, the age ("2h",
+"5d") and a link mark when a thread is linked, with the number (`#2344`) in
+tabular numerals at the trailing edge. The repository's name is the bare name
+in a group and `owner/name` on an ungrouped list that spans repositories, in both
+lists. Every row, flagged or not, is one tooltip trigger that opens on hover and
+on keyboard focus of the whole row, with the status sentence and then
+"head → base", and the same text is visually hidden text of the row, so no fact
+is pointer-only. A row has no hairline under it, the row under the pointer takes the
+control hover fill with the row radius, and clicking it opens the pull request
+exactly as before.
+
+Sort offers Recently updated (the default), Least recently updated and
+Repository, and a **Group by repository** check item. The snapshot carries each
+pull request's last update and not its creation time, so Newest and Oldest are
+not offered. Filter offers State (open, draft), Review (needs review, changes
+requested, approved) and Checks (passing, failing, pending); a pull request's
+author is not compared with the signed-in GitHub account, so a "mine" filter is
+not offered either. Sort, grouping and filters are remembered in this window's
+local storage, and a filter that is narrowing the list marks its button.
+Searching is unchanged and covers the title, author, branches, repository,
+number and linked threads.
+
+With grouping on, each repository has a slim header: its name, the count and a
+"..." menu. That menu holds what the old Project header held: **Auto-refresh**
+and **Agents may merge**, with the same labels and the same setters as before,
+and Refresh. With grouping off those switches are in the page's **Repository
+settings** menu, one group per connected repository, because they act on a
+Project and must stay one step from the list; they are never in Filter, which
+only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
+on, that repository's group header shows the quiet chip "Agents may merge"
+beside the count, and, with grouping off, the Repository settings button carries
+the same dot as a narrowing filter and its tooltip names those repositories;
+Auto-refresh is not an authority and has no chip, only the check in the menu.
+The server still owns both settings, refuses a
+device that may not set them, and enforces the merge choice at the merge. A
+Project that is not on GitHub is not drawn as an empty block: one quiet line at
+the foot says how many, with their names in a disclosure. A connected Project
+never refreshed is named in one line (flat) or keeps its group with the empty
+sentence (grouped). While grouped, every connected repository keeps its header,
+menu and chip even when a search or filter leaves it no rows: the count is 0 and
+one quiet line says "Nothing matches", so a granted permission is never hidden by
+a narrowed list. Choosing Agents may merge closes the menu and returns focus to its
+button, so one activation is one change; Auto-refresh stays open because it is not
+an authority and its check shows the change. The dock's Pull requests tool uses the same rows in one
+flat list with the search and count, and none of the page's menus.
+
+The Issues place draws the same row, so one component serves both lists: the
+title, the 12px meta line (state glyph, repository name when the list spans
+repositories, author, age, number at the trailing edge), the quiet hover and
+the same slim group head. Its list column keeps the 720px measure beside the
+detail pane. Its header carries the count and the Sort icon menu (Recently
+updated, Least recently updated, Highest number, and Repository and **Group by
+repository** only across repositories, since one repository has nothing to group
+by); grouping is remembered in the window's local storage. An issue's list read
+carries no labels, so the row shows none; they stay in the detail pane. A row's
+click, the state toggle, the repository chooser, search and the detail pane's
+Start a Code thread are unchanged.
+
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is
 cleared without opening threads. The card carries the Needs you row
