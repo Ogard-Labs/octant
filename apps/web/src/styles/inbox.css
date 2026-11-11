@@ -39,7 +39,9 @@
 
 @container inbox-cards (min-width: 720px) {
   .inbox-page__cards {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    /* The list a person came for takes the wider column. At one to two its
+       filter chips wrapped to a second row and long titles to three lines. */
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
 

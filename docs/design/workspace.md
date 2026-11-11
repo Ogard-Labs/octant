@@ -686,7 +686,7 @@ wording, and reads are specified in [Start screen](start-screen.md).
 The Inbox opens as a few raised cards in one readable column, not as sections
 under rules.
 
-- **Title line.** "Inbox" at the `oct-title` size (a display modifier on the page title), and on
+- **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
   its baseline, in the meta ink, one sentence of state in the person's locale:
   today's date and what waits ("Nothing is waiting on you.", "1 thread is
   waiting on you.", "3 threads are waiting on you."), with the urgent count when
@@ -695,7 +695,7 @@ under rules.
 - **One column.** The content keeps a measure of 980px, left-aligned under the
   title's inset; a wide window leaves ground, it does not stretch the cards.
 - **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
-  **Plan usage** stack to its right at about one to two, in one column when the
+  **Plan usage** stack to its right at about three to two (the list is the wider column), in one column when the
   page's own width (a container query, not the window's) is under 720px. Each
   card's label sits inside it at the top in the meta ink. The Needs you filters
   (All, Urgent, Decide, Stuck, Finished, with counts) are quiet chips at the
