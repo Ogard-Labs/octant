@@ -1,3 +1,4 @@
+import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
@@ -98,6 +99,7 @@ export interface ShellSettingsSurfaceProps {
   readonly shieldServersClient?: ShieldServersClient;
   readonly providerToolingClient?: ProviderToolingClient;
   readonly serverProjectsClient?: ServerProjectsClient;
+  readonly agentGrantClient?: AgentGrantClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
@@ -211,6 +213,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.providerToolingClient === undefined
               ? {}
               : { providerToolingClient: props.providerToolingClient })}
+            {...(props.agentGrantClient === undefined
+              ? {}
+              : { agentGrantClient: props.agentGrantClient })}
             {...(props.serverProjectsClient === undefined
               ? {}
               : { serverProjectsClient: props.serverProjectsClient })}

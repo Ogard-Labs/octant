@@ -114,6 +114,8 @@ import {
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { AgentAccessSettingsSection } from "../agentAccess/AgentAccessSettingsSection";
+import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
@@ -207,6 +209,7 @@ import {
   hubAdministrationOf,
   ownerUnlockOf,
   remoteAccessAdministrationOf,
+  agentAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
@@ -286,6 +289,8 @@ export interface SettingsViewProps {
   readonly providerToolingClient?: ProviderToolingClient;
   /** Code Projects on a registered server; absent off this computer. */
   readonly serverProjectsClient?: ServerProjectsClient;
+  /** Agent grants for Settings › Remote access › Agent access, from any window. */
+  readonly agentGrantClient?: AgentGrantClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
@@ -1360,6 +1365,16 @@ function ActiveSectionContent({
           </section>
         );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
+      const agentAccessAdministration = agentAccessAdministrationOf(props.hostBridge);
+      const agentAccess = (
+        <AgentAccessSettingsSection
+          {...(agentAccessAdministration === undefined
+            ? {}
+            : { administration: agentAccessAdministration })}
+          {...(props.agentGrantClient === undefined ? {} : { client: props.agentGrantClient })}
+          projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+        />
+      );
       const setupGuide = (
         <RemoteSetupGuide
           focusedSetting={focusedSetting}
@@ -1391,6 +1406,7 @@ function ActiveSectionContent({
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
           />
+          {agentAccess}
         </div>
       ) : (
         <div className="settings-section-stack">
@@ -1403,6 +1419,7 @@ function ActiveSectionContent({
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
           </section>
+          {agentAccess}
         </div>
       );
     }

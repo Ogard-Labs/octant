@@ -878,6 +878,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        threadId={props.thread.threadId}
         status={
           shows.status ? (
             <ThreadStatusMark

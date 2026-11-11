@@ -356,6 +356,37 @@ export const AgentAccessResult = Schema.Union(
 );
 export type AgentAccessResult = typeof AgentAccessResult.Type;
 
+/**
+ * Product routes a local window and a paired device both reach: the grant list,
+ * revoking one, and which threads each agent started, for "Started by" labels.
+ * Administration beyond revoking stays on the window-only desktop routes.
+ */
+export const AGENT_GRANT_ROUTES = {
+  grants: "/api/agent-grants",
+  revoke: "/api/agent-grants/revoke",
+  threads: "/api/agent-grants/threads",
+} as const;
+
+export const AgentGrantRevokeRequest = Schema.Struct({
+  grantId: AgentGrantId,
+  stopRunningTurns: Schema.Boolean,
+}).annotations(strict);
+export type AgentGrantRevokeRequest = typeof AgentGrantRevokeRequest.Type;
+
+/** A thread an outside agent started, with the name its grant had when read. */
+export const AgentThreadAttribution = Schema.Struct({
+  threadId: Schema.NonEmptyTrimmedString,
+  grantId: AgentGrantId,
+  agentName: label,
+  mode: AgentGrantMode,
+}).annotations(strict);
+export type AgentThreadAttribution = typeof AgentThreadAttribution.Type;
+
+export const AgentThreadAttributions = Schema.Struct({
+  threads: Schema.Array(AgentThreadAttribution),
+}).annotations(strict);
+export type AgentThreadAttributions = typeof AgentThreadAttributions.Type;
+
 export const decodeAgentGrant = Schema.decodeUnknownSync(AgentGrant);
 export const decodeAgentGrantScope = Schema.decodeUnknownSync(AgentGrantScope);
 export const decodeAgentAccessCommand = Schema.decodeUnknownSync(AgentAccessCommand);
@@ -363,6 +394,8 @@ export const decodeAgentAccessResult = Schema.decodeUnknownSync(AgentAccessResul
 export const decodeAgentConnectionCode = Schema.decodeUnknownSync(AgentConnectionCode);
 export const decodeAgentClaimRequest = Schema.decodeUnknownSync(AgentClaimRequest);
 export const decodeAgentConnectionFile = Schema.decodeUnknownSync(AgentConnectionFile);
+export const decodeAgentGrantRevokeRequest = Schema.decodeUnknownSync(AgentGrantRevokeRequest);
+export const decodeAgentThreadAttributions = Schema.decodeUnknownSync(AgentThreadAttributions);
 
 /** The bearer key's grant id is the grant UUID without dashes. */
 export function bearerGrantToken(grantId: string): string {

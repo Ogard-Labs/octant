@@ -1710,6 +1710,19 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
+/* An outside agent started this thread. Meta text after the title, cut before
+   the title is, so the thread's name stays readable. */
+.workspace-pane__started-by {
+  flex: 0 4 auto;
+  min-width: 0;
+  max-width: 24ch;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A phone header is about 340px wide, and the title is what names the pane;
    the composer's strip still names the Project. */
 @media (max-width: 680px) {

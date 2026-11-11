@@ -1226,6 +1226,18 @@ export function createHostBridge(
           requestQuit: () => {
             void ipc.invoke(IPC_CHANNELS.requestQuit).catch(() => undefined);
           },
+          // Settings › Agent access. Main checks the request against the
+          // contract and adds the desktop secret, which this preload never holds.
+          agentAccessRequest: async (request: unknown) => {
+            const answer = (await ipc.invoke(IPC_CHANNELS.agentAccessRequest, request)) as {
+              readonly status?: unknown;
+              readonly body?: unknown;
+            } | null;
+            if (typeof answer?.status !== "number") {
+              throw new Error("Octant agent access is unavailable.");
+            }
+            return { status: answer.status, body: answer.body };
+          },
           hubAdministrationRequest: async (operation: string, body?: unknown) => {
             // Main refuses an unknown operation; the preload stays free of the
             // operation table because its body decoders pull in npm modules a
@@ -1443,6 +1455,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
+  "agentAccessRequest",
   "openMovedThreadThere",
   "subscribePrepareToShutDown",
   "reportShutdownMovesOffered",

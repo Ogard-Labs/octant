@@ -732,6 +732,7 @@ describe("desktop preload bridge", () => {
       "acknowledgeCanvasPrototypeFrame",
       "acknowledgeWhatsNew",
       "addProviderApiKey",
+      "agentAccessRequest",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",

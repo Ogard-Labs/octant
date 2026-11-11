@@ -30,6 +30,8 @@ import type { BenchmarksWiring } from "./benchmarks";
 import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = {
+  /** Agent grant reads and revoke; answers nothing until the remote wiring binds it. */
+  readonly agentGrantRoutes: (request: Request) => Promise<Response | undefined>;
   readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
   readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
@@ -155,6 +157,7 @@ export type RoutesDependencies = {
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
+    agentGrantRoutes,
     conversationInputRoutes,
     credentialRequestRoutes,
     providerCloudSessionRoutes,
@@ -370,6 +373,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await planRoutes(request)) ??
     (await workResearchRoutes(request)) ??
     (await agentMessageRoutes(request)) ??
+    (await agentGrantRoutes(request)) ??
     (await themeRoutes(request));
 
   const measureProductRoutes = async (request: Request): Promise<Response | undefined> => {

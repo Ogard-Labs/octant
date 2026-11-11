@@ -10,6 +10,7 @@ import {
   decodeAgentGrant,
   type AgentGrant,
   type AgentGrantMode,
+  type AgentThreadAttribution,
   type EventEnvelope,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -234,4 +235,45 @@ function threadRecord(row: ThreadRow): AgentThreadRecord {
     ...(row.project_id === null ? {} : { projectId: row.project_id }),
     startedAt: row.started_at,
   };
+}
+
+/**
+ * Every thread an outside agent started, named by its grant as the grant reads
+ * now, so a rename shows on its threads and a revoked grant's threads keep
+ * their name.
+ */
+export function readAgentThreadAttributions(
+  connection: SqliteConnection,
+): ReadonlyArray<AgentThreadAttribution> {
+  const rows = connection
+    .prepare(
+      `SELECT t.thread_id, t.grant_id, t.mode, g.grant_json
+       FROM agent_access_thread_projection t
+       JOIN agent_access_grant_projection g ON g.grant_id = t.grant_id
+       ORDER BY t.last_sequence DESC`,
+    )
+    .all() as ReadonlyArray<{
+    readonly thread_id: string;
+    readonly grant_id: string;
+    readonly mode: AgentGrantMode;
+    readonly grant_json: string;
+  }>;
+  return rows.map((row) => {
+    const grant = decodeAgentGrant(JSON.parse(row.grant_json));
+    return {
+      threadId: row.thread_id,
+      grantId: grant.grantId,
+      agentName: grant.name,
+      mode: row.mode,
+    };
+  });
+}
+
+/** The name of the agent that started a thread, if one did. */
+export function readAgentThreadName(
+  connection: SqliteConnection,
+  threadId: string,
+): string | undefined {
+  const thread = readAgentThread(connection, threadId);
+  return thread === undefined ? undefined : readAgentGrant(connection, thread.grantId)?.name;
 }

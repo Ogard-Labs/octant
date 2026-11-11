@@ -979,6 +979,18 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
+  ...["/api/agent-grants", "/api/agent-grants/threads"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  {
+    kind: "exact" as const,
+    path: "/api/agent-grants/revoke",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",

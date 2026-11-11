@@ -28,6 +28,7 @@ import {
   type AgentGrantMode,
   type AgentGrantScope,
   type AgentGrantView,
+  type AgentThreadAttribution,
   type AgentPendingClaim,
   type EventActor,
 } from "@octant/contracts";
@@ -40,6 +41,7 @@ import {
   readAgentGrantRecord,
   readAgentGrants,
   readAgentThread,
+  readAgentThreadAttributions,
   readAgentThreads,
   type AgentThreadRecord,
 } from "../persistence/agentAccessProjection";
@@ -333,6 +335,11 @@ export class AgentAccessService {
 
   threadsOf(grantId: string): ReadonlyArray<AgentThreadRecord> {
     return readAgentThreads(this.#options.connection, grantId);
+  }
+
+  /** Every thread an outside agent started, with its agent's name, for "Started by" labels. */
+  attributions(): ReadonlyArray<AgentThreadAttribution> {
+    return readAgentThreadAttributions(this.#options.connection);
   }
 
   /** The grant a product-layer scope id belongs to, for attribution. */

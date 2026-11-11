@@ -5,10 +5,11 @@ person's own network.
 Size: Full: a new remote principal, a credential, a listener surface, a
 server-hosted MCP endpoint, Settings, and a CLI enrollment step.
 Owner: maintainer · Started: 2026-11-11
-Build status: slices 1 to 4 are built (grants, the endpoint, the bridge, and
-direct keys), administered from the loopback CLI (`octant agent-access`).
-Slice 5 is not built yet: Settings › Agent access, "Started by" on threads and
-in Needs you, and the paired-device view and revoke. The built rules are in
+Build status: all five slices are built: grants, the endpoint, the bridge,
+direct keys, and visibility (Settings › Remote access › Agent access, "Started
+by" on threads and in Needs you, push labels, and the paired-device view and
+revoke). Not built yet: naming the agent as the sender of each turn it sent
+(see Visibility). The built rules are in
 [Architecture: Security and authority](../architecture.md#security-and-authority)
 and [Decisions and requirements](decisions.md).
 
@@ -93,7 +94,7 @@ listener, pairing, or other grants; agent-to-agent work between hosts (that is
 
 ### Enrolling an agent
 
-1. In **Settings › Agent access**, or with
+1. In **Settings › Remote access › Agent access**, or with
    `octant agent-access create <name> --project <name>…`, the person makes a
    grant and chooses its scope (section 4). This is local-window or loopback CLI
    only, like pairing.
@@ -211,12 +212,20 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
 
 ### Visibility
 
-- Settings › Agent access lists each grant: name, scope, connection kinds,
-  enrolled key fingerprints, last use with source class, threads started, and
-  turns today. Change and Revoke are there; a paired device sees the list and
-  can revoke.
+- Settings › Remote access › Agent access lists each grant: name, scope,
+  connection kinds, enrolled key fingerprints, last use with source class,
+  threads started, and turns today. Change and Revoke are there; a paired
+  device sees the list and can revoke (`GET /api/agent-grants`,
+  `POST /api/agent-grants/revoke`, action `agent-access.revoke`, journaled as
+  that device). An outside agent reaches neither route.
 - A thread an outside agent started shows "Started by <agent name>" in its
-  header and in the sidebar, and its turns show the agent as the sender.
+  pane header and on its sidebar row, read from `GET /api/agent-grants/threads`,
+  which names each such thread with its grant's current name.
+- Its turns should show the agent as the sender. Not built: the host records
+  which threads an agent started, not which of a thread's turns it sent, and a
+  turn id is the host's own, found only after the send. Recording the sender
+  needs the send to return its turn; until then every turn in such a thread
+  reads as before, and the header names the agent.
 
 ### Revocation and expiry
 

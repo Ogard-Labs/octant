@@ -13316,9 +13316,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   device id is the grant's own scope id, after a guard that admits only the
   routes the tools use inside the grant, so every device clamp applies too.
   It never answers approvals or adds Projects, its threads are journaled as its
-  own and marked as outside content, and revoking the grant ends its sessions
-  ([Agent access from other machines](design/agent-access.md); its Settings
-  page is not built yet). The listener, pairing tickets, pairing
+  own and marked as outside content, and revoking the grant ends its sessions.
+  Settings › Remote access › Agent access administers grants from a local
+  window; a paired device may list them and revoke one through
+  `/api/agent-grants`, never make or widen one
+  ([Agent access from other machines](design/agent-access.md)). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the

@@ -105,6 +105,10 @@ import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRou
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { AgentAccessService } from "../agentAccess/agentAccessService";
 import { createAgentAccessAdministrationRouteHandler } from "../agentAccess/agentAccessAdministrationRoutes";
+import {
+  createAgentGrantRouteHandler,
+  type AgentGrantRoutes,
+} from "../agentAccess/agentGrantRoutes";
 import { createAgentAccessListenerRouteHandler } from "../agentAccess/agentAccessRoutes";
 import {
   createAgentSession,
@@ -225,10 +229,11 @@ const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
-export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void } & Pick<
-  ServerStart,
-  "options" | "persistence" | "serve" | "startedAt" | "version"
-> &
+export type RemoteDependencies = {
+  readonly onSecretStoreLinkChange?: () => void;
+  /** Bound here once the agent access service exists; the product chain asks it. */
+  readonly agentGrantRouteSlot: { readonly bind: (routes: AgentGrantRoutes) => void };
+} & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
   Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<
     AuthorityWiring,
@@ -2035,24 +2040,32 @@ export function wireRemote(deps: RemoteDependencies) {
     session: agentSessionDependencies,
     version,
   });
+  const stopAgentGrantTurns = async (grantId: string): Promise<void> => {
+    const grant = agentAccessService.read(grantId);
+    if (grant === undefined) return;
+    const session = createAgentSession({
+      grant,
+      signal: new AbortController().signal,
+      deps: agentSessionDependencies,
+      stopOnly: true,
+    });
+    for (const thread of agentAccessService.threadsOf(grantId)) {
+      await stopAgentTurn(session, thread.threadId).catch(() => undefined);
+    }
+  };
   const agentAccessAdministrationRoutes = createAgentAccessAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     service: agentAccessService,
-    stopRunningTurns: async (grantId) => {
-      const grant = agentAccessService.read(grantId);
-      if (grant === undefined) return;
-      const session = createAgentSession({
-        grant,
-        signal: new AbortController().signal,
-        deps: agentSessionDependencies,
-        stopOnly: true,
-      });
-      for (const thread of agentAccessService.threadsOf(grantId)) {
-        await stopAgentTurn(session, thread.threadId).catch(() => undefined);
-      }
-    },
+    stopRunningTurns: stopAgentGrantTurns,
   });
+  deps.agentGrantRouteSlot.bind(
+    createAgentGrantRouteHandler({
+      service: agentAccessService,
+      windowAuthorityStore,
+      stopRunningTurns: stopAgentGrantTurns,
+    }),
+  );
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
