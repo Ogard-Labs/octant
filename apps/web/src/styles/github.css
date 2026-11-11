@@ -32,8 +32,15 @@
   background: var(--octant-control);
 }
 
+/* Hover and focus step the edge and the fill as the shared field paint does
+   (field-paint.ts): the rest edge is the strong border, so hover and focus
+   step it to the muted text colour, and focus fills the field. */
+.github-issue-browser__search:hover,
 .github-issue-browser__search:focus-within {
-  border-color: var(--octant-border-strong);
+  border-color: var(--muted-foreground);
+}
+.github-issue-browser__search:focus-within {
+  background: var(--accent);
 }
 
 .github-issue-browser__search input[type="search"] {

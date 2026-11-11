@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import {
+  DEFAULT_THEME_SETTINGS,
+  decodeThemeSemanticOverrides,
+  type ThemeSettings,
+} from "@octant/contracts/theme";
 import { resolveEffectiveTokens } from "@octant/theme";
 import {
   ACCENT_SWATCHES,
   currentAccentSwatch,
   overridesForAccent,
+  upgradeLegacyAccent,
   type AccentSwatch,
 } from "./accentSwatches";
 
@@ -67,5 +72,52 @@ describe("accent swatches", () => {
     expect(resolveEffectiveTokens({ ...settings, mode: "light" }, false).tokens["accent"]).toBe(
       "#8a8a8f",
     );
+  });
+
+  describe("an accent saved before the light fills were deepened", () => {
+    // What the old Purple swatch wrote: one mode-less set.
+    const oldPurple = decodeThemeSemanticOverrides([
+      { role: "accent", color: "#a37cf0" },
+      { role: "accent-foreground", color: "#141414" },
+      { role: "primary-foreground", color: "#141414" },
+    ]);
+    const withOverrides = (semanticOverrides: ThemeSettings["semanticOverrides"]) => ({
+      ...DEFAULT_THEME_SETTINGS,
+      semanticOverrides,
+    });
+
+    it("is the same named swatch, painted with the deeper light fill and the unchanged dark fill", () => {
+      const settings = withOverrides(oldPurple);
+      expect(currentAccentSwatch(settings)).toBe("purple");
+      const upgraded = withOverrides(upgradeLegacyAccent(settings.semanticOverrides));
+      expect(resolveEffectiveTokens({ ...upgraded, mode: "light" }, false).tokens["accent"]).toBe(
+        "#9b74e7",
+      );
+      expect(resolveEffectiveTokens({ ...upgraded, mode: "dark" }, false).tokens["accent"]).toBe(
+        "#a37cf0",
+      );
+    });
+
+    it("leaves a custom colour and the default exactly as stored", () => {
+      const custom = decodeThemeSemanticOverrides([
+        { role: "accent", color: "#123456" },
+        { role: "accent-foreground", color: "#141414" },
+        { role: "primary-foreground", color: "#141414" },
+      ]);
+      expect(upgradeLegacyAccent(custom)).toBe(custom);
+      expect(currentAccentSwatch(withOverrides(custom))).toBe("custom");
+      expect(upgradeLegacyAccent([])).toEqual([]);
+      expect(currentAccentSwatch(withOverrides([]))).toBe("blue");
+    });
+
+    it("leaves a swatch whose fills never changed alone", () => {
+      const slate = decodeThemeSemanticOverrides([
+        { role: "accent", color: "#64748b" },
+        { role: "accent-foreground", color: "#ffffff" },
+        { role: "primary-foreground", color: "#ffffff" },
+      ]);
+      expect(upgradeLegacyAccent(slate)).toBe(slate);
+      expect(currentAccentSwatch(withOverrides(slate))).toBe("slate");
+    });
   });
 });

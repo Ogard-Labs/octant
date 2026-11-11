@@ -407,6 +407,41 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps the light theme's faint controls and dimmed text readable", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      css.match(new RegExp(`${selector}\\s*\\{[^}]+\\}`))?.[0] ?? "";
+
+    // The chosen segment is a stronger tint than its tray, not the tray itself.
+    expect(rule(system, '\\.modeswitch__tray > \\.mode\\[aria-current="page"\\]')).toMatch(
+      /background:\s*color-mix\(in srgb, var\(--oct-fg\) 12%, transparent\)/,
+    );
+    // Dimming a muted role with opacity fell under 4.5:1 on the page.
+    for (const selector of [
+      "\\.project-threads__more",
+      "\\.draft-thread__hint,\\s*\\.work-composer-adapter__hint",
+    ]) {
+      expect(rule(shell, selector)).not.toMatch(/opacity/);
+    }
+    // An off switch's edge and an unchecked checkbox are found at a glance.
+    expect(rule(system, '\\.octant-switch\\[data-slot="switch"\\]')).toMatch(
+      /border:\s*1px solid var\(--octant-divider-strong\)/,
+    );
+    expect(readFileSync(join(webRoot, "ui/shadcn/checkbox.tsx"), "utf8")).toContain(
+      "border-(--octant-divider-strong)",
+    );
+    // The inverse tooltip takes no inset bevel: its white line drew on the dark pill.
+    expect(rule(system, "\\.octant-tooltip").match(/box-shadow:[^;]+;/)?.[0]).not.toContain(
+      "inset",
+    );
+    // Only a locked model's picker keeps full ink.
+    expect(system).toMatch(
+      /\.composer-model-picker__trigger--locked:disabled\s*\{\s*opacity:\s*1;/,
+    );
+    expect(system).not.toMatch(/\.composer-model-picker__trigger:disabled\s*\{/);
+  });
+
   it("does not add a wrapper focus halo around the Issues search", () => {
     const github = readFileSync(join(webRoot, "styles/github.css"), "utf8");
     const input =

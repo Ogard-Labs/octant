@@ -609,7 +609,7 @@ function approvalPaletteCss(palette: CodeOperationApprovalPalette | undefined): 
   // theme it resolved; a reported palette is absolute, so no media query.
   if (palette === undefined) {
     return (
-      ":root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#141414;--approval-muted:#45454a;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e8e8e6;--approval-primary:#141414;--approval-primary-fg:#ffffff}\n" +
+      ":root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#141414;--approval-muted:#45454a;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e2e2e1;--approval-primary:#141414;--approval-primary-fg:#ffffff}\n" +
       "@media(prefers-color-scheme:dark){:root{--approval-bg:#232323;--approval-fg:#f5f5f7;--approval-muted:#bcbcc2;--approval-border:#303030;--approval-control:#2b2b2b;--approval-hover:#333333;--approval-primary:#f5f5f7;--approval-primary-fg:#1b1b1b}}"
     );
   }

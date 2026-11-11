@@ -196,7 +196,9 @@ track, a usage meter and a primary button, so on the light card it must reach
 3:1: the chromatic swatches and Silver take a deeper step in light, the dark
 value with only its OKLCH lightness lowered (Lime measured 1.74:1 on the card
 before, 3.03:1 after), and the dark values are unchanged. The Appearance chips
-show the fill the current mode uses. Accent text stays on the
+show the fill the current mode uses. An accent chosen before the light fills
+were deepened is read as the same swatch, at paint time, with no write to the
+saved settings. Accent text stays on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
 White would vanish on the light page and Carbon on the dark one, so each takes a
 silver in that mode, written as a mode-only override: an override's optional
@@ -813,9 +815,10 @@ of the pill between its corner and the curve. Attach is a plus on the quiet
 control fill: it adds to the message, by more than one route in the desktop
 app. Send is a quiet circle in the control fill until there is something to
 send (the fill stays at full strength and only the arrow is dimmed: at half
-strength the circle measured 1.07:1 on the page in light and vanished), then the pill's one solid control: the primary text colour as its fill,
-with the page colour on it. It is not the accent: a filled accent circle was
-the loudest thing on the page under an empty prompt. The microphone is in the
+strength the circle measured 1.07:1 on the page in light and vanished), then
+the pill's one solid control: the primary text colour as its fill, with the
+page colour on it. It is not the accent: a filled accent circle was the
+loudest thing on the page under an empty prompt. The microphone is in the
 pill because it writes into the prompt; in the line under it, it read as a
 fact about the thread. A notice about sending stays in the pill, under the
 prompt. How the
@@ -930,11 +933,15 @@ Tab keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name
-themselves in a tooltip. A thread whose model cannot change keeps the
-name in the ordinary meta ink (the blanket disabled opacity left it at 2.11:1)
-and looks unpressable by its dimmed chevron, default cursor and absent hover. The chosen model carries a check, not a filled row;
-a row's star shows on hover, on focus, or once it is on; and a provider mark leads
-each row only in a list mixed from several providers. Choosing a model keeps the menu open, since the
+themselves in a tooltip. The picker of a thread whose model can no longer
+change (a completed Work thread, which passes `locked`) keeps the name in the
+ordinary meta ink (the blanket disabled opacity left it at 2.11:1) and looks
+unpressable by its dimmed chevron, default cursor and absent hover; a picker
+disabled for any other reason, such as a running turn or no ready provider,
+keeps the ordinary disabled look. The chosen model carries a check, not a
+filled row; a row's star shows on hover, on focus, or once it is on; and a
+provider mark leads each row only in a list mixed from several providers.
+Choosing a model keeps the menu open, since the
 reasoning level beneath is often the next choice. Its reasoning control shows
 the full track, discrete stops, and filled range, with the reading ("Reasoning
 High") and reset above, and Faster and Smarter at the track's two ends. The fill
@@ -1363,7 +1370,8 @@ from the workspace. Every hairline registers on the surface it separates
 (about 1.3:1 in both modes); inputs and outline buttons use the strong border
 so an edge is never guessed. An off switch and an unchecked checkbox are the
 exception: they must be found at a glance on a card, so they take the strong
-divider (5.04:1 in light; the strong border measured 1.65:1 and 1.85:1 there).
+divider (4.4:1 on a card and 4.9:1 on the page in light; the strong border
+measured 1.65:1 and 1.85:1 there).
 The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 

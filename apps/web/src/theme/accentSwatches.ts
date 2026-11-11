@@ -96,11 +96,50 @@ const SWATCHES: ReadonlyArray<AccentSwatch & { readonly id: AccentSwatchId }> = 
 const ACCENT_ROLES = new Set(["accent", "accent-text", "accent-foreground", "primary-foreground"]);
 
 function accentFor(settings: ThemeSettings, mode: "light" | "dark"): string | undefined {
-  const accents = settings.semanticOverrides.filter((entry) => entry.role === "accent");
+  const accents = upgradeLegacyAccent(settings.semanticOverrides).filter(
+    (entry) => entry.role === "accent",
+  );
   const color =
     accents.find((entry) => entry.mode === mode)?.color ??
     accents.find((entry) => entry.mode === undefined)?.color;
   return color?.toLowerCase();
+}
+
+/**
+ * A swatch chosen before the light fills were deepened was saved as one
+ * mode-less set: its dark fill and ink for both modes. Read at paint time and
+ * by the picker, that set becomes the pair the swatch writes today, so the
+ * person's choice keeps its name and reads at 3:1 on the light card with no
+ * write to their settings. Only an exact match is upgraded: a colour that is
+ * no swatch's old value, or whose ink entries differ, is left as stored, and
+ * so is any swatch whose light and dark fills never differed.
+ */
+export function upgradeLegacyAccent(overrides: ThemeSemanticOverrides): ThemeSemanticOverrides {
+  const legacy = (role: string) => overrides.find((e) => e.role === role && e.mode === undefined);
+  const accent = legacy("accent");
+  if (accent === undefined) return overrides;
+  const swatch = SWATCHES.find(
+    (candidate) =>
+      candidate.light !== undefined &&
+      candidate.dark !== undefined &&
+      candidate.light.fill !== candidate.dark.fill &&
+      candidate.dark.fill.toLowerCase() === accent.color.toLowerCase() &&
+      legacy("accent-foreground")?.color.toLowerCase() === candidate.dark.ink.toLowerCase() &&
+      legacy("primary-foreground")?.color.toLowerCase() === candidate.dark.ink.toLowerCase(),
+  );
+  if (swatch?.light === undefined || swatch.dark === undefined) return overrides;
+  const kept = overrides.filter(
+    (entry) =>
+      entry.mode !== undefined ||
+      (entry.role !== "accent" &&
+        entry.role !== "accent-foreground" &&
+        entry.role !== "primary-foreground"),
+  );
+  return decodeThemeSemanticOverrides([
+    ...kept,
+    ...paintOverrides(swatch.light, "light"),
+    ...paintOverrides(swatch.dark, "dark"),
+  ]);
 }
 
 /** Which swatch the saved settings match, or `custom` for an accent set elsewhere. */

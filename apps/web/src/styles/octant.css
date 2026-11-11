@@ -4779,14 +4779,16 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
 }
 
-/* A model that cannot change is still a fact the person reads, so its name keeps
-   the ordinary meta ink (the blanket disabled opacity left it at 2.11:1 on the
-   page). It does not look pressable: the button ignores the pointer, shows the
-   default cursor and takes no hover fill, and only the chevron is dimmed. */
-.composer-model-picker__trigger:disabled {
+/* A thread whose model cannot change (a completed one) is still a fact the
+   person reads, so its name keeps the ordinary meta ink (the blanket disabled
+   opacity left it at 2.11:1 on the page). It does not look pressable: the
+   button ignores the pointer, shows the default cursor and takes no hover
+   fill, and only the chevron is dimmed. Every other disabled picker keeps the
+   ordinary disabled look. */
+.composer-model-picker__trigger--locked:disabled {
   opacity: 1;
 }
-.composer-model-picker__trigger:disabled .composer-model-picker__chevron {
+.composer-model-picker__trigger--locked:disabled .composer-model-picker__chevron {
   opacity: 0.4;
 }
 
