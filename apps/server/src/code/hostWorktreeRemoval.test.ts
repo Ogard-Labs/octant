@@ -130,6 +130,18 @@ describe("removing a worktree Octant did not make", () => {
     ).resolves.toMatchObject({ reason: "detached-commits" });
   });
 
+  it("keeps the record of a gone detached worktree whose commits nothing else keeps", async () => {
+    const { repo, add } = await fixture();
+    const worktree = await add("detached-gone", "--detach");
+    await git("-C", worktree, "commit", "-q", "--allow-empty", "-m", "only in this record");
+    await rm(worktree, { recursive: true, force: true });
+    await expect(
+      removeHostWorktree({ repositoryPath: repo, worktreePath: worktree }, deps(), signal),
+    ).resolves.toMatchObject({ reason: "detached-commits" });
+    const { stdout } = await git("-C", repo, "worktree", "list", "--porcelain");
+    expect(stdout).toContain(worktree);
+  });
+
   it("forgets only the record of a worktree whose folder is gone", async () => {
     const { repo, add } = await fixture();
     const gone = await add("gone", "-b", "gone");

@@ -1831,7 +1831,10 @@ Git's own records changing in the last 15 minutes ask once more, since
 another program may be working there. Then `git worktree remove`, never
 forced, removes it and the branch stays. A worktree whose folder is gone has
 only its own `worktrees/<name>` record removed, not the repository's other
-prunable entries. Settings › Code › Xcode builds, on a Mac, lists the build
+prunable entries, and is refused when it was on a detached HEAD whose commits
+no branch, tag or remote-tracking ref keeps: that record's HEAD and reflog may
+be all that keeps them from collection. Removing several at once asks once
+first, as removing one does. Settings › Code › Xcode builds, on a Mac, lists the build
 folders in `~/Library/Developer/Xcode/DerivedData` whose `info.plist`
 workspace is gone (orphaned) or that Xcode has not opened for 30 days
 (unused); a workspace on an unmounted volume is neither. Removing one reads

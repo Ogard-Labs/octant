@@ -2845,7 +2845,8 @@ line; a paired device sees the section as managed on the host machine
 ([rules](docs/architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
-with **Scan** and, when any qualify, **Remove N merged or gone**, which removes
+with **Scan** and, when any qualify, **Remove N merged or gone**, which asks
+once in the destructive role (ignored files go with each folder), then removes
 each and reports how many stayed because they need a look. Worktrees are
 grouped under their repository's path in mono; each row is the branch (or
 "Detached HEAD"), then a line of facts (Folder is gone, Locked by Git, Merged

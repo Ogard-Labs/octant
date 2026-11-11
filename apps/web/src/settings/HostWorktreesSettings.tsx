@@ -28,6 +28,7 @@ interface Target {
 
 type Asking =
   | { readonly kind: "remove"; readonly target: Target }
+  | { readonly kind: "bulk"; readonly targets: ReadonlyArray<Target> }
   | {
       readonly kind: "unpushed";
       readonly target: Target;
@@ -221,7 +222,7 @@ export function HostWorktreesSettings(props: HostWorktreesSettingsProps) {
               {safe.length === 0 ? null : (
                 <OctantButton
                   disabled={busy || scanning}
-                  onClick={() => void removeSafe(safe)}
+                  onClick={() => setAsking({ kind: "bulk", targets: safe })}
                   size="sm"
                   type="button"
                   variant="secondary"
@@ -284,7 +285,24 @@ export function HostWorktreesSettings(props: HostWorktreesSettingsProps) {
   return (
     <SettingsSection description={HOST_WORKTREES_FACT} title="Worktrees on this computer">
       {body}
-      {asking === undefined ? null : asking.kind === "remove" ? (
+      {asking === undefined ? null : asking.kind === "bulk" ? (
+        <OctantConfirmDialog
+          confirmLabel="Remove worktrees"
+          destructive
+          onCancel={() => setAsking(undefined)}
+          onConfirm={() => {
+            const { targets } = asking;
+            setAsking(undefined);
+            void removeSafe(targets);
+          }}
+          pending={busy}
+          title={`Remove ${worktrees(asking.targets.length)} whose work is merged or whose folder is gone?`}
+        >
+          Deletes each folder, including ignored files such as build output and installed
+          dependencies, and forgets those already gone. Branches and their commits stay. Any that
+          now have changes, commits only on their branch, or recent use are kept for you to look at.
+        </OctantConfirmDialog>
+      ) : asking.kind === "remove" ? (
         <OctantConfirmDialog
           confirmLabel={asking.target.worktree.missing ? "Forget worktree" : "Remove worktree"}
           destructive

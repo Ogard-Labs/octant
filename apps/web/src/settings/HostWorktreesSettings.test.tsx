@@ -95,11 +95,16 @@ describe("HostWorktreesSettings", () => {
     );
   });
 
-  it("removes every merged or gone worktree in one go and says how many stayed", async () => {
+  it("asks once, then removes every merged or gone worktree and says how many stayed", async () => {
     const user = userEvent.setup();
     const { fake, removeWorktree } = client([{ kind: "host-worktree-forgotten" }]);
     render(<HostWorktreesSettings client={fake} />);
     await user.click(await screen.findByRole("button", { name: "Remove 1 merged or gone" }));
+    // It asks first, as a single removal does: ignored files go with each folder.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/ignored files/u)).toBeVisible();
+    expect(removeWorktree).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Remove worktrees" }));
     await waitFor(() => expect(removeWorktree).toHaveBeenCalledOnce());
     expect(await screen.findByText("Removed 1 worktree.")).toBeVisible();
   });

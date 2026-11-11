@@ -96,6 +96,14 @@ export async function removeHostWorktree(
     if (admin === undefined || !isInside(join(common, "worktrees"), admin)) {
       return refused("broken-link");
     }
+    // A detached HEAD's commits may be kept only by this record's HEAD and
+    // reflog; removing it leaves them unreachable and Git collects them
+    // later. A branch keeps its own commits, so only detached ones count.
+    if (entry.branch === undefined) {
+      const kept = await commitsOnlyHere(common, entry.head, undefined, signal);
+      if (kept === undefined) return refused("unreadable");
+      if (kept.length > 0) return refused("detached-commits");
+    }
     await rm(admin, { recursive: true, force: true });
     return { status: "forgotten" };
   }
