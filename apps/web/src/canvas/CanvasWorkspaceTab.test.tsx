@@ -894,6 +894,15 @@ describe("CanvasWorkspaceTab", () => {
     await waitFor(() => expect(document.querySelector(".canvas-block__area")).toBeNull());
   });
 
+  it("keeps a finger's drag for the Area tool alone, so the page does not scroll under a box", () => {
+    expect(cssDeclarations('.canvas-tool-surface[data-tool="area"] *')["touch-action"]).toBe(
+      "none",
+    );
+    expect(
+      cssDeclarations('.canvas-tool-surface[data-tool="hand"] *')["touch-action"],
+    ).toBeUndefined();
+  });
+
   it("takes no area on a board, whose picture moves under its block", async () => {
     render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
 

@@ -3330,6 +3330,15 @@
   cursor: crosshair;
 }
 
+/* A finger dragging an area must not also scroll the page: the browser took
+   the gesture, cancelled the pointer, and the box was lost. Every part is
+   named because a chart sets its own panning. Hand keeps the browser's own
+   touch scrolling, which already moves the page. */
+.canvas-tool-surface[data-tool="area"],
+.canvas-tool-surface[data-tool="area"] * {
+  touch-action: none;
+}
+
 /* A board's picture moves under its block, so it takes no area. */
 .canvas-tool-surface[data-tool="area"] .canvas-board,
 .canvas-tool-surface[data-tool="area"] .canvas-board * {

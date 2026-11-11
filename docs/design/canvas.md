@@ -1077,7 +1077,8 @@ placement, a shared snapshot) shows no rail.
 
 A region's `x`, `y`, `width`, and `height` are percent of its block's drawn box
 from the top-left corner, kept inside the box and rounded to a tenth; a drag
-under 8px on either side marks nothing. Percent rather than pixels, because a
+under 8px on either side marks nothing. Under Area a touch drag marks the box
+and does not scroll the page; Hand leaves touch scrolling to the browser. Percent rather than pixels, because a
 block scales with its pane. A block whose text reflows at another width keeps
 the area on the same share of its box, not on the same words, which is why the
 Comment tool's named anchors come first wherever one exists. A board (a
