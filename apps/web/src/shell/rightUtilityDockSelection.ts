@@ -47,6 +47,12 @@ export interface ThreadUtilityDockState {
   /** With a layout, always the tab of the focused tile. */
   readonly active?: string;
   readonly layout?: DockTileLayout;
+  /**
+   * The Browser page that was last shown. The Browser is one tool with pages,
+   * so showing "the Browser" again (from its strip entry, a menu or a drag)
+   * returns to this page rather than to whichever page is first.
+   */
+  readonly lastBrowser?: string;
 }
 
 /**
@@ -179,11 +185,11 @@ export function closeUtilityTabState(
   if (closedIndex < 0) return state;
   const tabs = state.tabs.filter((candidate) => candidate.id !== tabId);
   if (state.layout !== undefined) {
-    return settle(tabs, state.layout, state.active, neighbourTile(state, tabId));
+    return settle(tabs, state.layout, state.active, neighbourTile(state, tabId), state.lastBrowser);
   }
   const active =
     state.active === tabId ? tabs[Math.min(closedIndex, tabs.length - 1)]?.id : state.active;
-  return settle(tabs, undefined, active);
+  return settle(tabs, undefined, active, undefined, state.lastBrowser);
 }
 
 /**
@@ -197,7 +203,7 @@ export function removeUtilityTabs(
 ): ThreadUtilityDockState {
   const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
-  return settle(tabs, state.layout, state.active);
+  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
 }
 
 export function retainAvailableUtilityTabs(
@@ -208,7 +214,7 @@ export function retainAvailableUtilityTabs(
   if (tabs.length === state.tabs.length) {
     if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
-  return settle(tabs, state.layout, state.active);
+  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
 }
 
 /** The tabs the dock body shows, in layout order, or just the active tab. */
@@ -246,7 +252,7 @@ export function showUtilityTabAlone(
 ): ThreadUtilityDockState {
   if (!state.tabs.some((tab) => tab.id === tabId)) return state;
   if (state.layout === undefined && state.active === tabId) return state;
-  return settle(state.tabs, undefined, tabId);
+  return settle(state.tabs, undefined, tabId, undefined, state.lastBrowser);
 }
 
 /**
@@ -263,6 +269,8 @@ export function hideUtilityTile(
     state.tabs,
     withoutTile(layout, tabId),
     state.active === tabId ? neighbourTile(state, tabId) : state.active,
+    undefined,
+    state.lastBrowser,
   );
 }
 
@@ -416,6 +424,10 @@ function neighbourTile(state: ThreadUtilityDockState, tabId: string): string | u
  * any other hidden tab replaces the focused tile's tool.
  */
 function focusTab(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  return withLastBrowser(focusTabUnrecorded(state, tabId));
+}
+
+function focusTabUnrecorded(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
   const tab = state.tabs.find((candidate) => candidate.id === tabId);
   if (tab === undefined) return state;
   const layout = state.layout;
@@ -463,6 +475,33 @@ function withoutTile(layout: DockTileLayout, tabId: string): DockTileLayout {
  * add up, fewer than two tiles is no layout, and the active tab is a shown one.
  */
 function settle(
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  layout: DockTileLayout | undefined,
+  active: string | undefined,
+  preferred?: string,
+  lastBrowser?: string,
+): ThreadUtilityDockState {
+  return withLastBrowser({
+    ...settleUnrecorded(tabs, layout, active, preferred),
+    ...(lastBrowser === undefined ? {} : { lastBrowser }),
+  });
+}
+
+/**
+ * Records the Browser page now on screen as the one to return to, and forgets
+ * a remembered page that is no longer an open Browser page.
+ */
+function withLastBrowser(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const isBrowser = (id: string | undefined) =>
+    id !== undefined && state.tabs.some((tab) => tab.id === id && tab.surface === "browser");
+  const shown = shownUtilityTabIds(state).find(isBrowser);
+  const next = shown ?? (isBrowser(state.lastBrowser) ? state.lastBrowser : undefined);
+  if (next === state.lastBrowser) return state;
+  const { lastBrowser: _dropped, ...rest } = state;
+  return next === undefined ? rest : { ...rest, lastBrowser: next };
+}
+
+function settleUnrecorded(
   tabs: ReadonlyArray<ThreadUtilityDockTab>,
   layout: DockTileLayout | undefined,
   active: string | undefined,
@@ -538,6 +577,8 @@ function place(
         columns: [...scaled.slice(0, focusedColumn + 1), added, ...scaled.slice(focusedColumn + 1)],
       },
       tabId,
+      undefined,
+      state.lastBrowser,
     );
   }
   // "Beside" with both columns present falls back to below in the last column.
@@ -559,6 +600,8 @@ function place(
       ),
     },
     tabId,
+    undefined,
+    state.lastBrowser,
   );
 }
 
@@ -740,6 +783,7 @@ interface StoredDockState {
   readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
   readonly active?: string;
   readonly layout?: DockTileLayout;
+  readonly lastBrowser?: string;
 }
 
 function encodeDockStates(
@@ -753,6 +797,7 @@ function encodeDockStates(
       tabs: [...state.tabs],
       ...(state.active === undefined ? {} : { active: state.active }),
       ...(tiled && state.layout !== undefined ? { layout: state.layout } : {}),
+      ...(tiled && state.lastBrowser !== undefined ? { lastBrowser: state.lastBrowser } : {}),
     };
   }
   return encoded;
@@ -787,9 +832,20 @@ function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState
       ? activeCandidate
       : fallback;
   const layout = tiled ? decodeDockLayout(candidate.layout, tabs) : undefined;
-  if (layout === undefined) return { tabs, active };
+  const remembered =
+    tiled &&
+    typeof candidate.lastBrowser === "string" &&
+    tabs.some((tab) => tab.id === candidate.lastBrowser && tab.surface === "browser")
+      ? { lastBrowser: candidate.lastBrowser }
+      : {};
+  if (layout === undefined) return { tabs, active, ...remembered };
   const shown = layoutTabIds(layout);
-  return { tabs, active: shown.includes(active) ? active : (shown[0] ?? active), layout };
+  return {
+    tabs,
+    active: shown.includes(active) ? active : (shown[0] ?? active),
+    layout,
+    ...remembered,
+  };
 }
 
 /**

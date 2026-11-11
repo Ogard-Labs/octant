@@ -27,6 +27,7 @@ export interface RightUtilityDockProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly isNarrow: boolean;
+  readonly lastBrowserTabId?: string;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose: () => void;
@@ -100,6 +101,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.desktop === undefined ? {} : { desktop: props.desktop })}
       {...(props.debug === undefined ? {} : { debug: props.debug })}
       {...(props.vitals === undefined ? {} : { vitals: props.vitals })}
+      {...(props.lastBrowserTabId === undefined
+        ? {}
+        : { lastBrowserTabId: props.lastBrowserTabId })}
       launchableSurfaces={props.launchableSurfaces}
       {...(props.launchableReferences === undefined
         ? {}

@@ -78,6 +78,8 @@ export interface RightUtilityDockSurfaceProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  /** The Browser page last shown: what the collapsed Browser entry stands for while no page is. */
+  readonly lastBrowserTabId?: string;
   readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose?: () => void;
   readonly onCloseTab: (tabId: string) => void;
@@ -150,7 +152,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const shownBrowserId = shownIds.find((id) => browserTabs.some((tab) => tab.id === id));
   const toolOf = (stripId: string) =>
     stripId === browserRepresentative?.id
-      ? (shownBrowserId ?? (browserActive ? activeTabId : undefined) ?? stripId)
+      ? (shownBrowserId ??
+        (browserActive ? activeTabId : undefined) ??
+        browserTabs.find((tab) => tab.id === props.lastBrowserTabId)?.id ??
+        stripId)
       : stripId;
   const shownInStrip = new Set(
     shownIds.map((id) =>

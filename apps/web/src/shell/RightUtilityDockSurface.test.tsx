@@ -471,6 +471,7 @@ describe("tool tiles in the right sidebar", () => {
     return (
       <RightUtilityDockSurface
         {...(state.active === undefined ? {} : { activeTabId: state.active })}
+        {...(state.lastBrowser === undefined ? {} : { lastBrowserTabId: state.lastBrowser })}
         launchableSurfaces={props.launchable ?? []}
         onCloseTab={(id) => setState((current) => closeUtilityTabState(current, id))}
         onOpenTab={vi.fn()}
@@ -1103,5 +1104,31 @@ describe("tool tiles in the right sidebar", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Terminal" }));
     expect(screen.getByRole("region", { name: "Terminal" })).toBeVisible();
     expect(document.activeElement?.getAttribute("role")).toBe("tab");
+  });
+
+  it("returns to the Browser page that was showing when the Browser is hidden and shown again", async () => {
+    const user = userEvent.setup();
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state = openUtilityTabState({ tabs: [] }, "files");
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = showUtilityTabBeside(state, "files");
+    render(<TiledDock initial={state} />);
+    await user.click(
+      within(screen.getByRole("region", { name: "Browser" })).getByRole("button", {
+        name: "Hide Browser from view",
+      }),
+    );
+    expect(screen.queryByRole("tablist", { name: "Browser pages" })).not.toBeInTheDocument();
+    await user.pointer({
+      target: screen.getByRole("tab", { name: "Browser" }),
+      keys: "[MouseRight]",
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Show beside" }));
+    const pages = within(screen.getByRole("tablist", { name: "Browser pages" })).getAllByRole(
+      "tab",
+    );
+    expect(pages[1]).toHaveAttribute("aria-selected", "true");
   });
 });
