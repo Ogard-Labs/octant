@@ -38,6 +38,7 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
+  CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
@@ -4488,7 +4489,7 @@ describe("flow callouts", () => {
   });
 
   it("refuses a callout in a document that declares the version before it", () => {
-    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    const earlier = CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION - 1;
     expectPolicyCode(
       () =>
         validateCanvasDefinition({

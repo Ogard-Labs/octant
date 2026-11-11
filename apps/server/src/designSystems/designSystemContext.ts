@@ -1,4 +1,8 @@
-import type { CanvasDesignBrand } from "@octant/contracts/canvas";
+import type { CanvasDesignBrand, CanvasDesignSystem } from "@octant/contracts/canvas";
+import {
+  decodeDesignSystemLocation,
+  type DesignSystemDocument,
+} from "@octant/contracts/design-systems";
 import { designSystemInstructions } from "@octant/domain/design-system-policy";
 import type { DesignSystemFiles, DesignSystemFolders } from "./designSystemFiles";
 
@@ -101,4 +105,40 @@ export async function projectCanvasBrand(input: {
   return input.brandKit === undefined || Object.keys(input.brandKit).length === 0
     ? undefined
     : { source: "brand-kit", brand: input.brandKit };
+}
+
+/**
+ * A design system as a Canvas carries it: its name, the path a person reads,
+ * and its tokens. The name is cut to what a Canvas holds.
+ */
+export function canvasDesignSystemFrom(
+  document: Pick<DesignSystemDocument, "folder" | "path" | "reading">,
+  mainFolder: string,
+): CanvasDesignSystem {
+  const name = document.reading.name.trim().slice(0, 128);
+  return {
+    name: name === "" ? "Design system" : name,
+    source: (document.folder === mainFolder
+      ? document.path
+      : `${document.folder}/${document.path}`
+    ).slice(0, 1024),
+    brand: document.reading.brand,
+  };
+}
+
+/** Read one of a Project's design systems for a Canvas, or undefined when it is not there. */
+export async function resolveCanvasDesignSystem(
+  files: Pick<DesignSystemFiles, "read">,
+  folders: DesignSystemFolders | undefined,
+  location: unknown,
+): Promise<CanvasDesignSystem | undefined> {
+  if (folders === undefined) return undefined;
+  let decoded;
+  try {
+    decoded = decodeDesignSystemLocation(location);
+  } catch {
+    return undefined;
+  }
+  const document = await files.read(folders, decoded);
+  return document === undefined ? undefined : canvasDesignSystemFrom(document, folders.main);
 }

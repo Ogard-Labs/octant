@@ -58,7 +58,10 @@ import type {
 } from "@octant/contracts/canvas";
 import { CanvasDesignRunTickets } from "../canvas/canvasDesignPage";
 import { DesignSystemFiles, designSystemFolders } from "../designSystems/designSystemFiles";
-import { projectCanvasBrand } from "../designSystems/designSystemContext";
+import {
+  projectCanvasBrand,
+  resolveCanvasDesignSystem,
+} from "../designSystems/designSystemContext";
 import {
   type CanvasDesignAssetPorts,
   readCanvasDesignAssetFile,
@@ -1253,6 +1256,19 @@ export function wireCanvas(deps: CanvasDependencies) {
   const canvasRoutes = createCanvasRouteHandler({
     canvasProjection: persistence.canvasProjection,
     canvasService,
+    listDesignSystems: async (projectId) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
+      const folders = project === undefined ? undefined : designSystemFolders(project);
+      return folders === undefined ? undefined : designSystemFiles.list(folders);
+    },
+    resolveDesignSystem: async (projectId, location) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
+      return resolveCanvasDesignSystem(
+        designSystemFiles,
+        project === undefined ? undefined : designSystemFolders(project),
+        location,
+      );
+    },
     resolveDesignAssets,
     designRunTickets: new CanvasDesignRunTickets(),
     ...(deps.findPublishedSnapshot === undefined

@@ -425,7 +425,7 @@ describe("createCanvasAgentTools", () => {
 
   it("hands describe the Project's design system so every design follows DESIGN.md", async () => {
     const brand = { "color-primary": "#123456", "font-body": "system-ui, sans-serif" };
-    const { set } = tools({
+    const { create, set } = tools({
       brandKit: async () => ({
         source: "design-system" as const,
         brand,
@@ -452,6 +452,26 @@ describe("createCanvasAgentTools", () => {
     ).result as { designSystem?: unknown; designSystemGuidance?: string };
     expect(overview.designSystem).toEqual({ path: "DESIGN.md", name: "Acme", brand });
     expect(overview.designSystemGuidance).toContain("design system");
+
+    // A Canvas the agent creates follows the design system, so its typed
+    // blocks draw in its colours; the model never names it.
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Report",
+        blocks: [
+          {
+            blockId: "summary",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "rich-text",
+            text: "Numbers.",
+          },
+        ],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create.mock.calls[0]?.[6]).toEqual({ name: "Acme", source: "DESIGN.md", brand });
   });
 
   it("says nothing about a brand kit when the Project has none", async () => {

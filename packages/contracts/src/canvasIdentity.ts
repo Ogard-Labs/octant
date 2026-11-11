@@ -44,12 +44,12 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // flow-chart-carrying v14, dashboard-carrying v15,
 // design-document-carrying v16, design-asset-carrying v17,
 // running-design-carrying v18, layout-group-carrying v19, thread-owned v20,
-// design-field-carrying v21, and chart-callout-carrying v22, flow-carrying v23, library-carrying v24, and deck-carrying v25 documents)
+// design-field-carrying v21, and chart-callout-carrying v22, flow-carrying v23, library-carrying v24, deck-carrying v25, and flow-callout-carrying v26 documents)
 // remains decodable so a host does not lose its history at the bump. The
 // literal set names each earlier version explicitly and ends at the current
 // one, so a future bump cannot silently drop an intermediate version from the
 // set that decodes.
-export const CANVAS_SCHEMA_VERSION = 26 as const;
+export const CANVAS_SCHEMA_VERSION = 27 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -76,6 +76,7 @@ export const CanvasSchemaVersion = Schema.Literal(
   23,
   24,
   25,
+  26,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;

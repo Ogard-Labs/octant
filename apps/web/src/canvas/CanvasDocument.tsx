@@ -1,4 +1,5 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
+import { canvasDesignSystemStyle } from "./canvasDesignSystemStyle";
 import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
@@ -83,6 +84,7 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
+  const designSystemStyle = canvasDesignSystemStyle(definition.designSystem);
   const blockSection = (block: CanvasDefinition["blocks"][number]) => (
     <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
       <CanvasBlockRenderer
@@ -162,6 +164,7 @@ export function CanvasDocument({
       <DeckBlock
         block={item.deck}
         blocks={definition.blocks}
+        {...(designSystemStyle === undefined ? {} : { designSystemStyle })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
       />
       {comments === undefined ? null : (
@@ -218,6 +221,8 @@ export function CanvasDocument({
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
       aria-label={definition.title}
+      data-design-system={definition.designSystem?.name}
+      style={designSystemStyle}
     >
       {placement === "thread" ? null : (
         <header className="canvas-view__header">

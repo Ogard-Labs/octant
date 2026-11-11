@@ -623,7 +623,7 @@ const BRAND_KIT_GUIDANCE =
  * not the deck or the document would leave them looking like two products.
  */
 const DESIGN_SYSTEM_GUIDANCE =
-  'This Project has a design system, returned as designSystem: its file path, its name, and its tokens as brand. Every design you make here follows it: a document (size "document"), a slide deck (size "slide", and the deck block that presents those frames), a website, app screens, a UI kit, a flow\'s screens. Set "theme": "brand" and "brand" to designSystem.brand unchanged (copy the whole object; do not invent colours or fonts), and style from the --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)); the kit classes pick up the colour, font, and radius roles. A design that runs script cannot take a brand theme, so write the same token values into its own stylesheet as custom properties instead. Follow the written rules of the design system as well as its tokens: the file is in your context or can be read at designSystem.path. Typed blocks such as charts, tables, and metrics keep the reader\'s theme for legibility; title and label them in the design system\'s voice.';
+  'This Project has a design system, returned as designSystem: its file path, its name, and its tokens as brand. Every design you make here follows it: a document (size "document"), a slide deck (size "slide", and the deck block that presents those frames), a website, app screens, a UI kit, a flow\'s screens. Set "theme": "brand" and "brand" to designSystem.brand unchanged (copy the whole object; do not invent colours or fonts), and style from the --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)); the kit classes pick up the colour, font, and radius roles. A design that runs script cannot take a brand theme, so write the same token values into its own stylesheet as custom properties instead. Follow the written rules of the design system as well as its tokens: the file is in your context or can be read at designSystem.path. A Canvas you create here follows the design system on its own, so its charts, tables, metrics, and diagrams draw their series and accent colours from it (a "chart-1" to "chart-6" palette under colors, else its primary and secondary); title and label them in the design system\'s voice.';
 
 function projectBrandFields(projectBrand: CanvasProjectBrand | undefined) {
   if (projectBrand === undefined) return {};
@@ -1472,8 +1472,25 @@ function canvasToolSet(options: {
           requestedAuthority: documentAuthority(),
         };
         const placed = placement(input);
+        // A Canvas made in a Project that follows a design system follows it
+        // too, so its charts and tables draw in the Project's colours. The
+        // host stamps it from the thread's own Project; the model names none.
+        let projectBrand: CanvasProjectBrand | undefined;
+        try {
+          projectBrand = await options.brandKit?.();
+        } catch {
+          projectBrand = undefined;
+        }
+        const designSystem =
+          projectBrand?.source === "design-system"
+            ? {
+                name: projectBrand.name.slice(0, 128) || "Design system",
+                source: projectBrand.path.slice(0, 1024),
+                brand: projectBrand.brand,
+              }
+            : undefined;
         const result =
-          placed.presentation !== undefined
+          designSystem !== undefined
             ? options.port.canvas.create(
                 request,
                 target.context,
@@ -1481,16 +1498,26 @@ function canvasToolSet(options: {
                 input.blocks,
                 options.author,
                 placed.presentation,
+                designSystem,
               )
-            : options.author === undefined
-              ? options.port.canvas.create(request, target.context, target.project, input.blocks)
-              : options.port.canvas.create(
+            : placed.presentation !== undefined
+              ? options.port.canvas.create(
                   request,
                   target.context,
                   target.project,
                   input.blocks,
                   options.author,
-                );
+                  placed.presentation,
+                )
+              : options.author === undefined
+                ? options.port.canvas.create(request, target.context, target.project, input.blocks)
+                : options.port.canvas.create(
+                    request,
+                    target.context,
+                    target.project,
+                    input.blocks,
+                    options.author,
+                  );
         if (result.kind !== "accepted") {
           return { result: { error: result.message }, isError: true };
         }

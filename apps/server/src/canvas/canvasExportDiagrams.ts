@@ -27,6 +27,7 @@ import {
   seriesColor,
   svgText,
   type CanvasExportDrawing,
+  type ExportPalette,
 } from "./canvasExportChart";
 
 /**
@@ -335,6 +336,7 @@ function scaleColor(
 export function drawCanvasExportTreemap(
   block: Block<"treemap">,
   label: Label,
+  palette?: ExportPalette,
 ): CanvasExportDrawing {
   const width = 560;
   const height = 320;
@@ -382,7 +384,9 @@ export function drawCanvasExportTreemap(
     }
     const value = treemapLeafReading(block, rect.nodeId, colorBy);
     const fill =
-      scale === "categorical" ? seriesColor(groupOf(rect)) : scaleColor(scale, value, domain);
+      scale === "categorical"
+        ? seriesColor(groupOf(rect), palette)
+        : scaleColor(scale, value, domain);
     parts.push(
       `<rect x="${round(rect.x + 0.5)}" y="${round(rect.y + 0.5)}" width="${round(Math.max(0, rect.width - 1))}" height="${round(Math.max(0, rect.height - 1))}" fill="${fill}"/>`,
     );

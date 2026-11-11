@@ -76,6 +76,7 @@
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
     "./work-project-status-policy": "./src/workProjectStatusPolicy.ts",
     "./design-system-policy": "./src/designSystemPolicy.ts",
+    "./canvas-design-system-policy": "./src/canvasDesignSystemPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",

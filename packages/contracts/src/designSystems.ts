@@ -151,6 +151,7 @@ export const DesignSystemWriteResult = Schema.Union(
 );
 export type DesignSystemWriteResult = typeof DesignSystemWriteResult.Type;
 
+export const decodeDesignSystemLocation = Schema.decodeUnknownSync(DesignSystemLocation);
 export const decodeDesignSystemList = Schema.decodeUnknownSync(DesignSystemList);
 export const decodeDesignSystemDocument = Schema.decodeUnknownSync(DesignSystemDocument);
 export const decodeDesignSystemWriteRequest = Schema.decodeUnknownSync(DesignSystemWriteRequest);
