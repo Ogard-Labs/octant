@@ -1149,6 +1149,13 @@
   height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
 }
 
+/* A Canvas pins its own rule: the general one above gives every sheet this
+   height, and a Canvas depends on it so its sticky table header stays inside
+   the document, under the comments drawer. */
+.octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab) {
+  height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
+}
+
 .octant-dialog__popup > .right-utility-dock__surface {
   width: 100%;
   height: 100%;
