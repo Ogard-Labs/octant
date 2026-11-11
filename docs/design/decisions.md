@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
+| [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **194** | **32**       | **4**               |
+| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2483,6 +2483,18 @@ Diagram and flow boards are editable by a local person, and comments are journal
 - A drawn mark (an area, a pen line, a pinned note) is a comment's anchor and never an object of its own, so it follows the comment rules and adds no aggregate, command or route. A pen line is a `stroke` anchor of 2 to 128 points bounded to the block's box; a note is a `region` of no size. A build older than the `stroke` kind cannot read a comment that carries one.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
+
+### Choices answered in a Canvas
+
+A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
+
+- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
+- The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
+- Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.
+- HTML design frames gain no submission ability.
+
+Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choice-block).
 
 ### Canvas shares and exports
 

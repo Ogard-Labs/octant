@@ -157,7 +157,9 @@ export function canvasCommentAgentPrompt(input: {
 
 /**
  * Hands the turn to the owning thread through its message queue, which the
- * host dispatches as the thread's next turn under the thread's own authority.
+ * composer's own sends use too, so it is the person's ordinary message. A
+ * comment sent to the agent and an answer to a choice block both go this way. The
+ * host dispatches it as the thread's next turn under the thread's own authority.
  * The Canvas rides along as context where that mode's turn can carry one; a
  * Work or Code turn names it in the prompt and the agent reads it with the
  * Canvas tool.

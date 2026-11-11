@@ -1176,6 +1176,24 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .filter((part) => part.length > 0)
           .join(" — "),
       );
+    case "choice":
+      // A file has no thread to answer to, so the question reads as its options.
+      return [
+        ...paragraph(reading(block.prompt)),
+        ...block.questions.flatMap(
+          (question): ReadonlyArray<Piece> => [
+            { kind: "heading", level: 3, text: reading(question.prompt) },
+            {
+              kind: "list",
+              items: question.options.map((option) =>
+                option.description === undefined
+                  ? reading(option.label)
+                  : `${reading(option.label)} — ${reading(option.description)}`,
+              ),
+            },
+          ],
+        ),
+      ];
     default: {
       const unhandled: never = block;
       return unhandled;

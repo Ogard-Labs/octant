@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_DECK_SCHEMA_VERSION,
+  CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DASHBOARD_CELLS,
@@ -4488,7 +4489,7 @@ describe("flow callouts", () => {
   });
 
   it("refuses a callout in a document that declares the version before it", () => {
-    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    const earlier = CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION - 1;
     expectPolicyCode(
       () =>
         validateCanvasDefinition({

@@ -4,6 +4,7 @@ import type {
   CanvasLayoutGroupBlock,
   CanvasVersionId,
 } from "@octant/contracts/canvas";
+import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 import {
   decodeCanvasStaticExportDocument,
   type CanvasStaticExportDocument,
@@ -485,6 +486,12 @@ type SharedBlock = CanvasStaticExportDocument["blocks"][number];
 // A shared design is drawn by the same block the live Canvas uses, so its
 // frames get the same sandbox and page policy; there is no second frame
 // renderer for a snapshot to drift from.
+// A shared copy has no thread, so a choice in it is shown and never sent.
+const SHARED_CHOICE: CanvasChoiceRuntime = {
+  kind: "read-only",
+  reason: "This is a shared copy. Answers are sent from the Canvas itself, not from a share.",
+};
+
 function SnapshotBlock(props: {
   readonly block: SharedBlock;
   readonly designRun: DesignRunRuntime | undefined;
@@ -493,6 +500,7 @@ function SnapshotBlock(props: {
     <section className="canvas-block" data-block-kind={props.block.kind}>
       <CanvasBlockRenderer
         block={props.block as CanvasBlock}
+        choiceRuntime={SHARED_CHOICE}
         {...(props.designRun === undefined ? {} : { designRunRuntime: props.designRun })}
       />
     </section>
