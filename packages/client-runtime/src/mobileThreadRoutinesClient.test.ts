@@ -125,6 +125,16 @@ describe("reading a thread's routines over a paired session", () => {
     ).toEqual({ status: "failed", reason: "invalid" });
   });
 
+  it("says the read failed when the host could not rebuild its routine history, rather than reporting an empty list", async () => {
+    const { transport } = transportOf([
+      { kind: "automation-list", items: [], historyUnavailable: true },
+    ]);
+    expect(await loadMobileThreadRoutines(transport, thread)).toEqual({
+      status: "failed",
+      reason: "unavailable",
+    });
+  });
+
   it("says the list was cut short, and keeps what it read, when the Project has more pages than one read walks", async () => {
     const { transport, requests } = transportOf([
       { kind: "automation-list", items: [summary("01")], nextCursor: "more" },

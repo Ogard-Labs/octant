@@ -87,6 +87,10 @@ export async function loadMobileThreadRoutines(
     } catch {
       return { status: "failed", reason: "invalid" };
     }
+    // The host could not rebuild its routine history, so an empty list means
+    // nothing loaded, not that this thread has none. Reading it as "loaded"
+    // would clear what the phone was showing.
+    if (listed.historyUnavailable === true) return { status: "failed", reason: "unavailable" };
     for (const item of listed.items) {
       if (item.originThreadId === undefined || String(item.originThreadId) !== thread.threadId) {
         continue;
