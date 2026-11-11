@@ -180,9 +180,10 @@
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
   --oct-radius-lg: 14px;
-  /* The composer's tray: the composer's corner carried out by the tray's
-     4px inset, so the card's edge and the tray's run parallel. */
-  --oct-radius-tray: 18px;
+  /* The composer's pill: half the height of its one-line prompt, so the
+     empty composer has half-circle ends and a longer message keeps the same
+     corner. */
+  --oct-radius-composer: 22px;
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
@@ -4470,7 +4471,8 @@ input.switch:checked::after {
   color: var(--octant-text-primary);
   background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-card));
   border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
-  border-radius: var(--oct-radius-sm);
+  /* The pill's corner less the cue's 8px inset. */
+  border-radius: var(--oct-radius-lg);
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -4495,18 +4497,16 @@ input.switch:checked::after {
 /* Every composer, on a start screen or under a thread, in Chat, Work, and
    Code, has this one prompt: the same insets and the transcript's own type,
    so a message reads the same in the box as in the bubble it becomes. The
-   start screen's box was four lines and the thread's under two, with smaller
-   insets and 14px type beside a 13px transcript, so the same message changed
-   shape as it moved. A start screen's prompt is two lines before it grows;
-   under a thread it is one (the rule below). */
+   empty prompt is one line everywhere and grows as the person types: one line
+   and 12px above and under it is the 44px pill. At two lines a start screen's
+   box was a card with a field's worth of empty room, and under a thread the
+   50px box held 6px more above the words than under them. */
 .composer-input {
   display: block;
   width: 100%;
-  min-height: calc(2lh + 30px);
+  min-height: calc(1lh + 24px);
   max-height: 180px;
-  /* 18px is the measured prompt offset the visual language contract pins, so it
-     stays off the 4px scale on purpose. */
-  padding: 18px var(--oct-composer-gutter) 12px;
+  padding: 12px var(--oct-composer-gutter);
   border: 0;
   border-radius: 0;
   background: none;
@@ -4530,16 +4530,9 @@ input.switch:checked::after {
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
-/* Under a thread the empty prompt is one line and grows as the person types.
-   At two lines the empty box stood 114px tall under every conversation, a
-   quarter of a laptop window's reading room held for a reply not yet begun.
-   The insets and type are the shared ones, so a message still keeps its
-   shape; only the empty box is shorter. */
-.composer--follow-up .composer-input {
-  min-height: calc(1lh + 30px);
-}
-/* The card's one line: attach, the prompt, send. The two controls ride the
-   prompt's last line, so they stay put as the prompt grows upward. */
+/* The pill's one line: attach, the prompt, the microphone, send. The
+   controls ride the prompt's last line, so they stay put as the prompt grows
+   upward. */
 .composer-field {
   display: flex;
   align-items: flex-end;
@@ -4560,8 +4553,38 @@ input.switch:checked::after {
   flex: 0 0 auto;
   align-items: center;
   gap: var(--oct-space-1);
-  /* Centres a 28px control on a one-line prompt (one line and 30px of inset). */
-  margin-bottom: calc((1lh + 2px) / 2);
+  /* The prompt's own type, so a line here measures what a line of the prompt
+     does, whatever transcript size the person chose. */
+  font-size: var(--oct-transcript-font-size);
+  line-height: var(--oct-leading-body);
+  /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
+  margin-bottom: calc((1lh - 4px) / 2);
+}
+/* The microphone says a failure beside itself. In the pill that line gives
+   way before the prompt does: in a 300px pane a 28-character failure took
+   the cell at full width and left the prompt some 30px. The buttons keep
+   their size; only the words are cut. */
+.composer-field__actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.composer-field__actions > :is(button, [role="button"]),
+.composer-field__actions .composer-voice > :is(button, [role="button"]) {
+  flex: none;
+}
+.composer-field__actions .composer-voice {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.composer-field__actions .composer-voice__error {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* While a failure is said, the prompt keeps room for a few words. The floor
+   holds only then: as a standing rule it pushed send out of a narrow pill
+   when Stop and Force stop stood beside it. */
+.composer-field:has(.composer-voice__error) > .composer-field__prompt {
+  min-width: 96px;
 }
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
@@ -4571,25 +4594,26 @@ input.switch:checked::after {
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
 }
+/* The pill's controls are round: its ends are half circles, and a 28px
+   circle 8px in from one is concentric with it. A square tile in a round end
+   left a wedge of the pill between the tile's corner and the curve. */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
   min-height: 28px;
   height: 28px;
   border-color: transparent;
+  border-radius: var(--oct-radius-pill);
   box-shadow: none;
 }
-/* Attach and send are square tiles with the control corner, the shape every
-   other control on the page has; a circle was the one round thing on it. */
 .composer-field__attach button[data-size="icon"],
 .composer-field__actions button[data-size="icon"] {
   width: 28px;
   min-width: 28px;
   padding: 0;
-  border-radius: var(--oct-radius-sm);
 }
-/* The thread's facts stand in the tray under the card, as one quiet line
-   with no fill or edge of its own: where the thread runs, the surface's row of
-   controls, the plan's windows, and the thread's info. */
+/* The thread's facts stand under the pill, as one quiet line with no fill or
+   edge of its own: where the thread runs, the surface's row of controls, the
+   plan's windows, and the thread's info. */
 .composer-under {
   display: flex;
   flex-wrap: wrap;
@@ -4611,6 +4635,17 @@ input.switch:checked::after {
 @container composer-under (max-width: 440px) {
   .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
     order: 1;
+  }
+  /* A thread with no place to name leads with the row. At this width the row
+     is two lines, and the info fell to a third of its own. The row leaves the
+     info room beside it, and the info stands at the end of the row's last
+     line. */
+  .composer-under > .composer-row:first-child {
+    flex: 1 1 0;
+    max-width: calc(100% - var(--oct-space-2) - 28px);
+  }
+  .composer-under > .composer-row:first-child ~ .thread-info {
+    align-self: flex-end;
   }
 }
 .composer-under > .thread-plan-windows {
@@ -4677,7 +4712,7 @@ input.switch:checked::after {
   box-shadow: none;
 }
 /* An icon control in the row is a square tile with the control corner, as
-   attach and send are in the card. */
+   controls on the page are. Only the pill's own controls are round. */
 .composer-row button[data-size="icon"],
 .thread-info > button[data-size="icon"] {
   width: 28px;
@@ -4786,43 +4821,41 @@ input.switch:checked::after {
 }
 
 /* Every composer keeps the message surface distinct from the thread's facts:
-   the rows beside it (where the thread runs, its controls) are in the tray,
-   and only the surface where the person types is raised out of it. Feedback
+   the rows beside it (where the thread runs, its controls) are quiet lines on
+   the page, and only the surface where the person types is raised. Feedback
    appears only when there is something to act on. */
 .composer.composer--carded {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-composer);
   box-shadow: none;
 }
-/* The tray: one frame around the start row, the card and the line under it.
-   It is a raised surface a step under the card, with the card's corner
-   carried out by its own inset, so the two edges run parallel. The rows were
-   text standing on the page above and below the card, and the composer read
-   as a field with labels around it, not as one object. */
+/* The frame groups the start row, the pill and the line under it, and
+   draws nothing: the pill is the one raised thing, and the rows are quiet
+   lines beside it, as the figures of the last turn are. Drawn as a tray
+   around all three, the composer was a block three rows tall with the pill a
+   box inside a box. */
 .composer-frame {
   display: grid;
   gap: var(--oct-space-1);
   min-width: 0;
-  padding: var(--oct-space-1);
-  border-radius: var(--oct-radius-tray);
-  background: var(--octant-tray);
-  box-shadow: var(--octant-shadow-xs);
 }
-/* A held thread has no card to frame; its line stands where it stood. */
+/* A held thread has no pill to frame; its line stands where it stood. */
 .composer-frame--held {
   display: contents;
 }
-/* A row in the tray keeps clear of the tray's corner. */
+/* A row starts where the pill's first control does. */
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-space-2);
 }
+/* The pill: the composer's one raised surface. Its corner is half its
+   one-line height, so the empty composer has half-circle ends. */
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
   border: 0;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-composer);
   box-shadow:
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);
@@ -4838,8 +4871,8 @@ input.switch:checked::after {
 }
 .thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
   position: absolute;
-  top: 16px;
-  /* Clear of the send tile at the card's trailing edge. */
+  top: 12px;
+  /* Clear of send at the pill's trailing edge. */
   right: calc(var(--oct-space-2) * 2 + 28px);
   padding: 1px var(--oct-space-2);
   border-radius: var(--oct-radius-pill);
@@ -4856,10 +4889,16 @@ input.switch:checked::after {
   align-items: center;
   min-height: 0;
   min-width: 0;
-  /* Room under the line: without it a notice's descenders sat on the card's
-     bottom edge. */
-  padding: 0 12px var(--oct-space-2);
+  /* Room under the line: without it a notice's descenders sat on the pill's
+     bottom edge. The inset is the prompt's, clear of the pill's round corner. */
+  padding: 0 var(--oct-composer-gutter) var(--oct-space-2);
   overflow: auto;
+}
+/* With the microphone beside send, the Tab cap keeps clear of both. */
+.thread-composer__surface:has(.composer-voice):has(
+  .composer-input[data-suggested="true"]:placeholder-shown
+)::after {
+  right: calc(var(--oct-space-2) * 2 + var(--oct-space-1) + 56px);
 }
 .thread-composer__feedback:empty,
 .thread-composer__feedback:has(> .composer-status:empty):not(:has(> .thread-composer__compacting)) {
@@ -6608,38 +6647,27 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
     }
-    /* The tray takes the whole material the composer has over a ground or
-       under Glass: floor, thick tint, blur, ring, and shadow. The card keeps
-       the raised card's own fill on it. When the card was the glass, it
-       blurred the tray it stood in and came out darker than the tray, a well
-       where a raised surface should be. */
+    /* Over a ground or under Glass the pill is the glass surface: floor,
+       thick tint, blur, and the glass stroke as its ring. The opaque border
+       is near black there and drew a dark outline around the pill. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
-      .composer-frame:not(.composer-frame--held) {
+      .thread-composer__surface {
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       box-shadow:
-        inset 0 0 0 1px var(--oct-glass-stroke),
-        var(--octant-shadow-md);
-    }
-    /* The card's own ring is the glass stroke there: the opaque border is
-       near black and drew a dark outline around the card on the tray. */
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
-      .thread-composer__surface {
-      box-shadow:
         var(--octant-shadow-md),
         inset 0 0 0 1px var(--oct-glass-stroke);
     }
-    /* Under Window glass the card takes the control tint, a clear step over
-       the tray. The card tint is 4% of the ink and the tray already carries
-       the floor and the thick tint, so on a real window the two read as one
-       grey and the card was told from the tray by its ring alone. */
+    /* Under Window glass the pill takes the control tint in place of the
+       floor, and keeps the blur and the stroke. The floor is the page colour
+       at part strength, there to hold text over a picture in an opaque
+       window; on a see-through window it made the pill darker than the glass
+       around it, a well where a raised surface should be. */
     html:not([data-octant-reduced-transparency="true"])
       .shell--material-translucent
-      .composer-frame
       .thread-composer__surface {
       background: var(--octant-control);
     }

@@ -1023,13 +1023,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     />
                   </span>
                   {props.poolControl}
-                  <ComposerVoiceButton
-                    disabled={props.creating === true || props.fixedPrompt !== undefined}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
                 </>
+              ),
+              dictate: (
+                <ComposerVoiceButton
+                  disabled={props.creating === true || props.fixedPrompt !== undefined}
+                  onTranscript={(transcript) =>
+                    setPrompt((current) => appendTranscript(current, transcript))
+                  }
+                />
               ),
               actions: {
                 kind: "send",

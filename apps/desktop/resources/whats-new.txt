@@ -1,6 +1,4 @@
-Octant 0.1.0
-
-Apple Silicon technical preview.
+The Apple Silicon technical preview
 
 Chat, Work, and Code stay separate modes on this machine. Updates are signed,
 and Octant never replaces itself until you relaunch.

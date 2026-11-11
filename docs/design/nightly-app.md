@@ -1573,7 +1573,7 @@ disclosure, and the same copy style. In place of the switch is one quiet line
 saying Nightly gets a new build of what is being built every night, and there
 is no install row. Automatic checks
 start off until Nightly's own stored choice is read. Invalid or redirected
-preference files leave them off. What's new and its acknowledgement also stay
+preference files leave them off. What's new, its bundled announcement, and its acknowledgement also stay
 in Nightly's own bundled resources and window storage.
 
 An explicit apply uses fresh bounded host activity for the exact native-bootstrap

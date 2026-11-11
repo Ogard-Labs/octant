@@ -24,7 +24,7 @@ export const MAX_PENDING_ROUTINE_PROPOSALS = 32;
  * for a proposal the routine exists, for a change request it is paused or
  * archived.
  */
-export type RoutineProposalOutcome =
+export type RoutineAskOutcome =
   | { readonly status: "confirmed"; readonly automationId: AutomationId }
   | { readonly status: "declined" }
   | { readonly status: "expired" }
@@ -32,6 +32,15 @@ export type RoutineProposalOutcome =
   /** The person confirmed, and the host's command refused it; nothing changed. */
   | { readonly status: "not-created"; readonly message: string }
   | { readonly status: "too-many-waiting" };
+
+/**
+ * What the proposal tool learns: a person's answer to a card, or, when the
+ * person asked for the routine in the thread, that it exists, paused, with no
+ * card.
+ */
+export type RoutineProposalOutcome =
+  | RoutineAskOutcome
+  | { readonly status: "created"; readonly automationId: AutomationId };
 
 export interface RoutineProposalServiceOptions {
   readonly uuid: () => string;
@@ -41,10 +50,20 @@ export interface RoutineProposalServiceOptions {
   readonly onChanged?: () => void;
 }
 
+/**
+ * Creates, paused, the routine a person asked a thread to set up. Bound at
+ * composition to the Automation command service, which this service cannot
+ * reach on its own.
+ */
+export type RequestedRoutineCreator = (input: {
+  readonly windowId: WindowId;
+  readonly proposal: RoutineProposal;
+}) => Extract<RoutineProposalOutcome, { readonly status: "created" | "not-created" }>;
+
 interface PendingProposal {
   readonly view: RoutineAgentRequest;
   readonly windowId: WindowId;
-  readonly settle: (outcome: RoutineProposalOutcome) => void;
+  readonly settle: (outcome: RoutineAskOutcome) => void;
 }
 
 /**
@@ -60,6 +79,7 @@ export class RoutineProposalService {
   readonly #pending = new Map<string, PendingProposal>();
   readonly #ttlMs: number;
   readonly #options: RoutineProposalServiceOptions;
+  #createRequested: RequestedRoutineCreator | undefined;
 
   constructor(options: RoutineProposalServiceOptions) {
     this.#options = options;
@@ -70,10 +90,35 @@ export class RoutineProposalService {
     readonly windowId: WindowId;
     readonly proposal: Omit<RoutineProposal, "proposalId" | "requestedAt">;
     readonly signal?: AbortSignal;
-  }): Promise<RoutineProposalOutcome> {
+  }): Promise<RoutineAskOutcome> {
     return this.#hold(input.windowId, input.signal, (stamp) =>
       decodeRoutineProposal({ ...input.proposal, ...stamp }),
     );
+  }
+
+  bindRequestedCreate(create: RequestedRoutineCreator): void {
+    this.#createRequested = create;
+  }
+
+  /**
+   * Create, paused, a routine the person asked this thread for. Nothing waits
+   * and no card is shown; the routine runs only when the person resumes it.
+   */
+  createRequested(input: {
+    readonly windowId: WindowId;
+    readonly proposal: Omit<RoutineProposal, "proposalId" | "requestedAt">;
+  }): RoutineProposalOutcome {
+    if (this.#createRequested === undefined) {
+      return { status: "not-created", message: "Routines from a thread are unavailable here." };
+    }
+    return this.#createRequested({
+      windowId: input.windowId,
+      proposal: decodeRoutineProposal({
+        ...input.proposal,
+        proposalId: decodeRoutineProposalId(this.#options.uuid()),
+        requestedAt: new Date(this.#options.now()).toISOString(),
+      }),
+    });
   }
 
   /** Ask the person to pause or archive one routine; nothing changes until they confirm. */
@@ -81,7 +126,7 @@ export class RoutineProposalService {
     readonly windowId: WindowId;
     readonly request: Omit<RoutineChangeRequest, "kind" | "proposalId" | "requestedAt">;
     readonly signal?: AbortSignal;
-  }): Promise<RoutineProposalOutcome> {
+  }): Promise<RoutineAskOutcome> {
     return this.#hold(input.windowId, input.signal, (stamp) =>
       decodeRoutineChangeRequest({ ...input.request, kind: "routine-change-request", ...stamp }),
     );
@@ -94,7 +139,7 @@ export class RoutineProposalService {
       readonly proposalId: RoutineProposalId;
       readonly requestedAt: string;
     }) => RoutineAgentRequest,
-  ): Promise<RoutineProposalOutcome> {
+  ): Promise<RoutineAskOutcome> {
     if (signal?.aborted) return Promise.resolve({ status: "cancelled" });
     if (this.#pending.size >= MAX_PENDING_ROUTINE_PROPOSALS) {
       return Promise.resolve({ status: "too-many-waiting" });
@@ -109,7 +154,7 @@ export class RoutineProposalService {
       const timer = setTimeout(() => settle({ status: "expired" }), this.#ttlMs);
       timer.unref?.();
       let settled = false;
-      const settle = (outcome: RoutineProposalOutcome) => {
+      const settle = (outcome: RoutineAskOutcome) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -141,7 +186,7 @@ export class RoutineProposalService {
   ):
     | {
         readonly proposal: RoutineAgentRequest;
-        readonly settle: (outcome: RoutineProposalOutcome) => void;
+        readonly settle: (outcome: RoutineAskOutcome) => void;
       }
     | undefined {
     const key = String(proposalId);

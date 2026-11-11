@@ -1059,7 +1059,9 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: /^Inbox/ }));
 
-    expect(await screen.findByText("No thread is waiting on you")).toBeVisible();
+    expect(
+      await screen.findByText("Threads that need an answer, an approval or a look show up here."),
+    ).toBeVisible();
     // Opening one used to hide the workspace and render no page in its place.
     expect(screen.queryByRole("button", { name: "Open the Board" })).toBeNull();
   });

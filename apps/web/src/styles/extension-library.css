@@ -71,11 +71,11 @@
 .library__group {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-2);
 }
 
 .library__group + .library__group {
-  margin-top: var(--oct-space-4);
+  margin-top: var(--oct-space-1);
 }
 
 .library__group-title {
@@ -98,137 +98,101 @@
   letter-spacing: normal;
 }
 
-.library__grid {
+.library__list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 232px), 1fr));
-  gap: var(--oct-space-3);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* The lead row has fewer, roomier cards. */
-.library__group--lead {
+.library__list > li {
+  display: grid;
+  min-width: 0;
+}
+
+/* One line per item, the same height all down the list. The hairline between
+   rows is inset to the mark, so the list reads as one object, not a stack of
+   boxes. */
+.library__row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--oct-space-1) 0;
+  color: inherit;
+}
+
+.library__list > li:not(:first-child) > .library__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+/* A wide card sets its lists in two columns, which halves the height of a
+   long one. The source is dropped from the line to make room; the detail
+   still names it. */
+.library {
   container-type: inline-size;
 }
 
-/* Six cards: columns of 1, 2, 3 or 6 so the last row is never ragged. */
-.library__grid--lead {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@container (min-width: 480px) {
-  .library__grid--lead {
+@container (min-width: 640px) {
+  .library__list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--oct-space-6);
+  }
+
+  .library__list > li:nth-child(2) > .library__row {
+    border-top: 0;
+  }
+
+  .library__row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+  }
+
+  .library__row-source {
+    display: none;
   }
 }
 
-@container (min-width: 720px) {
-  .library__grid--lead {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+.library__row .library__mark {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  border-radius: var(--oct-radius-sm);
 }
 
-.library__grid > li {
-  display: grid;
-  min-width: 0;
-}
-
-.library__card {
-  position: relative;
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  grid-template-rows: 1fr auto;
-  gap: var(--oct-space-3);
-  min-width: 0;
-  padding: var(--oct-space-4);
-  color: inherit;
-  background: var(--oct-bg);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-md);
-  transition:
-    border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-/* Hover lifts the card with a stronger edge and a soft shadow; it never
-   fills it. Pressed sets it back down. */
-.library__card:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 28%, transparent);
-  box-shadow: var(--oct-elev-subtle);
-}
-
-.library__card:active {
-  box-shadow: none;
-  border-color: color-mix(in oklab, var(--oct-fg) 40%, transparent);
-}
-
-.library__card--lead {
-  grid-template-columns: 48px minmax(0, 1fr);
-  box-shadow: var(--oct-elev-subtle);
-}
-
-.library__card-text {
-  display: grid;
-  align-content: start;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* The name is the card's one button; its ::after stretches over the card so
-   the whole card opens. The card's own action sits above that layer. */
+/* The name is the row's one button and opens the detail. */
 .library__open {
   justify-content: flex-start;
-  height: auto;
-  min-height: 0;
-  padding: 0;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
-  line-height: 1.35;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.library__open::after {
-  position: absolute;
-  inset: 0;
-  content: "";
-}
-
-.library__card-source {
+.library__row-source {
+  min-width: 0;
   overflow: hidden;
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.library__card-summary {
-  display: -webkit-box;
-  margin-top: var(--oct-space-2);
-  overflow: hidden;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.library__row[data-attention="true"] .library__row-source {
+  color: var(--oct-warn-fg);
 }
 
-.library__card-foot {
-  position: relative;
-  display: flex;
-  grid-column: 1 / -1;
+.library__row-foot {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
+  justify-content: flex-end;
+  gap: var(--oct-space-3);
   min-height: 28px;
-}
-
-.library__card-action {
-  position: relative;
-  z-index: 1;
 }
 
 .library__card-on {
@@ -239,8 +203,36 @@
   font-size: var(--oct-text-xs);
 }
 
-.library__card--skeleton {
-  min-height: 132px;
+.library__more {
+  justify-self: start;
+}
+
+/* A reference list folds under its label; the count stays on the closed line. */
+.library__fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-height: 32px;
+  cursor: default;
+  list-style: none;
+}
+
+.library__fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.library__chevron {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.library__fold[open] > summary > .library__chevron {
+  transform: rotate(90deg);
+}
+
+.library__row--skeleton {
+  min-height: 36px;
   cursor: default;
   animation: library-pulse var(--oct-motion-pulse) ease-in-out infinite;
 }
@@ -252,12 +244,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .library__card--skeleton {
+  .library__row--skeleton {
     animation: none;
-  }
-
-  .library__card {
-    transition: none;
   }
 }
 

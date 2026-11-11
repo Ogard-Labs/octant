@@ -33,11 +33,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 8         | 2       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 7       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 15        | 13      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **232**   | **196** | **32**       | **4**               |
+| **All areas**                                                                         | **234**   | **198** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -474,6 +474,18 @@ The host watches its own size and the system's memory pressure and eases itself 
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
+### Other agents start work through the local CLI
+
+Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
+
+- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
+- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access, and adds a folder as a Project only when the call says the person asked to work there.
+- Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
+- `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.
+- Remote callers have no path here; a scoped grant for a bot on another machine would be its own decision.
+
+Status: Built. Since: 2026-11-11. Detail: [Architecture: Native harness, scripted callers and other agents](../architecture.md#native-harness).
+
 ## App-managed tools
 
 ### Tool families and transport
@@ -569,6 +581,7 @@ Apple development is simulator-only. Physical devices and store upload, submissi
 - Journals with earlier device or distribution validation events replay unchanged; leftover files and the stored store key are left in place and nothing reads them.
 - Apple discovery is derived and refreshable from the checkout; Octant never rewrites projects, schemes, build settings or manifests to make discovery pass. _Here only._
 - A test run preserves its result bundle and logs as evidence and reports a structured verdict. If parsing fails it keeps the raw artifact and reports the verdict incomplete. _Here only._
+- A build's derived data is private to its action and removed when the action ends; a test run's result bundle is kept as its artifact first, and the host clears any leftover derived data at start (maintainer request, 2026-11-10). _Here only._
 - After a restart, ambiguous device work is waiting or inconclusive, never verified. _Here only._
 
 Status: Built. Since: 2026-10-29. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence) and [Device workbench](device-workbench.md).
@@ -614,6 +627,17 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Project icons
+
+A Project shows the favicon or app icon found inside its own folder wherever Projects are listed, and keeps its letter tile or folder glyph when there is none.
+
+- The host owns the read, over a short fixed list of well-known relative paths with the first valid file winning; there is no directory walk, no pattern search and no network fetch. The renderer never reads disk.
+- A file counts only when no component of its path below the Project's folder is a symbolic link (the host opens it anchored to the folder with a no-follow open on macOS and Linux, and finds no icon on other platforms, so a link swapped in during the lookup cannot lead outside; an icon reached through any link, even inside the folder, is not used), it is a regular file of at most 256 KB, and its first bytes match its extension; a Chat Project, which has no folder, has no icon.
+- It is served on the authenticated Project API (a window capability, or a paired device's read of the host) with `nosniff`, a script-forbidding content security policy and an ETag; a missing icon is a plain 404, not a logged error.
+- The renderer draws it as an `<img>` at the icon scale, fetched once per Project per session, so the polled navigation model never causes a request.
+
+Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Code starting posture and Plan
 
@@ -676,7 +700,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A repository is identified by an opaque digest of its canonical Git common directory, not a path. File, terminal, test and Git operations are server-owned services; panes are clients, never owners.
 
-- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset, pruned or reused. _Here only._
+- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
+- Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
@@ -944,7 +969,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -1403,6 +1428,7 @@ One journaled session per thread is the only state, and every surface reads and 
 - A person sets, raises or clears a goal's turn, time and token budgets when revising it; a revision's budget replaces the whole budget. A loop refuses to start on a goal with none. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
 - Harness parity with the first-class runtimes is claimed only while every checklist item holds in Chat, Work and Code.
+- Built: the terminal starts like a coding CLI. `octant` alone at a terminal, `octant --<agent flag>`, or `octant "<prompt>"` opens `octant agent` on the folder's thread, a bare prompt being the first message of a session that stays open (`--prompt` still runs one turn and exits). Inside a Git checkout no Project holds, a person at the terminal is asked whether to add its root as a Code Project, through the same bind-and-create as `octant project add`; nothing is asked without a terminal or with `--json`, and a no adds nothing.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
@@ -1478,7 +1504,8 @@ A person connects an MCP server from Settings in a local window only. It becomes
 
 - A secret value goes to the credential broker and never into the package. Listing servers found on the computer is read-only, and nothing is imported until the person clicks that item.
 - The Connectors view is a bundled first-party catalog that fetches nothing to render. The host accepts a connector id only at that entry's own address. Doop joined on 2026-11-01 after a bare request to its address answered 401 with resource metadata, and its authorization server published PKCE S256 and dynamic client registration. Dropbox, monday.com, ClickUp, Miro, GitLab, Buildkite, Amplitude, Calendly, Pipedrive and Klaviyo joined on 2026-11-07 after the same probe passed for each. Every entry names the vendor's own setup page and search keywords, both shown or matched in the Connectors view and the Library. `bun run connectors:probe` re-checks each address against its auth kind and each setup page; it runs weekly and on demand in CI, outside pull-request checks and never in the app, and an entry that fails it is fixed or removed in the catalog, not patched in the UI. Google's preview servers answer `initialize` without a credential and ask at the tool call, so the probe accepts that answer for a sign-in entry when its well-known resource metadata holds up, and says so.
-- The Library is the first view in Settings › Skills & Extensions: one searchable grid over connectors, plugins, skills and MCP servers, built only from the bundled list, the installed snapshot, results already searched for and the local look at Claude Code and Codex. It fetches nothing and ignores the Marketplace fetches switch because it never reaches the network. Each item shows its source, provider, state on the install, trust, on ladder, what it can do and an authority level from its declared capabilities. Trust and turning on are separate one-click commands; a generated MCP server added directly installs, trusts and turns on as one confirmed act. Rationale: a person judging an extension needs state and cost in one place, and a combined view must not widen what any one install flow may do. The Library leads with a hand-picked Featured row from the bundled list, groups by installed state then catalog category, and finishes the job in place: Connect… (opens the detail, which holds the one confirming press, the key field and the sign-in, over one function shared with Connectors) and Review then Install for a Marketplace plugin, which installs only and leaves Trust and Turn on as separate clicks; reading a plugin stays under the Marketplace fetches switch and every check stays on the server. The Featured set is fixed: a connected connector stays in it and shows its state on its card (and also stays under Installed), so the row never has a hole; its grid uses 1, 2 or 3 columns so six cards fill every row. A skill card shows the skill's own description and no line when the host gives none. A card says its next step rather than a repeated state, and keeps its authority as dots. Bundled CC0 Simple Icons marks (source recorded beside each, noticed in the logos licence file) show for the connectors that have one; the rest keep a two-letter tile. The shared Settings titlebar lost its bottom rule on every page, because the strip it bounded is empty and read as a bar.
+- The Library is the first view in Settings › Skills & Extensions: one searchable list over connectors, plugins, skills and MCP servers, built only from the bundled list, the installed snapshot, results already searched for and the local look at Claude Code and Codex. It fetches nothing and ignores the Marketplace fetches switch because it never reaches the network. Each item shows its source, provider, state on the install, trust, on ladder, what it can do and an authority level from its declared capabilities. Trust and turning on are separate one-click commands; a generated MCP server added directly installs, trusts and turns on as one confirmed act. Rationale: a person judging an extension needs state and cost in one place, and a combined view must not widen what any one install flow may do. The Library groups by installed state, then a hand-picked Featured group from the bundled list and the catalog's categories (each of those closed until opened, and open while a search or filter is on), and finishes the job in place: Connect… (opens the detail, which holds the one confirming press, the key field and the sign-in, over one function shared with Connectors) and Review then Install for a Marketplace plugin, which installs only and leaves Trust and Turn on as separate clicks; reading a plugin stays under the Marketplace fetches switch and every check stays on the server. The Featured set is fixed: a connected connector stays in it and shows its state on its card (and also stays under Installed), so the group never has a hole. Each item is one compact row of one height (mark, name, source, authority dots, and its state or next step at the trailing edge; two columns when the card is wide, with the source then left to the detail); the name opens the detail, which carries a skill's own description (and no line when the host gives none). A row says its next step rather than a repeated state. A list of more than ten items that are not installed shows its first eight with "Show all N"; everything installed, switched on or off, is always drawn, and an item that awaits a decision (blocked, awaiting trust, or a server that is not connecting) leads. Bundled CC0 Simple Icons marks (source recorded beside each, noticed in the logos licence file) show for the connectors that have one; the rest keep a two-letter tile. The shared Settings titlebar lost its bottom rule on every page, because the strip it bounded is empty and read as a bar.
+- Long Settings pages stay short by drawing long lists as compact rows and folding reference sections (Skills & Extensions and Permissions first; maintainer request, 2026-11-11). A compact row is one line of one height: the name (which opens the row's own detail: paths, permissions, secondary actions), a short state in the meta ink, and the one main control at the trailing edge. A section folds only when it is reference material or empty, its label is then a button with `aria-expanded` and its closed line says what it holds (a count, a state); what is switched on, trusted, protected or allowed stays readable closed, and a section holding any remembered approval, refusal or removed protection opens by itself. Nothing is removed and no behaviour changes: Settings search and deep links open the fold that holds their row and focus it. Built in Settings › Skills & Extensions › Library and Settings › Permissions (Protected files, Servers, Remembered websites and tool approvals, Safe networks, Bind a folder); other long pages may adopt it.
 - Atlassian's v2 HTTP and Airtable's HTTP connectors reuse public MCP PKCE/DCR and the existing broker; manual app setup remains separate from consent. Airtable has a distinct scoped PAT entry and an exact transport-to-origin resource alias; no generic resource equality is weakened. Vendor consent, selected bases, account permissions and admin restrictions remain authoritative; setup does not prove live tool access ([Architecture: Connectors catalog](../architecture.md#extensions-and-skills)).
 - HubSpot uses its exact vendor HTTP endpoint through the existing registered-client setup and broker. The person creates an MCP connector, registers the retained callback, and links its confidential client secret before separate consent. PKCE S256 and advertised POST client authentication apply; no fixed scopes, shared secret, or hosted service are invented. Permissions and tools depend on account consent and vendor eligibility; setup is not authenticated acceptance ([Architecture: Connectors catalog](../architecture.md#extensions-and-skills)).
 - Box uses its exact vendor HTTP endpoint through the same registered-client setup: its authorization server publishes PKCE S256 and client-secret token authentication but no dynamic registration, so a Box admin enables the Box MCP Server integration and the person links its client ID and secret before separate consent. No fixed scopes are invented; the integration sets them. Setup is not authenticated acceptance ([Architecture: Connectors catalog](../architecture.md#extensions-and-skills)).
@@ -2077,6 +2104,7 @@ Release notes show once after an update the person chose finishes applying, and 
 
 - Settings > General > Updates links the notes for the running build. _Here only._
 - First-run setup never shows release notes, and opening What's New is never counted or reported. _Here only._
+- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one announcement (`whats-new-announcement.json`, strict and size-bounded, with an optional picture beside it whose name cannot leave the folder); it shows once as a dialog instead of the card. Dismissing the card, answering the announcement, or opening the notes acknowledges the update. An invalid announcement is treated as absent. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -2114,8 +2142,9 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
+- The phone app reads as a native app, not a web page: a bottom tab bar for its top places, large titles on tab roots, a centred nav bar on pushed screens, inset grouped lists, the system segmented control and sheets with a grabber. It uses the product radius scale with one 20px sheet, three count tiles that take the desktop tiles' hues and marks, and the transcript recipe: bare prose replies and a control-fill bubble for the person's message.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character) and [Voice](../../DESIGN.md#voice).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), and the [mobile design system](../../apps/mobile/design-system/README.md).
 
 ### One theme authority and shared controls
 
@@ -2346,7 +2375,7 @@ Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#too
 
 ### Routines and subagents
 
-Agents may propose routines and delegate work, but only a person creates a routine, and only the thread's agent starts a subagent.
+Agents may propose routines and delegate work, but a routine exists only through a person's confirmation or request (created paused, so it runs only once the person enables it), and only the thread's agent starts a subagent.
 
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
@@ -2362,6 +2391,7 @@ Work and Code have server-authoritative boards. Chat has none, and an agent cann
 - Cards cannot be dragged between columns. A person marks a Work thread Done after confirming; a Code thread reaches Done only when its delivery target is satisfied.
 - A Code card may show one plan-progress count computed at read time. It is absent with no live plan and never shown on Work cards. _Here only._
 - The pull request list is a cached host-local snapshot, and board queries never call the forge. A card's summary says fresh, stale or unavailable. The forge is reached only by explicit refresh or a per-Project opt-in cadence (off by default, floored at 30 seconds).
+- The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. Newest, Oldest and a "mine" filter are not offered: the snapshot has no creation time and no signed-in login. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 
@@ -2402,7 +2432,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row under the card. Where a new thread runs is one row of chips above it. Both rows and the card are held by the composer's tray, one raised frame a step under the card, so the composer is one object in two layers; the tray is the glass surface over a ground or under Window glass. The working folder is one of the chips above the card, and opens its fields over the page.
+- A composer's pill holds only attach, the prompt, the microphone and send, on a start screen and under a thread alike, and is one line tall until the person types more. How the thread runs (access, the model, the context ring) is one row under the pill. Where a new thread runs is one row of chips above it. Both rows stand on the page with no frame, so the pill is the composer's one raised surface; it is the glass surface over a ground, and takes the control tint under Window glass. The working folder is one of the chips above the pill, and opens its fields over the page.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
@@ -2412,6 +2442,7 @@ Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#
 Waiting requests appear on several surfaces from one host list, at a local window only.
 
 - The start screen, board cards, palette, Inbox and Review page read the same list and answer through the mode's own command.
+- The Inbox page is raised cards in one 980px column, with its state in one line beside the title; see [Inbox page](workspace.md#inbox-page).
 - A remote window has no source. The desktop menu bar lists waiting threads but only opens them.
 
 Status: Built. Since: —. Detail: [Start screen: Needs you across surfaces](start-screen.md#needs-you-across-surfaces).

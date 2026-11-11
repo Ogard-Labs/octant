@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "react-native";
-import { GlassSurface, space, typography, useTheme } from "../../design-system";
+import { Ionicons } from "@expo/vector-icons";
+import { radii, space, useTheme } from "../../design-system";
 import { unlockAppVault, type AppVaultUnlockResult, type DeviceAuthenticator } from "./AppVault";
 import {
   createUnlockAttemptGuard,
@@ -114,42 +115,51 @@ export function AppVaultGate(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        // The system lock screen's shape: a centred lock, a title and one
+        // sentence, and the unlock action at the bottom within thumb reach.
         shell: {
           flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          padding: space.lg,
+          justifyContent: "space-between",
+          paddingHorizontal: space.lg,
+          paddingTop: space.xxl * 2,
+          paddingBottom: space.xl,
           backgroundColor: colors.canvas,
         },
-        card: {
+        intro: {
+          alignItems: "center",
+          gap: space.md,
           width: "100%",
           maxWidth: 420,
-          gap: space.md,
-          padding: space.lg,
+          alignSelf: "center",
         },
         title: {
           color: colors.textPrimary,
-          fontSize: 30,
-          fontWeight: "500",
+          fontSize: 28,
+          fontWeight: "700",
           letterSpacing: -0.7,
+          textAlign: "center",
         },
         body: {
           color: colors.textSecondary,
-          fontSize: typography.body.fontSize,
-          lineHeight: 20,
+          fontSize: 17,
+          lineHeight: 24,
+          textAlign: "center",
         },
         button: {
+          width: "100%",
+          maxWidth: 420,
+          alignSelf: "center",
           alignItems: "center",
           justifyContent: "center",
-          minHeight: 48,
-          borderRadius: 24,
+          height: 50,
+          borderRadius: radii.md,
           backgroundColor: colors.accent,
           paddingHorizontal: space.lg,
         },
         buttonLabel: {
           color: colors.sendLabel,
-          fontSize: typography.body.fontSize,
-          fontWeight: "500",
+          fontSize: 17,
+          fontWeight: "600",
         },
       }),
     [colors],
@@ -159,25 +169,28 @@ export function AppVaultGate(props: {
 
   return (
     <View style={styles.shell} testID="mobile-vault-locked">
-      <GlassSurface contentStyle={styles.card} material="regular">
-        <Text style={styles.title}>Unlock Octant</Text>
+      <View style={styles.intro}>
+        <Ionicons color={colors.accent} name="lock-closed" size={44} />
+        <Text accessibilityRole="header" style={styles.title}>
+          Unlock Octant
+        </Text>
         <Text selectable style={styles.body}>
           {message}
         </Text>
-        <Pressable
-          accessibilityRole="button"
-          disabled={state === "unlocking"}
-          onPress={() => void unlock()}
-          style={styles.button}
-          testID="mobile-vault-unlock"
-        >
-          {state === "unlocking" ? (
-            <ActivityIndicator color={colors.sendLabel} />
-          ) : (
-            <Text style={styles.buttonLabel}>Unlock</Text>
-          )}
-        </Pressable>
-      </GlassSurface>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={state === "unlocking"}
+        onPress={() => void unlock()}
+        style={styles.button}
+        testID="mobile-vault-unlock"
+      >
+        {state === "unlocking" ? (
+          <ActivityIndicator color={colors.sendLabel} />
+        ) : (
+          <Text style={styles.buttonLabel}>Unlock</Text>
+        )}
+      </Pressable>
     </View>
   );
 }

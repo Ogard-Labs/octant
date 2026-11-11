@@ -4,7 +4,7 @@ import type {
   ShieldServersCommandResult,
   ShieldServersView,
 } from "@octant/contracts/shield-servers";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -82,16 +82,56 @@ function setup(options: {
 }
 
 describe("ShieldServersSettings", () => {
-  it("lists each registered server with its login, profile, runbook and deploy count", async () => {
-    setup({});
+  it("lists each registered server on one line with its profile, and opens its login, runbook and deploy count", async () => {
+    const { user } = setup({});
 
     const list = await screen.findByRole("list", { name: "Registered servers" });
+    expect(within(list).getByText("Operate · 1 deploy command")).toBeVisible();
+    expect(within(list).queryByText("deploy@web-1")).toBeNull();
+    const toggle = within(list).getByRole("button", { name: "web-1" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(list).getByText("deploy@web-1")).toBeVisible();
-    expect(within(list).getByText("Operate")).toBeVisible();
     expect(within(list).getByText("/Users/me/notes/web-1.md")).toBeVisible();
-    expect(within(list).getByText("1 deploy command")).toBeVisible();
     expect(screen.getByText(SHIELD_SERVERS_ALWAYS_ASK_NOTE)).toBeVisible();
     expect(screen.queryByText(SHIELD_SSH_AGENT_MISSING_NOTE)).toBeNull();
+  });
+
+  it("opens the folded add form for a link followed before the registry had loaded", async () => {
+    const initial = view();
+    let answer: (loaded: ShieldServersView) => void = () => undefined;
+    const read = vi.fn(
+      () =>
+        new Promise<ShieldServersView>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const command = vi.fn(
+      async (): Promise<ShieldServersCommandResult> => ({
+        kind: "shield-servers-updated",
+        view: initial,
+      }),
+    );
+    const { container } = render(
+      <ShieldServersSettings
+        client={{ read, command }}
+        focusedSetting="shield-servers-add"
+        projectNames={PROJECTS}
+      />,
+    );
+    // Nothing is drawn yet: the link arrived first.
+    expect(container.querySelector('[data-setting-id="shield-servers-add"]')).toBeNull();
+    await act(async () => {
+      answer(initial);
+    });
+
+    const form = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>('[data-setting-id="shield-servers-add"]');
+      expect(found).not.toBeNull();
+      return found;
+    });
+    await waitFor(() => expect(form?.closest("details")).toHaveAttribute("open"));
   });
 
   it("says when no SSH agent is running", async () => {
@@ -199,6 +239,7 @@ describe("ShieldServersSettings", () => {
 
   it("hides deploy commands for a read-only server", async () => {
     const { user } = setup({ initial: view({ servers: [] }) });
+    await user.click(await screen.findByText("Add a server"));
     const form = await screen.findByRole("form", { name: "Add a server" });
 
     expect(within(form).queryByLabelText("Deploy commands (one per line)")).toBeNull();
@@ -273,7 +314,8 @@ describe("ShieldServersSettings", () => {
     await chooseProject(userEvent.setup(), "Atlas");
 
     const own = await screen.findByRole("list", { name: "Atlas servers" });
-    expect(within(own).getByText("ops@db-1")).toBeVisible();
+    expect(within(own).getByRole("button", { name: "db-1" })).toBeVisible();
+    expect(within(own).getByText("Read-only")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Use servers for this Project only" }),
     ).toHaveAttribute("aria-pressed", "true");

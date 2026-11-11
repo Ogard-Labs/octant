@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
 export interface ReasoningPartProps {
@@ -25,31 +25,33 @@ export function ReasoningPart(props: ReasoningPartProps) {
     () =>
       StyleSheet.create({
         header: {
+          minHeight: 32,
           flexDirection: "row",
           alignItems: "center",
           gap: space.sm,
-          paddingHorizontal: space.md,
-          paddingVertical: 10,
         },
         title: {
-          flex: props.preview === undefined || props.preview === "" ? 1 : 0,
           color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
+          fontSize: typography.detail.fontSize,
           fontWeight: "500",
         },
         preview: {
-          flex: 1,
+          flexShrink: 1,
           color: colors.textTertiary,
           fontSize: typography.caption.fontSize,
         },
+        // Open thinking hangs off a hairline under its row, quieter than the reply.
         body: {
-          paddingHorizontal: space.md,
-          paddingBottom: space.md,
+          marginLeft: 7,
+          paddingLeft: space.md,
+          paddingVertical: space.xs,
+          borderLeftWidth: 2,
+          borderLeftColor: colors.hairline,
           color: colors.textSecondary,
-          fontSize: typography.body.fontSize,
+          fontSize: typography.detail.fontSize + 1,
           lineHeight: 20,
         },
-        wrap: { marginBottom: space.sm },
+        wrap: { marginBottom: space.xs },
       }),
     [colors, props.preview],
   );
@@ -57,7 +59,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-reasoning-part"}>
-      <GlassSurface material="ultraThin" radius={radii.sm}>
+      <View>
         <Pressable
           accessibilityLabel={MOBILE_COPY.reasoningTitle}
           accessibilityRole="button"
@@ -66,7 +68,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
           style={styles.header}
           testID="mobile-reasoning-toggle"
         >
-          <Ionicons color={colors.textTertiary} name="sparkles-outline" size={16} />
+          <Ionicons color={colors.textTertiary} name="sparkles-outline" size={15} />
           <Text style={styles.title}>{MOBILE_COPY.reasoningTitle}</Text>
           {preview === "" ? null : (
             <Text
@@ -80,8 +82,8 @@ export function ReasoningPart(props: ReasoningPartProps) {
           )}
           <Ionicons
             color={colors.textTertiary}
-            name={expanded ? "chevron-up" : "chevron-down"}
-            size={16}
+            name={expanded ? "chevron-down" : "chevron-forward"}
+            size={14}
           />
         </Pressable>
         {expanded ? (
@@ -89,7 +91,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
             {props.text}
           </Text>
         ) : null}
-      </GlassSurface>
+      </View>
     </View>
   );
 }
