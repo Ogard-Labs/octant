@@ -8,16 +8,88 @@ import type {
   CodeProjectPullRequestView,
   ProjectId,
 } from "@octant/contracts";
-import { GitPullRequest, RefreshCw, Search, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  Check,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  Link2,
+  ListFilter,
+  MoreHorizontal,
+  RefreshCw,
+  Search,
+  Settings2,
+  ArrowUpDown,
+  X,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
+import {
+  defaultBoardStorage,
+  readStoredValue,
+  writeStoredValue,
+} from "../threadBoard/threadBoardState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSwitch } from "../ui/base/OctantSwitch";
+import {
+  OctantMenuCheckboxItem,
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  NO_PULL_REQUEST_FILTERS,
+  PULL_REQUEST_CHECKS_OPTIONS,
+  PULL_REQUEST_REVIEW_OPTIONS,
+  PULL_REQUEST_SORT_OPTIONS,
+  PULL_REQUEST_STATE_OPTIONS,
+  activeFilterCount,
+  blockingFact,
+  compactAge,
+  filterPullRequests,
+  groupPullRequestsByRepository,
+  mergeabilityCopy,
+  pullRequestAttention,
+  pullRequestStatusSentence,
+  reviewCopy,
+  sortPullRequests,
+  type PullRequestChecksFilter,
+  type PullRequestFilters,
+  type PullRequestReviewFilter,
+  type PullRequestSort,
+  type PullRequestStateFilter,
+} from "./pullRequestListView";
+
+export { mergeabilityCopy, reviewCopy };
+
+const SORT_STORAGE_KEY = "octant.code.pull-requests.sort";
+const GROUP_STORAGE_KEY = "octant.code.pull-requests.group-by-repository";
+const STATE_STORAGE_KEY = "octant.code.pull-requests.filter-state";
+const REVIEW_STORAGE_KEY = "octant.code.pull-requests.filter-review";
+const CHECKS_STORAGE_KEY = "octant.code.pull-requests.filter-checks";
+
+function oneOf<T extends string>(options: ReadonlyArray<{ readonly value: T }>) {
+  return (value: string): T | undefined => options.find((option) => option.value === value)?.value;
+}
+
+interface ProjectSetting {
+  readonly enabledFor: (projectId: ProjectId) => boolean;
+  readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+}
 
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
@@ -30,8 +102,7 @@ export interface CodeProjectPullRequestsProps {
   readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
   /**
    * The dock lists one thread's Project under the dock's own head; the page
-   * keeps its Surface shell, cross-Project grouping, and the Project's
-   * auto-refresh setting.
+   * keeps its Surface shell, sorting, grouping, and the Project's settings.
    */
   readonly presentation?: "page" | "dock";
   /**
@@ -44,19 +115,15 @@ export interface CodeProjectPullRequestsProps {
    * Present when the shell can toggle the opt-in background refresh for a
    * Project. The server owns the setting; this only issues the command.
    */
-  readonly backgroundRefresh?: {
-    readonly enabledFor: (projectId: ProjectId) => boolean;
-    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  };
+  readonly backgroundRefresh?: ProjectSetting;
   /**
    * Present on a local window, which alone may let a Project's agents merge
    * without asking each time. The server owns the setting and refuses a paired
    * device.
    */
-  readonly agentMerge?: {
-    readonly enabledFor: (projectId: ProjectId) => boolean;
-    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  };
+  readonly agentMerge?: ProjectSetting;
+  /** Injectable for tests; defaults to `window.localStorage` when available. */
+  readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
 
 type WorkspaceState =
@@ -72,6 +139,20 @@ type WorkspaceState =
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
   const [search, setSearch] = useState("");
+  const storage = props.storage ?? defaultBoardStorage();
+  const [sort, setSort] = useState<PullRequestSort>(
+    () => readStoredValue(storage, SORT_STORAGE_KEY, oneOf(PULL_REQUEST_SORT_OPTIONS)) ?? "updated",
+  );
+  const [grouped, setGrouped] = useState<boolean>(
+    () => readStoredValue(storage, GROUP_STORAGE_KEY, (value) => value) === "true",
+  );
+  const [filters, setFilters] = useState<PullRequestFilters>(() => ({
+    state: readStoredValue(storage, STATE_STORAGE_KEY, oneOf(PULL_REQUEST_STATE_OPTIONS)) ?? "any",
+    review:
+      readStoredValue(storage, REVIEW_STORAGE_KEY, oneOf(PULL_REQUEST_REVIEW_OPTIONS)) ?? "any",
+    checks:
+      readStoredValue(storage, CHECKS_STORAGE_KEY, oneOf(PULL_REQUEST_CHECKS_OPTIONS)) ?? "any",
+  }));
   const searchInput = useRef<HTMLInputElement>(null);
   const loadRef = useRef(props.load);
   useEffect(() => {
@@ -121,6 +202,23 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     }
   }
 
+  function chooseSort(next: PullRequestSort): void {
+    setSort(next);
+    writeStoredValue(storage, SORT_STORAGE_KEY, next);
+  }
+
+  function chooseGrouped(next: boolean): void {
+    setGrouped(next);
+    writeStoredValue(storage, GROUP_STORAGE_KEY, String(next));
+  }
+
+  function chooseFilters(next: PullRequestFilters): void {
+    setFilters(next);
+    writeStoredValue(storage, STATE_STORAGE_KEY, next.state);
+    writeStoredValue(storage, REVIEW_STORAGE_KEY, next.review);
+    writeStoredValue(storage, CHECKS_STORAGE_KEY, next.checks);
+  }
+
   const view =
     workspace.status === "ready" || workspace.status === "refreshing"
       ? workspace.view
@@ -129,6 +227,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         : undefined;
   const dock = props.presentation === "dock";
   const projectId = props.projectId;
+  const busy = workspace.status === "loading" || workspace.status === "refreshing";
   const scopedProjects =
     view === undefined
       ? []
@@ -142,17 +241,94 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       ? view?.freshness
       : projectFreshnessFor(view, projectId);
   const normalizedSearch = search.trim().toLocaleLowerCase();
-  const visibleRows =
+  const scopedRows =
     view?.rows.filter(
-      (row) =>
-        (projectId === undefined || String(row.projectId) === String(projectId)) &&
-        pullRequestMatches(row, normalizedSearch),
+      (row) => projectId === undefined || String(row.projectId) === String(projectId),
     ) ?? [];
+  const filterCount = activeFilterCount(filters);
+  // The dock lists one Project's rows in the page's default order; sorting,
+  // grouping and filtering are the page's.
+  const visibleRows = sortPullRequests(
+    filterPullRequests(
+      scopedRows.filter((row) => pullRequestMatches(row, normalizedSearch)),
+      dock ? NO_PULL_REQUEST_FILTERS : filters,
+    ),
+    dock ? "updated" : sort,
+  );
   const freshnessStatus = scopedFreshness?.status ?? "loading";
   const hasProjects = scopedProjects.length > 0;
   // With no Project on GitHub there is nothing to refresh or search; saying
   // "Refresh to load" beside "No github.com origin" contradicted itself.
   const onGitHub = scopedProjects.some((project) => project.kind === "connected");
+  const ready = view !== undefined && hasProjects && onGitHub;
+  const connectedProjects = scopedProjects.filter(
+    (project): project is Extract<CodeProjectPullRequestConnection, { kind: "connected" }> =>
+      project.kind === "connected",
+  );
+  const unconnectedProjects = scopedProjects.filter((project) => project.kind === "unconnected");
+  const countCopy =
+    view === undefined
+      ? undefined
+      : pullRequestCountCopy(scopedFreshness ?? view.freshness, visibleRows.length);
+
+  const searchField = (
+    <label className="surface-toolbar__search code-project-pull-requests__search">
+      <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+      <span className="sr-only">Search pull requests</span>
+      <OctantInput
+        aria-label="Search pull requests"
+        onChange={(event) => setSearch(event.currentTarget.value)}
+        placeholder="Search pull requests"
+        ref={searchInput}
+        type="search"
+        value={search}
+      />
+      {search === "" ? null : (
+        <OctantButton
+          aria-label="Clear pull-request search"
+          className="code-project-pull-requests__search-clear"
+          onClick={() => {
+            setSearch("");
+            searchInput.current?.focus();
+          }}
+          type="button"
+          variant="ghost"
+        >
+          <X aria-hidden="true" size={14} strokeWidth={1.7} />
+        </OctantButton>
+      )}
+    </label>
+  );
+
+  const showGroups = grouped && !dock;
+  const groups = showGroups ? groupPullRequestsByRepository(visibleRows) : [];
+  // A connected Project with nothing to list still gets its group when grouping
+  // is on, so its settings stay reachable and its empty state is told.
+  const emptyConnected =
+    showGroups && normalizedSearch === "" && filterCount === 0
+      ? connectedProjects.filter(
+          (project) =>
+            !groups.some((group) => String(group.projectId) === String(project.projectId)),
+        )
+      : [];
+  const neverRefreshed = showGroups
+    ? []
+    : connectedProjects.filter((project) => {
+        if (view === undefined) return false;
+        const freshness = projectFreshnessFor(view, project.projectId);
+        return (
+          freshness.status === "empty" &&
+          freshness.lastSuccessfulRefreshAt === undefined &&
+          !scopedRows.some((row) => String(row.projectId) === String(project.projectId))
+        );
+      });
+  const backgroundNotes =
+    view === undefined || dock
+      ? []
+      : connectedProjects.flatMap((project) => {
+          const copy = backgroundRefreshCopy(backgroundRefreshStateFor(view, project.projectId));
+          return copy === undefined ? [] : [{ project, copy }];
+        });
 
   const body = (
     <div
@@ -161,60 +337,24 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       data-narrow={props.isNarrow === true ? "true" : "false"}
       data-presentation={dock ? "dock" : "page"}
     >
-      {view === undefined || !hasProjects || !onGitHub ? null : (
+      {!ready ? null : dock ? (
         <div className="surface-toolbar">
-          <label className="surface-toolbar__search code-project-pull-requests__search">
-            <Search aria-hidden="true" size={14} strokeWidth={1.7} />
-            <span className="sr-only">Search pull requests</span>
-            <OctantInput
-              aria-label="Search pull requests"
-              onChange={(event) => setSearch(event.currentTarget.value)}
-              placeholder="Search pull requests"
-              ref={searchInput}
-              type="search"
-              value={search}
-            />
-            {search === "" ? null : (
-              <OctantButton
-                aria-label="Clear pull-request search"
-                className="code-project-pull-requests__search-clear"
-                onClick={() => {
-                  setSearch("");
-                  searchInput.current?.focus();
-                }}
-                type="button"
-                variant="ghost"
-              >
-                <X aria-hidden="true" size={14} strokeWidth={1.7} />
-              </OctantButton>
-            )}
-          </label>
+          {searchField}
           <span
             className="oct-meta code-project-pull-requests__count"
             data-freshness={scopedFreshness?.status}
           >
-            {pullRequestCountCopy(scopedFreshness ?? view.freshness, visibleRows.length)}
+            {countCopy}
           </span>
-          {dock ? null : (
-            <OctantButton
-              aria-label="Refresh all"
-              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
-              onClick={() => void runRefresh({ kind: "refresh-all" })}
-              title="Refresh all pull requests"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-              Refresh all
-            </OctantButton>
-          )}
         </div>
+      ) : (
+        <div className="surface-toolbar">{searchField}</div>
       )}
 
       {workspace.status === "loading" ? (
         <ShellState
           eyebrow="Pull requests"
-          message="Reading the last authorized snapshot."
+          message="Open and draft pull requests will list here."
           state="loading"
           title="Loading pull requests"
         />
@@ -244,7 +384,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         <SurfaceEmpty
           action={
             <OctantButton
-              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
+              disabled={busy}
               onClick={() =>
                 void runRefresh(
                   projectId === undefined
@@ -270,7 +410,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           {workspace.message}
         </OctantAlert>
       ) : null}
-      {view === undefined || !hasProjects || !onGitHub ? null : (
+      {view === undefined || !ready ? null : (
         <>
           <p
             className="code-project-pull-requests__status"
@@ -285,6 +425,17 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               {workspace.message}
             </OctantAlert>
           ) : null}
+          {showGroups
+            ? null
+            : backgroundNotes.map(({ project, copy }) => (
+                <p
+                  className="code-project-pull-requests__status"
+                  key={String(project.projectId)}
+                  role="status"
+                >
+                  {project.projectName}: {copy}
+                </p>
+              ))}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
             <SurfaceEmpty
               action={
@@ -300,36 +451,95 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               title={`No pull requests match “${search.trim()}”`}
             />
           ) : null}
-          <div className="code-project-pull-requests__groups">
-            {scopedProjects.map((project) => {
-              const backgroundRefreshState = backgroundRefreshStateFor(view, project.projectId);
-              return (
-                <ProjectGroup
+          {visibleRows.length === 0 && normalizedSearch === "" && filterCount > 0 ? (
+            <SurfaceEmpty
+              action={
+                <OctantButton
+                  onClick={() => chooseFilters(NO_PULL_REQUEST_FILTERS)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Clear filters
+                </OctantButton>
+              }
+              title="No pull requests match these filters"
+            />
+          ) : null}
+          {visibleRows.length === 0 &&
+          normalizedSearch === "" &&
+          filterCount === 0 &&
+          !showGroups ? (
+            <p className="code-project-pull-requests__empty">
+              {listEmptyCopy(scopedFreshness ?? view.freshness)}
+            </p>
+          ) : null}
+          {showGroups ? (
+            <div className="code-project-pull-requests__groups">
+              {groups.map((group) => (
+                <RepositoryGroup
+                  busy={busy}
+                  key={group.key}
+                  onRefresh={() =>
+                    void runRefresh({ kind: "refresh-project", projectId: group.projectId })
+                  }
+                  onSelectRow={props.onSelectRow}
+                  project={connectedProjects.find(
+                    (project) => String(project.projectId) === String(group.projectId),
+                  )}
+                  rows={group.rows}
+                  selectedRowKey={props.selectedRowKey}
+                  title={`${group.owner}/${group.name}`}
+                  {...(props.backgroundRefresh === undefined
+                    ? {}
+                    : { backgroundRefresh: props.backgroundRefresh })}
+                  {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                  {...settingsNote(view, group.projectId)}
+                />
+              ))}
+              {emptyConnected.map((project) => (
+                <RepositoryGroup
+                  busy={busy}
+                  emptyCopy={projectEmptyCopy(projectFreshnessFor(view, project.projectId))}
                   key={String(project.projectId)}
-                  busy={workspace.status === "refreshing"}
                   onRefresh={() =>
                     void runRefresh({ kind: "refresh-project", projectId: project.projectId })
                   }
+                  onSelectRow={props.onSelectRow}
                   project={project}
-                  rows={visibleRows.filter(
-                    (row) => String(row.projectId) === String(project.projectId),
-                  )}
-                  freshness={projectFreshnessFor(view, project.projectId)}
-                  {...(props.backgroundRefresh === undefined || dock
+                  rows={[]}
+                  selectedRowKey={props.selectedRowKey}
+                  title={`${project.repositoryOwner}/${project.repositoryName}`}
+                  {...(props.backgroundRefresh === undefined
                     ? {}
                     : { backgroundRefresh: props.backgroundRefresh })}
-                  {...(props.agentMerge === undefined || dock
-                    ? {}
-                    : { agentMerge: props.agentMerge })}
-                  {...(backgroundRefreshState === undefined ? {} : { backgroundRefreshState })}
-                  {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
-                  {...(props.selectedRowKey === undefined
-                    ? {}
-                    : { selectedRowKey: props.selectedRowKey })}
+                  {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                  {...settingsNote(view, project.projectId)}
                 />
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : visibleRows.length === 0 ? null : (
+            <PullRequestRows
+              onSelectRow={props.onSelectRow}
+              rows={visibleRows}
+              selectedRowKey={props.selectedRowKey}
+            />
+          )}
+          {neverRefreshed.length === 0 ? null : (
+            <p className="code-project-pull-requests__notice">
+              Not refreshed yet: {neverRefreshed.map((project) => project.projectName).join(", ")}.
+            </p>
+          )}
+          {dock || unconnectedProjects.length === 0 ? null : (
+            <details className="code-project-pull-requests__notice" role="note">
+              <summary>
+                {unconnectedProjects.length === 1
+                  ? "1 Project is not on GitHub"
+                  : `${String(unconnectedProjects.length)} Projects are not on GitHub`}
+              </summary>
+              <span>{unconnectedProjects.map((project) => project.projectName).join(", ")}</span>
+            </details>
+          )}
         </>
       )}
     </div>
@@ -338,173 +548,522 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   if (dock) return body;
 
   return (
-    <Surface ariaLabel="Pull requests" measure="wide">
+    <Surface ariaLabel="Pull requests" className="code-project-pull-requests-surface">
       <SurfaceHeader
+        {...(ready && countCopy !== undefined ? { detail: countCopy } : {})}
         title="Pull requests"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+        {...(ready
+          ? {
+              actions: (
+                <>
+                  <SortMenu
+                    grouped={grouped}
+                    onGroupedChange={chooseGrouped}
+                    onSortChange={chooseSort}
+                    sort={sort}
+                  />
+                  <FilterMenu filters={filters} onChange={chooseFilters} />
+                  {grouped ? null : (
+                    <RepositorySettingsMenu
+                      busy={busy}
+                      onRefresh={(project) =>
+                        void runRefresh({ kind: "refresh-project", projectId: project.projectId })
+                      }
+                      projects={connectedProjects}
+                      {...(props.backgroundRefresh === undefined
+                        ? {}
+                        : { backgroundRefresh: props.backgroundRefresh })}
+                      {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                    />
+                  )}
+                  <OctantTooltip label="Refresh all pull requests">
+                    <OctantButton
+                      aria-label="Refresh all"
+                      className="code-project-pull-requests__icon-button"
+                      disabled={busy}
+                      onClick={() => void runRefresh({ kind: "refresh-all" })}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <RefreshCw aria-hidden="true" size={16} strokeWidth={1.5} />
+                    </OctantButton>
+                  </OctantTooltip>
+                </>
+              ),
+            }
+          : {})}
       />
       {body}
     </Surface>
   );
+
+  function settingsNote(
+    snapshot: CodeProjectPullRequestView,
+    id: CodeProjectPullRequestConnection["projectId"],
+  ): { readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState } {
+    const state = backgroundRefreshStateFor(snapshot, id);
+    return state === undefined ? {} : { backgroundRefreshState: state };
+  }
 }
 
-function ProjectGroup(props: {
-  readonly project: CodeProjectPullRequestConnection;
-  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
-  readonly freshness: CodeProjectPullRequestFreshness;
+function IconMenuTrigger(props: {
+  readonly label: string;
+  readonly tooltip: string;
+  readonly active?: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <OctantTooltip label={props.tooltip}>
+      <OctantMenuTrigger
+        aria-label={props.label}
+        className={`${octantButtonClassName({ variant: "ghost", size: "icon" })} code-project-pull-requests__icon-button`}
+      >
+        {props.children}
+        {props.active === true ? (
+          <span aria-hidden="true" className="code-project-pull-requests__active-dot" />
+        ) : null}
+      </OctantMenuTrigger>
+    </OctantTooltip>
+  );
+}
+
+function SortMenu(props: {
+  readonly sort: PullRequestSort;
+  readonly grouped: boolean;
+  readonly onSortChange: (sort: PullRequestSort) => void;
+  readonly onGroupedChange: (grouped: boolean) => void;
+}) {
+  return (
+    <OctantMenuRoot>
+      <IconMenuTrigger label="Sort pull requests" tooltip="Sort and group">
+        <ArrowUpDown aria-hidden="true" size={16} strokeWidth={1.5} />
+      </IconMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+          <OctantMenuPopup aria-label="Sort pull requests" className="min-w-56">
+            <OctantMenuGroup>
+              <OctantMenuGroupLabel>Sort by</OctantMenuGroupLabel>
+              <OctantMenuRadioGroup
+                onValueChange={(value) => {
+                  const next = oneOf(PULL_REQUEST_SORT_OPTIONS)(String(value));
+                  if (next !== undefined) props.onSortChange(next);
+                }}
+                value={props.sort}
+              >
+                {PULL_REQUEST_SORT_OPTIONS.map((option) => (
+                  <OctantMenuRadioItem
+                    closeOnClick
+                    key={option.value}
+                    label={option.label}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </OctantMenuRadioItem>
+                ))}
+              </OctantMenuRadioGroup>
+            </OctantMenuGroup>
+            <OctantMenuSeparator />
+            <OctantMenuCheckboxItem
+              checked={props.grouped}
+              closeOnClick={false}
+              label="Group by repository"
+              onCheckedChange={(checked) => props.onGroupedChange(checked)}
+            >
+              Group by repository
+            </OctantMenuCheckboxItem>
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
+  );
+}
+
+function FilterMenu(props: {
+  readonly filters: PullRequestFilters;
+  readonly onChange: (filters: PullRequestFilters) => void;
+}) {
+  const count = activeFilterCount(props.filters);
+  return (
+    <OctantMenuRoot>
+      <IconMenuTrigger
+        active={count > 0}
+        label={
+          count === 0 ? "Filter pull requests" : `Filter pull requests, ${String(count)} active`
+        }
+        tooltip="Filter"
+      >
+        <ListFilter aria-hidden="true" size={16} strokeWidth={1.5} />
+      </IconMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+          <OctantMenuPopup aria-label="Filter pull requests" className="min-w-56">
+            <FilterGroup<PullRequestStateFilter>
+              label="State"
+              onChange={(state) => props.onChange({ ...props.filters, state })}
+              options={PULL_REQUEST_STATE_OPTIONS}
+              value={props.filters.state}
+            />
+            <OctantMenuSeparator />
+            <FilterGroup<PullRequestReviewFilter>
+              label="Review"
+              onChange={(review) => props.onChange({ ...props.filters, review })}
+              options={PULL_REQUEST_REVIEW_OPTIONS}
+              value={props.filters.review}
+            />
+            <OctantMenuSeparator />
+            <FilterGroup<PullRequestChecksFilter>
+              label="Checks"
+              onChange={(checks) => props.onChange({ ...props.filters, checks })}
+              options={PULL_REQUEST_CHECKS_OPTIONS}
+              value={props.filters.checks}
+            />
+            {count === 0 ? null : (
+              <>
+                <OctantMenuSeparator />
+                <OctantMenuItem onClick={() => props.onChange(NO_PULL_REQUEST_FILTERS)}>
+                  Clear filters
+                </OctantMenuItem>
+              </>
+            )}
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
+  );
+}
+
+function FilterGroup<T extends string>(props: {
+  readonly label: string;
+  readonly options: ReadonlyArray<{ readonly value: T; readonly label: string }>;
+  readonly value: T;
+  readonly onChange: (value: T) => void;
+}) {
+  return (
+    <OctantMenuGroup>
+      <OctantMenuGroupLabel>{props.label}</OctantMenuGroupLabel>
+      <OctantMenuRadioGroup
+        onValueChange={(value) => {
+          const next = oneOf(props.options)(String(value));
+          if (next !== undefined) props.onChange(next);
+        }}
+        value={props.value}
+      >
+        {props.options.map((option) => (
+          <OctantMenuRadioItem
+            closeOnClick={false}
+            key={option.value}
+            label={option.label}
+            value={option.value}
+          >
+            {option.label}
+          </OctantMenuRadioItem>
+        ))}
+      </OctantMenuRadioGroup>
+    </OctantMenuGroup>
+  );
+}
+
+/**
+ * What the heavy Project header used to hold, for one Project: the two
+ * switches that change what the host does on its own, and a refresh. They are
+ * checked items rather than switches, with the same names and the same setters;
+ * the server still owns both settings and refuses a device that may not set
+ * them.
+ */
+function ProjectSettingsItems(props: {
+  readonly project: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>;
   readonly busy: boolean;
   readonly onRefresh: () => void;
-  readonly selectedRowKey?: string;
-  readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
-  readonly backgroundRefresh?: {
-    readonly enabledFor: (projectId: ProjectId) => boolean;
-    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  };
-  readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
-  readonly agentMerge?: {
-    readonly enabledFor: (projectId: ProjectId) => boolean;
-    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  };
+  readonly backgroundRefresh?: ProjectSetting;
+  readonly agentMerge?: ProjectSetting;
 }) {
-  const repositories = groupByRepository(props.rows);
-  const backgroundRefresh =
-    props.project.kind === "connected" ? props.backgroundRefresh : undefined;
-  const backgroundRefreshEnabled = backgroundRefresh?.enabledFor(props.project.projectId) ?? false;
-  const agentMerge = props.project.kind === "connected" ? props.agentMerge : undefined;
+  const { project } = props;
   return (
-    <section
-      aria-label={`Project ${props.project.projectName}`}
-      className="surface-section code-project-pull-requests__project"
-    >
-      <div className="surface-section__head code-project-pull-requests__project-header">
-        <div className="surface-row__copy">
-          <h2 className="oct-section-label">{props.project.projectName}</h2>
-          {props.project.kind === "connected" ? (
-            <span className="oct-meta oct-meta--mono">
-              {props.project.repositoryOwner}/{props.project.repositoryName}
-            </span>
-          ) : (
-            <span className="oct-meta">Not on GitHub</span>
-          )}
-        </div>
-        <div className="code-project-pull-requests__project-actions">
-          {backgroundRefresh === undefined ? null : (
-            <div className="code-project-pull-requests__auto-refresh">
-              <span>Auto-refresh</span>
-              <OctantSwitch
-                checked={backgroundRefreshEnabled}
-                disabled={props.busy}
-                label={`Auto-refresh ${props.project.projectName} pull requests`}
-                onCheckedChange={(enabled) =>
-                  void backgroundRefresh.setEnabled(props.project.projectId, enabled)
-                }
-              />
-            </div>
-          )}
-          {agentMerge === undefined ? null : (
-            <div className="code-project-pull-requests__auto-refresh">
-              <span>Agents may merge</span>
-              <OctantSwitch
-                checked={agentMerge.enabledFor(props.project.projectId)}
-                disabled={props.busy}
-                label={`Let agents merge ${props.project.projectName} pull requests`}
-                onCheckedChange={(enabled) =>
-                  void agentMerge.setEnabled(props.project.projectId, enabled)
-                }
-              />
-            </div>
-          )}
-          <OctantButton
-            aria-label={`Refresh ${props.project.projectName}`}
-            disabled={props.busy}
-            onClick={props.onRefresh}
-            size="icon"
-            title={`Refresh ${props.project.projectName}`}
-            type="button"
-            variant="ghost"
-          >
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-          </OctantButton>
-        </div>
+    <>
+      {props.backgroundRefresh === undefined ? null : (
+        <OctantMenuCheckboxItem
+          aria-label={`Auto-refresh ${project.projectName} pull requests`}
+          checked={props.backgroundRefresh.enabledFor(project.projectId)}
+          closeOnClick={false}
+          disabled={props.busy}
+          label="Auto-refresh"
+          onCheckedChange={(enabled) =>
+            void props.backgroundRefresh?.setEnabled(project.projectId, enabled)
+          }
+        >
+          Auto-refresh
+        </OctantMenuCheckboxItem>
+      )}
+      {props.agentMerge === undefined ? null : (
+        <OctantMenuCheckboxItem
+          aria-label={`Let agents merge ${project.projectName} pull requests`}
+          checked={props.agentMerge.enabledFor(project.projectId)}
+          closeOnClick={false}
+          disabled={props.busy}
+          label="Agents may merge"
+          onCheckedChange={(enabled) =>
+            void props.agentMerge?.setEnabled(project.projectId, enabled)
+          }
+        >
+          Agents may merge
+        </OctantMenuCheckboxItem>
+      )}
+      <OctantMenuItem
+        aria-label={`Refresh ${project.projectName}`}
+        disabled={props.busy}
+        onClick={props.onRefresh}
+      >
+        Refresh
+      </OctantMenuItem>
+    </>
+  );
+}
+
+/** The ungrouped page's way to each Project's settings: one group per Project. */
+function RepositorySettingsMenu(props: {
+  readonly projects: ReadonlyArray<
+    Extract<CodeProjectPullRequestConnection, { kind: "connected" }>
+  >;
+  readonly busy: boolean;
+  readonly onRefresh: (
+    project: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+  ) => void;
+  readonly backgroundRefresh?: ProjectSetting;
+  readonly agentMerge?: ProjectSetting;
+}) {
+  return (
+    <OctantMenuRoot>
+      <IconMenuTrigger label="Repository settings" tooltip="Repository settings">
+        <Settings2 aria-hidden="true" size={16} strokeWidth={1.5} />
+      </IconMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+          <OctantMenuPopup aria-label="Repository settings" className="min-w-56">
+            {props.projects.map((project, index) => (
+              <div key={String(project.projectId)}>
+                {index === 0 ? null : <OctantMenuSeparator />}
+                <OctantMenuGroup>
+                  <OctantMenuGroupLabel>
+                    {project.repositoryOwner}/{project.repositoryName}
+                  </OctantMenuGroupLabel>
+                  <ProjectSettingsItems
+                    busy={props.busy}
+                    onRefresh={() => props.onRefresh(project)}
+                    project={project}
+                    {...(props.backgroundRefresh === undefined
+                      ? {}
+                      : { backgroundRefresh: props.backgroundRefresh })}
+                    {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                  />
+                </OctantMenuGroup>
+              </div>
+            ))}
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
+  );
+}
+
+function RepositoryGroup(props: {
+  readonly title: string;
+  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly project: Extract<CodeProjectPullRequestConnection, { kind: "connected" }> | undefined;
+  readonly busy: boolean;
+  readonly onRefresh: () => void;
+  readonly emptyCopy?: string;
+  readonly selectedRowKey: string | undefined;
+  readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
+  readonly backgroundRefresh?: ProjectSetting;
+  readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
+  readonly agentMerge?: ProjectSetting;
+}) {
+  const note = backgroundRefreshCopy(props.backgroundRefreshState);
+  return (
+    <section aria-label={props.title} className="code-project-pull-requests__group">
+      <div className="code-project-pull-requests__group-head">
+        <h2 className="code-project-pull-requests__group-title">{props.title}</h2>
+        <span className="oct-meta code-project-pull-requests__group-count">
+          {props.rows.length}
+        </span>
+        {props.project === undefined ? null : (
+          <OctantMenuRoot>
+            <IconMenuTrigger label={`${props.title} settings`} tooltip="Repository settings">
+              <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.5} />
+            </IconMenuTrigger>
+            <OctantMenuPortal>
+              <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+                <OctantMenuPopup aria-label={`${props.title} settings`} className="min-w-56">
+                  <OctantMenuGroup>
+                    <OctantMenuGroupLabel>{props.title}</OctantMenuGroupLabel>
+                    <ProjectSettingsItems
+                      busy={props.busy}
+                      onRefresh={props.onRefresh}
+                      project={props.project}
+                      {...(props.backgroundRefresh === undefined
+                        ? {}
+                        : { backgroundRefresh: props.backgroundRefresh })}
+                      {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                    />
+                  </OctantMenuGroup>
+                </OctantMenuPopup>
+              </OctantMenuPositioner>
+            </OctantMenuPortal>
+          </OctantMenuRoot>
+        )}
       </div>
-      {backgroundRefreshCopy(props.backgroundRefreshState) === undefined ? null : (
-        <p className="surface-section__note" role="status">
-          {backgroundRefreshCopy(props.backgroundRefreshState)}
+      {note === undefined ? null : (
+        <p className="code-project-pull-requests__status" role="status">
+          {note}
         </p>
       )}
-      {props.project.kind === "unconnected" ? null : repositories.length === 0 ? (
-        <p className="surface-section__note">{projectEmptyCopy(props.freshness)}</p>
+      {props.rows.length === 0 ? (
+        props.emptyCopy === undefined ? null : (
+          <p className="code-project-pull-requests__empty">{props.emptyCopy}</p>
+        )
       ) : (
-        repositories.map((group) => (
-          <section
-            aria-label={`${group.owner}/${group.name}`}
-            className="code-project-pull-requests__repository"
-            key={`${group.owner}/${group.name}`}
-          >
-            <ul className="code-project-pull-requests__list">
-              {group.rows.map((row) => {
-                const rowKey = projectPullRequestKey(row);
-                const selected = props.selectedRowKey === rowKey;
-                return (
-                  <li key={rowKey}>
-                    <OctantButton
-                      aria-pressed={selected}
-                      className="code-project-pull-requests__row"
-                      onClick={() => props.onSelectRow?.(row)}
-                      type="button"
-                      variant="bare"
-                    >
-                      <GitPullRequest
-                        aria-hidden="true"
-                        className="code-project-pull-requests__icon"
-                        size={16}
-                        strokeWidth={1.7}
-                      />
-                      <div className="code-project-pull-requests__row-content">
-                        <div className="code-project-pull-requests__title-line">
-                          <span className="code-project-pull-requests__title" title={row.title}>
-                            {row.title}
-                          </span>
-                          <span className="code-project-pull-requests__number">#{row.number}</span>
-                        </div>
-                        <div className="code-project-pull-requests__details">
-                          <span>{row.author}</span>
-                          <span aria-hidden="true">·</span>
-                          <time dateTime={row.updatedAt} title={formatUpdatedAt(row.updatedAt)}>
-                            {relativeTimeLabel(row.updatedAt)}
-                          </time>
-                          <span aria-hidden="true">·</span>
-                          <span className="code-project-pull-requests__branch">
-                            {row.headBranch} → {row.baseBranch}
-                          </span>
-                        </div>
-                        <div className="code-project-pull-requests__meta">
-                          {row.draft ? <StatusChip label="Draft" status="neutral" /> : null}
-                          <StatusChip label={`Checks ${row.checks}`} status={checksStatus(row)} />
-                          <StatusChip
-                            label={`Review ${reviewCopy(row.review)}`}
-                            status={reviewStatus(row)}
-                          />
-                          <StatusChip
-                            label={mergeabilityCopy(row.mergeability)}
-                            status={mergeabilityStatus(row)}
-                          />
-                        </div>
-                        {row.linkedThreads.length === 0 ? null : (
-                          <div className="code-project-pull-requests__linked">
-                            Linked: {row.linkedThreads.map((thread) => thread.title).join(", ")}
-                          </div>
-                        )}
-                      </div>
-                    </OctantButton>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))
+        <PullRequestRows
+          onSelectRow={props.onSelectRow}
+          rows={props.rows}
+          selectedRowKey={props.selectedRowKey}
+        />
       )}
     </section>
+  );
+}
+
+function PullRequestRows(props: {
+  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly selectedRowKey: string | undefined;
+  readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
+}) {
+  return (
+    <ul className="code-project-pull-requests__list">
+      {props.rows.map((row) => {
+        const rowKey = projectPullRequestKey(row);
+        return (
+          <li key={rowKey}>
+            <PullRequestRow
+              onSelect={() => props.onSelectRow?.(row)}
+              row={row}
+              selected={props.selectedRowKey === rowKey}
+            />
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function stateGlyph(row: CodeProjectPullRequestRow): {
+  readonly label: string;
+  readonly tone: "open" | "draft" | "merged" | "closed";
+  readonly Icon: typeof GitPullRequest;
+} {
+  if (row.state === "merged") return { label: "Merged", tone: "merged", Icon: GitMerge };
+  if (row.state === "closed")
+    return { label: "Closed", tone: "closed", Icon: GitPullRequestClosed };
+  if (row.draft) return { label: "Draft", tone: "draft", Icon: GitPullRequestDraft };
+  return { label: "Open", tone: "open", Icon: GitPullRequest };
+}
+
+/**
+ * One pull request: the title, what needs attention, then one quiet line of
+ * where it lives and how old it is. The row is the only control; opening it is
+ * the shell's decision.
+ */
+function PullRequestRow(props: {
+  readonly row: CodeProjectPullRequestRow;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+}) {
+  const { row } = props;
+  const glyph = stateGlyph(row);
+  const attention = pullRequestAttention(row);
+  const sentence = pullRequestStatusSentence(row);
+  const resolved = attention === undefined && row.mergeability === "mergeable";
+  const summary = (
+    <>
+      {attention === undefined ? null : (
+        <span aria-hidden="true">
+          <StatusChip label={attention.label} status={attention.tone} />
+        </span>
+      )}
+      {resolved ? (
+        <Check
+          aria-hidden="true"
+          className="code-project-pull-requests__ok"
+          size={14}
+          strokeWidth={1.8}
+        />
+      ) : null}
+      <span className="sr-only">{sentence}</span>
+    </>
+  );
+  return (
+    <OctantButton
+      aria-pressed={props.selected}
+      className="code-project-pull-requests__row"
+      onClick={props.onSelect}
+      type="button"
+      variant="bare"
+    >
+      <span className="code-project-pull-requests__title" title={row.title}>
+        {row.title}
+      </span>
+      <span className="code-project-pull-requests__status-cell">
+        {attention === undefined && !resolved ? (
+          summary
+        ) : (
+          <OctantTooltip
+            label={
+              <span className="code-project-pull-requests__tooltip">
+                <span>{sentence}</span>
+                <span>
+                  {row.headBranch} → {row.baseBranch}
+                </span>
+              </span>
+            }
+            side="top"
+          >
+            <span className="code-project-pull-requests__status-trigger">{summary}</span>
+          </OctantTooltip>
+        )}
+      </span>
+      <span className="code-project-pull-requests__meta">
+        <span
+          aria-label={glyph.label}
+          className="code-project-pull-requests__state"
+          data-state={glyph.tone}
+          role="img"
+        >
+          <glyph.Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+        </span>
+        <span className="code-project-pull-requests__meta-text">{row.repositoryName}</span>
+        <span className="code-project-pull-requests__meta-text">{row.author}</span>
+        <time
+          className="code-project-pull-requests__meta-text"
+          dateTime={row.updatedAt}
+          title={formatUpdatedAt(row.updatedAt)}
+        >
+          {compactAge(row.updatedAt)}
+        </time>
+        {row.linkedThreads.length === 0 ? null : (
+          <span
+            className="code-project-pull-requests__linked"
+            title={`Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
+          >
+            <Link2 aria-hidden="true" size={12} strokeWidth={1.7} />
+            <span className="sr-only">
+              Linked: {row.linkedThreads.map((thread) => thread.title).join(", ")}
+            </span>
+          </span>
+        )}
+      </span>
+      <span className="code-project-pull-requests__number">#{row.number}</span>
+    </OctantButton>
   );
 }
 
@@ -580,25 +1139,6 @@ function backgroundRefreshCopy(
   return undefined;
 }
 
-/**
- * What is holding this pull request up, if anything.
- *
- * Every fact used to carry its own colour, so one row could show a red
- * "Checks failing", an amber "Review pending" and a green "Mergeable" at once
- * and contradict itself at a glance. The facts all still show; only the one
- * that actually blocks the merge is coloured, and the rest read as neutral.
- */
-function blockingFact(
-  row: CodeProjectPullRequestRow,
-): "mergeability" | "checks" | "review" | undefined {
-  if (row.mergeability === "conflicting") return "mergeability";
-  if (row.checks === "failing") return "checks";
-  if (row.review === "changes-requested") return "review";
-  if (row.checks === "pending") return "checks";
-  if (row.review === "pending") return "review";
-  return undefined;
-}
-
 export function checksStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
@@ -617,12 +1157,6 @@ export function reviewStatus(
   return "neutral";
 }
 
-export function mergeabilityCopy(value: CodeProjectPullRequestRow["mergeability"]): string {
-  if (value === "mergeable") return "Mergeable";
-  if (value === "conflicting") return "Conflicts";
-  return "Mergeability unknown";
-}
-
 export function mergeabilityStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "negative" | "neutral" {
@@ -630,29 +1164,6 @@ export function mergeabilityStatus(
   // Nothing blocks it, so this is the one row that may say so in colour.
   if (row.mergeability === "mergeable" && blockingFact(row) === undefined) return "positive";
   return "neutral";
-}
-
-function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): ReadonlyArray<{
-  readonly owner: string;
-  readonly name: string;
-  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
-}> {
-  const groups: Array<{
-    owner: string;
-    name: string;
-    rows: CodeProjectPullRequestRow[];
-  }> = [];
-  for (const row of rows) {
-    const existing = groups.find(
-      (group) => group.owner === row.repositoryOwner && group.name === row.repositoryName,
-    );
-    if (existing === undefined) {
-      groups.push({ owner: row.repositoryOwner, name: row.repositoryName, rows: [row] });
-    } else {
-      existing.rows.push(row);
-    }
-  }
-  return groups;
 }
 
 export function truncationCopy(view: CodeProjectPullRequestView, dock: boolean): string {
@@ -734,12 +1245,13 @@ export function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): st
   return "No open or draft pull requests.";
 }
 
-export function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {
-  if (review === "changes-requested") return "changes requested";
-  // The raw value reads as "Review none", which is not a sentence about a
-  // pull request nobody has looked at yet.
-  if (review === "none") return "not started";
-  return review;
+/** The one sentence a list with nothing in it says about what will fill it. */
+function listEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
+  if (freshness.status === "empty" && freshness.lastSuccessfulRefreshAt === undefined) {
+    return "Open and draft pull requests will list here once a Project is refreshed.";
+  }
+  if (freshness.status === "stale") return "No cached pull requests to show.";
+  return "No open or draft pull requests.";
 }
 
 function formatUpdatedAt(value: string): string {

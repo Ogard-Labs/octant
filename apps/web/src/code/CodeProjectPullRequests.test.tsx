@@ -70,8 +70,82 @@ function view(overrides: Record<string, unknown> = {}): CodeProjectPullRequestVi
   });
 }
 
+function memoryStorage(initial: Record<string, string> = {}): Pick<Storage, "getItem" | "setItem"> {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => void values.set(key, value),
+  };
+}
+
+type RowOverrides = Record<string, unknown>;
+
+/** Three pull requests across two repositories, each with a distinct age. */
+function threeRepositoryView(): CodeProjectPullRequestView {
+  const base = {
+    projectId: projectA,
+    projectName: "Octant",
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    draft: false,
+    state: "open",
+    mergeability: "mergeable",
+    author: "octocat",
+    baseBranch: "development",
+    headBranch: "feature/x",
+    checks: "passing",
+    review: "approved",
+    linkedThreads: [],
+  };
+  const rows: ReadonlyArray<RowOverrides> = [
+    { ...base, number: 1, title: "Oldest in octant", updatedAt: "2026-08-20T07:00:00.000Z" },
+    { ...base, number: 2, title: "Newest in octant", updatedAt: "2026-08-22T07:00:00.000Z" },
+    {
+      ...base,
+      projectId: projectB,
+      projectName: "Aurora",
+      repositoryName: "aurora",
+      number: 3,
+      title: "Middle in aurora",
+      updatedAt: "2026-08-21T07:00:00.000Z",
+    },
+  ];
+  return view({
+    projects: [
+      {
+        kind: "connected",
+        projectId: projectA,
+        projectName: "Octant",
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+      },
+      {
+        kind: "connected",
+        projectId: projectB,
+        projectName: "Aurora",
+        repositoryOwner: "octant",
+        repositoryName: "aurora",
+      },
+    ],
+    rows,
+  });
+}
+
+/** Opens a header menu once any menu that was open has finished closing. */
+async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await user.click(screen.getByRole("button", { name }));
+}
+
+function titlesInOrder(): ReadonlyArray<string> {
+  return Array.from(document.querySelectorAll(".code-project-pull-requests__title")).map(
+    (element) => element.textContent ?? "",
+  );
+}
+
 function renderWorkspace(
   options: {
+    readonly storage?: Pick<Storage, "getItem" | "setItem">;
     readonly load?: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
     readonly refresh?: (
       command: CodeProjectPullRequestRefreshCommand,
@@ -102,6 +176,7 @@ function renderWorkspace(
       load={load}
       refresh={refresh}
       onClose={() => undefined}
+      storage={options.storage ?? memoryStorage()}
       {...(options.onSelectRow === undefined ? {} : { onSelectRow: options.onSelectRow })}
       {...(options.backgroundRefresh === undefined
         ? {}
@@ -124,8 +199,8 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("colours only what is blocking a pull request, and dates it in words", async () => {
-    // The clock is pinned so "3h ago" is stable, but time still advances, or
+  it("names the one thing holding a pull request up, and dates it compactly", async () => {
+    // The clock is pinned so "3h" is stable, but time still advances, or
     // every `findBy` in this file waits on a clock that never moves.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-08-22T10:00:00.000Z"));
@@ -141,22 +216,76 @@ describe("CodeProjectPullRequests", () => {
 
       // Red "Checks failing" beside a green "Mergeable" told the reader two
       // opposite things about one row. Failing checks are what blocks it, so
-      // that is the only fact wearing a colour.
+      // that is the only word on the row's trailing edge, and the others stay
+      // available as text.
       const failing = await screen.findByText("Checks failing");
-      const mergeable = screen.getByText("Mergeable");
-      const pending = screen.getByText("Review pending");
       expect(failing.closest("[data-status]")).toHaveAttribute("data-status", "negative");
-      expect(mergeable.closest("[data-status]")).toHaveAttribute("data-status", "neutral");
-      expect(pending.closest("[data-status]")).toHaveAttribute("data-status", "neutral");
+      expect(screen.queryByText("Mergeable")).toBeNull();
+      expect(screen.queryByText("Review pending")).toBeNull();
+      expect(
+        screen.getByText("Checks failing. Review pending. Mergeable.", { selector: ".sr-only" }),
+      ).toBeInTheDocument();
 
       // "22.8.2026, 09:00:00" is a fact nobody reads; the exact time stays on
       // the element for anyone who wants it.
-      const when = screen.getByText("3h ago");
+      const when = screen.getByText("3h");
       expect(when.tagName).toBe("TIME");
       expect(when).toHaveAttribute("title");
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("draws a row as a title and one meta line with the number at the trailing edge", async () => {
+    renderWorkspace();
+
+    const row = await screen.findByRole("button", { name: /List active pull requests/i });
+    expect(within(row).getByText("List active pull requests")).toHaveClass(
+      "code-project-pull-requests__title",
+    );
+    const meta = row.querySelector(".code-project-pull-requests__meta");
+    expect(meta).not.toBeNull();
+    expect(within(row).getByRole("img", { name: "Open" })).toBeInTheDocument();
+    expect(within(meta as HTMLElement).getByText("octant")).toBeVisible();
+    expect(within(meta as HTMLElement).getByText("octocat")).toBeVisible();
+    expect(within(meta as HTMLElement).getByText(/^(\d+[mhd]|now)$/)).toBeVisible();
+    expect(within(row).getByText("#12")).toHaveClass("code-project-pull-requests__number");
+    // Nothing is wrong with it, so nothing is said but a check.
+    expect(row.querySelector(".code-project-pull-requests__ok")).not.toBeNull();
+    expect(within(row).queryByText("Checks passing")).toBeNull();
+    expect(
+      within(row).getByText("Checks passing. Review approved. Mergeable.", {
+        selector: ".sr-only",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText("Linked: Manual refresh", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+  });
+
+  it("says Draft, Conflicts or the pending review in words on the trailing edge", async () => {
+    const base = view().rows[0];
+    if (base === undefined) throw new Error("fixture has a row");
+    const rows = [
+      { ...base, number: 1, title: "A draft", draft: true },
+      { ...base, number: 2, title: "A conflict", mergeability: "conflicting" as const },
+      { ...base, number: 3, title: "Awaiting review", review: "pending" as const },
+    ];
+    renderWorkspace({ load: async () => ({ ...view(), rows }) });
+
+    const draft = await screen.findByRole("button", { name: /A draft/ });
+    expect(within(draft).getByText("Draft", { selector: "[data-status]" })).toBeVisible();
+    expect(within(draft).getByRole("img", { name: "Draft" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("button", { name: /A conflict/ })).getByText("Conflicts", {
+        selector: "[data-status]",
+      }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("button", { name: /Awaiting review/ })).getByText("Review pending", {
+        selector: "[data-status]",
+      }),
+    ).toBeVisible();
   });
 
   it("guides setup instead of offering refresh and search before a Code Project exists", async () => {
@@ -171,57 +300,182 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
   });
 
-  it("groups rows by Project then repository and keeps an unconnected Project visible", async () => {
+  it("lists rows flat by default and keeps Projects off GitHub to one line at the foot", async () => {
+    const user = userEvent.setup();
     renderWorkspace();
 
-    const octant = await screen.findByRole("region", { name: "Project Octant" });
-    const notes = screen.getByRole("region", { name: "Project Local notes" });
-    expect(octant.querySelector(".code-project-pull-requests__project-header")).toHaveClass(
-      "surface-section__head",
-    );
-    expect(within(octant).getByText("octant/octant")).toBeVisible();
-    expect(within(octant).getByText("#12")).toBeVisible();
-    expect(within(octant).getByText("octocat")).toBeVisible();
-    expect(within(octant).getByText("feature/manual-refresh → development")).toBeVisible();
-    expect(within(octant).getByText("Checks passing")).toBeVisible();
-    expect(within(octant).getByText("Review approved")).toBeVisible();
-    expect(within(octant).getByText("Linked: Manual refresh")).toBeVisible();
-    expect(within(notes).getByText("Not on GitHub")).toBeVisible();
-    expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText("List active pull requests")).toBeVisible();
+    // No block per Project: the Project that is not on GitHub is one notice,
+    // with its name a disclosure away.
+    expect(screen.queryByRole("region", { name: "Local notes" })).toBeNull();
+    const notice = screen.getByRole("note");
+    expect(notice).toHaveTextContent("1 Project is not on GitHub");
+    await user.click(within(notice).getByText("1 Project is not on GitHub"));
+    expect(within(notice).getByText("Local notes")).toBeVisible();
+    // The header carries the title and the count; the toolbar only the search.
+    expect(within(screen.getByRole("banner")).getByText("1 pull request")).toBeVisible();
   });
 
-  it("toggles a connected Project's auto-refresh through the authoritative setter", async () => {
+  it("orders the list by update time, least recent first, or by repository", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({ load: async () => threeRepositoryView() });
+    await screen.findByText("Newest in octant");
+    expect(titlesInOrder()).toEqual(["Newest in octant", "Middle in aurora", "Oldest in octant"]);
+
+    await openMenu(user, "Sort pull requests");
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Recently updated",
+      "Least recently updated",
+      "Repository",
+    ]);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Least recently updated" }));
+    expect(titlesInOrder()).toEqual(["Oldest in octant", "Middle in aurora", "Newest in octant"]);
+
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Repository" }));
+    // aurora sorts before octant; inside a repository the newest comes first.
+    expect(titlesInOrder()).toEqual(["Middle in aurora", "Newest in octant", "Oldest in octant"]);
+  });
+
+  it("remembers the sort, grouping and filters the next time the page opens", async () => {
+    const user = userEvent.setup();
+    const storage = memoryStorage();
+    const first = render(
+      <CodeProjectPullRequests
+        load={async () => threeRepositoryView()}
+        refresh={async () => threeRepositoryView()}
+        storage={storage}
+      />,
+    );
+    await screen.findByText("Newest in octant");
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Repository" }));
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Group by repository" }));
+    first.unmount();
+
+    render(
+      <CodeProjectPullRequests
+        load={async () => threeRepositoryView()}
+        refresh={async () => threeRepositoryView()}
+        storage={storage}
+      />,
+    );
+    expect(await screen.findByRole("region", { name: "octant/aurora" })).toBeVisible();
+    expect(titlesInOrder()).toEqual(["Middle in aurora", "Newest in octant", "Oldest in octant"]);
+  });
+
+  it("groups by repository under a slim header with its count", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({ load: async () => threeRepositoryView() });
+    await screen.findByText("Newest in octant");
+
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Group by repository" }));
+
+    const octant = screen.getByRole("region", { name: "octant/octant" });
+    const aurora = screen.getByRole("region", { name: "octant/aurora" });
+    expect(within(octant).getByRole("heading", { name: "octant/octant" })).toBeVisible();
+    expect(within(octant).getByText("2")).toBeVisible();
+    expect(within(aurora).getByText("1")).toBeVisible();
+    expect(within(octant).getByText("Newest in octant")).toBeVisible();
+    expect(within(octant).queryByText("Middle in aurora")).toBeNull();
+    // The group whose newest row is newest comes first under the default sort.
+    expect(octant.compareDocumentPosition(aurora) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("narrows the list by review and checks and says so when nothing is left", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0];
+    if (base === undefined) throw new Error("fixture has a row");
+    const rows = [
+      { ...base, number: 1, title: "Green", checks: "passing" as const },
+      { ...base, number: 2, title: "Red", checks: "failing" as const },
+    ];
+    renderWorkspace({ load: async () => ({ ...view(), rows }) });
+    await screen.findByText("Green");
+
+    await openMenu(user, "Filter pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Checks failing" }));
+    expect(titlesInOrder()).toEqual(["Red"]);
+    expect(screen.getByRole("button", { name: "Filter pull requests, 1 active" })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    await openMenu(user, "Filter pull requests, 1 active");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Draft" }));
+    expect(await screen.findByText("No pull requests match these filters")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(titlesInOrder()).toHaveLength(2);
+  });
+
+  it("toggles a connected Project's auto-refresh from its group menu through the authoritative setter", async () => {
     const user = userEvent.setup();
     const setEnabled = vi.fn(async () => true);
     renderWorkspace({
       backgroundRefresh: { enabledFor: () => false, setEnabled },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
     });
     await screen.findByText("List active pull requests");
 
-    const toggle = screen.getByRole("switch", { name: "Auto-refresh Octant pull requests" });
+    await user.click(screen.getByRole("button", { name: "octant/octant settings" }));
+    const toggle = await screen.findByRole("menuitemcheckbox", {
+      name: "Auto-refresh Octant pull requests",
+    });
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Auto-refresh")).toBeVisible();
-    // The unconnected Project has nothing to refresh, so it gets no toggle.
-    expect(
-      screen.queryByRole("switch", { name: "Auto-refresh Local notes pull requests" }),
-    ).not.toBeInTheDocument();
+    expect(toggle).toHaveTextContent("Auto-refresh");
+    // A Project that is not on GitHub has nothing to refresh, so it has no group.
+    expect(screen.queryByRole("button", { name: /Local notes/ })).toBeNull();
 
     await user.click(toggle);
     expect(setEnabled).toHaveBeenCalledWith(projectA, true);
   });
 
+  it("reaches both Project switches from the page's menu when the list is not grouped", async () => {
+    const user = userEvent.setup();
+    const setBackground = vi.fn(async () => true);
+    const setMerge = vi.fn(async () => true);
+    renderWorkspace({
+      backgroundRefresh: { enabledFor: () => false, setEnabled: setBackground },
+      agentMerge: { enabledFor: () => true, setEnabled: setMerge },
+    });
+    await screen.findByText("List active pull requests");
+
+    await openMenu(user, "Repository settings");
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Auto-refresh Octant pull requests" }),
+    );
+    expect(setBackground).toHaveBeenCalledWith(projectA, true);
+    // A checked item leaves the menu open, so the next toggle is in the same one.
+    await user.keyboard("{Escape}");
+
+    await openMenu(user, "Repository settings");
+    const merge = await screen.findByRole("menuitemcheckbox", {
+      name: "Let agents merge Octant pull requests",
+    });
+    expect(merge).toHaveAttribute("aria-checked", "true");
+    expect(merge).toHaveTextContent("Agents may merge");
+    await user.click(merge);
+    expect(setMerge).toHaveBeenCalledWith(projectA, false);
+  });
+
   it("lets a local window turn on agents merging for a connected Project only", async () => {
     const user = userEvent.setup();
     const setEnabled = vi.fn(async () => true);
-    renderWorkspace({ agentMerge: { enabledFor: () => false, setEnabled } });
+    renderWorkspace({
+      agentMerge: { enabledFor: () => false, setEnabled },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
     await screen.findByText("List active pull requests");
 
-    const toggle = screen.getByRole("switch", {
+    await user.click(screen.getByRole("button", { name: "octant/octant settings" }));
+    const toggle = await screen.findByRole("menuitemcheckbox", {
       name: "Let agents merge Octant pull requests",
     });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(
-      screen.queryByRole("switch", { name: "Let agents merge Local notes pull requests" }),
+      screen.queryByRole("menuitemcheckbox", {
+        name: "Let agents merge Local notes pull requests",
+      }),
     ).not.toBeInTheDocument();
 
     await user.click(toggle);
@@ -240,22 +494,25 @@ describe("CodeProjectPullRequests", () => {
 
     expect(
       await screen.findByText(
-        "Auto-refresh is unavailable: the GitHub CLI is missing or not authenticated.",
+        "Octant: Auto-refresh is unavailable: the GitHub CLI is missing or not authenticated.",
       ),
     ).toBeVisible();
   });
 
-  it("refreshes all Projects or one Project only when those buttons are used", async () => {
+  it("refreshes all Projects or one Project only when those controls are used", async () => {
     const user = userEvent.setup();
-    const { refresh } = renderWorkspace();
+    const { refresh } = renderWorkspace({
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
     await screen.findByText("List active pull requests");
 
     await user.click(screen.getByRole("button", { name: "Refresh all" }));
     await waitFor(() => expect(refresh).toHaveBeenCalledWith({ kind: "refresh-all" }));
 
-    await user.click(screen.getByRole("button", { name: "Refresh Local notes" }));
+    await user.click(await screen.findByRole("button", { name: "octant/octant settings" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Refresh Octant" }));
     await waitFor(() =>
-      expect(refresh).toHaveBeenCalledWith({ kind: "refresh-project", projectId: projectB }),
+      expect(refresh).toHaveBeenCalledWith({ kind: "refresh-project", projectId: projectA }),
     );
     // The surface reads and refreshes pull requests; it never mutates one. A
     // row's own name carries its review state ("Review approved"), so only a
@@ -368,14 +625,31 @@ describe("CodeProjectPullRequests", () => {
         { projectId: projectB, freshness: { status: "empty" } },
       ],
     });
-    renderWorkspace({ load: async () => perProject, refresh: async () => perProject });
+    const { rerender } = render(
+      <CodeProjectPullRequests
+        load={async () => perProject}
+        refresh={async () => perProject}
+        storage={memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" })}
+      />,
+    );
 
-    const aurora = await screen.findByRole("region", { name: "Project AuroraDocs" });
-    const divetools = screen.getByRole("region", { name: "Project Divetools" });
+    const aurora = await screen.findByRole("region", { name: "octant/aurora" });
+    const divetools = screen.getByRole("region", { name: "octant/divetools" });
     expect(within(aurora).getByText("No open or draft pull requests.")).toBeVisible();
     expect(
       within(divetools).getByText("Not refreshed yet. Refresh this Project to load pull requests."),
     ).toBeVisible();
+
+    // Flat, the same untouched Project is named in one line, not hidden.
+    rerender(
+      <CodeProjectPullRequests
+        key="flat"
+        load={async () => perProject}
+        refresh={async () => perProject}
+        storage={memoryStorage()}
+      />,
+    );
+    expect(await screen.findByText("Not refreshed yet: Divetools.")).toBeVisible();
   });
 
   it("selects a pull request row without refreshing GitHub", async () => {
@@ -399,24 +673,24 @@ describe("CodeProjectPullRequests", () => {
         presentation="dock"
         projectId={projectAId}
         refresh={async () => view()}
+        storage={memoryStorage()}
       />,
     );
 
     expect(await screen.findByText("List active pull requests")).toBeVisible();
-    expect(await screen.findByRole("region", { name: "Project Octant" })).toBeVisible();
     // The dock names the surface in its own tab, so the list repeats neither a
     // page title nor a Back to workspace control.
     expect(screen.queryByRole("heading", { name: "Pull requests" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Back to workspace" })).toBeNull();
-    // Another Project's group is not this thread's business, and its absent
+    // Another Project's notice is not this thread's business, and its absent
     // rows must not be reported as this Project's count.
-    expect(screen.queryByRole("region", { name: "Project Local notes" })).toBeNull();
+    expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getByText("1 pull request")).toBeVisible();
     // A single-Project list refreshes that Project; there is nothing for a
-    // cross-Project "Refresh all" to add, and the Project setting stays on the
-    // page that owns it.
+    // cross-Project "Refresh all" or the page's sort and settings to add.
     expect(screen.queryByRole("button", { name: "Refresh all" })).toBeNull();
-    expect(screen.queryByRole("switch", { name: /Auto-refresh/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sort pull requests" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Repository settings" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /List active pull requests/i }));
     expect(onSelectRow).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
@@ -532,33 +806,31 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps pull-request row content from collapsing by separating metadata into its own column", () => {
-    const rowContent = ruleBody(stylesheet, ".code-project-pull-requests__row-content");
+  it("keeps the list to a readable measure at the page's leading edge", () => {
+    const surface = ruleBody(stylesheet, ".code-project-pull-requests-surface");
+    expect(surface).toMatch(/--oct-surface-measure:\s*720px/);
+    expect(ruleBody(stylesheet, ".code-project-pull-requests-surface > .surface__inner")).toMatch(
+      /margin-inline:\s*var\(--oct-surface-gutter\)\s+auto/,
+    );
+  });
+
+  it("sizes a row from its two lines and cuts the title after two", () => {
     const row = ruleBody(stylesheet, ".code-project-pull-requests__row");
     expect(row).toMatch(/height:\s*auto/);
-    expect(rowContent).toMatch(/display:\s*grid/);
-    expect(rowContent).toMatch(
-      /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(250px,\s*auto\)/,
-    );
-    expect(rowContent).not.toMatch(/gap:\s*3px/);
-    expect(rowContent).toMatch(/gap:\s*var\(--oct-space-2\)\s+var\(--oct-space-3\)/);
-
-    const meta = ruleBody(stylesheet, ".code-project-pull-requests__meta");
-    expect(meta).toMatch(/grid-column:\s*2/);
-    expect(meta).toMatch(/grid-row:\s*1\s*\/\s*span\s+3/);
+    expect(row).toMatch(/padding:\s*var\(--oct-space-2\)/);
+    expect(row).not.toMatch(/border-bottom/);
     const title = ruleBody(stylesheet, ".code-project-pull-requests__title");
-    expect(title).toMatch(/text-overflow:\s*ellipsis/);
-    expect(title).toMatch(/white-space:\s*nowrap/);
+    expect(title).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(title).toMatch(/font-weight:\s*var\(--oct-weight-medium\)/);
+    expect(ruleBody(stylesheet, ".code-project-pull-requests__number")).toMatch(
+      /font-variant-numeric:\s*tabular-nums/,
+    );
+    expect(ruleBody(stylesheet, ".code-project-pull-requests__row:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
     expect(ruleBody(stylesheet, '.code-project-pull-requests__row[aria-pressed="true"]')).toContain(
       "background: var(--oct-selection);",
     );
-
-    const narrowMeta = ruleBody(
-      stylesheet,
-      '.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta',
-    );
-    expect(narrowMeta).toMatch(/grid-column:\s*1/);
-    expect(narrowMeta).toMatch(/grid-row:\s*auto/);
   });
 
   it("scrolls a long dock list inside the dock instead of letting the dock clip it", () => {

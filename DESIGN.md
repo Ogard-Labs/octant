@@ -3314,9 +3314,18 @@ markup and IPC; shared renderer components never grant Code authority. Long
 paths and scope details wrap within the scrollable region rather than being
 silently clipped.
 
-The Pull requests dock packs its search, freshness, repository heading, and rows
-at the top of its scroll area. In the dock, status badges sit beneath each title
-instead of taking title width; long titles and metadata wrap within the panel.
+The Pull requests page is a dense list in a 720px reading measure at the
+page's leading edge: a title band with the count and Sort, Filter, Repository
+settings and Refresh icon buttons; rows of a medium-weight title (two lines at
+most) and one 12px meta line (state glyph, repository, author, age, and the
+number in tabular numerals at the trailing edge); one quiet chip or a success
+check at the trailing edge of the title line instead of three chips; no hairline
+between rows and the control hover fill with the row radius under the pointer.
+Grouping by repository gives each group a slim header with a "..." menu holding
+Auto-refresh, Agents may merge and Refresh. A Project that is not on GitHub is
+one notice at the foot, never an empty block. The dock packs its search,
+freshness and rows at the top of its scroll area in the same row anatomy, one
+flat list with no menus.
 
 Main-pane content opens in a closable tab beside its conversation. Files, previews,
 and canvases retain navigation references, and selecting one uses the ordinary
