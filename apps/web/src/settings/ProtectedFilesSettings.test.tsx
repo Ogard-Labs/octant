@@ -44,8 +44,17 @@ function client(initial: ProtectedFilesSnapshot, answer?: () => ProtectedFilesRe
 describe("ProtectedFilesSettings", () => {
   it("lists the protected groups and says no agent reaches them at any level", async () => {
     const { fake } = client(snapshot());
+    const user = userEvent.setup();
     render(<ProtectedFilesSettings client={fake} />);
     expect(await screen.findByText("SSH private keys")).toBeVisible();
+    // A closed row already says it is protected; its paths wait in the detail.
+    expect(screen.getAllByText("Protected").length).toBeGreaterThan(0);
+    expect(screen.queryByText("~/.ssh/id_* (not .pub)")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "SSH private keys" }));
+    expect(screen.getByRole("button", { name: "SSH private keys" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     expect(screen.getByText("~/.ssh/id_* (not .pub)")).toBeVisible();
     expect(screen.getByText(PROTECTED_FILES_FACT)).toBeVisible();
   });

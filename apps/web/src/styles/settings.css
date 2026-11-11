@@ -3914,3 +3914,126 @@ html[data-octant-increased-contrast="true"]
   height: 100%;
   max-width: none;
 }
+
+/* A collapsible section: the label is a button, the state it holds reads on
+   the same line, and everything else waits until it is opened. Only the head
+   stays, so a closed section costs one line. */
+.settings-section-head--collapsible {
+  justify-content: flex-start;
+}
+
+.settings-section-head--collapsible > h2 {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-collapse__toggle {
+  gap: var(--oct-space-1);
+  max-width: 100%;
+  margin-inline-start: calc(-1 * var(--oct-space-2));
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.settings-collapse__chevron {
+  flex: 0 0 auto;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.settings-collapse__toggle[aria-expanded="true"] > .settings-collapse__chevron {
+  transform: rotate(90deg);
+}
+
+.settings-collapse__state {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-section-head--collapsible > .settings-section-head__actions {
+  margin-inline-start: auto;
+}
+
+.settings-view
+  .settings-card-section.settings-card-section--collapsed
+  > :not(.settings-section-head) {
+  display: none;
+}
+
+/* A compact row: one line, the same height down a whole list. The name opens
+   its detail; the state sits beside it in the meta ink; the one main control
+   is at the trailing edge. */
+.crow {
+  display: grid;
+  min-width: 0;
+}
+
+.crow__line {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-space-4);
+}
+
+.crow__toggle {
+  gap: var(--oct-space-1);
+  min-width: 0;
+  max-width: 60%;
+  margin-inline-start: calc(-1 * var(--oct-space-2));
+}
+
+.crow__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crow__chevron {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.crow__toggle[aria-expanded="true"] > .crow__chevron {
+  transform: rotate(90deg);
+}
+
+.crow__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crow[data-attention="true"] .crow__meta {
+  color: var(--oct-warn-fg);
+}
+
+.crow__control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-inline-start: auto;
+}
+
+.crow__detail {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-4) var(--oct-space-3);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+  overflow-wrap: anywhere;
+}

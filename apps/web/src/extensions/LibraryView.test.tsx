@@ -145,8 +145,13 @@ describe("the library view", () => {
     expect(screen.getAllByRole("button", { name: "Doop" })).toHaveLength(1);
   });
 
-  it("gives a connector with no licensed logo a two-letter tile that tells its neighbours apart", () => {
+  it("gives a connector with no licensed logo a two-letter tile that tells its neighbours apart", async () => {
+    const user = userEvent.setup();
     renderLibrary();
+    // A long list shows its first few; the tiles below are in the rest.
+    for (const more of screen.queryAllByRole("button", { name: /^Show all/ })) {
+      await user.click(more);
+    }
     expect(screen.getByText("Co")).toBeTruthy();
     expect(screen.getByText("De")).toBeTruthy();
     expect(monogramFor("Microsoft Learn")).toBe("Ml");
@@ -339,5 +344,84 @@ describe("the library view", () => {
     renderLibrary({ marketplaceFetchesEnabled: false, loading: true });
     expect(screen.getByText(/Marketplace fetches are off/)).toBeTruthy();
     expect(screen.getByLabelText("Loading the library")).toBeTruthy();
+  });
+
+  describe("a long list", () => {
+    /** Installed items: some awaiting trust, the rest off, in a fixed order. */
+    function installedItems(waiting: number, quiet: number) {
+      const make = (name: string, state: "needs-trust" | "off") => ({
+        id: `package:${name}`,
+        kind: "skill" as const,
+        name,
+        summary: `${name} does one thing.`,
+        source: "Installed",
+        provider: "Every provider",
+        providers: ["Every provider"],
+        featured: false,
+        state,
+        stateLabel: state === "off" ? "Off" : "Needs trust",
+        steps: { install: "done", trust: "todo", enable: "todo" },
+        abilities: ["Reads files"],
+        authority: { level: "low", lines: ["Reads files"] },
+        handoff: "installed",
+      });
+      return [
+        ...Array.from({ length: quiet }, (_, n) =>
+          make(`Quiet ${String(n + 1).padStart(2, "0")}`, "off"),
+        ),
+        ...Array.from({ length: waiting }, (_, n) => make(`Waiting ${n + 1}`, "needs-trust")),
+      ] as never as React.ComponentProps<typeof LibraryView>["items"];
+    }
+
+    it("shows each row's state on its line and keeps the description in the detail", async () => {
+      const user = userEvent.setup();
+      renderLibrary({ items: installedItems(1, 2) });
+      const row = screen.getByRole("button", { name: "Quiet 01" }).closest("article");
+      if (row === null) throw new Error("expected a row");
+      expect(within(row).getByText("Off")).toBeVisible();
+      expect(screen.queryByText("Quiet 01 does one thing.")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Quiet 01" }));
+      expect(
+        within(screen.getByRole("dialog", { name: "Quiet 01" })).getByText(
+          "Quiet 01 does one thing.",
+        ),
+      ).toBeVisible();
+    });
+
+    it("lists what awaits a decision first and never leaves it behind Show all", async () => {
+      const user = userEvent.setup();
+      renderLibrary({ items: installedItems(3, 14) });
+      const list = screen.getByRole("list", { name: "Installed" });
+      const names = () =>
+        within(list)
+          .getAllByRole("button", { name: /^(Waiting|Quiet)/ })
+          .map((button) => button.textContent);
+      expect(names()).toEqual([
+        "Waiting 1",
+        "Waiting 2",
+        "Waiting 3",
+        "Quiet 01",
+        "Quiet 02",
+        "Quiet 03",
+        "Quiet 04",
+        "Quiet 05",
+      ]);
+      await user.click(screen.getByRole("button", { name: "Show all 17" }));
+      expect(names()).toHaveLength(17);
+      expect(names().slice(0, 3)).toEqual(["Waiting 1", "Waiting 2", "Waiting 3"]);
+    });
+
+    it("keeps every item that awaits a decision even when they outnumber the cap", () => {
+      renderLibrary({ items: installedItems(12, 3) });
+      const list = screen.getByRole("list", { name: "Installed" });
+      expect(within(list).getAllByRole("button", { name: /^Waiting/ })).toHaveLength(12);
+      expect(within(list).queryAllByRole("button", { name: /^Quiet/ })).toHaveLength(0);
+      expect(screen.getByRole("button", { name: "Show all 15" })).toBeVisible();
+    });
+
+    it("draws a short list in full without a Show all", () => {
+      renderLibrary({ items: installedItems(1, 5) });
+      expect(screen.queryByRole("button", { name: /^Show all/ })).toBeNull();
+    });
   });
 });

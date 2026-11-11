@@ -67,6 +67,7 @@ function renderPanel(extensionClient: ExtensionClient) {
 
 describe("RememberedToolApprovalsPanel", () => {
   it("lists remembered tools under the Project they were allowed in", async () => {
+    const user = userEvent.setup();
     renderPanel(client());
 
     const octant = await screen.findByRole("group", { name: "Octant" });
@@ -76,6 +77,8 @@ describe("RememberedToolApprovalsPanel", () => {
     const notes = screen.getByRole("group", { name: "Notes" });
     expect(within(notes).getByText("read_file")).toBeInTheDocument();
     expect(within(notes).queryByText("write_file")).not.toBeInTheDocument();
+    expect(screen.queryByText(/without asking/)).not.toBeInTheDocument();
+    await user.click(within(octant).getByRole("button", { name: "read_file" }));
     expect(screen.getAllByText(/without asking/).length).toBeGreaterThan(0);
   });
 
