@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
@@ -336,7 +336,7 @@ export class GitObservationPort {
           ),
         ),
       ].sort();
-      const contentObjects = await readContentObjects(run, changedPaths);
+      const contentObjects = await readContentObjects(run, checkoutRoot, changedPaths);
       const stagedSummary = statusEntries.filter(
         (entry) => entry.index !== " " && entry.index !== "?",
       );
@@ -740,13 +740,14 @@ const OBJECT_ID_CHUNK_SIZE = 200;
  */
 async function readContentObjects(
   run: (args: readonly string[]) => Promise<CommandResult>,
+  checkoutRoot: string,
   paths: ReadonlyArray<string>,
 ): Promise<Array<{ path: string; objectId: string | null; indexObjectId: string | null }>> {
   const objects: Array<{ path: string; objectId: string | null; indexObjectId: string | null }> =
     [];
   for (let offset = 0; offset < paths.length; offset += OBJECT_ID_CHUNK_SIZE) {
     const chunk = paths.slice(offset, offset + OBJECT_ID_CHUNK_SIZE);
-    const worktreeIds = await readWorktreeObjectIds(run, chunk);
+    const worktreeIds = await readWorktreeObjectIds(run, checkoutRoot, chunk);
     const indexIds = await readIndexObjectIds(run, chunk);
     chunk.forEach((path, index) => {
       objects.push({
@@ -761,21 +762,43 @@ async function readContentObjects(
 
 async function readWorktreeObjectIds(
   run: (args: readonly string[]) => Promise<CommandResult>,
+  checkoutRoot: string,
   paths: ReadonlyArray<string>,
 ): Promise<Array<string | null>> {
-  const batch = await run(["hash-object", "--no-filters", "--", ...paths]);
-  if (batch.exitCode === 0) {
-    const ids = batch.stdout.split("\n").filter((line) => line !== "");
-    if (ids.length === paths.length && ids.every((id) => OBJECT_ID_PATTERN.test(id))) return ids;
-  }
-  const ids: Array<string | null> = [];
+  // A deleted path, a rename source and a collapsed untracked directory make
+  // `hash-object` fail for the whole batch, and those are common. Only regular
+  // files and symlinks go to Git; the rest get null, as the per-path call gave.
+  const hashable: string[] = [];
   for (const path of paths) {
-    const one = await run(["hash-object", "--no-filters", "--", path]);
-    ids.push(
-      one.exitCode === 0 && OBJECT_ID_PATTERN.test(one.stdout.trim()) ? one.stdout.trim() : null,
-    );
+    try {
+      const stats = await lstat(join(checkoutRoot, path));
+      if (stats.isFile() || stats.isSymbolicLink()) hashable.push(path);
+    } catch {
+      // Missing or unreadable: no worktree id.
+    }
   }
-  return ids;
+  const byPath = new Map<string, string>();
+  if (hashable.length > 0) {
+    const batch = await run(["hash-object", "--no-filters", "--", ...hashable]);
+    const batchIds = batch.stdout.split("\n").filter((line) => line !== "");
+    if (
+      batch.exitCode === 0 &&
+      batchIds.length === hashable.length &&
+      batchIds.every((id) => OBJECT_ID_PATTERN.test(id))
+    ) {
+      hashable.forEach((path, index) => {
+        const id = batchIds[index];
+        if (id !== undefined) byPath.set(path, id);
+      });
+    } else {
+      for (const path of hashable) {
+        const one = await run(["hash-object", "--no-filters", "--", path]);
+        if (one.exitCode === 0 && OBJECT_ID_PATTERN.test(one.stdout.trim()))
+          byPath.set(path, one.stdout.trim());
+      }
+    }
+  }
+  return paths.map((path) => byPath.get(path) ?? null);
 }
 
 async function readIndexObjectIds(

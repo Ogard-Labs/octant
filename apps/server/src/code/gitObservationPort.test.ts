@@ -446,6 +446,35 @@ describe("GitObservationPort", () => {
     expect(calls.length).toBeLessThanOrEqual(12);
   });
 
+  it("keeps the fixed process count when a deleted file and an untracked directory sit among many changes", async () => {
+    const repository = createRepository();
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "before\n");
+    }
+    writeFileSync(join(repository, "deleted.txt"), "before\n");
+    git(repository, "add", "--", ".");
+    git(repository, "commit", "-m", "tracked files");
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "after\n");
+    }
+    rmSync(join(repository, "deleted.txt"));
+    mkdirSync(join(repository, "untracked-directory"));
+    writeFileSync(join(repository, "untracked-directory", "inner.txt"), "new\n");
+    const calls: string[][] = [];
+    const port = recordingPort((args) => calls.push([...args]));
+
+    const result = await port.observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toEqual(
+      expect.arrayContaining(["deleted.txt", "untracked-directory"]),
+    );
+    expect(calls.length).toBeLessThanOrEqual(12);
+    expect(calls.filter((args) => args.includes("hash-object"))).toHaveLength(1);
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
   it("reads the same content ids as one Git call per path for every kind of change", async () => {
     const repository = createRepository();
     const tracked = [
