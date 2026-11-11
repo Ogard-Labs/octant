@@ -600,6 +600,14 @@ Thought, plan, and usage updates end nothing. Rationale: without the break,
 an agent's note before a tool step and its text after it read as one
 sentence. Turns recorded before this rule keep their text as stored.
 
+Claude Code and OpenCode follow the same rule from their own signals, because
+neither puts a break between one agent message and the next. For Claude Code
+a tool-use block or a tool result ends the agent's message. For OpenCode a
+tool part or a tool event ends it, and text that continues a part already
+streaming is never broken. Codex names each agent message, so its mapper
+breaks between any two. Pi and the Octant Harness pass an agent's text on as
+sent.
+
 ### What an ACP agent cannot do
 
 The protocol leaves three things to the agent, and the driver reports them as

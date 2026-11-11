@@ -15,6 +15,7 @@ import {
   type OpenCodeEvent,
   type OpenCodeEventContext,
 } from "./openCodeEventMapper";
+import { OpenCodeMessageParts } from "./openCodeMessageParts";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000072");
@@ -688,6 +689,128 @@ describe("mapOpenCodeEvent", () => {
         }),
       ),
     ).toMatchObject([{ kind: "text-delta", text: " hello " }]);
+  });
+
+  // The text a turn's consumers would join: every text delta of one session, in order.
+  function transcript(events: ReadonlyArray<OpenCodeEvent>): string {
+    const messageParts = new OpenCodeMessageParts();
+    let text = "";
+    for (const event of events) {
+      for (const runtimeEvent of mapOpenCodeEvent({ ...context(), messageParts }, event)) {
+        if (runtimeEvent.kind === "text-delta") text += runtimeEvent.text;
+      }
+    }
+    return text;
+  }
+  const answers = (id: string) =>
+    ({
+      id: `role-${id}`,
+      type: "message.updated",
+      properties: {
+        sessionID: "provider-session",
+        info: { id, sessionID: "provider-session", role: "assistant" },
+      },
+    }) as Event;
+  const part = (messageID: string, id: string, type: "text" | "reasoning" | "tool", text = "") =>
+    ({
+      id: `part-${id}`,
+      type: "message.part.updated",
+      properties: {
+        sessionID: "provider-session",
+        time: 1,
+        part: { id, sessionID: "provider-session", messageID, type, text },
+      },
+    }) as Event;
+  const partDelta = (messageID: string, partID: string, delta: string) =>
+    official({
+      id: `delta-${partID}`,
+      type: "message.part.delta",
+      properties: { sessionID: "provider-session", messageID, partID, field: "text", delta },
+    });
+  const says = (assistantMessageID: string, delta: string) =>
+    official({
+      id: "event-text",
+      type: "session.next.text.delta",
+      properties: {
+        timestamp: 1,
+        sessionID: "provider-session",
+        assistantMessageID,
+        textID: `text-${assistantMessageID}`,
+        delta,
+      },
+    });
+  const callsTool = (assistantMessageID: string, callID: string) =>
+    official({
+      id: "event-tool-start",
+      type: "session.next.tool.called",
+      properties: {
+        timestamp: 1,
+        sessionID: "provider-session",
+        assistantMessageID,
+        callID,
+        tool: "read",
+        input: {},
+        provider: { executed: false },
+      },
+    });
+
+  it("keeps a paragraph break between an agent's note and the text that follows a tool step", () => {
+    const joined = "I'll inspect the repository.\n\nLet me read the entry point.\n\nDone.";
+    expect(
+      transcript([
+        answers("message-1"),
+        part("message-1", "text-1", "text", "I'll inspect "),
+        partDelta("message-1", "text-1", "the repository."),
+        part("message-1", "tool-1", "tool"),
+        answers("message-2"),
+        part("message-2", "text-2", "text", "Let me"),
+        partDelta("message-2", "text-2", " read the entry point."),
+        part("message-2", "tool-2", "tool"),
+        answers("message-3"),
+        part("message-3", "text-3", "text", "Done."),
+      ]),
+    ).toBe(joined);
+    expect(
+      transcript([
+        says("message-1", "I'll inspect "),
+        says("message-1", "the repository."),
+        callsTool("message-1", "call-1"),
+        says("message-2", "Let me"),
+        says("message-2", " read the entry point."),
+        callsTool("message-2", "call-2"),
+        says("message-3", "Done."),
+      ]),
+    ).toBe(joined);
+  });
+
+  it("adds no break where no agent message ended or the text already has one", () => {
+    expect(
+      transcript([
+        answers("message-1"),
+        part("message-1", "tool-1", "tool"),
+        part("message-1", "text-1", "text", "Reading"),
+        part("message-1", "thought-1", "reasoning", "Hm"),
+        // A tool part that changes while this text part is still streaming.
+        part("message-1", "tool-1", "tool"),
+        partDelta("message-1", "text-1", " the file.\n"),
+        part("message-1", "tool-2", "tool"),
+        answers("message-2"),
+        part("message-2", "text-2", "text", "It exports one function."),
+        part("message-2", "tool-3", "tool"),
+        answers("message-3"),
+        part("message-3", "text-3", "text", "\nNothing else."),
+      ]),
+    ).toBe("Reading the file.\nIt exports one function.\nNothing else.");
+    expect(
+      transcript([
+        callsTool("message-1", "call-1"),
+        says("message-1", "Reading the file.\n"),
+        callsTool("message-1", "call-2"),
+        says("message-2", "It exports one function."),
+        callsTool("message-2", "call-3"),
+        says("message-3", "\nNothing else."),
+      ]),
+    ).toBe("Reading the file.\nIt exports one function.\nNothing else.");
   });
 
   it("carries a length finish onto the completed event and leaves an ordinary finish unstated", () => {
