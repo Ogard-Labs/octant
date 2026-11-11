@@ -455,6 +455,7 @@ function GrantForm(props: {
   return (
     <form
       className="settings-panel__stack"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         if (!valid) return;
