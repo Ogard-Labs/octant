@@ -18,11 +18,12 @@ sidebar and board presentation is in
 side, the workspace surfaces recorded in
 [Workspace: Coordinators](workspace.md#coordinators), the planner carry-over,
 the proposal card in the coordinator thread, workers' requests in the
-coordinator's composer, the coordinator named on Needs you rows, and the owner
-device's routes for the wake switches are built. An owner device has no screen
-that calls those routes yet. None of it has run against a real provider or on
-the desktop app; whether each runtime's own tools honour the read-only gate is
-a maintainer live check.
+coordinator's composer, the coordinator named on Needs you rows, the owner
+device's routes and screens for the wake switches, the proposal review
+prefilled from the request, the read-only proposal card on paired clients, and
+counts that survive a restart are built. None of it has run against a real
+provider or on the desktop app; whether each runtime's own tools honour the
+read-only gate is a maintainer live check.
 
 ## What a coordinator is
 
@@ -168,7 +169,13 @@ restrict that can do it for the whole host or for one Project.
   coordinator's composer or from the Project overview, with the same **Review
   and approve** and versioned decline; an
   approved proposal creates the worker exactly as an unasked start would,
-  recorded as that coordinator's worker.
+  recorded as that coordinator's worker. The review states the request, starts
+  on the requested provider and model when the window can select them, starts
+  its mode at the requested level, and offers no mode above it. A paired browser
+  or phone shows the same pending proposals read-only (title, intent, requested
+  level) with "Approve at a window on this computer", through the planner read
+  the remote session already has; the proposal routes still refuse every caller
+  but a local window.
 
 Rationale: the person who enables a coordinator asked for work to happen without
 a click per thread, and a worker can do nothing a person could not have started
@@ -184,8 +191,19 @@ approval flow with one switch.
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most twelve `start` calls per coordinator in any hour,
-  admitted or proposed. The host counts them in memory, as it counts wake
-  turns and hops, so a restart starts the counts again.
+  admitted or proposed. The host records each call in its own store, beside the
+  wake turns and each thread's latest host turn with its hop, so the count holds
+  across a restart; it never reads fewer than the workers the coordinator's
+  lineage shows created in that hour, so starts made before the record existed
+  still count.
+
+  Rationale: the count is not derived from workers' creation times alone,
+  because a start that proposed or that the host failed to create leaves no
+  worker. These counts are host-local bounds, not facts other surfaces read,
+  so they live in a small store (migration `create_coordinator_count_store`)
+  rather than as journal events; a row older than an hour bounds nothing and is
+  pruned, and a purged thread's rows go with it.
+
 - **Ordinary gates.** Each worker's turns take ordinary turn admission: capacity
   gating, spend ceilings, usage limits, and the Done lock all apply unchanged.
 
@@ -222,8 +240,11 @@ Full access cap keeps that confirmation from being switched off at the start.
   change needs its own fresh unlock, is checked against a digest of the current
   thread and Project, and is journaled as the owner device; refusals are
   `not-found`, `not-a-worker`, `wake-stale`, and `refused`. A plain paired
-  device and any agent still cannot set them. No owner-device screen calls the
-  routes yet.
+  device and any agent still cannot set them. The owner access recovery screen
+  on the phone and in a browser's owner section shows them for a chosen Code
+  thread: **Read wake switches** (covered by an open administration session),
+  then a Turn on or Turn off per switch, each asking for its own unlock, after
+  which the reading is dropped and each refusal is stated in words.
 - **Worker to coordinator.** A worker uses `send` to its coordinator. Making a
   thread a coordinator turns on its **Wake when a message arrives** switch, as
   part of the person's journaled change; the person can turn it off as on any
@@ -239,7 +260,10 @@ Full access cap keeps that confirmation from being switched off at the start.
   thread, at most six per thread in any hour, and the hop count. A state notice
   takes the hop count of the worker turn that caused it, so a coordinator and a
   worker answering each other stop waking each other after three rounds and
-  continue when a person runs a turn on either.
+  continue when a person runs a turn on either. The wake turns and hops are
+  recorded in host storage, so a restart neither resets the hourly bound nor
+  lets a fourth round wake; pending state notices stay in memory, since the
+  first sweep after a restart reads every worker's state again.
 
 Rationale: without notices, a coordinator learns that a worker finished only by
 polling with `wait`, which spends its turn budget and its context. A closed set

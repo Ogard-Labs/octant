@@ -11,6 +11,7 @@ import {
 import { SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OwnerThreadWakeControls } from "./OwnerThreadWakeControls";
 
 export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray<OwnerSpoke> }) {
   const [hostId, setHostId] = useState(spokes[0]?.memberId ?? "");
@@ -147,6 +148,13 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
               >
                 Apply level
               </OctantButton>
+              {selected.posture.subject.kind === "code-thread" && host !== undefined ? (
+                <OwnerThreadWakeControls
+                  key={`${host.memberId}:${String(selected.posture.subject.threadId)}`}
+                  client={host.client}
+                  threadId={String(selected.posture.subject.threadId)}
+                />
+              ) : null}
             </>
           )}
         </>

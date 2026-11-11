@@ -8,7 +8,13 @@ import {
   type EventEnvelope,
   type Project,
 } from "@octant/contracts";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { MIGRATIONS } from "../persistence/migrations";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { createCoordinatorCountStore } from "./coordinatorCountStore";
 import { CoordinatorService, type CoordinatorServicePorts } from "./coordinatorService";
 
 const now = "2026-11-10T12:00:00.000Z";
@@ -47,8 +53,39 @@ function codeThread(id: string, overrides: Record<string, unknown> = {}): CodeTh
   });
 }
 
+const temporaryDirectories: string[] = [];
+const openConnections: SqliteConnection[] = [];
+
+afterEach(() => {
+  for (const connection of openConnections.splice(0)) connection.close();
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+/** A host store file holding only the coordinator count tables, opened as a new process would. */
+function countStoreFile(): string {
+  const directory = mkdtempSync(join(tmpdir(), "octant-coordinator-counts-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "octant.sqlite");
+  const connection = openSqlite(path);
+  const migration = MIGRATIONS.find((entry) => entry.name === "create_coordinator_count_store");
+  if (migration === undefined) throw new Error("The coordinator count migration is missing.");
+  connection.exec(migration.sql);
+  connection.close();
+  return path;
+}
+
+function openCountStore(path: string) {
+  const connection = openSqlite(path);
+  openConnections.push(connection);
+  return createCoordinatorCountStore(connection);
+}
+
 interface Harness {
   readonly service: CoordinatorService;
+  /** A new service over the same threads and host store, as after a restart. */
+  readonly restart: () => CoordinatorService;
   readonly threads: Map<string, CodeThread>;
   readonly states: Map<string, "working" | "waiting-for-person" | "idle">;
   readonly marked: Set<string>;
@@ -66,6 +103,7 @@ interface Harness {
 }
 
 function harness(): Harness {
+  const storePath = countStoreFile();
   const threads = new Map<string, CodeThread>([
     [COORDINATOR, codeThread(COORDINATOR, { coordinator: true, messageWake: true })],
   ]);
@@ -125,12 +163,17 @@ function harness(): Harness {
       });
       return { status: "proposed", proposalId: `proposal-${String(turnCount)}` };
     },
+    counts: openCountStore(storePath),
     uuid: () => NEW_WORKER,
     now: () => self.clock,
   };
   const service = new CoordinatorService(ports);
   return Object.assign(self, {
     service,
+    restart: () => {
+      service.stop();
+      return new CoordinatorService({ ...ports, counts: openCountStore(storePath) });
+    },
     threads,
     states,
     marked,
@@ -259,6 +302,40 @@ describe("starting workers", () => {
       result: { reason: "limit-reached" },
     });
   });
+
+  it("still counts an hour's earlier starts after the host restarts", async () => {
+    const h = harness();
+    h.settings = { coordinatorStarting: "propose-for-approval" } as unknown as CodeSettings;
+    for (let index = 0; index < 12; index += 1) {
+      expect(await h.service.start(startCall({}))).toMatchObject({
+        result: { status: "proposed" },
+      });
+    }
+    const restarted = h.restart();
+    expect(await restarted.start(startCall({}))).toMatchObject({
+      result: { status: "refused", reason: "rate-limited" },
+    });
+    h.clock += 60 * 60_000;
+    expect(await restarted.start(startCall({}))).toMatchObject({
+      result: { status: "proposed" },
+    });
+  });
+
+  it("counts workers created in the last hour even when no start was recorded", async () => {
+    const h = harness();
+    h.settings = {
+      coordinatorStarting: "propose-for-approval",
+      coordinatorOpenWorkerLimit: 16,
+    } as unknown as CodeSettings;
+    for (let index = 0; index < 12; index += 1) {
+      const id = `20000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`;
+      h.threads.set(id, codeThread(id, { coordinatorThreadId: COORDINATOR }));
+    }
+    expect(await h.service.start(startCall({}))).toMatchObject({
+      result: { reason: "rate-limited" },
+    });
+    expect(h.proposals).toEqual([]);
+  });
 });
 
 describe("the designated planner", () => {
@@ -334,6 +411,34 @@ describe("waking for messages and worker state", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(h.hostTurns).toHaveLength(3);
+  });
+
+  it("still refuses a fourth-round wake after the host restarts", async () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    for (let round = 0; round < 3; round += 1) {
+      const [sender, recipient] = round % 2 === 0 ? [COORDINATOR, WORKER] : [WORKER, COORDINATOR];
+      h.service.onCommittedEvents([sent(sender, recipient)]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(h.hostTurns).toHaveLength(3);
+    const restarted = h.restart();
+    // The worker's reply comes from the turn the third message woke.
+    restarted.onCommittedEvents([sent(WORKER, COORDINATOR)]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.hostTurns).toHaveLength(3);
+  });
+
+  it("keeps the six wake turns an hour across a restart", async () => {
+    const h = harness();
+    h.threads.set(OTHER, codeThread(OTHER, { messageWake: true }));
+    const restarted = h.restart();
+    for (let index = 0; index < 7; index += 1) {
+      const service = index < 4 ? h.service : restarted;
+      service.onCommittedEvents([sent(COORDINATOR, OTHER)]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(h.hostTurns.filter((turn) => turn.threadId === OTHER)).toHaveLength(6);
   });
 
   it("tells an idle coordinator when a worker finishes, with a roster that names no titles", async () => {

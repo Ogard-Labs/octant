@@ -25,6 +25,7 @@ import {
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { EventEnvelope } from "@octant/contracts";
 import type { InheritedExternalContentMark } from "../context/inheritedExternalContentMark";
+import type { CoordinatorCounts } from "./coordinatorCountStore";
 
 /** The roster names at most this many workers, most recently changed first. */
 export const MAX_COORDINATOR_ROSTER_ROWS = 32;
@@ -82,6 +83,8 @@ export interface CoordinatorServicePorts {
   ) =>
     | { readonly status: "proposed"; readonly proposalId: string }
     | { readonly status: "refused"; readonly message: string };
+  /** Start, wake, and hop counts in host storage, so a restart keeps the bounds. */
+  readonly counts: CoordinatorCounts;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly onError?: (message: string, error: unknown) => void;
@@ -101,16 +104,14 @@ interface PendingNotice {
  * The role, lineage, and switches live on the journaled Code thread; this
  * service decides with the pure policy and acts through the ordinary Code
  * command and turn paths, so a worker is created and started exactly the way
- * a person's thread is. Wake and start counts, hop counts, and pending state
- * notices are held in host memory: a restart clears them, which can let a
- * chain of wake turns start counting again from zero.
+ * a person's thread is. Start and wake counts and each thread's latest host
+ * turn with its hop live in host storage ({@link CoordinatorCounts}), so a
+ * restart keeps the hourly bounds and the hop count; pending state notices
+ * stay in memory, since the first sweep after a restart reads every worker's
+ * state again.
  */
 export class CoordinatorService {
   readonly #ports: CoordinatorServicePorts;
-  /** The wake or worker-start turn the host started on a thread, and the hop of what started it. */
-  readonly #hostTurns = new Map<string, { readonly operationId: string; readonly hop: number }>();
-  readonly #wakeTimes = new Map<string, number[]>();
-  readonly #startTimes = new Map<string, number[]>();
   readonly #lastState = new Map<string, CoordinatorWorkerState>();
   readonly #lastTurn = new Map<string, string | undefined>();
   readonly #notices = new Map<string, Map<string, PendingNotice>>();
@@ -179,7 +180,7 @@ export class CoordinatorService {
     const settings = this.#ports.readSettings();
     const now = this.#ports.now();
     const workers = caller === undefined ? [] : this.#openWorkers(caller);
-    const starts = this.#recent(this.#startTimes, input.callerThreadId, now);
+    const startsInLastHour = caller === undefined ? 0 : this.#startsInLastHour(caller, now);
     const decision = decideCoordinatorStart({
       caller:
         caller === undefined
@@ -202,7 +203,7 @@ export class CoordinatorService {
       }),
       openWorkers: workers.length,
       openWorkerLimit: settings?.coordinatorOpenWorkerLimit,
-      startsInLastHour: starts.length,
+      startsInLastHour,
       requestedLevel: call.level,
     });
     if (decision.status === "refused") return refusedAnswer(decision.reason, decision.message);
@@ -221,8 +222,7 @@ export class CoordinatorService {
     if ((call.providerInstanceId === undefined) !== (call.modelId === undefined)) {
       return refusedAnswer("policy", "Name a provider and a model together, or neither.");
     }
-    starts.push(now);
-    this.#startTimes.set(input.callerThreadId, starts);
+    this.#ports.counts.recordStart(input.callerThreadId, now);
     if (decision.status === "propose") {
       const proposed = this.#ports.propose(
         caller.id,
@@ -447,7 +447,7 @@ export class CoordinatorService {
         }) as const,
     );
     if (turn.status === "started") {
-      this.#hostTurns.set(String(workerId), { operationId: turn.operationId, hop });
+      this.#ports.counts.recordHostTurn(String(workerId), { operationId: turn.operationId, hop });
     }
     return {
       result: {
@@ -471,7 +471,6 @@ export class CoordinatorService {
     const recipient = this.#ports.readThread(recipientId);
     if (recipient === undefined || recipient.lifecycle === "archived") return;
     const now = this.#ports.now();
-    const wakes = this.#recent(this.#wakeTimes, recipientId, now);
     const decision = decideMessageWake({
       recipient: {
         messageWake: recipient.messageWake === true,
@@ -487,18 +486,17 @@ export class CoordinatorService {
       senderThreadId: senderId,
       hop,
       wakeTurnRunning: false,
-      wakeTurnsInLastHour: wakes.length,
+      wakeTurnsInLastHour: this.#ports.counts.wakesSince(recipientId, now - HOUR_MS),
     });
     if (decision.status !== "wake") return;
-    wakes.push(now);
-    this.#wakeTimes.set(recipientId, wakes);
+    this.#ports.counts.recordWake(recipientId, now);
     const prompt =
       cause.kind === "message"
         ? `Octant started this turn because thread ${senderId} left you a message; it is in this turn's context as untrusted data.`
         : `Octant started this turn because one of your workers changed state; the roster in this turn's context says which.`;
     const turn = await this.#ports.startHostTurn(recipient.id, prompt);
     if (turn.status === "started") {
-      this.#hostTurns.set(recipientId, { operationId: turn.operationId, hop });
+      this.#ports.counts.recordHostTurn(recipientId, { operationId: turn.operationId, hop });
     }
   }
 
@@ -508,7 +506,7 @@ export class CoordinatorService {
    * the host turn it is running.
    */
   #hopFrom(threadId: string): number {
-    const hostTurn = this.#hostTurns.get(threadId);
+    const hostTurn = this.#ports.counts.hostTurn(threadId);
     if (hostTurn === undefined) return 0;
     return this.#ports.latestTurnId(threadId) === hostTurn.operationId ? hostTurn.hop + 1 : 0;
   }
@@ -560,10 +558,21 @@ export class CoordinatorService {
       );
   }
 
-  #recent(times: Map<string, number[]>, key: string, now: number): number[] {
-    const kept = (times.get(key) ?? []).filter((at) => now - at < HOUR_MS);
-    times.set(key, kept);
-    return kept;
+  /**
+   * The coordinator's `start` calls in the last hour: the recorded ones, and
+   * never fewer than the workers its lineage shows created in that hour, so
+   * starts made before the counts were stored still count. Only the record
+   * sees a start that proposed or that the host failed to create.
+   */
+  #startsInLastHour(coordinator: CodeThread, now: number): number {
+    const created = this.#ports
+      .readThreads()
+      .filter(
+        (thread) =>
+          String(thread.coordinatorThreadId) === String(coordinator.id) &&
+          now - Date.parse(thread.createdAt) < HOUR_MS,
+      ).length;
+    return Math.max(created, this.#ports.counts.startsSince(String(coordinator.id), now - HOUR_MS));
   }
 }
 
