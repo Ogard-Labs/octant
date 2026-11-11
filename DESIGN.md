@@ -654,7 +654,7 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, on the page above the
+callout takes the full row above the context chips, in the tray above the
 card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
