@@ -13813,10 +13813,13 @@ const noSiblings: SiblingThreadSource = {
 };
 
 describe("streamed reply text in a Code turn", () => {
-  async function streamingTurn(id: number) {
+  async function streamingTurn(
+    id: number,
+    options: Omit<Parameters<typeof runtimeFixture>[0], "provider"> = {},
+  ) {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const fixture = runtimeFixture({ ...options, provider: providerDriver(connection) });
     await fixture.runtime.execute(windowId, {
       kind: "start-provider-turn",
       operationId: operationId(id),
@@ -13970,6 +13973,104 @@ describe("streamed reply text in a Code turn", () => {
           .map((text) => text.replace(/^message:/, ""))
           .join(""),
       ).toBe(chunks.join(""));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("fails the turn when a timer-driven flush hits evidence capacity", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(307, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      full = true;
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      await vi.advanceTimersByTimeAsync(100);
+      for (let step = 0; step < 20; step += 1) await vi.advanceTimersByTimeAsync(0);
+      const states = turn
+        .frames()
+        .flatMap((frame) => (frame.event.kind === "operation-state" ? [frame.event] : []));
+      expect(states).toContainEqual(
+        expect.objectContaining({
+          state: "failed",
+          failure: expect.objectContaining({ category: "unavailable" }),
+        }),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("leaves no timer pending once the turn has ended", async () => {
+    const turn = await streamingTurn(308);
+    try {
+      await turn.offer({ kind: "text-delta", text: "done" }, { kind: "completed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals text before an approval request and before a question", async () => {
+    const turn = await streamingTurn(309);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "before approval" },
+        {
+          kind: "approval-request",
+          requestId: "provider-approval-1",
+          action: "Bash",
+          description: "Bash · git status",
+        },
+      );
+      await turn.offer(
+        { kind: "text-delta", text: "before question" },
+        { kind: "user-input-request", requestId: "ask-1", prompt: "Which one?", options: [] },
+      );
+      const kinds = turn.kinds();
+      const approval = kinds.indexOf("approval-requested");
+      expect(approval).toBeGreaterThan(-1);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(approval);
+      expect(turn.texts()[0]).toBe("message:before approval");
+      const second = kinds.lastIndexOf("provider-content");
+      expect(turn.texts().at(-1)).toMatch(/^message:\s*before question$/);
+      expect(second).toBeGreaterThan(approval);
+      // Something follows the second text: the question it preceded.
+      expect(kinds.slice(second + 1).length).toBeGreaterThan(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("flushes an open burst when the runtime closes", async () => {
+    const turn = await streamingTurn(310);
+    try {
+      await turn.offer({ kind: "text-delta", text: "open burst" });
+      expect(turn.texts()).toEqual([]);
+      await turn.fixture.runtime.close();
+      expect(turn.texts()).toEqual(["message:open burst"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("writes nothing for a chunk that arrives after the turn settled", async () => {
+    const turn = await streamingTurn(311);
+    try {
+      await turn.offer({ kind: "text-delta", text: "done" }, { kind: "completed" });
+      const settled = turn.frames().length;
+      await turn.offer({ kind: "text-delta", text: "late" });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(turn.frames()).toHaveLength(settled);
+      expect(turn.texts()).toEqual(["message:done"]);
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       await turn.finish();
     }
