@@ -1,6 +1,6 @@
 import { execFile as nodeExecFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -594,6 +594,99 @@ describe("GitObservationPort", () => {
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
     expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it.each([
+    [
+      "a symlink to a regular file",
+      "link.txt",
+      (root: string) => symlinkSync("target.txt", join(root, "link.txt")),
+    ],
+    [
+      "a dangling symlink",
+      "link.txt",
+      (root: string) => symlinkSync("missing.txt", join(root, "link.txt")),
+    ],
+    [
+      "a symlink to a directory",
+      "link.txt",
+      (root: string) => symlinkSync("some-directory", join(root, "link.txt")),
+    ],
+  ])(
+    "reads the same content ids as one Git call per path for %s, with a fixed process count",
+    async (_name, _link, makeLink) => {
+      const repository = createRepository();
+      writeFileSync(join(repository, "target.txt"), "target\n");
+      mkdirSync(join(repository, "some-directory"));
+      for (let index = 0; index < 10; index += 1) {
+        writeFileSync(join(repository, `plain-${index}.txt`), "new\n");
+      }
+      makeLink(repository);
+      const calls: string[][] = [];
+      const port = recordingPort((args) => calls.push([...args]));
+
+      const result = await port.observe(repository);
+
+      expect(result.status).toBe("ready");
+      if (result.status !== "ready") return;
+      expect(result.changedPaths).toContain("link.txt");
+      expect(result.stateToken).toBe(oracleStateToken(result));
+      expect(calls.length).toBeLessThanOrEqual(12);
+    },
+  );
+
+  it("hashes a server checkout's changed paths through Git and never reads the local filesystem", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "edited.txt"), "one\n");
+    // A local path with the same names must not matter: the checkout is elsewhere.
+    const decoyRoot = join(temporaryDirectory(), "server-checkout");
+    mkdirSync(join(decoyRoot, "edited.txt"), { recursive: true });
+    const calls: string[][] = [];
+    const port = new GitObservationPort(
+      { ...confinedOptions(), onServer: true },
+      {
+        realpath: async (path) => path,
+        execFile: (file, args, environment, signal) =>
+          new Promise((resolve) => {
+            calls.push([...args]);
+            if (args.includes("--show-toplevel")) {
+              resolve({ exitCode: 0, stdout: `${decoyRoot}\n` });
+              return;
+            }
+            const rewritten = args.map((argument) =>
+              argument === decoyRoot ? repository : argument,
+            );
+            nodeExecFile(
+              file,
+              rewritten,
+              {
+                encoding: "buffer",
+                env: environment,
+                shell: false,
+                signal,
+                maxBuffer: 2 * 1024 * 1024,
+              },
+              (error, stdoutBytes) => {
+                resolve({
+                  exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+                  stdout: stdoutBytes.toString("utf8"),
+                });
+              },
+            );
+          }),
+      },
+    );
+
+    const first = await port.observe(decoyRoot);
+    writeFileSync(join(repository, "edited.txt"), "two\n");
+    const second = await port.observe(decoyRoot);
+
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status !== "ready" || second.status !== "ready") return;
+    expect(first.changedPaths).toEqual(["edited.txt"]);
+    expect(calls.some((args) => args.includes("hash-object"))).toBe(true);
+    expect(second.stateToken).not.toBe(first.stateToken);
   });
 
   it("keeps rewritten remote URLs as git reports them", async () => {

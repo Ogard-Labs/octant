@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
@@ -336,7 +336,11 @@ export class GitObservationPort {
           ),
         ),
       ].sort();
-      const contentObjects = await readContentObjects(run, checkoutRoot, changedPaths);
+      const contentObjects = await readContentObjects(
+        run,
+        this.#onServer ? undefined : checkoutRoot,
+        changedPaths,
+      );
       const stagedSummary = statusEntries.filter(
         (entry) => entry.index !== " " && entry.index !== "?",
       );
@@ -740,7 +744,7 @@ const OBJECT_ID_CHUNK_SIZE = 200;
  */
 async function readContentObjects(
   run: (args: readonly string[]) => Promise<CommandResult>,
-  checkoutRoot: string,
+  checkoutRoot: string | undefined,
   paths: ReadonlyArray<string>,
 ): Promise<Array<{ path: string; objectId: string | null; indexObjectId: string | null }>> {
   const objects: Array<{ path: string; objectId: string | null; indexObjectId: string | null }> =
@@ -762,19 +766,28 @@ async function readContentObjects(
 
 async function readWorktreeObjectIds(
   run: (args: readonly string[]) => Promise<CommandResult>,
-  checkoutRoot: string,
+  checkoutRoot: string | undefined,
   paths: ReadonlyArray<string>,
 ): Promise<Array<string | null>> {
   // A deleted path, a rename source and a collapsed untracked directory make
-  // `hash-object` fail for the whole batch, and those are common. Only regular
-  // files and symlinks go to Git; the rest get null, as the per-path call gave.
-  const hashable: string[] = [];
-  for (const path of paths) {
-    try {
-      const stats = await lstat(join(checkoutRoot, path));
-      if (stats.isFile() || stats.isSymbolicLink()) hashable.push(path);
-    } catch {
-      // Missing or unreadable: no worktree id.
+  // `hash-object` fail for the whole batch, and those are common. Locally, only
+  // paths that resolve to a regular file go to Git (it follows symlinks, so a
+  // dangling link or one to a directory would fail the chunk); the rest get
+  // null, as the per-path call gave. On a server the checkout is not on this
+  // machine's disk, so nothing is read here: every path goes to the batch and
+  // the per-path fallback sorts out the failures.
+  let hashable: string[] = [];
+  if (checkoutRoot === undefined) hashable = [...paths];
+  else {
+    for (const path of paths) {
+      try {
+        const full = join(checkoutRoot, path);
+        const stats = await lstat(full);
+        if (stats.isFile() || (stats.isSymbolicLink() && (await stat(full)).isFile()))
+          hashable.push(path);
+      } catch {
+        // Missing, dangling or unreadable: no worktree id.
+      }
     }
   }
   const byPath = new Map<string, string>();
