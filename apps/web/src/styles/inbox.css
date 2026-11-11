@@ -1,6 +1,7 @@
 /* The Inbox overlay: one cross-mode list of what is waiting on the user.
-   The shell, sections, and rows come from the surface language; this sheet
-   only turns a row's button or link into a full-width, multi-line target. */
+   The page is a few raised cards in one readable column; the shell, rows and
+   labels come from the surface language, and this sheet lays the cards out and
+   turns a row's button or link into a full-width, multi-line target. */
 
 .inbox-layer {
   position: absolute;
@@ -10,6 +11,130 @@
   background: var(--oct-bg);
 }
 
+/* One column of about 980px, left-aligned under the title's own inset, so a
+   wide window leaves empty ground instead of stretching the cards. */
+.inbox-page {
+  --oct-surface-measure: 980px;
+}
+
+.inbox-page > .surface__inner {
+  margin-inline: var(--oct-surface-gutter) auto;
+  /* The cards ask this box, not the window, how wide they may be. */
+  container: inbox-cards / inline-size;
+}
+
+/* The pane's width, not the window's, decides between one column and two. */
+.inbox-page__cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-4);
+}
+
+.inbox-page__side {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-4);
+}
+
+@container inbox-cards (min-width: 720px) {
+  .inbox-page__cards {
+    /* The list a person came for takes the wider column. At one to two its
+       filter chips wrapped to a second row and long titles to three lines. */
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+.inbox-card {
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.inbox-card__head {
+  display: flex;
+  min-height: 28px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  padding: 0 var(--oct-space-4);
+}
+
+.inbox-card__head > .oct-section-label {
+  color: var(--oct-meta);
+}
+
+.inbox-card__body {
+  display: grid;
+  min-width: 0;
+  padding: 0 var(--oct-space-2);
+}
+
+/* The filters are quiet chips: no track behind them, the chosen one takes the
+   control fill. */
+.inbox-card__filters {
+  flex-wrap: wrap;
+  padding: 0;
+  gap: 2px;
+  background: transparent;
+}
+
+.inbox-card__filters > [data-slot="toggle-group-item"] {
+  height: 24px;
+  padding-inline: var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+}
+
+.inbox-card__note,
+.inbox-card__empty {
+  margin: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+.inbox-card__empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.inbox-card__empty > p {
+  margin: 0;
+}
+
+/* Rows have no rule between them: the row under the pointer takes the quiet
+   fill with the row radius. A row that holds its own controls (a decision) is
+   padded here; a plain row pads its link or button so the whole row opens. */
+.inbox-card .inbox-row {
+  display: block;
+  padding: 0;
+  border-bottom: 0;
+  border-radius: var(--oct-radius-sm);
+}
+
+.inbox-card .inbox-row:has(> :not(.inbox-view__row)) {
+  padding: var(--oct-space-2) var(--oct-space-3);
+}
+
+.inbox-card .inbox-row:hover,
+.inbox-card .inbox-row:has(.inbox-view__row:focus-visible) {
+  background: var(--oct-fg-soft);
+}
+
+.inbox-card .inbox-row--static:hover {
+  background: none;
+}
+
+.inbox-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2) var(--oct-space-4);
+}
+
 /* height/min-height beat the button recipe's fixed h-9, which would clip a
    multi-line row; the anchor rows share the class so both render alike. */
 .inbox-view__row {
@@ -17,19 +142,17 @@
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 0;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: inherit;
   font: inherit;
   text-align: left;
   text-decoration: none;
+  /* The button recipe never wraps; a long thread title must, in a narrow card. */
+  white-space: normal;
   cursor: default;
-}
-
-.inbox-view__row:hover .oct-row-label,
-.inbox-view__row:focus-visible .oct-row-label {
-  text-decoration: underline;
 }
 
 .inbox-view__row .oct-row-label {
@@ -50,15 +173,6 @@
   flex: none;
 }
 
-/* The count line and filter chips sit between the title and the lists. */
-.inbox-view__summary {
-  margin: 0 0 var(--oct-space-3);
-}
-
-.inbox-view__filters {
-  margin-bottom: var(--oct-space-4);
-}
-
 /* The agent's claim that waiting costs more soon, in the warning role. The
    group head's count also carries .oct-meta, which would otherwise paint it grey. */
 .inbox-view__urgent,
@@ -70,6 +184,7 @@
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  margin: var(--oct-space-4) 0 var(--oct-space-1);
+  margin: var(--oct-space-2) 0 var(--oct-space-1);
+  padding: 0 var(--oct-space-3);
   font: inherit;
 }

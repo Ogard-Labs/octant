@@ -1,8 +1,7 @@
 import { useMemo } from "react";
-import { usePlanUsageClient } from "./PlanUsageContext";
+import { usePlanUsageReading } from "./PlanUsageContext";
 import { PlanUsageMeters } from "./PlanUsageMeters";
 import { railUsageReadings } from "./railUsageReading";
-import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
 
 /**
  * The plan meters for the provider a new thread will send to, read from the
@@ -11,7 +10,7 @@ import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
  * a window whose reset has passed), or before a provider is chosen.
  */
 export function ComposerPlanUsage(props: { readonly providerInstanceId: string | undefined }) {
-  const { snapshot, now } = useProviderUsageSnapshot(usePlanUsageClient());
+  const { snapshot, now } = usePlanUsageReading();
   const { providerInstanceId } = props;
   const reading = useMemo(
     () =>

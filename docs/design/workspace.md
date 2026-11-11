@@ -709,6 +709,37 @@ wording, and reads are specified in [Start screen](start-screen.md).
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
+### Inbox page
+
+The Inbox opens as a few raised cards in one readable column, not as sections
+under rules.
+
+- **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
+  its baseline, in the meta ink, one sentence of state in the person's locale:
+  today's date and what waits ("Nothing is waiting on you.", "1 thread is
+  waiting on you.", "3 threads are waiting on you."), with the urgent count when
+  there is one. There is no greeting by time of day and no separate count line.
+  Refresh is a quiet icon button with a tooltip at the trailing edge.
+- **One column.** The content keeps a measure of 980px, left-aligned under the
+  title's inset; a wide window leaves ground, it does not stretch the cards.
+- **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
+  **Plan usage** stack to its right at about three to two (the list is the wider column), in one column when the
+  page's own width (a container query, not the window's) is under 720px. Each
+  card's label sits inside it at the top in the meta ink. The Needs you filters
+  (All, Urgent, Decide, Stuck, Finished, with counts) are quiet chips at the
+  trailing edge of that label row and filter only that card. An empty Needs you
+  says what will show up there in one sentence, with Open the Board as a quiet
+  text button beside it. Loading, empty and failed GitHub and Linear are one
+  sentence in their card.
+- **Plan usage** lists each provider account that reports a plan window: its
+  name, the share left on the plan usage meter and, where the reading carries
+  it, when the window resets. It reads the host observation the composer and the
+  rail already hold, adds no request, and is absent while no account reports a
+  window.
+- **Rows** in every card carry no rule between them; the row under the pointer
+  takes the quiet hover fill with the row radius. Screen readers meet the title,
+  the state sentence, Needs you, GitHub, Linear, then Plan usage.
+
 ## Tool lifecycles
 
 In current Code Review, **Select Git hunks** opens separate **Index → Working

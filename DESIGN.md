@@ -1758,7 +1758,11 @@ stage), defined once on every shell in `shell.css`:
   card is the card step below.
 - **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
   Automations, Artifacts, Image generator) are clear over the sheet, and their
-  cards drawn with the raised step (`--oct-surface`) take the card step.
+  cards drawn with the raised step (`--oct-surface`) take the card step. The
+  Inbox is the model: a display-size page title (the `oct-title` size) with its one line of state
+  on the baseline, then raised cards in a 980px left-aligned column, two
+  columns by container query and one when narrow, rows without rules (see
+  [Inbox page](docs/design/workspace.md#inbox-page)).
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
   the sheet: the primary text at 4%.
 - **An outline button** rests on that card step instead of the page colour
