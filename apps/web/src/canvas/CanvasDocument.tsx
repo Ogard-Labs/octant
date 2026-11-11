@@ -61,7 +61,23 @@ export interface CanvasDocumentComments {
   readonly openRowCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
   /** Unresolved threads anchored to a mockup or board node, by block then node. */
   readonly openNodeCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /**
+   * The freeform areas drawn over a block: those of its unresolved threads,
+   * and the one a person has just marked and not yet commented on.
+   */
+  readonly areas?: ReadonlyMap<string, ReadonlyArray<CanvasBlockAreaMark>>;
   readonly onOpen: (blockId: string, rowId?: string) => void;
+}
+
+/** One area of a block, in percent of the block's drawn box. */
+export interface CanvasBlockAreaMark {
+  readonly key: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** Marked and waiting for its comment. */
+  readonly draft?: boolean;
 }
 
 const NO_ROW_COMMENTS: ReadonlyMap<string, number> = new Map();
@@ -83,8 +99,39 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
+  // What comments add to a block: its marker in the margin and the areas
+  // people marked on it.
+  const commentMarks = (block: CanvasDefinition["blocks"][number]) =>
+    comments === undefined ? null : (
+      <>
+        {(comments.areas?.get(String(block.blockId)) ?? []).map((area) => (
+          <span
+            aria-hidden="true"
+            className="canvas-block__area"
+            data-draft={area.draft === true ? "true" : "false"}
+            key={area.key}
+            style={{
+              left: `${String(area.x)}%`,
+              top: `${String(area.y)}%`,
+              width: `${String(area.width)}%`,
+              height: `${String(area.height)}%`,
+            }}
+          />
+        ))}
+        <CommentMarker
+          count={comments.openCounts.get(String(block.blockId)) ?? 0}
+          label={canvasBlockLabel(block)}
+          onOpen={() => comments.onOpen(String(block.blockId))}
+        />
+      </>
+    );
   const blockSection = (block: CanvasDefinition["blocks"][number]) => (
-    <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+    <section
+      key={block.blockId}
+      className="canvas-block"
+      data-block-id={block.blockId}
+      data-block-kind={block.kind}
+    >
       <CanvasBlockRenderer
         block={block}
         {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
@@ -109,18 +156,17 @@ export function CanvasDocument({
               },
             })}
       />
-      {comments === undefined ? null : (
-        <CommentMarker
-          count={comments.openCounts.get(String(block.blockId)) ?? 0}
-          label={canvasBlockLabel(block)}
-          onOpen={() => comments.onOpen(String(block.blockId))}
-        />
-      )}
+      {commentMarks(block)}
     </section>
   );
 
   const dashboardSection = (item: Extract<ReadingItem, { readonly kind: "dashboard" }>) => (
-    <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
+    <section
+      key={item.dashboard.blockId}
+      className="canvas-block"
+      data-block-id={item.dashboard.blockId}
+      data-block-kind="dashboard"
+    >
       <DashboardBlock
         title={item.dashboard.title}
         columns={item.columns}
@@ -129,48 +175,40 @@ export function CanvasDocument({
         cellKind={(block) => block.kind}
         renderCell={(block) => blockSection(block)}
       />
-      {comments === undefined ? null : (
-        <CommentMarker
-          count={comments.openCounts.get(String(item.dashboard.blockId)) ?? 0}
-          label={canvasBlockLabel(item.dashboard)}
-          onOpen={() => comments.onOpen(String(item.dashboard.blockId))}
-        />
-      )}
+      {commentMarks(item.dashboard)}
     </section>
   );
 
   const flowSection = (item: Extract<ReadingItem, { readonly kind: "flow" }>) => (
-    <section key={item.flow.blockId} className="canvas-block" data-block-kind="flow">
+    <section
+      key={item.flow.blockId}
+      className="canvas-block"
+      data-block-id={item.flow.blockId}
+      data-block-kind="flow"
+    >
       <FlowBoard
         block={item.flow}
         blocks={definition.blocks}
         {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
       />
-      {comments === undefined ? null : (
-        <CommentMarker
-          count={comments.openCounts.get(String(item.flow.blockId)) ?? 0}
-          label={canvasBlockLabel(item.flow)}
-          onOpen={() => comments.onOpen(String(item.flow.blockId))}
-        />
-      )}
+      {commentMarks(item.flow)}
     </section>
   );
 
   const deckSection = (item: Extract<ReadingItem, { readonly kind: "deck" }>) => (
-    <section key={item.deck.blockId} className="canvas-block" data-block-kind="deck">
+    <section
+      key={item.deck.blockId}
+      className="canvas-block"
+      data-block-id={item.deck.blockId}
+      data-block-kind="deck"
+    >
       <DeckBlock
         block={item.deck}
         blocks={definition.blocks}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
       />
-      {comments === undefined ? null : (
-        <CommentMarker
-          count={comments.openCounts.get(String(item.deck.blockId)) ?? 0}
-          label={canvasBlockLabel(item.deck)}
-          onOpen={() => comments.onOpen(String(item.deck.blockId))}
-        />
-      )}
+      {commentMarks(item.deck)}
     </section>
   );
 
@@ -189,19 +227,14 @@ export function CanvasDocument({
           <section
             key={first.group.blockId}
             className="canvas-block canvas-block--group"
+            data-block-id={first.group.blockId}
             data-block-kind={first.group.kind}
           >
             <CanvasLayoutGroup
               block={first.group}
               renderSection={(index) => flow(first.sections[index] ?? [])}
             />
-            {comments === undefined ? null : (
-              <CommentMarker
-                count={comments.openCounts.get(String(first.group.blockId)) ?? 0}
-                label={canvasBlockLabel(first.group)}
-                onOpen={() => comments.onOpen(String(first.group.blockId))}
-              />
-            )}
+            {commentMarks(first.group)}
           </section>
         );
       }

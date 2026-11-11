@@ -1551,7 +1551,7 @@ function noPictureSentence(reason: CanvasPreviewImageOmitted | undefined): strin
 // Carried on the read that shows the requests rather than in the tool's
 // always-visible definition, which is kept under a size budget.
 const REQUESTED_CHANGES_GUIDANCE =
-  "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, or region) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
+  "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, or region; a region's x, y, width, and height are percent of the block as drawn, from its top-left corner) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
 
 /**
  * The comments a person sent to the agent that no agent version has answered
