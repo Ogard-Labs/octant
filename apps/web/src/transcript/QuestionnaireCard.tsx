@@ -12,9 +12,21 @@ export interface QuestionnaireCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
   readonly prompt: string;
   readonly questionnaire: Questionnaire;
-  readonly onAnswer: (answer: string) => void | boolean | Promise<void | boolean>;
+  /**
+   * `false` keeps the draft with a generic notice; `{ refused }` keeps it with
+   * the host's own reason, so a person reads why their answer did not go.
+   */
+  readonly onAnswer: (
+    answer: string,
+  ) => void | boolean | QuestionnaireRefusal | Promise<void | boolean | QuestionnaireRefusal>;
   readonly onDismiss?: (() => void) | undefined;
+  /** The send button's words; a Canvas names the thread the answer goes to. */
+  readonly submitLabel?: string | undefined;
   readonly className?: string | undefined;
+}
+
+export interface QuestionnaireRefusal {
+  readonly refused: string;
 }
 
 type DraftAnswer = QuestionnaireResponse["answers"][number];
@@ -75,6 +87,7 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
       const result = await props.onAnswer(encoded);
       if (result === false)
         setNotice("The answers were not accepted. Review the thread status and try again.");
+      else if (typeof result === "object") setNotice(result.refused);
       else {
         draft.clear();
         setSent(encoded);
@@ -263,7 +276,7 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
           </OctantButton>
         )}
         <OctantButton disabled={!valid || busy} size="sm" type="submit">
-          {busy ? "Sending answers…" : "Send answers"}
+          {busy ? "Sending answers…" : (props.submitLabel ?? "Send answers")}
         </OctantButton>
       </footer>
     </form>
