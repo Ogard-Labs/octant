@@ -163,6 +163,27 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+**Pinning Projects to the rail.** A Project can be pinned to the icon rail from
+its row menu in the sidebar (Pin to rail, then Unpin from rail) or unpinned from
+the context menu of its tile (the context-menu key or Shift+F10 opens it from the
+keyboard). A pinned Project is a tile under the destinations, after the rail's
+divider, in the order it was pinned, in the rail beside the sidebar and in the
+collapsed rail; it shows the Project's icon or its initial, is named in the
+label beside the rail, and is current while that Project is the open one.
+Opening it is the same action as opening the Project in the sidebar. In the
+collapsed rail the pinned Projects lead and the automatic list fills what is
+left of six Project tiles without repeating a pinned one; the rail draws no more
+than six pinned tiles, so a long list of pins never pushes Settings or the usage
+rings out of the window; once six Projects are pinned, Pin to rail in another
+Project's menu is disabled with the reason "The rail holds 6 Projects" and
+Unpin from rail stays available, and pins saved beyond six are kept, and the Projects page still lists every Project. Pins
+are the shell setting `sidebarPinnedProjects`, a list of Project ids saved the
+way the sidebar destinations are; a store saved before pins decodes to none, and
+a pin for a Project that no longer exists draws nothing and is dropped the next
+time pins are saved, but only once the Project list is loaded and complete; a save
+made while it loads keeps every other pin, and two quick pin actions both land. The More menu does not list pins: it holds only the
+destinations the rail does not show.
+
 **Project icons.** A Project shows its own icon wherever Projects are listed:
 the sidebar's Project rows, the icon rail's Project tiles, the Projects
 directory, the Project options in the composer's Project picker and in the move

@@ -161,6 +161,7 @@ export function defaultShellSettings(): ShellSettings {
     projectViewSwitcherPresentation: "dropdown",
     sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
     sidebarDestinations: { order: [], visibility: [] },
+    sidebarPinnedProjects: [],
     sidebarMoreEnabled: true,
     sidebarCountTiles: true,
     sidebarSearchPresentation: "icon",

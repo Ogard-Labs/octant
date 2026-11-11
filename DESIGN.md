@@ -1558,7 +1558,10 @@ count badge stay neutral, and under Mono and increased contrast the icons stay
 grey), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
-Projects, More (the menu-only destinations and Customize sidebar), the usage
+Projects, a tile for each Project the person pinned (its icon or initial on the
+same 32px face, after the divider; a context menu on the tile unpins it; the
+collapsed rail lists pinned Projects first and draws six Project tiles at most
+so Settings and the rings stay in the window), More (the menu-only destinations and Customize sidebar), the usage
 rings, and Settings. The sidebar keeps its header (modes, search, new thread,
 hide), the Project list with its view, filter, and Activity controls, the
 threads, and the profile, so nothing is offered twice. Rail icons are 16px on
