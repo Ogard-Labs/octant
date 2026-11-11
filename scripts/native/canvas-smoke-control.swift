@@ -71,8 +71,14 @@ func describedButtons(_ pid: pid_t, _ bounds: CGRect, _ description: String) -> 
     while !queue.isEmpty && visited < 6000 {
         let (node, depth) = queue.removeFirst()
         visited += 1
-        if text(node, kAXRoleAttribute as String) == kAXButtonRole,
-           text(node, kAXDescriptionAttribute as String) == description {
+        // A control that opens a menu is exposed as a pop-up or menu button,
+        // and some roles carry the accessible name as the title. The first
+        // version matched plain buttons by description only and could not
+        // find a menu's trigger.
+        let role = text(node, kAXRoleAttribute as String)
+        if role == kAXButtonRole || role == kAXPopUpButtonRole || role == kAXMenuButtonRole,
+           text(node, kAXDescriptionAttribute as String) == description
+            || text(node, kAXTitleAttribute as String) == description {
             var position: CFTypeRef?
             var size: CFTypeRef?
             var origin = CGPoint.zero
