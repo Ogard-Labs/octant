@@ -46,9 +46,11 @@ import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   acknowledgeWhatsNew,
   loadBundledWhatsNew,
+  resolveBundledAnnouncementPath,
   resolveBundledWhatsNewPath,
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
+import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
@@ -279,6 +281,14 @@ export async function runNightlyClient(
     writeFile: async (path: string, contents: string) => {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, contents, "utf8");
+    },
+    announcement: {
+      path: resolveBundledAnnouncementPath({
+        packaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        moduleUrl: import.meta.url,
+      }),
+      readBounded: readAtMost,
     },
   });
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));

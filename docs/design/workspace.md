@@ -163,6 +163,55 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+**Pinning Projects to the rail.** A Project can be pinned to the icon rail from
+its row menu in the sidebar (Pin to rail, then Unpin from rail) or unpinned from
+the context menu of its tile (the context-menu key or Shift+F10 opens it from the
+keyboard). A pinned Project is a tile under the destinations, after the rail's
+divider, in the order it was pinned, in the rail beside the sidebar and in the
+collapsed rail; it shows the Project's icon or its initial, is named in the
+label beside the rail, and is current while that Project is the open one.
+Opening it is the same action as opening the Project in the sidebar. In the
+collapsed rail the pinned Projects lead and the automatic list fills what is
+left of six Project tiles without repeating a pinned one; the rail draws no more
+than six pinned tiles, so a long list of pins never pushes Settings or the usage
+rings out of the window; once six Projects are pinned, Pin to rail in another
+Project's menu is disabled with the reason "The rail holds 6 Projects" and
+Unpin from rail stays available, and pins saved beyond six are kept, and the Projects page still lists every Project. Pins
+are the shell setting `sidebarPinnedProjects`, a list of Project ids saved the
+way the sidebar destinations are; a store saved before pins decodes to none, and
+a pin for a Project that no longer exists draws nothing and is dropped the next
+time pins are saved, but only once the Project list is loaded and complete; a save
+made while it loads keeps every other pin, and two quick pin actions both land. The More menu does not list pins: it holds only the
+destinations the rail does not show.
+
+**Project icons.** A Project shows its own icon wherever Projects are listed:
+the sidebar's Project rows, the icon rail's Project tiles, the Projects
+directory, the Project options in the composer's Project picker and in the move
+dialog, the Project chip on a thread row, the Work overview's Project line, the
+Inbox's Project group headings, and the Continue cards on Code Home. The icon is
+the favicon or app icon in the Project's folder. The host finds it, because the
+renderer never reads disk: it tries a short fixed list of well-known relative
+paths (`favicon.*`, `public/`, `static/`, `app/`, `src/app/`, `assets/` and
+`docs/public/` variants, then `icon.*` and `logo.svg`) and the first valid file
+wins, with no directory walk and no pattern search. A file is used only when its
+no component of its path below the Project's folder is a symbolic link (the
+open is anchored to the folder and refuses a link at any depth, so an icon
+reached through a link, even one inside the folder, is not used; platforms
+without such an open find no icon), it is a regular file of at most 256 KB, and its first bytes agree with
+its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
+host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
+with `nosniff`, a content security policy that forbids script, and an ETag, and
+answers a plain 404 when there is none. The renderer draws it as an `<img>` at
+the row's own icon size (12, 14, 16, 20 or 24px) with a small radius; it never
+inlines SVG markup. The picture is fetched once per Project per session, not
+per render or per navigation poll. The row's letter tile or folder glyph shows
+while it loads, when the Project has none, and when the image fails. A Project's
+colour still shows in its overview and menus but not on a row that shows an
+icon. A thread with no Project keeps the folder glyph and asks for nothing, and
+many rows in one Project share the one request. Nothing is fetched from a
+network, and a thread's authority does not change: the host shows the person
+their own files.
+
 The Project overview is one reading column in the 880px measure, starting
 below the title band. The header sits on the page: the Project tile at 40px
 (the colour picker), the name as the editable title with the kind ("Code
@@ -494,8 +543,7 @@ Transcript offsets require the same first loaded row and viewport width. These
 presentation references share the endpoint/window/context boundary, retain at
 most 64 entries and 128 KiB, and write no document text, native process identity,
 approval or authority. They never take focus or perform a host operation during
-restore. Composer drafts retain their existing durable storage. Editor drafts
-remain in the thread draft store; approval requests keep their explicit controls.
+restore. Composer drafts retain their existing durable storage. Editor drafts use the local recovery store described under [File editing](#file-editing); approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
@@ -624,6 +672,76 @@ only: nothing is sent until the person sends it, and the new thread has exactly
 the authority a new thread in that Project has. A Project that is archived or
 unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
 
+## File editing
+
+Work's Files previews offer Edit for plain text and Source for Markdown. The
+person may switch Markdown between Preview, Source and Split; switching views
+keeps the editor model and its undo history. Wide layouts place source and
+preview beside each other, and narrow layouts stack independently usable
+regions. Code keeps its file editor and adds a file breadcrumb and a Problems
+list whose rows reveal the reported range in the current file.
+
+Work edits apply only to existing ordinary files, including files in an
+approved extra folder. Saved artifact versions, attachments, PDFs, office
+formats and images retain their viewers and external handoffs. Text source is
+loaded in full through an independently authorized source route; preview chunks
+may be normalized or truncated and are never editable source. A local window
+may manually save inside the current Work Project at its existing access level;
+this human action grants no agent write, shell or Code authority. Plan refuses
+editing. The source route is not admitted for paired-device principals.
+
+Work source editing accepts regular, single-link UTF-8 files up to 5 MiB,
+preserves BOM and line endings, and rejects binary or invalid text. The host
+resolves the opaque target inside the current main or extra folder on every
+request, opens through the existing confinement proof, and checks authority,
+root, physical file identity and source revision before writing through that
+same descriptor. The host serializes source reads and saves by physical file
+identity across windows and Project aliases, reading the baseline again after
+the preceding operation completes; concurrent stale saves return a conflict.
+It never creates a missing source. Saves flush the descriptor;
+an I/O failure can leave a partial write and its outcome is never retried
+implicitly. This is a human file save, not a new artifact version or a multi-file
+transaction. Code retains its existing file-helper save path.
+
+Both editors share Commands, Find, Replace, Format, Go to line and Editor
+settings. Preferences cover wrapping, indentation, spaces or tabs, visible
+whitespace, minimap and opt-in format on save. Settings stay on the person's
+client. A Code file additionally exposes the language-server outline and
+selection-to-agent review. Language capabilities and launch authority remain
+owned by [Language services](language-services.md).
+
+Unsaved text is kept locally on the client, separately from pane references,
+messages and the host journal. Code recovery keys include the endpoint, checkout
+and file identity; Work recovery uses the authorized host, Project and a stable
+opaque key for the physical root and file path, so temporary listing tokens do
+not lose a draft on host restart. A recovered draft retains its original source
+revision. A newer disk version requires comparison and an explicit choice to
+keep the draft against that version or discard it; Save never silently adopts
+a newer baseline. Failed local storage keeps edits in memory with a warning to
+save before closing. That warning stays visible while any draft remains
+unpersisted, even when its baseline or another draft was stored successfully.
+Saving or discarding removes that file's recovery copy.
+Opening source is authorized before a recovery copy is shown.
+
+Code's content search offers literal, case-insensitive replacement in its
+listed matching files. The person prepares and reviews before/after text for
+at most 16 files, 256 KiB per file and 1 MiB of combined preview text. Incomplete
+search results are explicitly labelled. Preparation refuses unsaved editor
+drafts; application checks them again before any save and before each file.
+Saves use the reviewed physical identity and digest and stop at the first
+conflict or failure. Earlier successful files remain. Plan may prepare a review
+but cannot save it. Nothing runs a language-server command or writes without the
+ordinary authoritative file-save route.
+
+Send selection to agent quotes the exact selected text, path and line range in
+the current conversation draft; only the person sends it. The editor retains
+that selection's complete draft baseline. The person may load the latest
+completed same-thread/same-checkout agent reply when it contains exactly one
+fenced code block, or paste a proposed replacement. Preview replacement shows a
+comparison. Apply replacement to draft is allowed only while the complete draft
+still equals the captured baseline and the editor is writable; it writes no
+file. Save remains the explicit disk write.
+
 ## Start-screen cards
 
 Every start screen shows one question and its composer. **New task**, in
@@ -680,6 +798,37 @@ wording, and reads are specified in [Start screen](start-screen.md).
   commands. The desktop menu bar lists the same waiting threads but only opens
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
+
+### Inbox page
+
+The Inbox opens as a few raised cards in one readable column, not as sections
+under rules.
+
+- **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
+  its baseline, in the meta ink, one sentence of state in the person's locale:
+  today's date and what waits ("Nothing is waiting on you.", "1 thread is
+  waiting on you.", "3 threads are waiting on you."), with the urgent count when
+  there is one. There is no greeting by time of day and no separate count line.
+  Refresh is a quiet icon button with a tooltip at the trailing edge.
+- **One column.** The content keeps a measure of 980px, left-aligned under the
+  title's inset; a wide window leaves ground, it does not stretch the cards.
+- **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
+  **Plan usage** stack to its right at about three to two (the list is the wider column), in one column when the
+  page's own width (a container query, not the window's) is under 720px. Each
+  card's label sits inside it at the top in the meta ink. The Needs you filters
+  (All, Urgent, Decide, Stuck, Finished, with counts) are quiet chips at the
+  trailing edge of that label row and filter only that card. An empty Needs you
+  says what will show up there in one sentence, with Open the Board as a quiet
+  text button beside it. Loading, empty and failed GitHub and Linear are one
+  sentence in their card.
+- **Plan usage** lists each provider account that reports a plan window: its
+  name, the share left on the plan usage meter and, where the reading carries
+  it, when the window resets. It reads the host observation the composer and the
+  rail already hold, adds no request, and is absent while no account reports a
+  window.
+- **Rows** in every card carry no rule between them; the row under the pointer
+  takes the quiet hover fill with the row radius. Screen readers meet the title,
+  the state sentence, Needs you, GitHub, Linear, then Plan usage.
 
 ## Tool lifecycles
 
@@ -1201,6 +1350,73 @@ remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
 host restart and is cleared when GitHub authority is revoked.
+
+**The Pull requests and Issues lists.** The Pull requests page is a dense, calm list in the reading
+measure, at most 720px and left-aligned in the page. Its title band carries the
+count; at the trailing edge sit a Sort menu, a Filter menu, Repository settings
+(only while the list is not grouped) and Refresh, each an icon button with a
+tooltip. A row is two lines. Line one is the title at medium weight, cut after
+two lines, and at its trailing edge the one thing that needs attention, in
+words and as the quiet chip (Draft, Conflicts, Checks failing, Changes
+requested, Checks pending, Review pending), or a small check when the pull
+request is mergeable and nothing blocks it. Line two is one meta line: a state
+glyph coloured by state, the repository's name, the author, the age ("2h",
+"5d") and a link mark when a thread is linked, with the number (`#2344`) in
+tabular numerals at the trailing edge. The repository's name is the bare name
+in a group and `owner/name` on an ungrouped list that spans repositories, in both
+lists. Every row, flagged or not, is one tooltip trigger that opens on hover and
+on keyboard focus of the whole row, with the status sentence and then
+"head → base", and the same text is visually hidden text of the row, so no fact
+is pointer-only. A row has no hairline under it, the row under the pointer takes the
+control hover fill with the row radius, and clicking it opens the pull request
+exactly as before.
+
+Sort offers Recently updated (the default), Least recently updated and
+Repository, and a **Group by repository** check item. The snapshot carries each
+pull request's last update and not its creation time, so Newest and Oldest are
+not offered. Filter offers State (open, draft), Review (needs review, changes
+requested, approved) and Checks (passing, failing, pending); a pull request's
+author is not compared with the signed-in GitHub account, so a "mine" filter is
+not offered either. Sort, grouping and filters are remembered in this window's
+local storage, and a filter that is narrowing the list marks its button.
+Searching is unchanged and covers the title, author, branches, repository,
+number and linked threads.
+
+With grouping on, each repository has a slim header: its name, the count and a
+"..." menu. That menu holds what the old Project header held: **Auto-refresh**
+and **Agents may merge**, with the same labels and the same setters as before,
+and Refresh. With grouping off those switches are in the page's **Repository
+settings** menu, one group per connected repository, because they act on a
+Project and must stay one step from the list; they are never in Filter, which
+only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
+on, that repository's group header shows the quiet chip "Agents may merge"
+beside the count, and, with grouping off, the Repository settings button carries
+the same dot as a narrowing filter and its tooltip names those repositories;
+Auto-refresh is not an authority and has no chip, only the check in the menu.
+The server still owns both settings, refuses a
+device that may not set them, and enforces the merge choice at the merge. A
+Project that is not on GitHub is not drawn as an empty block: one quiet line at
+the foot says how many, with their names in a disclosure. A connected Project
+never refreshed is named in one line (flat) or keeps its group with the empty
+sentence (grouped). While grouped, every connected repository keeps its header,
+menu and chip even when a search or filter leaves it no rows: the count is 0 and
+one quiet line says "Nothing matches", so a granted permission is never hidden by
+a narrowed list. Choosing Agents may merge closes the menu and returns focus to its
+button, so one activation is one change; Auto-refresh stays open because it is not
+an authority and its check shows the change. The dock's Pull requests tool uses the same rows in one
+flat list with the search and count, and none of the page's menus.
+
+The Issues place draws the same row, so one component serves both lists: the
+title, the 12px meta line (state glyph, repository name when the list spans
+repositories, author, age, number at the trailing edge), the quiet hover and
+the same slim group head. Its list column keeps the 720px measure beside the
+detail pane. Its header carries the count and the Sort icon menu (Recently
+updated, Least recently updated, Highest number, and Repository and **Group by
+repository** only across repositories, since one repository has nothing to group
+by); grouping is remembered in the window's local storage. An issue's list read
+carries no labels, so the row shows none; they stay in the detail pane. A row's
+click, the state toggle, the repository chooser, search and the detail pane's
+Start a Code thread are unchanged.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is

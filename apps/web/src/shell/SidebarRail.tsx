@@ -8,13 +8,15 @@ import {
   SquarePen,
   type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import { TILE_ICONS, type SidebarTile, type SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
+import { ProjectIcon } from "../projects/ProjectIcon";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 
 export interface SidebarRailProject {
@@ -50,7 +52,15 @@ export interface SidebarRailProps {
     readonly onSelect: () => void;
     readonly active: boolean;
   }>;
+  /** The automatic list: the first Projects, drawn only in the collapsed rail. */
   readonly projects: ReadonlyArray<SidebarRailProject>;
+  /**
+   * Projects the person pinned, in the order they pinned them, already
+   * resolved against the Projects that exist. They show in both placements.
+   */
+  readonly pinnedProjects?: ReadonlyArray<SidebarRailProject>;
+  /** Unpins a Project from a pinned tile's context menu. */
+  readonly onUnpinProject?: (projectId: string) => void;
   readonly onOpenProjects?: () => void;
   /** Whether the Projects page is the one showing. */
   readonly projectsActive?: boolean;
@@ -71,8 +81,67 @@ const TILE_RAIL: Readonly<
   done: { label: "Done today", icon: TILE_ICONS.done },
 };
 
-/** Projects past this many wait behind the folder button rather than scroll the rail. */
-const RAIL_PROJECT_LIMIT = 6;
+/**
+ * Project tiles past this many wait behind the folder button rather than push
+ * Settings and the usage rings out of the window. Pins count against it first
+ * in the collapsed rail, and the beside rail draws no more than this many of
+ * them: the sidebar next to it lists every Project anyway.
+ */
+export const RAIL_PROJECT_LIMIT = 6;
+
+/**
+ * The pinned Projects that still exist, in pin order. A pin for a Project that
+ * is gone draws nothing.
+ */
+export function resolveRailPins<P extends { readonly id: string }>(
+  pinnedIds: ReadonlyArray<string>,
+  existing: ReadonlyArray<P>,
+): ReadonlyArray<P> {
+  const byId = new Map(existing.map((project) => [String(project.id), project] as const));
+  return pinnedIds.flatMap((id) => {
+    const project = byId.get(id);
+    return project === undefined ? [] : [project];
+  });
+}
+
+/**
+ * The pin list to save after pinning or unpinning one Project. Pins for
+ * Projects that no longer exist are dropped here, the next time pins are saved,
+ * but only when `existingIds` is the complete, loaded Project list. Without it
+ * (still loading, or refused) every other pin is kept: an empty list is not
+ * evidence that a Project is gone.
+ */
+export function savedRailPins<Id extends string>(
+  saved: ReadonlyArray<Id>,
+  existingIds: ReadonlySet<string> | undefined,
+  projectId: Id,
+  pinned: boolean,
+): ReadonlyArray<Id> {
+  const kept = saved.filter(
+    (id) => id !== projectId && (existingIds === undefined || existingIds.has(id)),
+  );
+  return pinned ? [...kept, projectId] : kept;
+}
+
+/** What the rail draws: pins first, then the automatic list fills what is left. */
+function railProjectTiles(
+  placement: "collapsed" | "beside",
+  pinned: ReadonlyArray<SidebarRailProject>,
+  automatic: ReadonlyArray<SidebarRailProject>,
+): ReadonlyArray<{ readonly project: SidebarRailProject; readonly pinned: boolean }> {
+  const pins = pinned.slice(0, RAIL_PROJECT_LIMIT);
+  const pinnedIds = new Set(pins.map((project) => String(project.id)));
+  const rest =
+    placement === "beside"
+      ? []
+      : automatic
+          .filter((project) => !pinnedIds.has(String(project.id)))
+          .slice(0, RAIL_PROJECT_LIMIT - pins.length);
+  return [
+    ...pins.map((project) => ({ project, pinned: true })),
+    ...rest.map((project) => ({ project, pinned: false })),
+  ];
+}
 
 /**
  * What a collapsed sidebar leaves: one column of the places the full sidebar
@@ -84,7 +153,11 @@ export function SidebarRail(props: SidebarRailProps) {
   const modes = visibleModes(props.modes);
   const activeMode = visibleModeOf(props.activeMode);
   const beside = props.placement === "beside";
-  const visibleProjects = beside ? [] : props.projects.slice(0, RAIL_PROJECT_LIMIT);
+  const visibleProjects = railProjectTiles(
+    beside ? "beside" : "collapsed",
+    props.pinnedProjects ?? [],
+    props.projects,
+  );
   return (
     <aside
       aria-label={beside ? "Destinations" : "Octant sidebar, collapsed"}
@@ -170,18 +243,34 @@ export function SidebarRail(props: SidebarRailProps) {
         {visibleProjects.length === 0 && props.onOpenProjects === undefined ? null : (
           <RailDivider />
         )}
-        {visibleProjects.map((project) => (
-          <RailButton
-            active={project.active}
-            key={project.id}
-            label={project.name}
-            onSelect={project.onOpen}
-          >
-            <span aria-hidden="true" className="sidebar-rail__project">
-              {projectInitial(project.name)}
-            </span>
-          </RailButton>
-        ))}
+        {visibleProjects.map(({ project, pinned }) => {
+          const tile = (
+            <RailButton active={project.active} label={project.name} onSelect={project.onOpen}>
+              <ProjectIcon
+                fallback={
+                  <span aria-hidden="true" className="sidebar-rail__project">
+                    {projectInitial(project.name)}
+                  </span>
+                }
+                projectId={String(project.id)}
+                size={20}
+              />
+            </RailButton>
+          );
+          const unpin = props.onUnpinProject;
+          return pinned && unpin !== undefined ? (
+            <OctantContextMenu
+              items={[{ label: "Unpin from rail", value: "unpin" }]}
+              key={project.id}
+              onValueChange={() => unpin(String(project.id))}
+              triggerClassName="sidebar-rail__tile"
+            >
+              {tile}
+            </OctantContextMenu>
+          ) : (
+            <Fragment key={project.id}>{tile}</Fragment>
+          );
+        })}
         {props.onOpenActivity === undefined ? null : (
           <RailButton icon={ScrollText} label="Activity feed" onSelect={props.onOpenActivity} />
         )}

@@ -58,6 +58,40 @@ export const PreviewTarget = Schema.Struct({
 }).annotations(strict);
 export type PreviewTarget = typeof PreviewTarget.Type;
 
+/** Complete source text only; preview chunks may be truncated or normalized. */
+export const MAX_PREVIEW_EDITOR_BYTES = 5 * 1024 * 1024;
+export const PreviewTextRequest = Schema.Struct({
+  target: PreviewTarget,
+  change: Schema.optional(
+    Schema.Struct({
+      revision: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+      text: Schema.String.pipe(Schema.maxLength(MAX_PREVIEW_EDITOR_BYTES)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type PreviewTextRequest = typeof PreviewTextRequest.Type;
+export const PreviewTextReply = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready", "saved"),
+    fileKey: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+    text: Schema.String.pipe(Schema.maxLength(MAX_PREVIEW_EDITOR_BYTES)),
+    revision: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal(
+      "conflict",
+      "unauthorized",
+      "unavailable",
+      "unsupported",
+      "too-large",
+      "failed",
+    ),
+  }).annotations(strict),
+);
+export type PreviewTextReply = typeof PreviewTextReply.Type;
+export const decodePreviewTextRequest = Schema.decodeUnknownSync(PreviewTextRequest);
+export const decodePreviewTextReply = Schema.decodeUnknownSync(PreviewTextReply);
+
 /**
  * Source-version identity used for stale detection and source-versioned
  * structured selections. The content hash binds selections to the exact bytes

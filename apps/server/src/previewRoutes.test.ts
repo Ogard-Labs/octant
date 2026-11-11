@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +117,102 @@ describe("Preview routes", () => {
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it("edits the full source, refuses an intervening disk change, and never writes in Plan", async () => {
+    const call = async (handler: typeof route, change?: { text: string; revision: string }) => {
+      const response = await handler(
+        new Request("http://127.0.0.1/api/preview/text", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify({
+            target: makeTarget(),
+            ...(change === undefined ? {} : { change }),
+          }),
+        }),
+      );
+      return response?.json();
+    };
+    const opened = await call(route);
+    expect(opened).toMatchObject({ kind: "ready", text: "# Title\nbody line\n" });
+    expect(JSON.stringify(opened)).not.toContain(root);
+    writeFileSync(join(root, "notes.md"), "agent changes");
+    expect(await call(route, { text: "my edit", revision: opened.revision })).toEqual({
+      kind: "conflict",
+    });
+    const latest = await call(route);
+    expect(
+      await call(createRoute(service, { posture: "plan" }), {
+        text: "no",
+        revision: latest.revision,
+      }),
+    ).toEqual({ kind: "unauthorized" });
+    expect(await call(route, { text: "my edit", revision: latest.revision })).toMatchObject({
+      kind: "saved",
+      text: "my edit",
+    });
+    expect(await call(route)).toMatchObject({ kind: "ready", text: "my edit" });
+  });
+
+  it("lets only one concurrent save replace a Work file's revision across service instances", async () => {
+    const otherRoute = createRoute(makeService(root, records));
+    const call = async (handler: typeof route, change?: { text: string; revision: string }) => {
+      const response = await handler(
+        new Request("http://127.0.0.1/api/preview/text", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify({
+            target: makeTarget(),
+            ...(change === undefined ? {} : { change }),
+          }),
+        }),
+      );
+      return response?.json();
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const baseline = await call(route);
+      const texts = Array.from({ length: 4 }, (_, index) =>
+        `Draft ${attempt}/${index}\n`.repeat(1000 + index),
+      );
+      const replies = await Promise.all(
+        texts.map((text, index) =>
+          call(index % 2 === 0 ? route : otherRoute, { text, revision: baseline.revision }),
+        ),
+      );
+      expect(replies.filter((reply) => reply.kind === "saved")).toHaveLength(1);
+      expect(replies.filter((reply) => reply.kind === "conflict")).toHaveLength(3);
+      const winner = texts[replies.findIndex((reply) => reply.kind === "saved")];
+      expect(readFileSync(join(root, "notes.md"), "utf8")).toBe(winner);
+      expect(await call(route)).toMatchObject({ kind: "ready", text: winner });
+    }
+  });
+
+  it("preserves BOM and CRLF source and refuses immutable versions and escaping links", async () => {
+    const send = async (
+      target: ReturnType<typeof makeTarget>,
+      change?: { text: string; revision: string },
+    ) => {
+      const response = await route(
+        new Request("http://127.0.0.1/api/preview/text", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify({ target, ...(change === undefined ? {} : { change }) }),
+        }),
+      );
+      return response?.json();
+    };
+    writeFileSync(join(root, "notes.md"), "\ufeffline one\r\nline two\r\n");
+    const source = await send(makeTarget());
+    expect(source.text).toBe("\ufeffline one\r\nline two\r\n");
+    await send(makeTarget(), {
+      text: source.text.replace("one", "edited"),
+      revision: source.revision,
+    });
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("\ufeffline edited\r\nline two\r\n");
+    expect(await send(makeTarget({ kind: "artifact-version" }))).toEqual({ kind: "unauthorized" });
+    symlinkSync("/etc/passwd", join(root, "escape.txt"));
+    records.set("escape", { relativePath: "escape.txt", displayName: "escape.txt" });
+    expect(await send(makeTarget({ opaqueRef: "escape" }))).toMatchObject({ kind: "unavailable" });
   });
 
   it("opens a markdown target and returns a ready outcome with no host path", async () => {

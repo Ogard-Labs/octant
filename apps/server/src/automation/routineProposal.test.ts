@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  decodeAutomationCommand,
+  decodeAutomationId,
   decodeRoutineProposalDecisionResult,
   decodeRoutineProposalList,
   decodeWindowId,
@@ -11,6 +13,7 @@ import {
   type AutomationDefinition,
   type AutomationRunReference,
   type ProviderExecutionPolicy,
+  type RoutineProposal,
   type WindowId,
 } from "@octant/contracts";
 import { AgentProfile } from "@octant/contracts/agent-profile";
@@ -120,6 +123,45 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
         : {}),
     },
   };
+  const draft = (proposal: RoutineProposal) =>
+    buildThreadRoutineDraft(
+      {
+        hostId: "local",
+        actorId: ACTOR,
+        readThread: () => thread.current,
+        readProject: () => ({
+          name: "Reports",
+          mode,
+          active: true,
+          version: 1,
+          bindingRevisionId: BINDING_REVISION,
+        }),
+        checkoutAvailable: () => true,
+        profiles: () => [profile],
+        uuid,
+        clock: () => NOW,
+      },
+      proposal,
+    );
+  proposals.bindRequestedCreate(({ windowId: scope, proposal }) => {
+    const built = draft(proposal);
+    if (built.status === "refused") return { status: "not-created", message: built.message };
+    const created = commands.execute(
+      decodeAutomationCommand({
+        kind: "create-automation",
+        automationId: decodeAutomationId(uuid()),
+        expectedVersion: 0,
+        principal: { kind: "local-window", windowId: String(scope), capabilityGeneration: 0 },
+        origin: { kind: "interactive" },
+        definition: built.draft,
+        initialLifecycle: "paused",
+      }),
+      { originThreadId: proposal.threadId },
+    );
+    return created.kind === "automation-created"
+      ? { status: "created", automationId: created.automation.id }
+      : { status: "not-created", message: "The routine was not created." };
+  });
   const handler = createAutomationRouteHandler({
     projection,
     commands,
@@ -150,29 +192,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
     hostId: "local",
     now: () => 1,
     uuid,
-    proposals: {
-      service: proposals,
-      draft: (proposal) =>
-        buildThreadRoutineDraft(
-          {
-            hostId: "local",
-            actorId: ACTOR,
-            readThread: () => thread.current,
-            readProject: () => ({
-              name: "Reports",
-              mode,
-              active: true,
-              version: 1,
-              bindingRevisionId: BINDING_REVISION,
-            }),
-            checkoutAvailable: () => true,
-            profiles: () => [profile],
-            uuid,
-            clock: () => NOW,
-          },
-          proposal,
-        ),
-    },
+    proposals: { service: proposals, draft },
   });
   /** Every outside-content mark a routine read journaled, and whether the journal refuses them. */
   const ingestion = {
@@ -187,12 +207,17 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
       };
     },
   };
-  const tools = (scope: WindowId = windowId, isAutomationOrigin = false) =>
+  const tools = (
+    scope: WindowId = windowId,
+    isAutomationOrigin = false,
+    posture?: ProviderExecutionPolicy,
+  ) =>
     createRoutineProposalTools({
       windowId: scope,
       thread: { id: THREAD, mode, projectId: PROJECT },
       isAutomationOrigin,
       proposals,
+      ...(posture === undefined ? {} : { readPosture: () => posture }),
       now: () => NOW_MS,
     });
   const routines = (
@@ -253,6 +278,16 @@ async function decide(
   return decodeRoutineProposalDecisionResult(await response?.json());
 }
 
+/** Waits until a proposal is listed for the window, then returns the list. */
+async function cardAppears(handler: (request: Request) => Promise<Response | undefined>) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const waiting = await listed(handler);
+    if (waiting.length > 0) return waiting;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("The proposal never appeared.");
+}
+
 /** Starts the tool call and waits until its proposal is listed for the window. */
 async function propose(h: ReturnType<typeof harness>, input = weeklyInput) {
   const call = h.tools().execute({ name: "octant_propose_routine", inputJson: input });
@@ -288,6 +323,93 @@ describe("routine proposals from a thread", () => {
       .execute({ name: "octant_propose_routine", inputJson: weeklyInput });
     expect(outcome).toMatchObject({ isError: true, result: { reason: "automation-recursion" } });
     expect(await listed(h.handler)).toEqual([]);
+  });
+
+  it("creates a paused routine at once, with no card, when the person asked for it", async () => {
+    const h = harness();
+    const outcome = await h.tools().execute({
+      name: "octant_propose_routine",
+      inputJson: JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true }),
+    });
+    expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+    // The tool row carries what was created, so the transcript can show a receipt.
+    expect(outcome.routine).toMatchObject({
+      name: "Monday report",
+      paused: true,
+      trigger: { kind: "weekly-local" },
+    });
+    expect(await listed(h.handler)).toEqual([]);
+    const items = h.projection.listSummaries({
+      hostId: "local" as never,
+      mode: "all",
+      limit: 10,
+    }).items;
+    expect(items).toHaveLength(1);
+    const routine = h.projection.getDefinition(items[0]?.id as never);
+    expect(routine).toMatchObject({
+      lifecycle: "paused",
+      originThreadId: THREAD,
+      createdBy: { kind: "local-window", windowId: String(windowId), capabilityGeneration: 0 },
+    });
+    // Asked for by the person or not, a routine takes only approval-gated authority.
+    expect(routine?.authorityProfile.effective).toMatchObject({
+      network: false,
+      subagents: false,
+      executionPolicy: "approval-gated",
+    });
+  });
+
+  it("still asks on a card when the agent suggests the routine itself", async () => {
+    const h = harness();
+    const { call, proposal } = await propose(h);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    await decide(h.handler, String(proposal.proposalId), "decline");
+    expect(await call).toMatchObject({ result: { status: "declined" } });
+  });
+
+  it("asks on a card, and creates nothing, for a follow-up or a turn in Plan even when the person asked", async () => {
+    const h = harness({ mode: "code" });
+    const requested = { ...JSON.parse(weeklyInput), requestedByPerson: true };
+    const inPlan = h
+      .tools(windowId, false, "plan")
+      .execute({ name: "octant_propose_routine", inputJson: JSON.stringify(requested) });
+    const waiting = await cardAppears(h.handler);
+    expect(waiting).toHaveLength(1);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    await decide(h.handler, String(waiting[0]?.proposalId), "decline");
+    expect(await inPlan).toMatchObject({ result: { status: "declined" } });
+
+    const followUp = h.tools().execute({
+      name: "octant_propose_routine",
+      inputJson: JSON.stringify({
+        name: "Check back",
+        prompt: "Check whether the reply arrived.",
+        trigger: "follow-up",
+        at: "2026-11-01T09:00:00Z",
+        requestedByPerson: true,
+      }),
+    });
+    const followUpCard = await cardAppears(h.handler);
+    expect(followUpCard).toHaveLength(1);
+    await decide(h.handler, String(followUpCard[0]?.proposalId), "decline");
+    expect(await followUp).toMatchObject({ result: { status: "declined" } });
+  });
+
+  it("refuses a requested routine from a turn the host runs", async () => {
+    const h = harness();
+    const requested = JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true });
+    expect(
+      await h
+        .tools(windowId, true)
+        .execute({ name: "octant_propose_routine", inputJson: requested }),
+    ).toMatchObject({ isError: true, result: { reason: "automation-recursion" } });
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
   });
 
   it("lets a Code turn in Plan propose, and the routine the person confirms asks first", async () => {
@@ -341,6 +463,7 @@ describe("routine proposals from a thread", () => {
       status: "confirmed",
       routineId: String(routine.id),
     });
+    expect(outcome.routine).toMatchObject({ routineId: String(routine.id), paused: false });
     expect(routine.createdBy).toEqual({
       kind: "local-window",
       windowId: String(windowId),

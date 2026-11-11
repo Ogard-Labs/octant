@@ -18,6 +18,7 @@ import {
   type ProjectCreateGithubSource,
 } from "../projects/ProjectCreateDialog";
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
+import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 import type {
@@ -29,7 +30,7 @@ import type {
 
 export interface ShellDialogHostCodeThreadView {
   readonly checkout: { readonly id: CodeCheckoutId };
-  readonly thread: { readonly id: CodeThreadId };
+  readonly thread: { readonly id: CodeThreadId; readonly executionPolicy?: string };
 }
 
 export interface ShellDialogHostProps {
@@ -68,6 +69,7 @@ export interface ShellDialogHostProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly firstRun: FirstRunOnboardingProps;
+  readonly whatsNew: WhatsNewController;
   readonly announcement: string;
   readonly announcementSequence: number;
   readonly projectAnnouncement: string;
@@ -148,6 +150,10 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           every split pane at once. */}
       {props.zenActive || props.activeCodeThreadView === undefined ? null : (
         <CodeSearchDialog
+          readOnly={
+            props.activeCodeThreadView.thread.executionPolicy === undefined ||
+            props.activeCodeThreadView.thread.executionPolicy === "plan"
+          }
           checkoutId={props.activeCodeThreadView.checkout.id}
           onOpenFile={props.onOpenCodeSearchFile}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
@@ -168,10 +174,7 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           <FirstRunOnboarding {...props.firstRun} />
         </Suspense>
       ) : null}
-      <WhatsNewAfterUpdate
-        firstRunVisible={props.firstRun.controller.visible}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-      />
+      <WhatsNewAfterUpdate controller={props.whatsNew} />
       <p
         aria-atomic="true"
         aria-live="polite"

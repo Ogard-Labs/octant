@@ -1,5 +1,10 @@
+import type { BundledWhatsNewAnnouncement } from "@octant/contracts/desktop-bridge";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  BUNDLED_ANNOUNCEMENT_FILENAME,
+  loadBundledAnnouncement,
+} from "./bundledWhatsNewAnnouncement";
 
 /**
  * Local notes for the running desktop build.
@@ -27,6 +32,7 @@ export type BundledWhatsNew =
       readonly version: string;
       readonly text: string;
       readonly showAfterApply: boolean;
+      readonly announcement?: BundledWhatsNewAnnouncement;
     }
   | {
       readonly kind: "empty";
@@ -39,13 +45,29 @@ export function resolveBundledWhatsNewPath(options: {
   readonly appPath: string;
   readonly moduleUrl: string;
 }): string {
+  return resolveBundledResourcePath(options, BUNDLED_WHATS_NEW_FILENAME);
+}
+
+/** The announcement sits beside the notes; its picture sits beside it. */
+export function resolveBundledAnnouncementPath(options: {
+  readonly packaged: boolean;
+  readonly appPath: string;
+  readonly moduleUrl: string;
+}): string {
+  return resolveBundledResourcePath(options, BUNDLED_ANNOUNCEMENT_FILENAME);
+}
+
+function resolveBundledResourcePath(
+  options: {
+    readonly packaged: boolean;
+    readonly appPath: string;
+    readonly moduleUrl: string;
+  },
+  filename: string,
+): string {
   return options.packaged
-    ? resolve(options.appPath, "apps/desktop/resources", BUNDLED_WHATS_NEW_FILENAME)
-    : resolve(
-        dirname(fileURLToPath(options.moduleUrl)),
-        "../resources",
-        BUNDLED_WHATS_NEW_FILENAME,
-      );
+    ? resolve(options.appPath, "apps/desktop/resources", filename)
+    : resolve(dirname(fileURLToPath(options.moduleUrl)), "../resources", filename);
 }
 
 export function resolveWhatsNewStatePath(userDataDirectory: string): string {
@@ -116,6 +138,11 @@ export async function loadBundledWhatsNew(options: {
   readonly statePath: string;
   readonly readFile: (path: string) => Promise<string>;
   readonly writeFile: (path: string, contents: string) => Promise<void>;
+  /** Without it a release carries notes only. */
+  readonly announcement?: {
+    readonly path: string;
+    readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
+  };
 }): Promise<BundledWhatsNew> {
   const document = await readDocument(options.notesPath, options.readFile);
   const lastShownVersion = await readLastShown(options.statePath, options.readFile);
@@ -135,11 +162,21 @@ export async function loadBundledWhatsNew(options: {
   if (document.kind === "empty") {
     return { kind: "empty", version: options.currentVersion, showAfterApply: false };
   }
+  // Only read when the notes are due: the picture crosses IPC as a data URL,
+  // and Settings reads the same answer on every open.
+  const announcement =
+    decision.showAfterApply && options.announcement !== undefined
+      ? await loadBundledAnnouncement({
+          announcementPath: options.announcement.path,
+          readBounded: options.announcement.readBounded,
+        })
+      : undefined;
   return {
     kind: "notes",
     version: options.currentVersion,
     text: document.text,
     showAfterApply: decision.showAfterApply,
+    ...(announcement === undefined ? {} : { announcement }),
   };
 }
 

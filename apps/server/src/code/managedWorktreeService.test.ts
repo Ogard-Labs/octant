@@ -158,6 +158,8 @@ function harness(
     readonly add?: "created" | "rejected" | "throw";
     readonly remove?: "removed" | "rejected" | "throw";
     readonly dirty?: boolean;
+    /** Whether the worktree's commit is pushed or merged; "unknown" leaves the port without the check. */
+    readonly delivered?: boolean | "unknown";
     readonly authority?: "eligible" | "active" | "undelivered" | "mismatched" | "unavailable";
     readonly grantClockPosture?: "ok" | "recovery-required";
   } = {},
@@ -189,6 +191,14 @@ function harness(
       return { status: options.add === "rejected" ? ("rejected" as const) : ("created" as const) };
     }),
     isDirty: vi.fn(async () => ({ status: "observed" as const, dirty: options.dirty ?? false })),
+    ...(options.delivered === "unknown"
+      ? {}
+      : {
+          isDelivered: vi.fn(async () => ({
+            status: "observed" as const,
+            delivered: options.delivered !== false,
+          })),
+        }),
     removeWorktree: vi.fn(async () => {
       events.push("git:remove");
       if (options.remove === "throw") throw new Error("connection lost");
@@ -642,6 +652,65 @@ describe("ManagedWorktreeService", () => {
     expect(git.removeWorktree).not.toHaveBeenCalled();
     // A checkout that is still there keeps every restore point it recorded.
     expect(git.removeCheckpointRefs).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["dirty", { dirty: true }, "dirty"],
+    ["unpushed and unmerged", { delivered: false }, "undelivered"],
+    ["unknown delivery", { delivered: "unknown" as const }, "undelivered"],
+  ])("keeps the worktree of a just-archived thread that is %s", async (_label, options, reason) => {
+    const { service, receipts, git } = harness({
+      ...options,
+      observations: [repositoryObservation({ target: "ready" })],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+
+    await expect(
+      service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: false, onArchive: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "refused", reason });
+    expect(git.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("removes a just-archived thread's clean, delivered worktree and keeps its branch", async () => {
+    const { service, receipts, git } = harness({
+      observations: [repositoryObservation({ target: "ready" })],
+    });
+    const receipt = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await receipts.transition(receipt.receiptId, "ready");
+
+    await expect(
+      service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: false, onArchive: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "removed" });
+    expect(git.removeWorktree).toHaveBeenCalledWith(
+      { repositoryRoot, targetPath },
+      expect.any(AbortSignal),
+    );
+    expect(git.deleteBranch).toBeUndefined();
   });
 
   it("retires the checkout's checkpoint anchors once, and only after it is really gone", async () => {

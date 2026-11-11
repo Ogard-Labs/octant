@@ -6,12 +6,14 @@ const MOBILE_SOURCE = "apps/mobile";
 const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 
 // Allow hex/rgb/rgba/hsl literals in theme data, theme-editing UI, tests,
-// and the two mobile theme-data modules. All other views consume CSS variables
-// or theme tokens, including React Native views.
+// and the mobile theme modules (its data, its materials, and the arithmetic
+// that tints a theme hue). All other views consume CSS variables or theme
+// tokens, including React Native views.
 const EXEMPT_PREFIXES = [`${WEB_SOURCE}/ui/shadcn/`, `${WEB_SOURCE}/theme/`, `${WEB_SOURCE}/zen/`];
 const EXEMPT_FILES = new Set([
   `${MOBILE_SOURCE}/design-system/materials.ts`,
   `${MOBILE_SOURCE}/design-system/tokens.ts`,
+  `${MOBILE_SOURCE}/design-system/tone.ts`,
 ]);
 const EXEMPT_SUFFIXES = [".test.ts", ".test.tsx"];
 

@@ -2721,16 +2721,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   selectedModelId={thread.modelId}
                   selectedProviderInstanceId={thread.providerInstanceId}
                 />
-                <ComposerVoiceButton
-                  disabled={busy}
-                  onTranscript={(transcript) => {
-                    const next = appendTranscript(draft, transcript);
-                    draftRevisionRef.current += 1;
-                    setDraft(next);
-                    props.controller.setPendingDraft?.(next, next.length);
-                  }}
-                />
               </>
+            ),
+            dictate: (
+              <ComposerVoiceButton
+                disabled={busy}
+                onTranscript={(transcript) => {
+                  const next = appendTranscript(draft, transcript);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                }}
+              />
             ),
             actions: {
               kind: "send-or-stop",

@@ -1038,16 +1038,22 @@ export async function openChatAgentThread(
 /**
  * Opens the thread a bare id names, whatever its mode, so one read of its
  * harness session is allowed: a Work or Code thread through its Project, any
- * other id as a Chat thread.
+ * other id as a Chat thread. Says which mode it turned out to live in.
  */
 export async function openAgentThreadById(
   session: OpenedLocalControlSession,
   threadId: string,
-): Promise<HostRefusal | { readonly kind: "opened" }> {
+): Promise<
+  | HostRefusal
+  | { readonly kind: "opened"; readonly mode: OctantMode; readonly projectName?: string }
+> {
   const attached = await attachAgentThread(session, { threadId, mode: "auto" });
   if (attached.kind === "refused") return attached;
-  if (attached.kind === "attached") return { kind: "opened" };
-  return await openChatAgentThread(session, threadId);
+  if (attached.kind === "attached") {
+    return { kind: "opened", mode: attached.mode, projectName: attached.projectName };
+  }
+  const opened = await openChatAgentThread(session, threadId);
+  return opened.kind === "refused" ? opened : { kind: "opened", mode: "chat" };
 }
 
 /** A Project's active threads in this mode, most recently updated first. */
@@ -1090,7 +1096,7 @@ export function pickAgentModel<T extends { readonly endpoint: string; readonly m
 }
 
 /** The Work or Code Project whose bound folder holds the directory, deepest match first. */
-function projectHolding<
+export function projectHolding<
   T extends {
     readonly type: "chat" | "work" | "code";
     readonly binding?: { readonly canonicalRoot: string };

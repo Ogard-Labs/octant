@@ -1,4 +1,5 @@
 import type { WindowHistory } from "../shell/windowHistory";
+import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { ContextHealth } from "@octant/contracts/context";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -40,6 +41,8 @@ import {
 } from "../shell/pluginSidebarDestinationRegistry";
 import type { projectThreadsAccessForMode } from "../shell/shellModeRouting";
 import { ShellSidebar, type ShellSidebarProps } from "../shell/ShellSidebar";
+import { resolveRailPins } from "../shell/SidebarRail";
+import { useRailPinSetter } from "../shell/useRailPinSetter";
 import type { countSidebarTiles } from "../shell/sidebarTileCounts";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { exportThreadBundle, type resolveThreadExportClient } from "../thread/threadExport";
@@ -182,6 +185,8 @@ export interface SidebarContainerProps {
   readonly sidebarRailBeside: boolean;
   /** Plan usage rings for the icon rail. */
   readonly railUsage?: ReactNode;
+  /** The update card at the sidebar's foot; the rail never draws it. */
+  readonly whatsNew: WhatsNewController;
   readonly sidebarTileCounts: ReturnType<typeof countSidebarTiles>;
   readonly threadErrorMessage?: string;
   readonly threadExportClient: ReturnType<typeof resolveThreadExportClient>;
@@ -248,6 +253,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarRailBeside,
     homeActive,
     railUsage,
+    whatsNew,
     sidebarTileCounts,
     threadErrorMessage,
     threadExportClient,
@@ -521,6 +527,33 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ),
     [allProjects],
   );
+  // Pins are saved by Project id and resolve against every active Project, in
+  // any mode: opening one is the same action as clicking it in the Projects
+  // page, and a pin must survive a visit to a mode that does not list it. A pin
+  // for a Project that no longer exists draws nothing, and is dropped from the
+  // next saved list.
+  const railPinnedSetting = settings.sidebarPinnedProjects;
+  const railPinnedProjects = useMemo(() => {
+    return resolveRailPins(
+      railPinnedSetting,
+      allProjects.filter((project) => project.lifecycle === "active"),
+    );
+  }, [allProjects, railPinnedSetting]);
+  // The Project list starts empty and is replaced wholesale on each load, so
+  // only a "ready" list may prune pins; otherwise a pin saved during a load
+  // would drop every other one.
+  const completeProjectIds = useMemo(
+    () =>
+      projectStatus === "ready"
+        ? new Set<string>(allProjects.map((project) => project.id))
+        : undefined,
+    [projectStatus, allProjects],
+  );
+  const setRailPin = useRailPinSetter<ProjectId>(
+    railPinnedSetting,
+    completeProjectIds,
+    (sidebarPinnedProjects) => updateSettings({ sidebarPinnedProjects }),
+  );
   const workSideArchivedProjects = useMemo(
     () =>
       allProjects.filter(
@@ -684,10 +717,36 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           onOpenReview: openReview,
           onOpenDone: () => openSidebarList("completed"),
         }}
+        {...(sidebarRail || sidebarRailBeside
+          ? {
+              railPins: {
+                projects: railPinnedProjects.map((project) => ({
+                  id: String(project.id),
+                  name: project.name,
+                  active:
+                    activeProjectId !== undefined && String(activeProjectId) === String(project.id),
+                  onOpen: () => void openSelectedProject(project),
+                })),
+                onUnpin: (projectId: string) => {
+                  const project = railPinnedProjects.find((p) => String(p.id) === projectId);
+                  if (project !== undefined) setRailPin(project.id, false);
+                },
+              },
+            }
+          : {})}
         {...(sidebarRailBeside
           ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
           : {})}
         {...(railUsage === undefined ? {} : { railUsage })}
+        {...(whatsNew.card === undefined
+          ? {}
+          : {
+              whatsNew: {
+                content: whatsNew.card,
+                onDismiss: whatsNew.dismiss,
+                onOpenNotes: whatsNew.openNotes,
+              },
+            })}
         {...(sidebarRail
           ? {
               rail: {
@@ -740,6 +799,10 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                   activityMode={activeMode === "code" ? "code" : "work"}
                   {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
                   {...(sidebarListRequest === undefined ? {} : { listRequest: sidebarListRequest })}
+                  railPins={{
+                    pinnedIds: new Set(railPinnedProjects.map((project) => String(project.id))),
+                    onChange: setRailPin,
+                  }}
                   rowProperties={settings.sidebarRowProperties}
                   onRowPropertiesChange={(sidebarRowProperties) => {
                     void updateSettings({ sidebarRowProperties });

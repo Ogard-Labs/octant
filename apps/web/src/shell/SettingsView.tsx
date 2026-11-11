@@ -100,6 +100,7 @@ import {
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
@@ -119,6 +120,7 @@ import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSec
 import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
+import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -163,6 +165,7 @@ import {
   SettingsPageScope,
   SettingsSection,
   SettingsState,
+  revealSettingsAncestors,
   type SettingsOutlineEntry,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
@@ -265,6 +268,7 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly personMemoryClient?: PersonMemoryClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
@@ -825,14 +829,13 @@ export function SettingsView(props: SettingsViewProps) {
                             event.preventDefault();
                             // A section inside a closed disclosure opens first,
                             // or the link would scroll to nothing.
-                            for (
-                              let ancestor = entry.element.parentElement;
-                              ancestor !== null;
-                              ancestor = ancestor.parentElement
-                            ) {
-                              if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+                            // A collapsed section opens on the next frame.
+                            const scroll = () => entry.element.scrollIntoView?.({ block: "start" });
+                            if (revealSettingsAncestors(entry.element)) {
+                              requestAnimationFrame(scroll);
+                            } else {
+                              scroll();
                             }
-                            entry.element.scrollIntoView?.({ block: "start" });
                           }}
                         >
                           {entry.title}
@@ -1098,6 +1101,11 @@ function ActiveSectionContent({
               settings={props.codeController.bootstrap.settings}
             />
           )}
+          <ArchivedWorktreesSettings
+            client={props.archivedWorktreesClient}
+            focusedSetting={focusedSetting}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+          />
           <OpenInApplicationSettings
             applications={props.settings.openInApplications}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1658,6 +1666,17 @@ function RememberedBrowserOriginsPanel(props: {
   };
   return (
     <SettingsSection
+      collapse={{
+        // Sites the Browser may open without asking are authority, so any
+        // remembered one opens the section; the closed line still counts them.
+        open: props.origins.length + props.profileSites.length > 0,
+        summary:
+          props.origins.length + props.profileSites.length === 0
+            ? "None remembered"
+            : props.origins.length + props.profileSites.length === 1
+              ? "1 site always allowed"
+              : `${props.origins.length + props.profileSites.length} sites always allowed`,
+      }}
       description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >

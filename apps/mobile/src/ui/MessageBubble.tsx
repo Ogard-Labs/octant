@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import type { ChatMessagePart, ReplyDetailLevel } from "@octant/contracts";
-import { GlassSurface, radii, space, useTheme } from "../../design-system";
+import { radii, space, useTheme } from "../../design-system";
 import { MessageActions, type MessageActionItem } from "./MessageActions";
 import { MessageBlocks } from "./MessageBlocks";
 import { resolveChatMessageParts } from "./messageDocument";
@@ -37,7 +37,7 @@ function isResearchRole(role: string): boolean {
 
 /**
  * Conversation-first message presentation on Distilled glass or flat surfaces:
- * user = solid ink bubble; assistant = reasoning + tool cards + markdown blocks.
+ * user = control-fill bubble; assistant = reasoning and tool rows, then bare prose.
  */
 export function MessageBubble(props: MessageBubbleProps) {
   const { colors } = useTheme();
@@ -64,22 +64,21 @@ export function MessageBubble(props: MessageBubbleProps) {
         rowUser: { alignItems: "flex-end" },
         rowAssistant: { alignItems: "stretch" },
         bubble: {
-          maxWidth: "88%",
+          maxWidth: "84%",
           borderRadius: radii.bubble,
-          paddingHorizontal: space.md,
-          paddingVertical: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
         },
+        // A person's message: the control fill and a hairline, no accent
+        // (DESIGN.md › Transcript); the reply beside it is bare prose.
         bubbleUser: {
           backgroundColor: colors.userBubble,
-          borderBottomRightRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.hairline,
         },
         assistantStack: {
           width: "100%",
-          gap: space.sm,
-        },
-        assistantPad: {
-          paddingHorizontal: space.md,
-          paddingVertical: 12,
+          gap: space.xs,
         },
       }),
     [colors],
@@ -132,15 +131,12 @@ export function MessageBubble(props: MessageBubbleProps) {
             );
           }
           return (
-            <GlassSurface
-              contentStyle={styles.assistantPad}
+            <View
               key={key}
-              material="thin"
-              radius={radii.md}
-              {...(props.testID === undefined ? {} : { testID: `${props.testID}-glass` })}
+              {...(props.testID === undefined ? {} : { testID: `${props.testID}-prose` })}
             >
               <MessageBlocks text={part.text} tone="assistant" />
-            </GlassSurface>
+            </View>
           );
         })}
       </View>

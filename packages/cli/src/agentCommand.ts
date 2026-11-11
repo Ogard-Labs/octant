@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   nativeHarnessStatusLabel,
@@ -10,6 +12,7 @@ import {
   NativeHarnessRoutingSettings,
   NativeHarnessFollowUpActivationResult,
   NativeHarnessFollowUpPreview,
+  ProjectBootstrap,
   decodeHostAnswer,
 } from "@octant/contracts";
 import {
@@ -52,7 +55,9 @@ import {
   type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
+  projectHolding,
 } from "./agentThread";
+import { openAndReadAgentThread, readActiveProjects, startAgentTurn } from "./agentStart";
 import { runAgentTui } from "./agentTui";
 import {
   defaultCheckpointLabel,
@@ -62,11 +67,15 @@ import {
   type TuiThemeId,
 } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
+import { addProject } from "./projectCommand";
 
 export type AgentCliCommand =
   | {
       readonly action: "agent";
+      /** `--prompt`: one turn, then exit, for scripts. */
       readonly prompt?: string;
+      /** A bare prompt (`octant "fix the tests"`): the first turn of a session that stays open. */
+      readonly openingPrompt?: string;
       readonly threadId?: string;
       readonly project?: string;
       readonly title?: string;
@@ -86,7 +95,13 @@ export type AgentCliCommand =
       readonly access?: AgentAccessMode;
       /** Keep the OS sandbox and proxied network on at Full access (needs --access full-access). */
       readonly sandbox?: boolean;
+      /**
+       * Start the prompt's turn and return once the host lists it, without
+       * waiting for the reply; approvals and questions wait in Octant.
+       */
+      readonly detach?: true;
     }
+  | { readonly action: "agent-status"; readonly threadId: string; readonly json: boolean }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean }
   | {
@@ -100,9 +115,32 @@ export type AgentCliCommand =
 const AGENT_ACCESS_MODES = ["ask-first", "accept-edits", "auto", "plan", "full-access"] as const;
 export type AgentAccessMode = (typeof AGENT_ACCESS_MODES)[number];
 
+/** Whether `--name` is one of `octant agent`'s own flags. */
+export function isAgentFlag(name: string): boolean {
+  return AGENT_FLAGS.includes(name);
+}
+
+/** Thread ids are UUIDs in every mode. */
+function isThreadId(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
 function isAgentAccessMode(value: string): value is AgentAccessMode {
   return (AGENT_ACCESS_MODES as ReadonlyArray<string>).includes(value);
 }
+
+/** `octant agent`'s flags that take no value, so the word after one stays in the prompt. */
+export const AGENT_SWITCHES: ReadonlyArray<string> = [
+  "json",
+  "plain",
+  "last",
+  "quiet",
+  "sandbox",
+  "detach",
+];
 
 const AGENT_FLAGS: ReadonlyArray<string> = [
   "prompt",
@@ -118,6 +156,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "model",
   "access",
   "sandbox",
+  "detach",
 ];
 
 export function resolveAgentCliCommand(
@@ -125,9 +164,22 @@ export function resolveAgentCliCommand(
   positional: readonly string[],
   flags: Readonly<Record<string, string | boolean>>,
 ): AgentCliCommand | undefined {
+  // `octant agent status <thread-id>` only when the second word is a thread id;
+  // any other words after `agent` are a prompt (`octant agent status of CI`).
+  if (command === "agent" && positional[0] === "status" && isThreadId(positional[1])) {
+    const threadId = positional[1] ?? "";
+    if (positional.length !== 2) return undefined;
+    if (Object.keys(flags).some((flag) => flag !== "json")) return undefined;
+    return { action: "agent-status", threadId, json: flags.json === true };
+  }
   if (command === "agent") {
-    if (positional.length > 0) return undefined;
     if (Object.keys(flags).some((flag) => !AGENT_FLAGS.includes(flag))) return undefined;
+    // The argument parser never gives a switch a value, so the prompt's
+    // words arrive in order around them; a value here is a caller's mistake.
+    if (AGENT_SWITCHES.some((flag) => flags[flag] !== undefined && flags[flag] !== true)) {
+      return undefined;
+    }
+    const openingPrompt = positional.join(" ").trim();
     const text = (flag: string) =>
       typeof flags[flag] === "string" ? String(flags[flag]) : undefined;
     const prompt = text("prompt");
@@ -141,7 +193,11 @@ export function resolveAgentCliCommand(
     if (access !== undefined && !isAgentAccessMode(access)) return undefined;
     // The sandbox only exists at Full access, so asking for it with any other
     // level (or none) is refused rather than quietly ignored.
-    if (flags.sandbox !== undefined && (flags.sandbox !== true || access !== "full-access")) {
+    if (flags.sandbox === true && access !== "full-access") return undefined;
+    // `--prompt` runs one turn and exits; a bare prompt opens the session with it.
+    if (prompt !== undefined && openingPrompt.length > 0) return undefined;
+    // Detaching starts one turn, so it needs the prompt to start it with.
+    if (flags.detach !== undefined && (flags.detach !== true || prompt === undefined)) {
       return undefined;
     }
     const mode = text("mode") ?? "auto";
@@ -149,12 +205,14 @@ export function resolveAgentCliCommand(
     return {
       action: "agent",
       ...(prompt === undefined ? {} : { prompt }),
+      ...(openingPrompt.length === 0 ? {} : { openingPrompt }),
       ...(threadId === undefined ? {} : { threadId }),
       ...(project === undefined ? {} : { project }),
       ...(title === undefined ? {} : { title }),
       ...(model === undefined ? {} : { model }),
       ...(access === undefined ? {} : { access }),
       ...(flags.sandbox === true ? { sandbox: true } : {}),
+      ...(flags.detach === true ? { detach: true as const } : {}),
       json: flags.json === true,
       plain: flags.plain === true,
       last: flags.last === true,
@@ -244,6 +302,8 @@ export interface RunAgentCliCommandInput {
   readonly signal?: AbortSignal;
   /** Whether stdout is a terminal that can draw the full screen. */
   readonly interactive?: boolean;
+  /** The folder a new thread follows; the process's own when absent. */
+  readonly cwd?: string;
 }
 
 /**
@@ -327,10 +387,22 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
     );
   }
 
+  if (input.command.action === "agent-status") {
+    return await showThreadState(input, input.command.threadId, input.command.json);
+  }
+
+  if (input.command.detach === true && (await detachWouldStartChat(input))) {
+    input.stderr.write(DETACH_NEEDS_WORK_OR_CODE);
+    return 1;
+  }
   const threadId = await resolveThread(input);
   if (threadId === undefined) return 1;
   if (input.command.json) input.stdout.write(`${JSON.stringify({ kind: "thread", threadId })}\n`);
   else input.stdout.write(`Thread ${threadId}\n`);
+
+  if (input.command.detach === true && input.command.prompt !== undefined) {
+    return await startDetached(input, threadId, input.command.prompt);
+  }
 
   if (
     input.command.prompt === undefined &&
@@ -341,6 +413,9 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
     const exit = await runAgentTui({
       session: input.session,
       threadId,
+      ...(input.command.openingPrompt === undefined
+        ? {}
+        : { openingPrompt: input.command.openingPrompt }),
       themeId: input.command.theme,
       quiet: input.command.quiet,
       mode: modeOf(input.command),
@@ -354,6 +429,9 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
   try {
     if (input.command.prompt !== undefined) {
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
+    }
+    if (input.command.openingPrompt !== undefined) {
+      await runTurn(input, threadId, input.command.openingPrompt, lines);
     }
     input.stdout.write(
       "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /agents lists the helper agents, /agent N shows one and /agent N <message> replies to it; /fork forks at the last reply; /checkpoint marks it, /checkpoints lists them, /restore N starts a thread from one; /quit exits.\n",
@@ -407,6 +485,104 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
   } finally {
     lines.close();
   }
+}
+
+const DETACH_NEEDS_WORK_OR_CODE =
+  "--detach starts Work and Code turns. A Chat turn answers only when it ends, so run it without --detach.\n";
+
+/**
+ * Whether `--detach` would land on a Chat thread, decided before anything is
+ * created: an explicit `--mode chat`, or `auto` with no Project here or named.
+ * An existing thread is checked once it is opened.
+ */
+async function detachWouldStartChat(input: RunAgentCliCommandInput): Promise<boolean> {
+  if (input.command.action !== "agent") return false;
+  if (input.command.mode === "chat") return true;
+  if (input.command.mode !== "auto") return false;
+  if (input.command.threadId !== undefined || input.command.last) return false;
+  if (input.command.project !== undefined) return false;
+  const projects = await readActiveProjects(input.session);
+  return projects.kind === "read" && projectHolding(projects.active, process.cwd()) === undefined;
+}
+
+/**
+ * `--detach`: sends the turn and returns once the host lists it. The thread
+ * runs on the host like any other; the person answers its approvals in Octant,
+ * and `octant agent status` reads where it got to.
+ */
+async function startDetached(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  prompt: string,
+): Promise<number> {
+  const mode = modeOf(input.command);
+  if (mode === "chat") {
+    input.stderr.write(DETACH_NEEDS_WORK_OR_CODE);
+    return 1;
+  }
+  const started = await startAgentTurn(
+    agentThreadPort(input.session, mode, threadId),
+    prompt,
+    input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs },
+  );
+  if (started.kind === "refused") {
+    input.stderr.write(`${started.message}\n`);
+    return 1;
+  }
+  await started.settled;
+  if (input.command.json) {
+    input.stdout.write(
+      `${JSON.stringify({ kind: "started", ...(started.turnId === undefined ? {} : { turnId: started.turnId }) })}\n`,
+    );
+  } else {
+    input.stdout.write(`Started. Follow it with: octant agent status ${threadId}\n`);
+  }
+  return 0;
+}
+
+/** `octant agent status <thread>`: where the thread got to and what it waits on. */
+async function showThreadState(
+  input: Pick<RunAgentCliCommandInput, "session" | "stdout" | "stderr">,
+  threadId: string,
+  json: boolean,
+): Promise<number> {
+  const read = await openAndReadAgentThread(input.session, threadId);
+  if (read.kind === "refused") {
+    input.stderr.write(`${read.message}\n`);
+    return 1;
+  }
+  const { state } = read;
+  if (json) {
+    input.stdout.write(`${JSON.stringify({ kind: "thread-state", state })}\n`);
+    return 0;
+  }
+  const where =
+    state.mode === "chat"
+      ? "Chat thread"
+      : `${state.mode === "code" ? "Code" : "Work"} thread in ${state.projectName ?? "its Project"}`;
+  input.stdout.write(`${state.title} · ${where} · ${state.status}\n`);
+  const turn = state.turns.at(-1);
+  if (turn !== undefined) {
+    input.stdout.write(`> ${turn.prompt.split("\n")[0] ?? ""}\n`);
+    const reply = withoutFollowUpBlocks(turn.reply, { streaming: state.status === "running" });
+    if (reply.length > 0) input.stdout.write(`${reply}${reply.endsWith("\n") ? "" : "\n"}`);
+    if (turn.outcome !== "completed" && state.status === "idle") {
+      input.stdout.write(`Turn ended: ${turn.outcome}.\n`);
+    }
+  }
+  for (const question of state.questions) {
+    input.stdout.write(`? ${question.prompt}\n`);
+    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
+  }
+  if (state.waitingIncomplete === true) {
+    input.stdout.write("! Octant could not list everything waiting on you; check Octant.\n");
+  }
+  for (const request of state.waitingInOctant) {
+    input.stdout.write(
+      `! Waits on you in Octant: ${request.kind}${request.text === undefined ? "" : ` — ${request.text}`}\n`,
+    );
+  }
+  return 0;
 }
 
 /**
@@ -1077,7 +1253,15 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     }
     return await openedChatThread(input, String(latest.id));
   }
+  if (
+    (input.command.mode === "auto" || input.command.mode === "code") &&
+    input.command.project === undefined
+  ) {
+    const offered = await offerCheckoutAsProject(input);
+    if (offered === "refused") return undefined;
+  }
   const created = await createAgentThread(input.session, {
+    cwd: input.cwd,
     mode: input.command.mode,
     title:
       input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
@@ -1106,6 +1290,57 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     );
   }
   return created.threadId;
+}
+
+/**
+ * Started inside a Git checkout that is not a Project yet, a person at the
+ * terminal is asked whether to add it as a Code Project, so `octant` in a
+ * repository opens a Code thread there instead of a Chat thread that cannot
+ * touch the files. Adding is the same bind-and-create `octant project add`
+ * sends and the host checks the folder before it binds. Nothing is asked
+ * without a person to answer (no terminal, or `--json`), and a no keeps what
+ * the folder gave before: a Chat thread, or `--mode code`'s refusal.
+ */
+async function offerCheckoutAsProject(
+  input: RunAgentCliCommandInput,
+): Promise<"unchanged" | "added" | "refused"> {
+  if (input.command.action !== "agent" || input.command.json || input.interactive !== true) {
+    return "unchanged";
+  }
+  const folder = input.cwd ?? process.cwd();
+  const checkout = checkoutRoot(folder);
+  if (checkout === undefined) return "unchanged";
+  const projects = await input.session.send({ path: "/api/projects/bootstrap", method: "GET" });
+  if (projects.status !== 200) return "unchanged";
+  const active = decodeHostAnswer(ProjectBootstrap)(projects.body).active;
+  if (projectHolding(active, folder) !== undefined) return "unchanged";
+  input.stdout.write(`${checkout} is not an Octant Project yet. Add it as a Code Project? [Y/n] `);
+  const lines = lineSource(input.stdin);
+  const answer = await lines.next();
+  lines.close();
+  const yes = answer !== undefined && /^\s*(y|yes)?\s*$/i.test(answer);
+  if (!yes) {
+    if (input.command.mode === "auto") input.stdout.write("Starting a Chat thread instead.\n");
+    return "unchanged";
+  }
+  const added = await addProject(input.session, { path: checkout, projectType: "code" });
+  if (added.kind === "refused") {
+    input.stderr.write(`${added.message}\n`);
+    return "refused";
+  }
+  input.stdout.write(`Added Code Project ${added.name}.\n`);
+  return "added";
+}
+
+/** The top of the Git checkout holding the folder: the nearest folder with a `.git` entry. */
+function checkoutRoot(folder: string): string | undefined {
+  let here = resolve(folder);
+  for (;;) {
+    if (existsSync(join(here, ".git"))) return here;
+    const parent = dirname(here);
+    if (parent === here) return undefined;
+    here = parent;
+  }
 }
 
 /** A Chat thread's id once this terminal's window has it open, so its session answers. */

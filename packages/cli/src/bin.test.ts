@@ -4,6 +4,31 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hasInvalidLifecyclePositionals, parseArgs } from "./bin";
+import { agentShorthand } from "./cli";
+
+describe("starting the agent without a subcommand", () => {
+  it("keeps the prompt's words in order around the agent's switches", () => {
+    expect(parseArgs(["agent", "compare", "A", "--plain", "B", "--last", "C"])).toEqual({
+      command: "agent",
+      flags: { plain: true, last: true },
+      positional: ["compare", "A", "B", "C"],
+    });
+    // Other commands keep the general rule: a flag takes the next word.
+    expect(parseArgs(["web", "--port", "4000"])?.flags).toEqual({ port: "4000" });
+  });
+
+  it("opens the agent for a bare command at a terminal and prints the usage without one", () => {
+    expect(agentShorthand([], true)).toEqual(["agent"]);
+    expect(agentShorthand([], false)).toEqual([]);
+  });
+
+  it("treats a leading agent flag or a quoted prompt as the agent, and leaves commands alone", () => {
+    expect(agentShorthand(["--last"], false)).toEqual(["agent", "--last"]);
+    expect(agentShorthand(["fix the tests"], false)).toEqual(["agent", "fix the tests"]);
+    expect(agentShorthand(["status"], true)).toEqual(["status"]);
+    expect(agentShorthand(["--version"], true)).toEqual(["--version"]);
+  });
+});
 
 describe("server lifecycle CLI positionals", () => {
   it("rejects an extra lifecycle positional before dispatch", () => {

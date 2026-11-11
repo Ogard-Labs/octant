@@ -532,6 +532,7 @@ export function wireDevices(deps: DevicesDependencies) {
         }
       }
       await appleRuntimeStore.persistReceipts([]);
+      await appleRuntimeStore.removeLeftoverBuildData();
     });
     return {
       androidToolchainService,

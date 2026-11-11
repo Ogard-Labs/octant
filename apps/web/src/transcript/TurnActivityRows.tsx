@@ -16,6 +16,7 @@ import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
+import { RoutineReceiptCard } from "./RoutineReceiptCard";
 import { PublishedSnapshot } from "./PublishedSnapshot";
 import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
@@ -104,6 +105,10 @@ type PublishedToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
   readonly published: NonNullable<Extract<TurnActivityRow, { kind: "tool" }>["published"]>;
 };
 
+type RoutineToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
+  readonly routine: NonNullable<Extract<TurnActivityRow, { kind: "tool" }>["routine"]>;
+};
+
 function rowKey(row: TurnActivityRow): string {
   return `${row.kind}:${row.id}`;
 }
@@ -183,6 +188,9 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
   // A published page is what the turn delivered, so it stays in view below the
   // rows even when the settled toolchain folds away.
+  const routineRows = activity.rows.filter(
+    (row): row is RoutineToolRow => row.kind === "tool" && row.routine !== undefined,
+  );
   const publishedPages = activity.rows.filter(
     (row): row is PublishedToolRow => row.kind === "tool" && row.published !== undefined,
   );
@@ -298,6 +306,15 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         </>
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
+      )}
+      {routineRows.length === 0 ? null : (
+        <ul aria-label="Created automations" className="turn-activity__routines">
+          {routineRows.map((row) => (
+            <li key={rowKey(row)}>
+              <RoutineReceiptCard routine={row.routine} />
+            </li>
+          ))}
+        </ul>
       )}
       {publishedPages.length === 0 ? null : (
         <ul aria-label="Published pages" className="turn-activity__published">

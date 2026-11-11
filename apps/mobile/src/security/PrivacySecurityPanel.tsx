@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import {
   decideScreenshotPrivacyMode,
   evaluateDeviceIntegrityHeuristic,
@@ -11,6 +11,7 @@ import {
   type StaleHostSecurityPresentation,
 } from "@octant/domain";
 import { MOBILE_COPY } from "../copy";
+import { ListNote, ListRow, ListSection } from "../ui/NativeChrome";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import type { MobileDeviceIntegrityPort } from "./deviceIntegrityPort";
@@ -90,122 +91,87 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        panel: {
-          marginTop: mobileSpacing.lg,
-          gap: mobileSpacing.sm,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
-          paddingTop: mobileSpacing.md,
-        },
-        title: {
-          ...mobileTypography.title,
-          color: colors.textPrimary,
-        },
-        subtitle: {
-          ...mobileTypography.body,
-          color: colors.textPrimary,
-          fontWeight: "500",
-          marginTop: mobileSpacing.sm,
-        },
-        help: {
-          ...mobileTypography.body,
+        message: {
           color: colors.textSecondary,
+          fontSize: mobileTypography.meta.fontSize,
+          paddingHorizontal: mobileSpacing.xl,
+          marginTop: -mobileSpacing.sm,
+          marginBottom: mobileSpacing.md,
         },
-        status: {
-          ...mobileTypography.body,
-          color: colors.textPrimary,
-        },
-        warn: {
-          color: colors.textPrimary,
-          fontWeight: "500",
-        },
-        button: {
-          backgroundColor: colors.accent,
-          paddingVertical: mobileSpacing.md,
-          borderRadius: 8,
-          alignItems: "center",
-        },
-        buttonDisabled: { opacity: 0.45 },
-        buttonLabel: {
-          ...mobileTypography.body,
-          color: colors.sendLabel,
-          fontWeight: "500",
-        },
-        secondary: { alignItems: "center", paddingVertical: mobileSpacing.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "500" },
-        meta: { ...mobileTypography.body, color: colors.textSecondary },
-        message: { ...mobileTypography.body, color: colors.textPrimary },
       }),
     [colors],
   );
+  const mode = privacyDecision?.mode;
 
   return (
-    <View style={styles.panel} testID="mobile-privacy-security-panel">
-      <Text style={styles.title}>{MOBILE_COPY.privacySecurityTitle}</Text>
-      <Text style={styles.help}>{MOBILE_COPY.privacySecurityHelp}</Text>
+    <View testID="mobile-privacy-security-panel">
+      <ListSection
+        footer={MOBILE_COPY.privacySecurityHelp}
+        title={MOBILE_COPY.privacySecurityTitle}
+      >
+        {integrityView !== undefined ? (
+          <ListNote
+            testID="mobile-integrity-status"
+            text={integrityView.message}
+            tone={integrityView.severity === "soft-warn" ? colors.warning : undefined}
+          />
+        ) : null}
+        {keyStorage !== undefined ? (
+          <ListNote
+            testID="mobile-key-storage-status"
+            text={describeKeyStorageProtection(keyStorage, props.keyStorage.vault)}
+          />
+        ) : null}
+        <ListNote last testID="mobile-stale-security-status" text={staleView.message} />
+      </ListSection>
 
-      {integrityView !== undefined ? (
-        <Text
-          style={[styles.status, integrityView.severity === "soft-warn" ? styles.warn : null]}
-          testID="mobile-integrity-status"
-        >
-          {integrityView.message}
-        </Text>
-      ) : null}
-
-      {keyStorage !== undefined ? (
-        <Text style={styles.status} testID="mobile-key-storage-status">
-          {describeKeyStorageProtection(keyStorage, props.keyStorage.vault)}
-        </Text>
-      ) : null}
-
-      <Text style={styles.status} testID="mobile-stale-security-status">
-        {staleView.message}
-      </Text>
-
-      <Text style={styles.subtitle}>Screenshot privacy</Text>
-      {props.screenshotPrivacy.available ? (
-        <>
-          {props.screenshotPrivacy.coverage !== "none" && privacyDecision?.mode !== "standard" ? (
-            <Text style={styles.status} testID="mobile-screenshot-coverage">
-              {describeScreenshotProtection(props.screenshotPrivacy.coverage)}
-            </Text>
-          ) : null}
-          <Text style={styles.help}>
-            {privacyDecision?.summary ?? MOBILE_COPY.screenshotPrivacyHint}
-          </Text>
-          <Pressable
-            disabled={busy}
-            onPress={() => void setMode("hide-in-recents")}
-            style={[styles.button, busy ? styles.buttonDisabled : null]}
-            testID="mobile-screenshot-hide-recents"
-          >
-            {busy ? (
-              <ActivityIndicator color={colors.sendLabel} />
-            ) : (
-              <Text style={styles.buttonLabel}>Hide in recents</Text>
-            )}
-          </Pressable>
-          <Pressable
-            disabled={busy}
-            onPress={() => void setMode("standard")}
-            style={styles.secondary}
-            testID="mobile-screenshot-standard"
-          >
-            <Text style={styles.secondaryLabel}>Use standard capture</Text>
-          </Pressable>
-          {nativeApply !== undefined ? (
-            <Text style={styles.meta} testID="mobile-screenshot-native-apply">
-              Native apply: {nativeApply}
-            </Text>
-          ) : null}
-        </>
-      ) : (
-        <Text style={styles.help} testID="mobile-screenshot-unavailable">
-          Screenshot and app-switcher protection is unavailable in this build. Avoid capturing
-          sensitive thread content.
-        </Text>
-      )}
+      <ListSection
+        footer={
+          props.screenshotPrivacy.available
+            ? (privacyDecision?.summary ?? MOBILE_COPY.screenshotPrivacyHint)
+            : undefined
+        }
+        title="Screenshot privacy"
+      >
+        {props.screenshotPrivacy.available ? (
+          <>
+            {props.screenshotPrivacy.coverage !== "none" && mode !== "standard" ? (
+              <ListNote
+                testID="mobile-screenshot-coverage"
+                text={describeScreenshotProtection(props.screenshotPrivacy.coverage)}
+              />
+            ) : null}
+            <ListRow
+              accessory={mode === "hide-in-recents" ? "check" : "none"}
+              label="Hide in recents"
+              onPress={busy ? undefined : () => void setMode("hide-in-recents")}
+              testID="mobile-screenshot-hide-recents"
+            />
+            <ListRow
+              accessory={mode === "standard" ? "check" : "none"}
+              label="Use standard capture"
+              last={nativeApply === undefined}
+              onPress={busy ? undefined : () => void setMode("standard")}
+              testID="mobile-screenshot-standard"
+            />
+            {nativeApply !== undefined ? (
+              <ListRow
+                label="Native apply"
+                last
+                testID="mobile-screenshot-native-apply"
+                value={nativeApply}
+              />
+            ) : null}
+          </>
+        ) : (
+          <ListNote
+            last
+            testID="mobile-screenshot-unavailable"
+            text="Screenshot and app-switcher protection is unavailable in this build. Avoid capturing sensitive thread content."
+            tone={colors.textSecondary}
+          />
+        )}
+      </ListSection>
       {message !== undefined ? <Text style={styles.message}>{message}</Text> : null}
     </View>
   );

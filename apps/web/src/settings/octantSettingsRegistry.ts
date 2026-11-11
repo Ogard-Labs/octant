@@ -662,6 +662,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "external editor arguments flags open files",
         },
         {
+          id: settingId("archived-worktrees"),
+          label: "Worktrees",
+          scope: "host",
+          keywords:
+            "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
+        },
+        {
           id: settingId("open-in-applications"),
           label: "Open in applications",
           scope: "app",

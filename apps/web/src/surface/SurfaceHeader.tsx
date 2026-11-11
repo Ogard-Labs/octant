@@ -37,6 +37,11 @@ export interface SurfaceHeaderProps {
    */
   readonly detail?: string;
   readonly titleId?: string;
+  /**
+   * The page's own title at the display step, with the detail on its baseline.
+   * For a page that opens as a place to read, not a toolbar over a list.
+   */
+  readonly display?: boolean;
   /** Primary actions for the whole surface, at the trailing edge. */
   readonly actions?: ReactNode;
   /**
@@ -53,7 +58,11 @@ export interface SurfaceHeaderProps {
  */
 export function SurfaceHeader(props: SurfaceHeaderProps) {
   return (
-    <header className="surface-header">
+    <header
+      className={
+        props.display === true ? "surface-header surface-header--display" : "surface-header"
+      }
+    >
       {props.onBack === undefined ? null : (
         <OctantIconButton
           className="surface-header__back"

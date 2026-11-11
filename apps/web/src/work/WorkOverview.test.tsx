@@ -13,7 +13,45 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
 } from "../composer/useNewTaskPrompt";
+import { ProjectIconContext } from "../projects/ProjectIcon";
+import { iconSourceFor } from "../projects/projectIcon.test-support";
 import { WorkOverview, type WorkOverviewModel, type OverviewSectionStatus } from "./WorkOverview";
+
+describe("WorkOverview Project icon", () => {
+  const id = "00000000-0000-4000-8000-0000000000bb" as never;
+
+  function overview(source: ReturnType<typeof iconSourceFor>["source"]) {
+    return render(
+      <ProjectIconContext.Provider value={source}>
+        <WorkOverview
+          model={populatedModel()}
+          onCreateThread={vi.fn(async () => true)}
+          projectId={id}
+          projectName="Harbor"
+        />
+      </ProjectIconContext.Provider>,
+    );
+  }
+
+  it("draws the Project's image beside its name when the host has an icon", async () => {
+    const { container } = overview(iconSourceFor([String(id)]).source);
+    await waitFor(() =>
+      expect(
+        container.querySelector(".work-overview__context-item img.project-icon"),
+      ).not.toBeNull(),
+    );
+  });
+
+  it("keeps the folder glyph when the host has no icon", async () => {
+    const { fetcher, source } = iconSourceFor([]);
+    const { container } = overview(source);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".work-overview__context-item img.project-icon")).toBeNull();
+    expect(
+      container.querySelector(".work-overview__context-item svg.lucide-folder-open"),
+    ).not.toBeNull();
+  });
+});
 
 describe("WorkOverview", () => {
   it("renders confined Work sections and excludes Code affordances", () => {

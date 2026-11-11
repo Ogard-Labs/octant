@@ -29,6 +29,7 @@ import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
+import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 import {
   layoutSidebarDestinations,
@@ -145,6 +146,17 @@ export interface ShellSidebarProps {
   readonly home?: { readonly onOpen: () => void; readonly active: boolean };
   /** Plan usage rings for the icon rail, in either placement. */
   readonly railUsage?: ReactNode;
+  /** Absent leaves the card out; the collapsed rail never draws it either way. */
+  readonly whatsNew?: SidebarWhatsNewProps;
+  /**
+   * Projects pinned to the icon rail, resolved against the Projects that
+   * exist, and the way to unpin one from its tile. Either rail placement
+   * draws them.
+   */
+  readonly railPins?: {
+    readonly projects: ReadonlyArray<SidebarRailProject>;
+    readonly onUnpin: (projectId: string) => void;
+  };
   readonly railBeside?: {
     readonly onOpenActivity?: () => void;
   };
@@ -332,6 +344,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
         presentation="rail"
       />
     );
+  const railPinProps =
+    props.railPins === undefined
+      ? {}
+      : { pinnedProjects: props.railPins.projects, onUnpinProject: props.railPins.onUnpin };
   const besideRail =
     props.railBeside === undefined ? null : (
       <SidebarRail
@@ -355,6 +371,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
         onSelectMode={props.onSelectMode}
         placement="beside"
         projects={[]}
+        {...railPinProps}
         tiles={tiles}
       />
     );
@@ -399,6 +416,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
         usage={props.railUsage}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
+        {...railPinProps}
         tiles={tiles}
       />
     );
@@ -617,6 +635,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 )}
               </div>
             )}
+            {props.whatsNew === undefined ? null : <SidebarWhatsNew {...props.whatsNew} />}
             <SidebarProfile
               navigatorAvailable={props.navigatorAvailable === true}
               {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}

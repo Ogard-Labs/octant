@@ -292,6 +292,7 @@ function unanswered(answer: CodeLanguageAgentReadResult): ToolOutcome {
     case "capabilities":
     case "edit-previews":
     case "edit-unavailable":
+    case "intelligence":
       return refused("tool-execution-failed", "The language server answered another read.");
     case "too-large":
       return refused("too-large", "The file is too large for the language server.");

@@ -57,9 +57,6 @@
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
-  /* The composer's tray is a lighter step of the same ink, so the card on it
-     is still the lighter of the two. */
-  --octant-tray: color-mix(in srgb, var(--octant-text-primary) 3%, transparent);
   /* A raised card's shadow goes with its tint. A shadow token is resolved
      where it is declared, with the opaque border in it, and that border is
      near black on the grey a desktop shows through. */
@@ -92,7 +89,6 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
   --octant-stage-surface: var(--octant-app-background);
   --octant-card: inherit;
   --card: inherit;
-  --octant-tray: inherit;
   --octant-outline-rest: initial;
   --octant-shadow-xs: inherit;
   --octant-shadow-sm: inherit;
@@ -102,7 +98,6 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
 html[data-octant-increased-contrast="true"] .shell {
   --octant-card: inherit;
   --card: inherit;
-  --octant-tray: inherit;
   --octant-outline-rest: initial;
   --octant-shadow-xs: inherit;
   --octant-shadow-sm: inherit;
@@ -116,7 +111,6 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-stage-surface: var(--octant-app-background);
     --octant-card: inherit;
     --card: inherit;
-    --octant-tray: inherit;
     --octant-outline-rest: initial;
     --octant-shadow-xs: inherit;
     --octant-shadow-sm: inherit;
@@ -444,6 +438,12 @@ html[data-octant-native-host="true"]
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__project {
   border-color: color-mix(in oklab, var(--oct-fg) 40%, transparent);
   color: var(--oct-fg);
+}
+
+/* The context-menu trigger around a pinned Project tile; it adds no box of its own. */
+.sidebar-rail__tile {
+  display: flex;
+  flex: 0 0 auto;
 }
 
 .sidebar-rail__divider {
@@ -4271,6 +4271,158 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .whats-new__empty {
   margin: 0;
   color: var(--octant-text-secondary);
+}
+
+/* The aperture on a wash of the theme's own ink and accent. The accent is a
+   tint here, never a fill, so the band reads as depth rather than a banner. */
+.aperture-art {
+  display: grid;
+  place-items: center;
+  color: var(--octant-text-secondary);
+  background:
+    radial-gradient(
+      120% 140% at 50% 0%,
+      color-mix(in oklab, var(--oct-accent) 18%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--octant-text-primary) 6%, transparent),
+      color-mix(in oklab, var(--octant-text-primary) 2%, transparent)
+    );
+}
+
+.aperture-art__mark {
+  display: block;
+}
+
+/* Above the profile row, which keeps the foot of the sidebar. */
+.whats-new-card {
+  position: relative;
+  margin-top: auto;
+  margin-bottom: var(--oct-space-2);
+  overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+/* The fill and shadow are the card's only edge, and forced colours drops both.
+   These are the shared card recipe's outline and increased-contrast ring. */
+@media (forced-colors: active) {
+  .whats-new-card {
+    outline: 1px solid;
+  }
+}
+
+html[data-octant-increased-contrast="true"] .whats-new-card {
+  box-shadow: 0 0 0 1px var(--octant-border-strong);
+}
+
+.whats-new-card + .sidebar-foot {
+  margin-top: 0;
+}
+
+.whats-new-card__art {
+  height: 64px;
+}
+
+.whats-new-card__dismiss {
+  position: absolute;
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+}
+
+.whats-new-card__body {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3);
+}
+
+.whats-new-card__body > p {
+  margin: 0;
+  max-width: 100%;
+}
+
+.whats-new-card__kicker {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.whats-new-card__headline {
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whats-new-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.whats-new-card__body > button {
+  margin-top: var(--oct-space-1);
+  margin-left: calc(-1 * var(--oct-space-2));
+}
+
+/* An announcement is a poster, not a form: the picture runs to the dialog's
+   edges at its top, and the words and the two answers are centred under it.
+   With the picture inset and the text ranged left it read as a settings
+   dialog that happened to hold an image. */
+.whats-new-announcement {
+  --octant-dialog-width: 440px;
+  display: grid;
+  justify-items: center;
+  gap: var(--oct-space-3);
+  overflow: hidden;
+  padding: 0 0 var(--oct-space-6);
+  text-align: center;
+}
+
+.whats-new-announcement__art,
+.whats-new-announcement__picture {
+  width: 100%;
+  height: 200px;
+  margin-bottom: var(--oct-space-2);
+}
+
+/* The mark is the picture when a release bundles none, so it is drawn at a
+   picture's size, not an icon's. */
+.whats-new-announcement__art > .aperture-art__mark {
+  width: 56px;
+  height: 56px;
+}
+
+.whats-new-announcement > :is(h2, p, .whats-new-announcement__actions) {
+  padding-inline: var(--oct-space-6);
+}
+
+.whats-new-announcement__picture {
+  display: block;
+  object-fit: cover;
+}
+
+.whats-new-announcement__body {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+
+.whats-new-announcement__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
 }
 
 .code-home__project-setup {

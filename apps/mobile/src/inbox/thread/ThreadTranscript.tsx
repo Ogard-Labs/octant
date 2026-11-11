@@ -5,6 +5,7 @@ import {
   mobileChatMessages,
   mobileCodeTurnTargets,
   mobileWorkTurnTargets,
+  threadRoutineReceipts,
   type MobileCodeConversation,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
@@ -14,6 +15,7 @@ import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
 import { AttemptStatus } from "../../ui/AttemptStatus";
 import { MessageBubble } from "../../ui/MessageBubble";
+import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import type { MessageActionItem } from "../../ui/MessageActions";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
 import type { useChatThread } from "./useChatThread";
@@ -49,8 +51,8 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         },
         emptyTitle: {
           color: colors.textPrimary,
-          fontSize: 22,
-          fontWeight: "400",
+          fontSize: 20,
+          fontWeight: "600",
           letterSpacing: -0.4,
           textAlign: "center",
         },
@@ -110,6 +112,13 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   turn.status === "waiting" ? (
                   <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
                 ) : null}
+                {threadRoutineReceipts(turn.toolSteps).map((routine) => (
+                  <RoutineReceiptCard
+                    key={routine.routineId}
+                    routine={routine}
+                    testID={`mobile-work-routine-${routine.routineId}`}
+                  />
+                ))}
               </View>
             ))
           )}
@@ -158,6 +167,13 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 ) : turn.status === "failed" || turn.status === "interrupted" ? (
                   <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
                 ) : null}
+                {turn.routines.map((routine) => (
+                  <RoutineReceiptCard
+                    key={routine.routineId}
+                    routine={routine}
+                    testID={`mobile-code-routine-${routine.routineId}`}
+                  />
+                ))}
               </View>
             ))
           )}

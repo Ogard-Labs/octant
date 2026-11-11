@@ -2434,6 +2434,9 @@ describe("CodeService commands", () => {
         ],
       }),
     );
+    // The host hears of the archive once, after it is journaled, so it can
+    // reclaim the thread's worktree when that loses nothing.
+    expect(fixture.onThreadArchived).toHaveBeenCalledExactlyOnceWith(ids.thread);
 
     await expect(
       fixture.service.execute(ids.window, {
@@ -5264,6 +5267,7 @@ function serviceFixture(
     resolve: vi.fn(async () => "/private/authorized-root/packages/app"),
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);
+  const onThreadArchived = vi.fn();
   const content = new CodeContentStore({
     maximumBytes: 1024,
     maximumEntries: 4,
@@ -5283,6 +5287,7 @@ function serviceFixture(
     clock: () => now,
     workingDirectories,
     onWorkingDirectoryChanged,
+    onThreadArchived,
     ...(options.sessionAuthority === undefined
       ? {}
       : { sessionAuthority: options.sessionAuthority }),
@@ -5333,6 +5338,7 @@ function serviceFixture(
     approvals,
     workingDirectories,
     onWorkingDirectoryChanged,
+    onThreadArchived,
   };
 }
 
@@ -5614,6 +5620,7 @@ describe("completing and snoozing a Code thread", () => {
       }),
     );
     expect(revoke).toHaveBeenCalledWith(ids.thread);
+    expect(fixture.onThreadArchived).toHaveBeenCalledExactlyOnceWith(ids.thread);
     expect(
       fixture.service.archiveCompletedThread(ids.unauthorizedThread, { afterDays: 7, now }),
     ).toEqual({ status: "skipped", reason: "not-found" });

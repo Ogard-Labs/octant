@@ -266,6 +266,7 @@ describe("octantSettingsRegistry", () => {
       "code-full-access-sandbox",
       "code-editor-executable",
       "code-editor-arguments",
+      "archived-worktrees",
       "open-in-applications",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");

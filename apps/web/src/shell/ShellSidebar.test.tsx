@@ -1193,6 +1193,53 @@ describe("ShellSidebar", () => {
     expect(within(sidebar).queryByRole("button", { name: "More destinations" })).toBeNull();
   });
 
+  it("draws a pinned Project in the rail beside the sidebar and in the collapsed rail, and leaves More as it was", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const onUnpin = vi.fn();
+    const railPins = {
+      projects: [{ id: "p9", name: "Harbor", active: false, onOpen }],
+      onUnpin,
+    };
+    const common = {
+      codeNavigation: {
+        actions: {
+          "new-code-thread": vi.fn(),
+          inbox: vi.fn(),
+          "thread-board": vi.fn(),
+          projects: vi.fn(),
+          agents: vi.fn(),
+          plugins: vi.fn(),
+        },
+      },
+      onAddFolder: vi.fn(),
+      onOpenNavigator: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onSelectMode: vi.fn(),
+      projectSection: <nav aria-label="Projects">Project navigation</nav>,
+      railPins,
+      settings: defaultShellSettings(),
+      workspace: { ...defaultWindowWorkspace(windowId), activeMode: "code" as const },
+    };
+    const { unmount } = render(<ShellSidebar {...common} railBeside={{}} />);
+    const beside = screen.getByRole("complementary", { name: "Destinations" });
+    await user.click(within(beside).getByRole("button", { name: "Harbor" }));
+    expect(onOpen).toHaveBeenCalledOnce();
+    // Pinning adds no check items to More: it lists destinations only.
+    await user.click(within(beside).getByRole("button", { name: "More destinations" }));
+    expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Customize sidebar" })).toBeVisible();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain("Harbor");
+    expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /rail/i })).toBeNull();
+    await user.keyboard("{Escape}");
+    unmount();
+
+    render(<ShellSidebar {...common} rail={{ projects: [] }} />);
+    const collapsed = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(within(collapsed).getByRole("button", { name: "Harbor" })).toBeInTheDocument();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar
@@ -1222,5 +1269,30 @@ describe("ShellSidebar", () => {
     const pullRequests = screen.getByRole("button", { name: "Pull requests" });
     const board = screen.getByRole("button", { name: "Board" });
     expect(pullRequests.compareDocumentPosition(board)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  it("draws the What's new card above the profile row, and not on the collapsed icon rail", () => {
+    const common = {
+      onAddFolder: vi.fn(),
+      onCollapseSidebar: vi.fn(),
+      onOpenNavigator: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onSelectMode: vi.fn(),
+      projectSection: null,
+      settings: defaultShellSettings(),
+      whatsNew: {
+        content: { version: "0.2.0", headline: "Canvas comments" },
+        onDismiss: vi.fn(),
+        onOpenNotes: vi.fn(),
+      },
+      workspace: defaultWindowWorkspace(windowId),
+    };
+    const { unmount } = render(<ShellSidebar {...common} />);
+    const card = screen.getByRole("region", { name: "What's new" });
+    const profile = screen.getByRole("button", { name: /^Account menu/ });
+    expect(card.compareDocumentPosition(profile)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    unmount();
+
+    render(<ShellSidebar {...common} rail={{ projects: [] }} />);
+    expect(screen.queryByRole("region", { name: "What's new" })).toBeNull();
   });
 });

@@ -43,3 +43,5 @@ export {
 export { GlassSurface, type GlassSurfaceProps } from "./GlassSurface";
 export { GlassCard, type GlassCardProps } from "./GlassCard";
 export { GlassChip, type GlassChipProps } from "./GlassChip";
+
+export { mix, withAlpha } from "./tone";

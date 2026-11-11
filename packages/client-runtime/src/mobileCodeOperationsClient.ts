@@ -3,6 +3,7 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_OPERATION_TEXT_BYTES,
   type CodeConversationTurn,
+  type ThreadRoutineReceipt,
   type CodeOperationCommand,
   CodeOperationResult,
   type CodePullRequestReview,
@@ -23,6 +24,7 @@ import {
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import { threadRoutineReceipts } from "./threadRoutineReceipts";
 import {
   sendWithOwnerUnlock,
   type OwnerMergeUnlock,
@@ -293,6 +295,8 @@ export interface MobileCodeConversationTurn {
   readonly status: CodeConversationTurn["status"];
   readonly prompt: string;
   readonly assistant: ReadonlyArray<string>;
+  /** The routines the turn's tool calls created, for the receipt cards under it. */
+  readonly routines: ReadonlyArray<ThreadRoutineReceipt>;
   readonly updatedAt: string;
 }
 
@@ -367,6 +371,9 @@ export async function loadMobileCodeConversation(
       assistant: turn.assistant
         .map((part) => resolve(String(turn.operationId), String(part.contentId)))
         .filter((part) => part.length > 0),
+      routines: threadRoutineReceipts(
+        (turn.steps ?? []).flatMap((step) => (step.kind === "tool" ? [step] : [])),
+      ),
       updatedAt: turn.updatedAt,
     })),
     hasEarlier: read.hasEarlier || kept.length < read.turns.length,
