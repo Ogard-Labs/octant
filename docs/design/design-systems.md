@@ -92,8 +92,8 @@ this sense too.
   and diagrams then draw their series colours from it: `color-chart-1` to
   `color-chart-6` when the file names a chart palette, else its primary colour
   as series 1 and its secondary as series 2, with the theme's own colours for
-  any series it leaves unnamed; its primary colour is also the accent a
-  progress bar or highlighted bar fills with. Status tones (success, warning,
+  any series it leaves unnamed; its primary colour is also the accent
+  (callout edges, diagram strokes, and highlighted marks). Status tones (success, warning,
   danger) and text stay the reader's theme, because they are tuned for
   contrast on the reader's light or dark scheme and a brand's usually suit
   one; colour never stands alone, since every mark keeps its dash, shape, or

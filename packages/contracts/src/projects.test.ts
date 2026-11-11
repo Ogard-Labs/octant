@@ -182,6 +182,27 @@ describe("Project read contracts", () => {
     ).toMatchObject({ color: "pink" });
   });
 
+  it("carries a person's design system choice into the compact summary a window reads", () => {
+    for (const project of [codeProject, workProject]) {
+      const { bindingHistory: _history, ...summary } = project;
+      const designSystem = {
+        kind: "file",
+        folder: binding.canonicalRoot,
+        path: "apps/site/DESIGN.md",
+      };
+      expect(
+        decodeProjectSummary({ ...summary, bindingRevisionId: ids.revision, designSystem }),
+      ).toMatchObject({ designSystem });
+      expect(
+        decodeProjectSummary({
+          ...summary,
+          bindingRevisionId: ids.revision,
+          designSystem: { kind: "none" },
+        }),
+      ).toMatchObject({ designSystem: { kind: "none" } });
+    }
+  });
+
   it("separates virtual Chat Projects from bound Projects", () => {
     expect(() => decodeProject({ ...chatProject, binding, bindingHistory: [] })).toThrow();
     expect(() => decodeProject({ ...workProject, bindingHistory: [] })).toThrow();

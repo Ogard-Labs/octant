@@ -47,7 +47,7 @@ export function canvasDesignSystemSeries(
 /**
  * The custom properties a Canvas sets on its typed blocks so they draw with
  * its design system: each series colour it names, and its primary colour as
- * the accent a progress bar or a highlighted bar fills with. Every value
+ * the accent callout edges, diagram strokes, and highlighted marks take. Every value
  * passes the brand rule again, wherever it came from, so nothing written can
  * end a declaration.
  */

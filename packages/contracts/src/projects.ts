@@ -450,6 +450,7 @@ const WorkProjectSummary = Schema.Struct({
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
+  designSystem: Schema.optional(DesignSystemChoice),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -473,6 +474,7 @@ const CodeProjectSummary = Schema.Struct({
   providerPolicy: Schema.optional(ProjectProviderPolicy),
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
   extraFolders: Schema.optional(ProjectExtraFolders),
+  designSystem: Schema.optional(DesignSystemChoice),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
