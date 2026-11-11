@@ -334,7 +334,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
   controls are the worker's. The List and Graph switch is offered when the
-  coordinator or any worker has subagents. When the host refuses the read, the
+  coordinator or any worker has subagents. When the coordinator has more workers
+  than the host reads, the section says subagents are shown for the most
+  recently changed workers only, since an older worker's row cannot otherwise
+  tell "not read" from "handed off nothing". When the host refuses the read, the
   rows stay and the section says the workers' subagents cannot be read here
   ([Coordinator threads: Seeing workers' subagents](coordinator-threads.md#seeing-workers-subagents)).
 - **Requests.** A coordinator's composer lists its workers' pending approvals

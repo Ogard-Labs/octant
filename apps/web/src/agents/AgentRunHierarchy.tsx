@@ -232,6 +232,15 @@ export function AgentRunHierarchy(props: {
   const workerRunsRefused =
     workerRead?.status === "refused" &&
     workerRead.coordinatorThreadId === String(props.parentThreadId);
+  // The host reads only the most recently changed workers and leaves out any
+  // without runs, so past its bound an older worker's row cannot tell "not
+  // read" from "handed off nothing". The section says the answer is partial
+  // rather than let those rows read as complete.
+  const workersNotice = workerRunsRefused
+    ? "This window cannot read the workers' subagents."
+    : workerGraph?.workersTruncated === true
+      ? "Subagents are shown for the most recently changed workers only."
+      : undefined;
   const workers = useMemo(
     (): ReadonlyArray<SubagentWorker> | undefined =>
       workerThreads?.map((worker) => {
@@ -452,9 +461,7 @@ export function AgentRunHierarchy(props: {
         {...(props.onOpenWorker === undefined ? {} : { onOpenWorker: props.onOpenWorker })}
         onViewChange={setView}
         {...(workers === undefined ? {} : { workers })}
-        {...(workerRunsRefused
-          ? { workersNotice: "This window cannot read the workers' subagents." }
-          : {})}
+        {...(workersNotice === undefined ? {} : { workersNotice })}
         {...(props.providers === undefined ? {} : { providers: props.providers })}
         reconnecting={status === "refreshing"}
         view={view}

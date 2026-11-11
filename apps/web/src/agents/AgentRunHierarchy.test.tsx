@@ -961,6 +961,32 @@ describe("AgentRunHierarchy", () => {
       expect(screen.queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
     });
 
+    it("says the answer is partial when the host read only the most recently changed workers", async () => {
+      const older = { threadId: "66666666-6666-4666-8666-666666666666", title: "An older worker" };
+      const coordinatorGraph = vi.fn(
+        async () => ({ ...graphFor(String(parentThreadId)), workersTruncated: true }) as never,
+      );
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          parentThreadId={parentThreadId}
+          workers={[...workers, { ...older, state: "done" as const }]}
+        />,
+      );
+
+      const section = await screen.findByRole("region", { name: "Workers" });
+      // The older worker's row shows no count, which alone would read as
+      // "handed off nothing"; the section says its subagents were not read.
+      expect(
+        await within(section).findByText(
+          "Subagents are shown for the most recently changed workers only.",
+        ),
+      ).toBeVisible();
+      expect(within(section).getByRole("button", { name: /An older worker/ })).toHaveTextContent(
+        "Done",
+      );
+    });
+
     it("asks the host for nothing on a thread with no workers", async () => {
       const coordinatorGraph = vi.fn(async () => graphFor(String(parentThreadId)) as never);
       render(
