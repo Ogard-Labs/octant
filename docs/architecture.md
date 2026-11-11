@@ -13291,10 +13291,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
   ([Hub and spokes](design/hub-and-spokes.md), built). An outside agent on
-  another machine is designed as a third such principal, held to an agent
-  grant the person creates at a local window
-  ([Agent access from other machines](design/agent-access.md), designed, not
-  built). The listener, pairing tickets, pairing
+  another machine on the person's own network is a third such principal, held
+  to an agent grant the person creates over the loopback administration
+  channel (`/api/desktop/agent-access`, `octant agent-access`): named Projects,
+  modes, a highest level below Full access, tools, models, limits, and expiry.
+  It reaches only `POST /api/agent-access/claim` and `POST
+/api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
+  Tailscale sources only, authenticated by a signed bridge proof or a bearer
+  agent key; each tool runs in process as a paired-device principal whose
+  device id is the grant's own scope id, after a guard that admits only the
+  routes the tools use inside the grant, so every device clamp applies too.
+  It never answers approvals or adds Projects, its threads are journaled as its
+  own and marked as outside content, and revoking the grant ends its sessions
+  ([Agent access from other machines](design/agent-access.md); its Settings
+  page is not built yet). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the

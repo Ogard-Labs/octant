@@ -5,9 +5,12 @@ person's own network.
 Size: Full: a new remote principal, a credential, a listener surface, a
 server-hosted MCP endpoint, Settings, and a CLI enrollment step.
 Owner: maintainer · Started: 2026-11-11
-Build status: being built; each built slice moves its rule into its owner
-([Architecture: Security and authority](../architecture.md#security-and-authority))
-and into [Decisions and requirements](decisions.md).
+Build status: slices 1 to 4 are built (grants, the endpoint, the bridge, and
+direct keys), administered from the loopback CLI (`octant agent-access`).
+Slice 5 is not built yet: Settings › Agent access, "Started by" on threads and
+in Needs you, and the paired-device view and revoke. The built rules are in
+[Architecture: Security and authority](../architecture.md#security-and-authority)
+and [Decisions and requirements](decisions.md).
 
 An agent running on another machine can start and follow work in Octant: a bot
 on a home server, a coding CLI on a second laptop, a script on a build box. It

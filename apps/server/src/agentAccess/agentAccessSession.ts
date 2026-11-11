@@ -10,6 +10,7 @@ import {
   type PermissionMode,
 } from "@octant/contracts";
 import { threadAccessOf, workAccessOfPermissionMode } from "@octant/domain";
+import { agentThreadPort, isAgentSnapshotRunning } from "@octant/cli/agent-tools";
 import type {
   AgentToolPolicy,
   LocalControlRequest,
@@ -29,7 +30,10 @@ const decodeSessionId = Schema.decodeUnknownSync(RemoteSessionId);
 export const AGENT_ACCESS_ORIGIN = "octant-agent-access";
 
 export interface AgentSessionDependencies {
-  readonly service: AgentAccessService;
+  readonly service: Pick<
+    AgentAccessService,
+    "threadOwner" | "recordThreadStarted" | "threadsOf" | "takeTurn"
+  >;
   readonly dispatch: (
     handoff: AuthenticatedProductDispatchHandoff,
   ) => Promise<Response | undefined>;
@@ -133,10 +137,23 @@ export function agentToolPolicy(
     projectAllowed: (projectId) => grant.scope.projects.some((id) => String(id) === projectId),
     threadAllowed: (threadId) => threadInScope(grant, threadId, deps),
     defaultAccess: grant.scope.highestLevel,
-    beforeTurn: () =>
-      deps.service.takeTurn(String(grant.grantId))
+    beforeTurn: async (session) => {
+      // Running turns are counted from the agent's own newest threads, read
+      // as the agent would read them; the daily count is the service's.
+      let running = 0;
+      for (const thread of deps.service.threadsOf(String(grant.grantId)).slice(0, 20)) {
+        const snapshot = await agentThreadPort(session, thread.mode, thread.threadId)
+          .read()
+          .catch(() => undefined);
+        if (isAgentSnapshotRunning(snapshot)) running += 1;
+        if (running >= grant.scope.limits.runningTurns) {
+          return `This agent already has ${running} turns running, its limit; wait for one to end.`;
+        }
+      }
+      return deps.service.takeTurn(String(grant.grantId))
         ? undefined
-        : `This agent has used its ${grant.scope.limits.turnsPerDay} turns for today.`,
+        : `This agent has used its ${grant.scope.limits.turnsPerDay} turns for today.`;
+    },
   };
 }
 

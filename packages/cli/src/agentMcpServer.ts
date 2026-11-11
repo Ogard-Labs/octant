@@ -33,6 +33,7 @@ import {
 import { addProject } from "./projectCommand";
 
 export { stopAgentTurn } from "./agentStart";
+export { agentThreadPort, isAgentSnapshotRunning } from "./agentThread";
 export type {
   LocalControlRequest,
   LocalControlResponse,
@@ -289,7 +290,7 @@ export interface AgentToolPolicy {
   /** The level a new Work or Code thread starts at when the call names none. */
   readonly defaultAccess: PermissionMode;
   /** A refusal when the caller's limits do not allow another turn now. */
-  readonly beforeTurn: () => string | undefined;
+  readonly beforeTurn: (session: OpenedLocalControlSession) => Promise<string | undefined>;
 }
 
 export interface AgentToolCallOptions {
@@ -799,6 +800,10 @@ async function startWork(
     }
     mode = "chat";
   }
+  // Limits are checked before anything is created, so a refused turn leaves
+  // no empty thread behind.
+  const limited = await policy?.beforeTurn(session);
+  if (limited !== undefined) return { value: limited, isError: true };
   const created = await createAgentThread(session, {
     mode,
     title: call.title ?? titleFromPrompt(call.prompt),
@@ -813,7 +818,7 @@ async function startWork(
     mode: created.mode,
     ...(created.projectName === undefined ? {} : { projectName: created.projectName }),
   };
-  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal, policy);
+  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal, undefined);
   if (addedProject === undefined || typeof answer.value === "string") return answer;
   return { ...answer, value: { ...answer.value, addedProject } };
 }
@@ -829,9 +834,10 @@ async function sendAndFollow(
   options: { readonly wait: boolean; readonly timeoutSeconds: number },
   poll: { readonly pollIntervalMs?: number },
   signal: AbortSignal,
+  /** Absent when the caller already checked the limits for this turn. */
   policy: AgentToolPolicy | undefined,
 ): Promise<ToolAnswer> {
-  const limited = policy?.beforeTurn();
+  const limited = await policy?.beforeTurn(session);
   if (limited !== undefined) return { value: limited, isError: true };
   const started = await startAgentTurn(
     agentThreadPort(session, thread.mode, thread.threadId),

@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 6       | 2            | 1                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 6       | 3            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **232**   | **195** | **32**       | **5**               |
+| **All areas**                                                                         | **232**   | **195** | **33**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2045,7 +2045,9 @@ An agent on another machine on the person's own network starts and follows work 
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
 - Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 
-Status: Designed, not built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md).
+- Not built yet: Settings › Agent access, "Started by" on an agent's threads and in Needs you, and the paired-device view and revoke; grants are administered with `octant agent-access` until then.
+
+Status: Partly built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
 ## Credentials and sign-in
 
