@@ -40,6 +40,7 @@ export const ArchivedWorktreeRefusalReason = Schema.Literal(
   "not-archived",
   "not-found",
   "dirty",
+  "turn-running",
   "busy",
 );
 export type ArchivedWorktreeRefusalReason = typeof ArchivedWorktreeRefusalReason.Type;

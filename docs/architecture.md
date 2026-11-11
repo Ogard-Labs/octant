@@ -1779,14 +1779,19 @@ with `onArchive`, which stands in for a person's confirmation only when the
 worktree has no uncommitted or untracked changes and its commit is delivered:
 contained in a remote-tracking branch (pushed) or in a local branch other than
 its own (merged), as `git for-each-ref --contains HEAD` reports. Anything else
-is refused before anything is touched and the worktree stays. Removal keeps the
+is refused before anything is touched and the worktree stays. Archiving does
+not stop a turn that is starting, running, or waiting on the person, and its
+commands still use the folder, so while the runtime reports one
+(`turnInProgress`) the host skips the removal and the worktree stays listed.
+Removal keeps the
 branch, so committed work is never lost; a squash or rebase merge leaves the
 original commit uncontained, and that worktree stays for a person to remove.
 Settings › Code › Worktrees lists the managed worktrees archived threads still
 keep, largest first, with the Project, branch, folder, and a bounded size
 (200,000 entries, then "more than"). Remove asks once and runs the same
-cleanup as a confirmed local-user request: it refuses uncommitted changes and
-an active thread, and keeps the branch. Listing and removing are a local
+cleanup as a confirmed local-user request: it refuses uncommitted changes, an
+active thread, and a thread whose turn is still in progress, and keeps the
+branch. Listing and removing are a local
 window's alone, because the list names folders on this computer and removal
 deletes from its disk; a paired device is refused both. The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the

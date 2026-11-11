@@ -657,11 +657,16 @@ export function wireCode(deps: CodeDependencies) {
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
+    // The Code runtime is built after this area, so the turn check reads the
+    // runtime the service is built with; before that no turn can run.
+    let archivedWorktreeTurns: CodeOperationRuntime | undefined;
     const archivedWorktrees = createArchivedWorktrees({
       readCodeThreads: () => persistence.readCodeThreads(),
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
       loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      turnInProgress: (threadId) =>
+        archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
       cleanup: (input, signal) => managedWorktreeService.cleanup(input, signal),
     });
     const archivedWorktreeRoutes = createArchivedWorktreeRouteHandler({
@@ -830,6 +835,7 @@ export function wireCode(deps: CodeDependencies) {
     // exists; everything else the service reads is this area's.
     const serverGitHistories = new Map<string, GitHistoryPort>();
     const buildCodeService = (codeOperationRuntime: CodeOperationRuntime | undefined) => {
+      archivedWorktreeTurns = codeOperationRuntime;
       const codeService =
         options.codeService ??
         new CodeService({

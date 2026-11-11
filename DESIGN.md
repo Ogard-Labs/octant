@@ -2698,7 +2698,8 @@ a line of Project, branch in mono, and size ("more than" when the count stopped
 early), then the folder in mono. Each row's secondary **Remove** opens
 `OctantConfirmDialog` in the destructive role ("Remove this worktree?", Cancel
 focused, **Remove worktree**), saying the folder and its ignored files go and
-the branch and its commits stay. A refusal (uncommitted changes) is said in the
+the branch and its commits stay. A refusal (uncommitted changes, or a turn
+still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device sees the section as managed on the host machine
 ([rules](docs/architecture.md#modes-chat-work-and-code)).

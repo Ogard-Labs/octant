@@ -40,6 +40,7 @@ function setup(options: {
   readonly lifecycle?: "active" | "archived";
   readonly receiptState?: "ready" | "cleanup-pending" | "removed";
   readonly cleanup?: CleanupResult;
+  readonly turnRunning?: boolean;
 }) {
   const thread = {
     id: threadId,
@@ -58,6 +59,7 @@ function setup(options: {
     readCodeCheckout: () => ({ kind: "managed-worktree", ownershipReceiptId: receiptId }) as never,
     loadReceipt: async () => receipt(options.receiptState ?? "ready"),
     cleanup,
+    turnInProgress: () => options.turnRunning === true,
     measure: async () => ({ bytes: 2_048, complete: true }),
   });
   return { worktrees, cleanup };
@@ -114,6 +116,18 @@ describe("archived worktrees", () => {
       { receiptId, confirmedByLocalUser: false, onArchive: true },
       expect.any(AbortSignal),
     );
+  });
+
+  it("keeps the worktree of a thread archived while its turn still runs", async () => {
+    // Archiving does not stop a running turn, and its commands still read and
+    // write the folder; removing it then would pull the files out from under it.
+    const running = setup({ turnRunning: true });
+    await running.worktrees.reclaimOnArchive(threadId);
+    await expect(running.worktrees.remove(threadId)).resolves.toMatchObject({
+      kind: "archived-worktree-refused",
+      reason: "turn-running",
+    });
+    expect(running.cleanup).not.toHaveBeenCalled();
   });
 
   it("measures a folder without following links and reports a missing one as absent", async () => {

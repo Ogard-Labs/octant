@@ -22,6 +22,12 @@ export interface ArchivedWorktreesDependencies {
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
   readonly cleanup: ManagedWorktreeService["cleanup"];
+  /**
+   * Whether a turn on the thread is starting, running, or waiting on the
+   * person. Archiving does not stop one, and its commands still use the
+   * worktree, so neither removal touches the folder while it does.
+   */
+  readonly turnInProgress: (threadId: CodeThreadId) => boolean;
   /** Override for tests; production walks the folder. */
   readonly measure?: (path: string) => Promise<FolderSize | undefined>;
 }
@@ -78,6 +84,7 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
       const thread = dependencies.readCodeThread(threadId);
       if (thread === undefined) return refused("not-found");
       if (thread.lifecycle !== "archived") return refused("not-archived");
+      if (dependencies.turnInProgress(threadId)) return refused("turn-running");
       const receipt = await ownedReceipt(thread);
       if (receipt === undefined) return refused("not-found");
       const result = await dependencies.cleanup(
@@ -100,6 +107,8 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
     async reclaimOnArchive(threadId: CodeThreadId): Promise<void> {
       const thread = dependencies.readCodeThread(threadId);
       if (thread?.lifecycle !== "archived") return;
+      // A turn still running keeps its worktree; it stays listed in Settings.
+      if (dependencies.turnInProgress(threadId)) return;
       const receipt = await ownedReceipt(thread);
       if (receipt?.state !== "ready") return;
       await dependencies
@@ -121,6 +130,7 @@ const REFUSALS: Record<ArchivedWorktreeRefusalReason, string> = {
   "not-found": "That worktree is already gone.",
   dirty:
     "The worktree has uncommitted changes. Commit or discard them in the thread first, or keep it.",
+  "turn-running": "A turn is still running in this thread. Stop it or let it finish first.",
   busy: "The worktree could not be removed right now. Try again in a moment.",
 };
 
