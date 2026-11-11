@@ -1903,7 +1903,7 @@ describe("App", () => {
         "false",
       ),
     );
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     const freshWelcome = await screen.findByRole("region", { name: "Chat welcome" });
     await user.type(within(freshWelcome).getByRole("textbox", { name: "First message" }), "Hi");
@@ -2722,7 +2722,7 @@ describe("App", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     await waitFor(() =>
       expect(
         within(screen.getByRole("button", { name: /Controller foundation/ })).queryByText(
@@ -2738,7 +2738,7 @@ describe("App", () => {
     const saved = await screen.findByRole("checkbox", { name: "Branch on Projects rows" });
     expect(saved).not.toBeChecked();
     await user.click(saved);
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     await waitFor(() =>
       expect(
         within(screen.getByRole("button", { name: /Controller foundation/ })).getByText(
@@ -4028,7 +4028,7 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     await screen.findByRole("heading", { level: 1, name: "General" });
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     expect(await screen.findByRole("button", { name: "Project: Octant" })).toBeVisible();
     expect(
@@ -4057,7 +4057,7 @@ describe("App", () => {
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep my unsent draft");
     await openSettingsFromSidebar(user);
     await screen.findByRole("heading", { level: 1, name: "General" });
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
@@ -4403,26 +4403,34 @@ describe("App", () => {
     );
 
     await openSettingsFromSidebar(user);
+    // Settings is a sheet over the shell, which keeps its frame and material.
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveClass(
-      "shell-frame--standalone",
+      "shell-frame",
       "shell--material-translucent",
     );
+    expect(document.querySelector(".shell")).not.toHaveClass("shell-frame--standalone");
     fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
     await user.click(
       within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Off" }),
     );
     await waitFor(() => expect(setSidebarMaterialPreference).toHaveBeenLastCalledWith("opaque"));
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
 
     await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Host" }));
     await user.click(await screen.findByRole("button", { name: "Reset native window bounds" }));
     expect(hostBridge.resetBounds).toHaveBeenCalledOnce();
+    // The shell stays mounted under the sheet with live regions of its own,
+    // so the announcement is looked for inside Settings.
+    const settings = screen.getByRole("dialog", { name: "Settings" });
     await waitFor(() =>
-      expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
-        "Native window bounds reset.",
-      ),
+      expect(
+        [...settings.querySelectorAll('[aria-live="polite"]')].some((region) =>
+          region.textContent?.includes("Native window bounds reset."),
+        ),
+      ).toBe(true),
     );
   });
 
@@ -5236,7 +5244,7 @@ describe("App", () => {
     expect(screen.getByRole("switch", { name: "Enable Work" })).toBeVisible();
     expect(providerApi.bootstrap).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(screen.queryByRole("region", { name: "Settings" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: /Workspace pane:/ })).toHaveAttribute(
       "data-workspace-pane-id",
@@ -5272,7 +5280,7 @@ describe("App", () => {
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
     await user.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
     await user.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);
     // The rail shows an icon until search is asked for.

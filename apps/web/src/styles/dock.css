@@ -754,9 +754,69 @@
   pointer-events: auto;
 }
 
+/* A sheet is a surface as large as a page that floats over the window. Its
+   scrim is light, because the point of a sheet is that the window behind it
+   can still be seen: Settings changes how the app looks, and as a page that
+   replaced the app it showed none of what a change did. It has no padding of
+   its own; what it holds lays itself out to the edges. */
+.octant-sheet__backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
+}
+
+.octant-sheet__viewport {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--oct-space-12) var(--oct-space-8) var(--oct-space-8);
+  pointer-events: none;
+}
+
+.octant-sheet__popup {
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  background: var(--octant-float);
+  border: 1px solid var(--octant-bevel);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: var(--octant-shadow-pop);
+  outline: 0;
+  pointer-events: auto;
+}
+
+/* A sheet opened in a wide window stays a sheet when the window is made
+   narrow, where there is no room around it: it then fills the window. */
+@media (max-width: 960px) {
+  .octant-sheet__viewport {
+    padding: 0;
+  }
+
+  .octant-sheet__popup {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 /* The persisted app preference must stop entrance motion just like the OS
    preference, including feature-owned animations on the shared popup. */
-html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialog__backdrop) {
+html[data-octant-reduced-motion="true"]
+  :is(
+    .octant-dialog__popup,
+    .octant-dialog__backdrop,
+    .octant-sheet__popup,
+    .octant-sheet__backdrop
+  ) {
   animation: none;
   transition: none;
 }

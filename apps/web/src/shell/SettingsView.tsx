@@ -46,6 +46,7 @@ import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection"
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -225,6 +226,12 @@ export interface SettingsViewProps {
    * the rail keeps a title band for them. Elsewhere the band is empty.
    */
   readonly reservesTitlebarInset?: boolean;
+  /**
+   * `"sheet"` when Settings floats over the app: it then closes with a
+   * control in its own corner, and "Back to app" would name a place the
+   * person never left.
+   */
+  readonly presentation?: "page" | "sheet";
   readonly onBack?: () => void;
   readonly onResetLayout: () => void;
   readonly onResetNativeBounds: () => void;
@@ -449,6 +456,7 @@ export function SettingsView(props: SettingsViewProps) {
       : { initialDeepLink: currentSettingsLink(props.initialDeepLink) }),
   });
   const narrow = props.isNarrow === true;
+  const sheet = !narrow && props.presentation === "sheet";
   const contentRef = useRef<HTMLDivElement>(null);
   const previousSection = useRef(route.activeSection);
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -613,7 +621,13 @@ export function SettingsView(props: SettingsViewProps) {
   return (
     <section
       aria-label="Settings"
-      className={narrow ? "settings-view settings-view--narrow" : "settings-view"}
+      className={
+        narrow
+          ? "settings-view settings-view--narrow"
+          : sheet
+            ? "settings-view settings-view--sheet"
+            : "settings-view"
+      }
     >
       {narrow ? null : (
         <aside aria-label="Settings sidebar" className="settings-view__sidebar">
@@ -644,7 +658,7 @@ export function SettingsView(props: SettingsViewProps) {
             <div className="settings-view__navigation-scroll" ref={navigationScroll}>
               {navigation}
             </div>
-            {props.onBack === undefined ? null : (
+            {props.onBack === undefined || sheet ? null : (
               <footer className="settings-view__sidebar-footer">
                 <OctantButton
                   className="setnav-item window-no-drag settings-view__back justify-start rounded-lg"
@@ -732,6 +746,20 @@ export function SettingsView(props: SettingsViewProps) {
                 </span>
               ) : null}
             </span>
+            {sheet && props.onBack !== undefined ? (
+              <OctantTooltip align="end" label="Close">
+                <OctantButton
+                  aria-label="Close Settings"
+                  className="settings-view__close window-no-drag text-muted-foreground"
+                  onClick={props.onBack}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X aria-hidden="true" size={16} strokeWidth={1.5} />
+                </OctantButton>
+              </OctantTooltip>
+            ) : null}
           </div>
         )}
         <main className="settings-view__content" ref={contentRef}>
