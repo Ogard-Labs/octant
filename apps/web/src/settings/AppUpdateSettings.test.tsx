@@ -4,8 +4,9 @@ import {
 } from "@octant/contracts/app-updates";
 import type { UtcTimestamp } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
+import { resetWhatsNewAcknowledgement } from "./whatsNewAcknowledgement";
 import type { AppUpdateChannel } from "@octant/contracts/shell";
 import type { AppUpdateState, OctantHostBridge } from "../shell/hostBridge";
 
@@ -85,6 +86,8 @@ function view(
 }
 
 describe("AppUpdateSettings", () => {
+  beforeEach(resetWhatsNewAcknowledgement);
+
   it("keeps Nightly update preferences local and shows Nightly no ring switch", () => {
     const local: AppUpdateState = {
       ...ready,

@@ -11,7 +11,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
-import { SettingRow, SettingsSection, SettingsState } from "./primitives";
+import { SettingRow, SettingsCompactRow, SettingsSection, SettingsState } from "./primitives";
 
 export interface ProtectedFilesSettingsProps {
   /** Absent where the host publishes no protected list, such as a paired device. */
@@ -110,53 +110,66 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
     ) : (
       <>
         <div className="setgroup">
-          {settings.builtIns.map((group, index) => (
-            <SettingRow
-              description={
-                <>
-                  <span className="protected-files__paths">{group.paths.join(", ")}</span>{" "}
-                  {group.removed ? "Agents can read these now." : CHANNEL_HINT[group.channel]}
-                </>
-              }
-              focused={props.focusedSetting === "protected-files" && index === 0}
-              key={group.id}
-              label={group.removed ? `${group.label} (not protected)` : group.label}
-              scope="host"
-              settingId="protected-files"
-            >
-              {group.removed ? (
-                <OctantButton
-                  disabled={busy}
-                  onClick={() =>
-                    void send({ kind: "restore-built-in-protected-files", id: group.id })
-                  }
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Protect again
-                </OctantButton>
-              ) : (
-                <OctantButton
-                  disabled={busy}
-                  onClick={() => setConfirming(group)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </SettingRow>
-          ))}
+          {/* A group that is no longer protected is a decision, so it leads. */}
+          {[...settings.builtIns]
+            .sort((a, b) => Number(b.removed) - Number(a.removed))
+            .map((group, index) => (
+              <SettingsCompactRow
+                attention={group.removed}
+                detail={
+                  <>
+                    <span className="protected-files__paths">{group.paths.join(", ")}</span>
+                    <span>
+                      {group.removed ? "Agents can read these now." : CHANNEL_HINT[group.channel]}
+                    </span>
+                  </>
+                }
+                focused={props.focusedSetting === "protected-files" && index === 0}
+                key={group.id}
+                label={group.removed ? `${group.label} (not protected)` : group.label}
+                meta={
+                  // The paths are what is guarded, so they read on the closed
+                  // row, cut to one line; the detail holds the full list.
+                  <>
+                    {group.removed ? "Not protected" : "Protected"} ·{" "}
+                    <span>{group.paths.join(", ")}</span>
+                  </>
+                }
+                settingId="protected-files"
+              >
+                {group.removed ? (
+                  <OctantButton
+                    disabled={busy}
+                    onClick={() =>
+                      void send({ kind: "restore-built-in-protected-files", id: group.id })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Protect again
+                  </OctantButton>
+                ) : (
+                  <OctantButton
+                    disabled={busy}
+                    onClick={() => setConfirming(group)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Remove
+                  </OctantButton>
+                )}
+              </SettingsCompactRow>
+            ))}
         </div>
         <div className="setgroup">
           {settings.added.map((path) => (
-            <SettingRow
-              description="Added by you."
+            <SettingsCompactRow
               key={path}
               label={path}
-              scope="host"
+              labelWraps
+              meta="Added by you"
               settingId="protected-files"
             >
               <OctantButton
@@ -168,7 +181,7 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
               >
                 Remove
               </OctantButton>
-            </SettingRow>
+            </SettingsCompactRow>
           ))}
           <SettingRow
             description="A file, or a folder and everything in it. Absolute, or starting with ~/."

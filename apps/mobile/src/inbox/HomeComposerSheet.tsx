@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
+import { SegmentedControl } from "../ui/NativeChrome";
 import { ComposerVoiceButton } from "../ui/ComposerVoiceButton";
 import { IconButton, type MobileIconName } from "../ui/IconButton";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
@@ -15,7 +16,7 @@ const MOBILE_CREATE_MODES: ReadonlyArray<{
   readonly icon: MobileIconName;
 }> = [
   { id: "chat", label: "Chat", icon: "chatbubble-outline" },
-  { id: "work", label: "Work", icon: "folder-outline" },
+  { id: "work", label: "Work", icon: "briefcase-outline" },
   { id: "code", label: "Code", icon: "code-slash" },
 ];
 
@@ -62,29 +63,16 @@ export function HomeComposerSheet(props: {
           paddingBottom: space.md,
           gap: space.md,
         },
-        modes: {
-          alignSelf: "flex-start",
-          flexDirection: "row",
-          padding: 3,
-          gap: 2,
-          borderRadius: radii.pill,
-          backgroundColor: colors.glassFillThin,
+        header: { minHeight: 44, flexDirection: "row", alignItems: "center" },
+        cancel: { flex: 1 },
+        cancelLabel: { color: colors.accent, fontSize: 17 },
+        headerTitle: {
+          color: colors.textPrimary,
+          fontSize: typography.pageTitle.fontSize,
+          fontWeight: typography.pageTitle.fontWeight,
+          letterSpacing: typography.pageTitle.letterSpacing,
         },
-        mode: {
-          minHeight: 34,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 5,
-          paddingHorizontal: space.sm,
-          borderRadius: radii.pill,
-        },
-        modeSelected: { backgroundColor: colors.glassFillThick },
-        modeLabel: {
-          color: colors.textTertiary,
-          fontSize: typography.caption.fontSize,
-          fontWeight: "500",
-        },
-        modeLabelSelected: { color: colors.textPrimary },
+        headerEnd: { flex: 1, alignItems: "flex-end" },
         context: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm },
         contextItem: {
           flexDirection: "row",
@@ -105,8 +93,8 @@ export function HomeComposerSheet(props: {
           flex: 1,
           minHeight: 120,
           color: colors.textPrimary,
-          fontSize: 18,
-          lineHeight: 21,
+          fontSize: 17,
+          lineHeight: 23,
           textAlignVertical: "top",
           outlineColor: "transparent",
           outlineStyle: "solid",
@@ -126,21 +114,23 @@ export function HomeComposerSheet(props: {
         error: { color: colors.danger, fontSize: typography.caption.fontSize, lineHeight: 18 },
         toolbar: { flexDirection: "row", alignItems: "center", gap: space.sm },
         model: {
-          flex: 1,
-          minHeight: 46,
+          flexShrink: 1,
+          height: 32,
           flexDirection: "row",
           alignItems: "center",
-          gap: 6,
-          paddingHorizontal: space.md,
+          gap: 4,
+          paddingHorizontal: 12,
           borderRadius: radii.pill,
+          backgroundColor: colors.control,
         },
-        modelPressed: { backgroundColor: colors.glassFillThin },
+        modelPressed: { backgroundColor: colors.controlPressed },
         modelText: {
-          flex: 1,
+          flexShrink: 1,
           color: colors.textPrimary,
-          fontSize: typography.body.fontSize,
+          fontSize: typography.detail.fontSize,
           fontWeight: "500",
         },
+        spacer: { flex: 1 },
       }),
     [colors],
   );
@@ -163,31 +153,40 @@ export function HomeComposerSheet(props: {
       title="New thread"
       visible={props.visible}
     >
-      {availableModes.length > 1 ? (
-        <View accessibilityRole="tablist" style={styles.modes}>
-          {availableModes.map((mode) => {
-            const selected = props.mode === mode.id;
-            return (
-              <Pressable
-                accessibilityRole="tab"
-                accessibilityState={{ selected }}
-                key={mode.id}
-                onPress={() => props.onSelectMode(mode.id)}
-                style={[styles.mode, selected ? styles.modeSelected : null]}
-                testID={`mobile-home-composer-mode-${mode.id}`}
-              >
-                <Ionicons
-                  color={selected ? colors.textPrimary : colors.textTertiary}
-                  name={mode.icon}
-                  size={14}
-                />
-                <Text style={[styles.modeLabel, selected ? styles.modeLabelSelected : null]}>
-                  {mode.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+      <View style={styles.header}>
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={props.onClose}
+          style={styles.cancel}
+          testID="mobile-home-composer-cancel"
+        >
+          <Text style={styles.cancelLabel}>Cancel</Text>
+        </Pressable>
+        <Text accessibilityRole="header" style={styles.headerTitle}>
+          New thread
+        </Text>
+        <View style={styles.headerEnd}>
+          <IconButton
+            accessibilityLabel={props.busy === true ? "Creating" : "Send"}
+            disabled={!canSubmit}
+            iconSize={18}
+            name={props.busy === true ? "hourglass-outline" : "arrow-up"}
+            onPress={props.onSubmit}
+            size={32}
+            testID="mobile-home-composer-submit"
+            variant="send"
+          />
         </View>
+      </View>
+
+      {availableModes.length > 1 ? (
+        <SegmentedControl
+          onSelect={props.onSelectMode}
+          optionTestID={(id) => `mobile-home-composer-mode-${id}`}
+          options={availableModes}
+          selected={props.mode}
+        />
       ) : null}
 
       <View style={styles.context} testID="mobile-home-composer-context">
@@ -198,7 +197,7 @@ export function HomeComposerSheet(props: {
               props.mode === "code"
                 ? "git-branch-outline"
                 : props.mode === "work"
-                  ? "folder-outline"
+                  ? "briefcase-outline"
                   : "chatbubble-outline"
             }
             size={16}
@@ -264,7 +263,13 @@ export function HomeComposerSheet(props: {
       )}
 
       <View style={styles.toolbar}>
-        <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={38} />
+        <IconButton
+          accessibilityLabel="Attachments unavailable"
+          disabled
+          name="add"
+          size={32}
+          variant="ghost"
+        />
         <Pressable
           accessibilityLabel={`Choose model, ${props.modelLabel}`}
           accessibilityRole="button"
@@ -275,19 +280,10 @@ export function HomeComposerSheet(props: {
           <Text numberOfLines={1} style={styles.modelText}>
             {props.modelLabel}
           </Text>
-          <Ionicons color={colors.textSecondary} name="chevron-down" size={16} />
+          <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
         </Pressable>
-        {props.voice === undefined ? null : <ComposerVoiceButton size={38} voice={props.voice} />}
-        <IconButton
-          accessibilityLabel={props.busy === true ? "Creating" : "Send"}
-          disabled={!canSubmit}
-          name={props.busy === true ? "hourglass-outline" : "arrow-up"}
-          onPress={props.onSubmit}
-          size={38}
-          style={!canSubmit ? styles.disabled : null}
-          testID="mobile-home-composer-submit"
-          variant="send"
-        />
+        <View style={styles.spacer} />
+        {props.voice === undefined ? null : <ComposerVoiceButton size={32} voice={props.voice} />}
       </View>
     </BottomSheet>
   );

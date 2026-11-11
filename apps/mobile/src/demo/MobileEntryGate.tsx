@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text } from "react-native";
-import { GlassSurface, space, typography, useTheme } from "../../design-system";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { radii, space, typography, useTheme } from "../../design-system";
 import { createMobileHostRegistry, type MobileHostRegistryRead } from "../hosts/HostRegistry";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
 
@@ -41,67 +41,94 @@ export function MobileEntryGate(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        // A native welcome: the words at the top, the two choices at the
+        // bottom within thumb reach, and no card framing the whole screen.
         shell: {
           flexGrow: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          padding: space.lg,
+          justifyContent: "space-between",
+          paddingHorizontal: space.lg,
+          paddingTop: space.xxl * 2,
+          paddingBottom: space.xl,
           backgroundColor: colors.canvas,
         },
-        card: { width: "100%", maxWidth: 420, padding: space.lg, gap: space.md },
-        title: { color: colors.textPrimary, fontSize: 30, fontWeight: "500", letterSpacing: -0.7 },
-        body: { color: colors.textSecondary, fontSize: typography.body.fontSize, lineHeight: 22 },
+        checking: { flexGrow: 1, justifyContent: "center", alignItems: "center" },
+        intro: { gap: space.md, width: "100%", maxWidth: 420, alignSelf: "center" },
+        actions: { gap: space.sm, width: "100%", maxWidth: 420, alignSelf: "center" },
+        title: {
+          color: colors.textPrimary,
+          fontSize: 34,
+          fontWeight: "700",
+          letterSpacing: -0.9,
+          lineHeight: 40,
+        },
+        body: { color: colors.textSecondary, fontSize: 17, lineHeight: 24 },
         button: {
-          minHeight: 48,
+          height: 50,
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: 24,
+          borderRadius: radii.md,
           paddingHorizontal: space.lg,
           backgroundColor: colors.accent,
         },
-        secondary: {
-          backgroundColor: colors.surfaceElevated,
-          borderColor: colors.hairlineStrong,
-          borderWidth: StyleSheet.hairlineWidth,
+        secondary: { backgroundColor: "transparent" },
+        label: { color: colors.sendLabel, fontSize: 17, fontWeight: "600" },
+        secondaryLabel: { color: colors.accent },
+        note: {
+          color: colors.textTertiary,
+          fontSize: typography.meta.fontSize,
+          lineHeight: 16,
+          textAlign: "center",
+          marginTop: space.xs,
         },
-        label: { color: colors.sendLabel, fontSize: typography.body.fontSize, fontWeight: "500" },
-        secondaryLabel: { color: colors.textPrimary },
       }),
     [colors],
   );
   if (entry === "live") return props.live;
   if (entry === "demo") return props.demo(() => setEntry("welcome"));
   return (
-    <ScrollView contentContainerStyle={styles.shell} testID="mobile-entry">
+    <ScrollView
+      contentContainerStyle={entry === "checking" ? [styles.shell, styles.checking] : styles.shell}
+      testID="mobile-entry"
+    >
       {entry === "checking" ? (
         <ActivityIndicator color={colors.accent} accessibilityLabel="Checking paired computers" />
       ) : (
-        <GlassSurface contentStyle={styles.card} material="regular">
-          <Text style={styles.title}>Your workspace, on your phone</Text>
-          <Text style={styles.body}>
-            Connect to Octant on your own computer, or explore a sample workspace first. No Octant
-            account is needed.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setEntry("live")}
-            style={styles.button}
-            testID="mobile-entry-connect"
-          >
-            <Text style={styles.label}>Connect a computer</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setEntry("demo")}
-            style={[styles.button, styles.secondary]}
-            testID="mobile-entry-demo"
-          >
-            <Text style={[styles.label, styles.secondaryLabel]}>Explore offline demo</Text>
-          </Pressable>
-          <Text style={styles.body}>
-            The demo uses sample data. It never connects to a computer or changes your accounts.
-          </Text>
-        </GlassSurface>
+        <>
+          <View style={styles.intro}>
+            <Text accessibilityRole="header" style={styles.title}>
+              Your workspace, on your phone
+            </Text>
+            <Text style={styles.body}>
+              Connect to Octant on your own computer, or explore a sample workspace first. No Octant
+              account is needed.
+            </Text>
+          </View>
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setEntry("live")}
+              style={({ pressed }) => [styles.button, pressed ? { opacity: 0.85 } : null]}
+              testID="mobile-entry-connect"
+            >
+              <Text style={styles.label}>Connect a computer</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setEntry("demo")}
+              style={({ pressed }) => [
+                styles.button,
+                styles.secondary,
+                pressed ? { opacity: 0.5 } : null,
+              ]}
+              testID="mobile-entry-demo"
+            >
+              <Text style={[styles.label, styles.secondaryLabel]}>Explore offline demo</Text>
+            </Pressable>
+            <Text style={styles.note}>
+              The demo uses sample data. It never connects to a computer or changes your accounts.
+            </Text>
+          </View>
+        </>
       )}
     </ScrollView>
   );

@@ -1,7 +1,12 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSnapshot, ExtensionToolGrant } from "@octant/contracts/extension-rpc";
 import { useEffect, useMemo, useState } from "react";
-import { SettingGroup, SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
+import {
+  SettingGroup,
+  SettingsCompactRow,
+  SettingsSection,
+  SettingsState,
+} from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { pluginNameIn, serverNameIn, UNNAMED_PLUGIN } from "./toolGrantLabels";
 
@@ -102,8 +107,24 @@ export function RememberedToolApprovalsPanel(props: {
     }
   }
 
+  const grantCount = loaded.kind === "ready" ? loaded.grants.length : 0;
   return (
     <SettingsSection
+      // What a person allowed is authority: it opens whenever there is any, or
+      // when it could not be read; the closed line still says how many.
+      collapse={{
+        open: grantCount > 0 || loaded.kind === "failed" || notice !== undefined,
+        summary:
+          loaded.kind === "loading"
+            ? "Reading…"
+            : loaded.kind === "failed"
+              ? "Could not be read"
+              : grantCount === 0
+                ? "None remembered"
+                : grantCount === 1
+                  ? "1 tool always allowed"
+                  : `${grantCount} tools always allowed`,
+      }}
       className="remembered-tool-approvals"
       description="Tools you chose to always allow in a Project. Revoking one makes Octant ask again the next time that tool runs."
       title="Remembered tool approvals"
@@ -134,14 +155,15 @@ export function RememberedToolApprovalsPanel(props: {
                 String(grant.componentId),
               );
               return (
-                <SettingRow
-                  description={`From ${plugin}${server === undefined ? "" : `, server ${server}`}. Octant runs it in this Project without asking.`}
+                <SettingsCompactRow
+                  detail="Octant runs it in this Project without asking."
                   focused={
                     props.focusedSetting === "tool-approvals" && groupIndex === 0 && rowIndex === 0
                   }
                   key={String(grant.grantId)}
                   label={grant.mcpToolName}
-                  scope="host"
+                  metaWraps
+                  meta={`Always allowed · From ${plugin}${server === undefined ? "" : `, server ${server}`}`}
                   settingId="tool-approvals"
                 >
                   <OctantButton
@@ -154,7 +176,7 @@ export function RememberedToolApprovalsPanel(props: {
                   >
                     Revoke
                   </OctantButton>
-                </SettingRow>
+                </SettingsCompactRow>
               );
             })}
           </SettingGroup>

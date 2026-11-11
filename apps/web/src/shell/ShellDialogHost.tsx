@@ -18,6 +18,7 @@ import {
   type ProjectCreateGithubSource,
 } from "../projects/ProjectCreateDialog";
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
+import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 import type {
@@ -69,6 +70,7 @@ export interface ShellDialogHostProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly firstRun: FirstRunOnboardingProps;
+  readonly whatsNew: WhatsNewController;
   readonly announcement: string;
   readonly announcementSequence: number;
   readonly projectAnnouncement: string;
@@ -175,10 +177,7 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           </Suspense>
         ) : null}
       </OctantDialogPresence>
-      <WhatsNewAfterUpdate
-        firstRunVisible={props.firstRun.controller.visible}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-      />
+      <WhatsNewAfterUpdate controller={props.whatsNew} />
       <p
         aria-atomic="true"
         aria-live="polite"

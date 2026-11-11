@@ -796,8 +796,8 @@ export function ChatComposer(props: ChatComposerProps) {
     </>
   );
 
-  // Model, then microphone: the trailing run reads context ring, model, mic,
-  // send, the same on every surface.
+  // The trailing run under the pill reads context ring, then model, the same
+  // on every surface. The microphone is in the pill, beside send.
   const rowTrailing = (
     <>
       <div className="chat-composer__selectors">
@@ -900,13 +900,13 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         ) : null}
       </div>
-      <ComposerVoiceButton
-        disabled={props.isSending}
-        onTranscript={(transcript) =>
-          props.onDraftChange(appendTranscript(props.draft, transcript))
-        }
-      />
     </>
+  );
+  const rowDictate = (
+    <ComposerVoiceButton
+      disabled={props.isSending}
+      onTranscript={(transcript) => props.onDraftChange(appendTranscript(props.draft, transcript))}
+    />
   );
 
   return (
@@ -945,6 +945,7 @@ export function ChatComposer(props: ChatComposerProps) {
         attach: rowAttach,
         leading: rowLeading,
         trailing: rowTrailing,
+        dictate: rowDictate,
         actions: {
           kind: "send-or-stop",
           cellClassName: "chat-composer__actions",

@@ -5,7 +5,7 @@ import type {
   ExtensionCommandFailure,
   ExtensionPackagePreview,
 } from "@octant/contracts/extension-rpc";
-import { BookOpen, Check, Puzzle, Search, Server, X } from "lucide-react";
+import { BookOpen, Check, ChevronRight, Puzzle, Search, Server, X } from "lucide-react";
 import {
   useId,
   useMemo,
@@ -166,6 +166,8 @@ export function LibraryView(props: LibraryViewProps) {
   const [openId, setOpenId] = useState<string>();
   const [connectingId, setConnectingId] = useState<string>();
   const [failure, setFailure] = useState<ExtensionCommandFailure>();
+  /** Lists the person opened to every item; the rest show their first few. */
+  const [everyItem, setEveryItem] = useState<ReadonlySet<string>>(new Set());
   const [fresh, setFresh] = useState<Readonly<Record<string, FreshConnection>>>({});
   const opener = useRef<HTMLElement | null>(null);
   const counts = useMemo(() => libraryCounts(props.items), [props.items]);
@@ -232,19 +234,57 @@ export function LibraryView(props: LibraryViewProps) {
     setOpenId(item.id);
   };
 
-  const renderCard = (item: LibraryItem, variant: "lead" | "row") => (
+  const renderRow = (item: LibraryItem) => (
     <li key={item.id}>
-      <LibraryCard
+      <LibraryRow
         item={item}
         onAct={(element) => act(item, element)}
         onOpen={(element) => {
           opener.current = element;
           setOpenId(item.id);
         }}
-        variant={variant}
       />
     </li>
   );
+
+  const renderList = (key: string, items: ReadonlyArray<LibraryItem>, label: string) => {
+    const { shown: rows, hidden } = visibleRows(items, everyItem.has(key));
+    const toggle = (all: boolean) =>
+      setEveryItem((current) => {
+        const next = new Set(current);
+        if (all) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+    return (
+      <>
+        <ul aria-label={label} className="library__list">
+          {rows.map(renderRow)}
+        </ul>
+        {hidden > 0 ? (
+          <OctantButton
+            className="library__more"
+            onClick={() => toggle(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Show all {items.length}
+          </OctantButton>
+        ) : everyItem.has(key) && items.filter(isCatalogItem).length > LIST_CAP_TRIGGER ? (
+          <OctantButton
+            className="library__more"
+            onClick={() => toggle(false)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Show fewer
+          </OctantButton>
+        ) : null}
+      </>
+    );
+  };
 
   return (
     <SettingsSection
@@ -340,9 +380,9 @@ export function LibraryView(props: LibraryViewProps) {
           <OctantAlert tone="warning">{failure.message}</OctantAlert>
         )}
         {props.loading === true ? (
-          <ul aria-label="Loading the library" aria-busy="true" className="library__grid">
+          <ul aria-label="Loading the library" aria-busy="true" className="library__list">
             {Array.from({ length: 6 }, (_, index) => (
-              <li className="library__card library__card--skeleton" key={index} />
+              <li className="library__row library__row--skeleton" key={index} />
             ))}
           </ul>
         ) : shown.length === 0 ? (
@@ -375,25 +415,35 @@ export function LibraryView(props: LibraryViewProps) {
           <>
             {lead.length === 0 ? null : (
               <section aria-label="Featured" className="library__group library__group--lead">
-                <h3 className="library__group-title">
-                  Featured{" "}
-                  <span className="library__group-note">
-                    Picked for everyday agent work; the list ships with Octant
-                  </span>
-                </h3>
-                <ul className="library__grid library__grid--lead">
-                  {lead.map((item) => renderCard(item, "lead"))}
-                </ul>
+                <details className="library__fold" open={filtering}>
+                  <summary className="library__group-summary">
+                    <ChevronRight aria-hidden="true" className="library__chevron" size={12} />
+                    <h3 className="library__group-title">
+                      Featured <span className="library__count">{lead.length}</span>{" "}
+                      <span className="library__group-note">
+                        Picked for everyday agent work; the list ships with Octant
+                      </span>
+                    </h3>
+                  </summary>
+                  {renderList("featured", lead, "Featured")}
+                </details>
               </section>
             )}
             {groups.map((group) => (
               <section aria-label={group.title} className="library__group" key={group.key}>
-                <h3 className="library__group-title">
-                  {group.title} <span className="library__count">{group.items.length}</span>
-                </h3>
-                <ul className="library__grid">
-                  {group.items.map((item) => renderCard(item, "row"))}
-                </ul>
+                {/* Reference lists (the catalog's categories, what was found on
+                    this computer) stay closed until asked for; what a person has
+                    installed, and any search or filter, is open. The count stays
+                    on the closed line. */}
+                <details className="library__fold" open={libraryGroupOpen(group.key, filtering)}>
+                  <summary className="library__group-summary">
+                    <ChevronRight aria-hidden="true" className="library__chevron" size={12} />
+                    <h3 className="library__group-title">
+                      {group.title} <span className="library__count">{group.items.length}</span>
+                    </h3>
+                  </summary>
+                  {renderList(group.key, group.items, group.title)}
+                </details>
               </section>
             ))}
           </>
@@ -440,14 +490,59 @@ export function LibraryView(props: LibraryViewProps) {
   );
 }
 
-interface LibraryCardProps {
+/** More items than this and a list shows only its first few. */
+const LIST_CAP_TRIGGER = 10;
+const LIST_CAP = 8;
+
+/** A decision is waiting on it: blocked, awaiting trust, or a server that is not connecting. */
+function needsAttention(item: LibraryItem): boolean {
+  return (
+    item.state === "blocked" ||
+    item.state === "needs-trust" ||
+    (item.state === "on" &&
+      item.connection !== undefined &&
+      connectionNeedsAttention(item.connection.state))
+  );
+}
+
+/** What a person has installed is never capped; only what is merely available is. */
+function isCatalogItem(item: LibraryItem): boolean {
+  return item.state === "available";
+}
+
+/**
+ * Items that need a decision lead. Everything installed, on or off, is always
+ * drawn: switched-on items are what a person must be able to see. Only the
+ * catalog and discovery items (not installed) are capped, to their first few
+ * with "Show all".
+ */
+function visibleRows(
+  items: ReadonlyArray<LibraryItem>,
+  everyItem: boolean,
+): { readonly shown: ReadonlyArray<LibraryItem>; readonly hidden: number } {
+  const catalog = items.filter(isCatalogItem);
+  const installed = items.filter((item) => !isCatalogItem(item));
+  const ordered = [
+    ...installed.filter(needsAttention),
+    ...installed.filter((item) => !needsAttention(item)),
+    ...catalog,
+  ];
+  if (everyItem || catalog.length <= LIST_CAP_TRIGGER) return { shown: ordered, hidden: 0 };
+  const shown = ordered.slice(0, installed.length + LIST_CAP);
+  return { shown, hidden: ordered.length - shown.length };
+}
+
+function libraryGroupOpen(key: string, filtering: boolean): boolean {
+  return filtering || key === "installed" || key === "results";
+}
+
+interface LibraryRowProps {
   readonly item: LibraryItem;
-  readonly variant: "lead" | "row";
   readonly onOpen: (element: HTMLElement) => void;
   readonly onAct: (element: HTMLElement) => void;
 }
 
-/** What a card offers before anything is installed: the one next step. */
+/** What an item offers before anything is installed: the one next step. */
 function cardAction(item: LibraryItem): string | undefined {
   if (item.state !== "available") return undefined;
   if (item.localSetupId === "paper") return "Set up…";
@@ -456,34 +551,39 @@ function cardAction(item: LibraryItem): string | undefined {
   return "Review";
 }
 
-function LibraryCard(props: LibraryCardProps) {
+/**
+ * One line per item: its mark, its name (which opens the detail that holds the
+ * description, what it can do and what that costs), where it comes from in the
+ * meta ink, and at the trailing edge its state or its one next step. Every row
+ * is the same height, so a list of fifty reads as a list.
+ */
+function LibraryRow(props: LibraryRowProps) {
   const { item } = props;
   const action = cardAction(item);
   return (
-    <article className={`library__card library__card--${props.variant}`} data-state={item.state}>
-      <LibraryMark item={item} large={props.variant === "lead"} />
-      <span className="library__card-text">
-        <OctantButton
-          className="library__open"
-          onClick={(event) => props.onOpen(event.currentTarget)}
-          type="button"
-          variant="ghost"
-        >
-          {item.name}
-        </OctantButton>
-        <span className="library__card-source">
-          {item.category ?? item.source}
-          {item.provider === "Every provider" ? "" : ` · ${item.provider}`}
-        </span>
-        {item.summary === undefined ? null : (
-          <span className="library__card-summary">{item.summary}</span>
-        )}
+    <article
+      className="library__row"
+      data-attention={needsAttention(item) ? "true" : undefined}
+      data-state={item.state}
+    >
+      <LibraryMark item={item} />
+      <OctantButton
+        className="library__open"
+        onClick={(event) => props.onOpen(event.currentTarget)}
+        type="button"
+        variant="ghost"
+      >
+        {item.name}
+      </OctantButton>
+      <span className="library__row-source">
+        {item.category ?? item.source}
+        {item.provider === "Every provider" ? "" : ` · ${item.provider}`}
       </span>
-      <span className="library__card-foot">
+      <span className="library__row-foot">
+        <AuthorityDots level={item.authority.level} showWord={item.authority.level === "high"} />
         {action !== undefined ? (
           <OctantButton
             aria-label={`${action} ${item.name}`}
-            className="library__card-action"
             onClick={(event) => props.onAct(event.currentTarget)}
             size="sm"
             type="button"
@@ -494,7 +594,7 @@ function LibraryCard(props: LibraryCardProps) {
         ) : item.state === "on" &&
           item.connection !== undefined &&
           connectionNeedsAttention(item.connection.state) ? (
-          // A switched-on server that is not working says so on its card;
+          // A switched-on server that is not working says so on its row;
           // the detail carries the reason.
           <ConnectionStatus connection={{ state: item.connection.state }} />
         ) : item.state === "on" ? (
@@ -505,7 +605,6 @@ function LibraryCard(props: LibraryCardProps) {
         ) : (
           <OctantBadge variant="secondary">{item.stateLabel}</OctantBadge>
         )}
-        <AuthorityDots level={item.authority.level} showWord={item.authority.level === "high"} />
       </span>
     </article>
   );

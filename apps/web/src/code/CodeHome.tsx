@@ -24,6 +24,7 @@ import {
 } from "../github/readIssuesAcrossRepositories";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ProjectIcon } from "../projects/ProjectIcon";
 import { PullRequestChip } from "./PullRequestChip";
 import type { ContinueCards } from "./useContinueCards";
 
@@ -443,7 +444,11 @@ function ContinueFacts(props: {
     <span className="code-home__facts">
       {project === undefined ? null : (
         <span className="code-home__fact">
-          <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+          <ProjectIcon
+            fallback={<FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />}
+            projectId={String(card.projectId)}
+            size={12}
+          />
           {project}
         </span>
       )}

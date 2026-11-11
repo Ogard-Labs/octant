@@ -164,6 +164,7 @@ import {
   SettingsPageScope,
   SettingsSection,
   SettingsState,
+  revealSettingsAncestors,
   type SettingsOutlineEntry,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
@@ -826,14 +827,13 @@ export function SettingsView(props: SettingsViewProps) {
                             event.preventDefault();
                             // A section inside a closed disclosure opens first,
                             // or the link would scroll to nothing.
-                            for (
-                              let ancestor = entry.element.parentElement;
-                              ancestor !== null;
-                              ancestor = ancestor.parentElement
-                            ) {
-                              if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+                            // A collapsed section opens on the next frame.
+                            const scroll = () => entry.element.scrollIntoView?.({ block: "start" });
+                            if (revealSettingsAncestors(entry.element)) {
+                              requestAnimationFrame(scroll);
+                            } else {
+                              scroll();
                             }
-                            entry.element.scrollIntoView?.({ block: "start" });
                           }}
                         >
                           {entry.title}
@@ -1661,6 +1661,17 @@ function RememberedBrowserOriginsPanel(props: {
   };
   return (
     <SettingsSection
+      collapse={{
+        // Sites the Browser may open without asking are authority, so any
+        // remembered one opens the section; the closed line still counts them.
+        open: props.origins.length + props.profileSites.length > 0,
+        summary:
+          props.origins.length + props.profileSites.length === 0
+            ? "None remembered"
+            : props.origins.length + props.profileSites.length === 1
+              ? "1 site always allowed"
+              : `${props.origins.length + props.profileSites.length} sites always allowed`,
+      }}
       description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >

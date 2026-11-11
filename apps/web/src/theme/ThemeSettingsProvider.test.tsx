@@ -38,6 +38,17 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe("");
   });
 
+  it("remembers the chosen mode so the next window can paint it on its first frame", () => {
+    localStorage.clear();
+    const result = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(localStorage.getItem("octant.theme-mode")).toBe("light");
+    result.unmount();
+  });
+
   it("keeps the window's theme when a nested provider, such as Settings, closes", () => {
     const root = document.documentElement;
     const settings = { ...DEFAULT_THEME_SETTINGS, mode: "light" as const, increasedContrast: true };

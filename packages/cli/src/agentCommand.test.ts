@@ -1,3 +1,7 @@
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import * as agentThreads from "./agentThread";
@@ -405,6 +409,128 @@ describe("octant agent command line", () => {
     },
   );
 
+  describe("started in a Git checkout that is not a Project", () => {
+    async function checkout(): Promise<{ root: string; inside: string }> {
+      const root = realpathSync(await mkdtemp(join(tmpdir(), "octant-agent-checkout-")));
+      await mkdir(join(root, ".git"));
+      const inside = join(root, "src");
+      await mkdir(inside);
+      return { root, inside };
+    }
+
+    function host(projects: ReadonlyArray<unknown>, requests: LocalControlRequest[]) {
+      return session((request) => {
+        requests.push(request);
+        if (request.path === "/api/projects/bootstrap") {
+          return {
+            status: 200,
+            body: { active: projects, archived: [], availability: [], memory: [] },
+          };
+        }
+        if (request.path === "/api/desktop/project-binding-receipts") {
+          return { status: 201, body: { receiptId: "receipt-1" } };
+        }
+        if (request.path === "/api/projects/commands") return { status: 200, body: {} };
+        return { status: 404, body: {} };
+      });
+    }
+
+    async function run(input: {
+      readonly cwd: string;
+      readonly answer: string;
+      readonly projects?: ReadonlyArray<unknown>;
+      readonly interactive?: boolean;
+    }) {
+      const requests: LocalControlRequest[] = [];
+      const stdout = sink();
+      const create = vi
+        .spyOn(agentThreads, "createAgentThread")
+        .mockResolvedValue({ kind: "refused", message: "stop here" });
+      try {
+        await runAgentCliCommand({
+          command: resolveAgentCliCommand("agent", [], { plain: true })!,
+          session: host(input.projects ?? [], requests),
+          stdin: Readable.from([input.answer]),
+          stdout,
+          stderr: sink(),
+          interactive: input.interactive ?? true,
+          cwd: input.cwd,
+        });
+        return {
+          requests,
+          stdout: stdout.text(),
+          created: create.mock.calls.map(([, made]) => made),
+        };
+      } finally {
+        create.mockRestore();
+      }
+    }
+
+    it("adds the checkout's root as a Code Project after a yes, then starts the thread there", async () => {
+      const { root, inside } = await checkout();
+      try {
+        const { requests, stdout, created } = await run({ cwd: inside, answer: "\n" });
+        expect(stdout).toContain(`${root} is not an Octant Project yet.`);
+        const receipt = requests.find(
+          (request) => request.path === "/api/desktop/project-binding-receipts",
+        );
+        expect(receipt?.body).toMatchObject({ projectType: "code", path: root });
+        expect(
+          requests.find((request) => request.path === "/api/projects/commands")?.body,
+        ).toMatchObject({ kind: "create-code-project", receiptId: "receipt-1" });
+        expect(created).toEqual([expect.objectContaining({ mode: "auto", cwd: inside })]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it("adds nothing after a no and starts the Chat thread the folder gave before", async () => {
+      const { root, inside } = await checkout();
+      try {
+        const { requests, stdout, created } = await run({ cwd: inside, answer: "n\n" });
+        expect(stdout).toContain("Starting a Chat thread instead.");
+        expect(requests.some((request) => request.path.startsWith("/api/desktop/"))).toBe(false);
+        expect(created).toHaveLength(1);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it("asks nothing without a person at a terminal, or where a Project already holds the folder", async () => {
+      const { root, inside } = await checkout();
+      try {
+        const piped = await run({ cwd: inside, answer: "y\n", interactive: false });
+        expect(piped.stdout).not.toContain("is not an Octant Project");
+        const bound = await run({
+          cwd: inside,
+          answer: "y\n",
+          projects: [
+            {
+              id: "40000000-0000-4000-8000-000000000001",
+              name: "repo",
+              type: "code",
+              lifecycle: "active",
+              pinned: false,
+              rank: "1/2",
+              version: 1,
+              createdAt: "2026-11-11T09:00:00.000Z",
+              updatedAt: "2026-11-11T09:00:00.000Z",
+              binding: { canonicalRoot: root },
+              bindingRevisionId: "40000000-0000-4000-8000-000000000002",
+              codeAccessPersistence: "current-session",
+            },
+          ],
+        });
+        expect(bound.stdout).not.toContain("is not an Octant Project");
+        for (const { requests } of [piped, bound]) {
+          expect(requests.some((request) => request.path.startsWith("/api/desktop/"))).toBe(false);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("parses the agent and harness forms and refuses unknown flags", () => {
     expect(resolveAgentCliCommand("agent", [], { prompt: "hi", json: true })).toEqual({
       action: "agent",
@@ -433,7 +559,13 @@ describe("octant agent command line", () => {
       access: "full-access",
     });
     expect(resolveAgentCliCommand("agent", [], { access: "yolo" })).toBeUndefined();
-    expect(resolveAgentCliCommand("agent", ["extra"], {})).toBeUndefined();
+    expect(resolveAgentCliCommand("agent", ["fix", "the", "tests"], {})).toMatchObject({
+      openingPrompt: "fix the tests",
+    });
+    // A switch takes no value; one handed a value is refused rather than guessed at.
+    expect(resolveAgentCliCommand("agent", ["the", "tests"], { last: "fix" })).toBeUndefined();
+    // One turn and exit, or a session opened with a prompt: never both.
+    expect(resolveAgentCliCommand("agent", ["more"], { prompt: "hi" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { bogus: true })).toBeUndefined();
     expect(resolveAgentCliCommand("harness", ["slots"], {})).toEqual({
       action: "harness-slots",

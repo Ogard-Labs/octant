@@ -234,6 +234,7 @@ import {
   useHostFirstPartyPluginsEffective,
 } from "./shell/firstPartyPluginsEffective";
 import { isThreadBoardAvailable } from "./shell/contributionRegistry";
+import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
 import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
@@ -359,6 +360,7 @@ import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
+import { ProjectIconProvider } from "./projects/ProjectIcon";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
@@ -3530,6 +3532,10 @@ function LaunchedShell(
     shellStatus: controller.status,
     resolve: recordFirstRunOutcome,
     concealed: controller.settingsOpen || createOpen,
+  });
+  const whatsNew = useWhatsNewAfterUpdate({
+    hostBridge: props.hostBridge,
+    firstRunVisible: firstRunController.visible,
   });
   const firstRunProjects: ReadonlyArray<FirstRunHandoffProject> = projectController.allProjects.map(
     (project) => ({
@@ -7435,6 +7441,7 @@ function LaunchedShell(
               sidebarRail={sidebarRail}
               sidebarRailBeside={sidebarRailBeside}
               {...(railUsage === undefined ? {} : { railUsage })}
+              whatsNew={whatsNew}
               sidebarTileCounts={sidebarTileCounts}
               {...(projectThreadsAccess.errorMessage === undefined
                 ? {}
@@ -7703,6 +7710,7 @@ function LaunchedShell(
           {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          whatsNew={whatsNew}
           mode={projectCreateMode ?? controller.workspace.activeMode}
           onCloseCreate={() => {
             setCreateOpen(false);
@@ -8062,56 +8070,61 @@ function LaunchedShell(
                   <TrackerReferenceProvider ports={trackerReferencePorts}>
                     <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
                       <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                        <ProjectThreadsProvider value={projectThreadsAccess}>
-                          <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                            <StreamRepliesContext.Provider
-                              value={controller.settings?.streamReplies !== false}
-                            >
-                              <ReplyDetailSourceContext.Provider value={replyDetailSource}>
-                                <ReplyDetailContext.Provider
-                                  value={replyDetailSource.reading.defaultLevel}
-                                >
-                                  {/* The floor for every rendered link: panes that can host a
+                        <ProjectIconProvider
+                          serverUrl={props.launch.serverUrl}
+                          windowCapability={props.projectWindowCapability}
+                        >
+                          <ProjectThreadsProvider value={projectThreadsAccess}>
+                            <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                              <StreamRepliesContext.Provider
+                                value={controller.settings?.streamReplies !== false}
+                              >
+                                <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                                  <ReplyDetailContext.Provider
+                                    value={replyDetailSource.reading.defaultLevel}
+                                  >
+                                    {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                  <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                                    <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                      <ModelToolVerificationContext.Provider
-                                        value={providerController.verifyModelTools}
-                                      >
-                                        <HostFederationStackContext.Provider value={federation}>
-                                          <PlanUsageProvider
-                                            barStyle={controller.settings?.usageBars ?? "smooth"}
-                                            client={launchedClients.providerUsageLimitsClient}
-                                          >
-                                            <HostPlatformContext.Provider value={hostPlatform}>
-                                              <ServerCodeProjectsContext.Provider
-                                                value={serverCodeProjects}
-                                              >
-                                                <CodeDebugWindowProvider
-                                                  origin={new URL(props.launch.serverUrl).origin}
-                                                  windowId={String(props.launch.windowId)}
+                                    <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                      <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                        <ModelToolVerificationContext.Provider
+                                          value={providerController.verifyModelTools}
+                                        >
+                                          <HostFederationStackContext.Provider value={federation}>
+                                            <PlanUsageProvider
+                                              barStyle={controller.settings?.usageBars ?? "smooth"}
+                                              client={launchedClients.providerUsageLimitsClient}
+                                            >
+                                              <HostPlatformContext.Provider value={hostPlatform}>
+                                                <ServerCodeProjectsContext.Provider
+                                                  value={serverCodeProjects}
                                                 >
-                                                  <QuestionnaireDraftsProvider
-                                                    serverUrl={props.launch.serverUrl}
-                                                    windowId={props.launch.windowId}
+                                                  <CodeDebugWindowProvider
+                                                    origin={new URL(props.launch.serverUrl).origin}
+                                                    windowId={String(props.launch.windowId)}
                                                   >
-                                                    {shell}
-                                                  </QuestionnaireDraftsProvider>
-                                                </CodeDebugWindowProvider>
-                                              </ServerCodeProjectsContext.Provider>
-                                            </HostPlatformContext.Provider>
-                                          </PlanUsageProvider>
-                                        </HostFederationStackContext.Provider>
-                                      </ModelToolVerificationContext.Provider>
-                                    </WorkKindChoiceContext.Provider>
-                                  </MarkdownLinkActionsContext.Provider>
-                                </ReplyDetailContext.Provider>
-                              </ReplyDetailSourceContext.Provider>
-                            </StreamRepliesContext.Provider>
-                          </NewTaskDraftsContext.Provider>
-                        </ProjectThreadsProvider>
+                                                    <QuestionnaireDraftsProvider
+                                                      serverUrl={props.launch.serverUrl}
+                                                      windowId={props.launch.windowId}
+                                                    >
+                                                      {shell}
+                                                    </QuestionnaireDraftsProvider>
+                                                  </CodeDebugWindowProvider>
+                                                </ServerCodeProjectsContext.Provider>
+                                              </HostPlatformContext.Provider>
+                                            </PlanUsageProvider>
+                                          </HostFederationStackContext.Provider>
+                                        </ModelToolVerificationContext.Provider>
+                                      </WorkKindChoiceContext.Provider>
+                                    </MarkdownLinkActionsContext.Provider>
+                                  </ReplyDetailContext.Provider>
+                                </ReplyDetailSourceContext.Provider>
+                              </StreamRepliesContext.Provider>
+                            </NewTaskDraftsContext.Provider>
+                          </ProjectThreadsProvider>
+                        </ProjectIconProvider>
                       </SidebarThreadTabsContext.Provider>
                     </SidebarThreadDragContext.Provider>
                   </TrackerReferenceProvider>

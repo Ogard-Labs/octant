@@ -1223,4 +1223,29 @@ describe("ShellSidebar", () => {
     const board = screen.getByRole("button", { name: "Board" });
     expect(pullRequests.compareDocumentPosition(board)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
+  it("draws the What's new card above the profile row, and not on the collapsed icon rail", () => {
+    const common = {
+      onAddFolder: vi.fn(),
+      onCollapseSidebar: vi.fn(),
+      onOpenNavigator: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onSelectMode: vi.fn(),
+      projectSection: null,
+      settings: defaultShellSettings(),
+      whatsNew: {
+        content: { version: "0.2.0", headline: "Canvas comments" },
+        onDismiss: vi.fn(),
+        onOpenNotes: vi.fn(),
+      },
+      workspace: defaultWindowWorkspace(windowId),
+    };
+    const { unmount } = render(<ShellSidebar {...common} />);
+    const card = screen.getByRole("region", { name: "What's new" });
+    const profile = screen.getByRole("button", { name: /^Account menu/ });
+    expect(card.compareDocumentPosition(profile)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    unmount();
+
+    render(<ShellSidebar {...common} rail={{ projects: [] }} />);
+    expect(screen.queryByRole("region", { name: "What's new" })).toBeNull();
+  });
 });

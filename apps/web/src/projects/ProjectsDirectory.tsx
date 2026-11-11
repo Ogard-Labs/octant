@@ -4,6 +4,7 @@ import { useDeferredValue, useState } from "react";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { ProjectIcon } from "./ProjectIcon";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 type ProjectModeFilter = "all" | ProjectSummary["type"];
@@ -144,7 +145,11 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
                   type="button"
                   variant="ghost"
                 >
-                  <Folder aria-hidden="true" size={16} strokeWidth={1.6} />
+                  <ProjectIcon
+                    fallback={<Folder aria-hidden="true" size={16} strokeWidth={1.6} />}
+                    projectId={String(project.id)}
+                    size={16}
+                  />
                   <span className="surface-row__copy">
                     <span className="oct-row-label">{project.name}</span>
                     <span className="oct-meta">{projectModeLabel(project.type)}</span>
