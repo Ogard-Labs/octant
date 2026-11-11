@@ -32,10 +32,10 @@
    dialog only spaces them, with more room above a part than under its
    heading, so its four blocks of text read as four. */
 .continuation-dialog h2 {
-  margin-bottom: var(--oct-space-3);
+  margin: 0 0 var(--oct-space-3);
 }
 .continuation-dialog h3 {
-  margin-block: var(--oct-space-5) var(--oct-space-2);
+  margin: var(--oct-space-5) 0 var(--oct-space-2);
 }
 .continuation-dialog p {
   margin-block: var(--oct-space-2);

@@ -609,18 +609,21 @@ describe("WindowChrome", () => {
     expect(cssRule(".project-dialog h1")).toContain("font-size: var(--oct-text-base)");
   });
 
-  it("gives every popup one thin edge and the floating fill", () => {
-    // The overlay shadow carries the popup's edge, and it is a hairline in both
-    // themes. In dark it used the strong border, so menus and popovers had a
-    // heavier edge than dialogs, and a popup that also set a border showed two.
+  it("gives every popup one lit edge and the floating fill", () => {
+    // The overlay shadow carries the popup's whole edge in both themes: light
+    // along its top, then one thin line outside it. A popup that also set a
+    // border showed two edges, and the strong border made a menu's heavier
+    // than a dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("0 0 0 1px var(--octant-border)");
+      expect(overlay).toContain("inset 0 1px 0 var(--octant-bevel-strong)");
+      expect(overlay).toMatch(/(^|,)\s*0 0 0 1px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
+    expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
     // A feature stylesheet sizes and places a popup; it does not repaint it.
     const branchMenu = cssRule(".code-branch-selector__menu");
     expect(branchMenu).not.toMatch(/(^|\s)border:/);

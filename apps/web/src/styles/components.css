@@ -82,11 +82,23 @@
 .octant-menu__popup,
 .octant-dialog__popup,
 .octant-preview-card,
+.octant-tooltip--card,
 .window-chrome__disclosure,
+.workspace-disclosure,
+.workspace-drag-preview,
 .project-dialog,
 .folder-picker,
 .thread-info__panel,
+.chat-composer__command-typeahead,
+.code-board__view-popover,
+.code-board__filters-panel,
+.menu,
+.palette,
 .toast {
+  /* A surface that paints the card colour paints the float here, and an
+     outline button rests clear on it, not in the page's colour. */
+  --oct-surface: var(--octant-float);
+  --octant-outline-rest: transparent;
   --octant-control: var(--octant-float-control);
   --octant-control-hover: var(--octant-float-hover);
   --octant-control-pressed: var(--octant-float-pressed);

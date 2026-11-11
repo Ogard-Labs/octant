@@ -254,7 +254,7 @@ html[data-octant-theme-mode="light"] {
   --octant-text-muted-high-contrast: #565656;
   --octant-scrim: #000000;
   --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 7%), 0 1px 2px rgb(16 24 40 / 6%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 10%), 0 1px 2px rgb(16 24 40 / 6%);
   --octant-shadow-sm:
     inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 8%),
     0 8px 20px -10px rgb(16 24 40 / 18%);
@@ -957,7 +957,7 @@ h6 {
   padding: 4px;
   color: var(--octant-text-primary);
   background: var(--octant-float);
-  border: 1px solid var(--octant-border-strong);
+  border: 0;
   border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
   outline: 0;

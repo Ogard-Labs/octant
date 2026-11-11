@@ -777,8 +777,9 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
 /* What a dialog is about is the largest thing in it, and a part of it is
    headed in the strong weight: read at the body's size, a title was one more
    line of the text under it. A fact's name is muted so its value is what the
-   eye lands on. `:where` keeps these under any dialog's own rule. */
-.octant-dialog__popup :where(h2) {
+   eye lands on. Each rule weighs one element, so it replaces the page's
+   own heading sizes and gives way to any class a heading carries. */
+:where(.octant-dialog__popup) h2 {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-lg);
@@ -786,14 +787,14 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.3;
 }
-.octant-dialog__popup :where(h3) {
+:where(.octant-dialog__popup) h3 {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   line-height: 1.35;
 }
-.octant-dialog__popup :where(dt) {
+:where(.octant-dialog__popup) dt {
   color: var(--oct-muted);
 }
 .octant-dialog__title,

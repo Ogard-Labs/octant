@@ -3108,10 +3108,18 @@ html[data-octant-increased-contrast="true"]
   overflow: visible;
   background: var(--oct-settings-card-fill);
   /* A raised card: its edge, the light its top catches and a short shadow
-     come from the one token, not from a border of its own. */
-  border: 0;
+     come from the one token. The border is clear and stays, because forced
+     colours drop every shadow and would leave the card with no edge. */
+  border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-xs);
+}
+
+html[data-octant-increased-contrast="true"]
+  .settings-view
+  .settings-card-section--open
+  > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
+  border-color: var(--octant-border-strong);
 }
 
 .settings-view .settings-card-section--open > .setgroup {

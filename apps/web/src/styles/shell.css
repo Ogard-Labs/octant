@@ -57,6 +57,12 @@
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
+  /* A raised card's shadow goes with its tint. A shadow token is resolved
+     where it is declared, with the opaque border in it, and that border is
+     near black on the grey a desktop shows through. */
+  --octant-shadow-xs: var(--octant-shadow-raised-glass);
+  --octant-shadow-sm: var(--octant-shadow-raised-glass);
+  --octant-shadow-md: var(--octant-shadow-raised-glass);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
@@ -84,12 +90,18 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
+  --octant-shadow-xs: inherit;
+  --octant-shadow-sm: inherit;
+  --octant-shadow-md: inherit;
 }
 
 html[data-octant-increased-contrast="true"] .shell {
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
+  --octant-shadow-xs: inherit;
+  --octant-shadow-sm: inherit;
+  --octant-shadow-md: inherit;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -100,6 +112,9 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
+    --octant-shadow-xs: inherit;
+    --octant-shadow-sm: inherit;
+    --octant-shadow-md: inherit;
   }
 }
 

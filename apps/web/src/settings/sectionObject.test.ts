@@ -36,8 +36,8 @@ describe("a settings section", () => {
       )?.[1] ?? "";
     expect(card).toMatch(/background:\s*var\(--oct-settings-card-fill\)/);
     // The edge, the light on the top edge and the short shadow are the one
-    // token's; a border of its own would double the edge.
-    expect(card).toMatch(/border:\s*0/);
+    // token's. The clear border is what forced colours draw in their place.
+    expect(card).toMatch(/border:\s*1px solid transparent/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
     expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-xs\)/);
     // Menus and popovers inside a row have to escape the card, so it never clips.
