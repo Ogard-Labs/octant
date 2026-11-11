@@ -692,6 +692,85 @@ describe("Project memory proposal routes", () => {
   });
 });
 
+describe("Project icon route", () => {
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+  const found = {
+    status: "found",
+    bytes,
+    mediaType: "image/svg+xml",
+    etag: '"2a-1f"',
+  } as const;
+  const iconUrl = `http://127.0.0.1/api/projects/${projectId}/icon`;
+  const headers = { "x-octant-window-capability": capability };
+
+  function iconRoute(result: unknown) {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const read = vi.fn().mockResolvedValue(result);
+    const route = createProjectRouteHandler({
+      service: {} as never,
+      environmentService: {} as never,
+      windowAuthorityStore: store,
+      icons: { read },
+      now: () => 1,
+    });
+    return { route, read };
+  }
+
+  it("serves the icon bytes with headers that keep an SVG from running", async () => {
+    const { route, read } = iconRoute(found);
+
+    const response = await route(new Request(iconUrl, { headers }));
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("image/svg+xml");
+    expect(response?.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response?.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(response?.headers.get("etag")).toBe('"2a-1f"');
+    expect(new Uint8Array(await (response as Response).arrayBuffer())).toEqual(bytes);
+    expect(read).toHaveBeenCalledWith(windowId, projectId);
+  });
+
+  it("answers not modified when the person's copy is current", async () => {
+    const { route } = iconRoute(found);
+
+    const response = await route(
+      new Request(iconUrl, { headers: { ...headers, "if-none-match": '"2a-1f"' } }),
+    );
+
+    expect(response?.status).toBe(304);
+    expect(await response?.text()).toBe("");
+  });
+
+  it("answers a plain 404 when the Project has no icon", async () => {
+    const { route } = iconRoute({ status: "none" });
+
+    const response = await route(new Request(iconUrl, { headers }));
+
+    expect(response?.status).toBe(404);
+    expect(await response?.json()).toMatchObject({ category: "not-found" });
+  });
+
+  it("refuses a request without a window credential and reads nothing", async () => {
+    const { route, read } = iconRoute(found);
+
+    const response = await route(new Request(iconUrl));
+
+    expect(response?.status).toBe(401);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("refuses a query string and a malformed Project id", async () => {
+    const { route, read } = iconRoute(found);
+
+    expect((await route(new Request(`${iconUrl}?windowId=forged`, { headers })))?.status).toBe(400);
+    expect(
+      (await route(new Request("http://127.0.0.1/api/projects/%/icon", { headers })))?.status,
+    ).toBe(400);
+    expect(read).not.toHaveBeenCalled();
+  });
+});
+
 function routeFixture(
   overrides: Record<string, unknown>,
   environmentOverrides: Record<string, unknown> = {},

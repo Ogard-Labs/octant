@@ -635,7 +635,7 @@ async function runTool(
       });
       return added.kind === "refused"
         ? refused(added)
-        : answered({ project: { name: added.name, type: added.projectType, folder: added.path } });
+        : answered({ project: { name: added.name, type: call.type, folder: added.path } });
     }
     case "list_threads": {
       const projects = await readActiveProjects(session);

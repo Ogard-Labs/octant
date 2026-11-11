@@ -37,7 +37,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 15        | 13      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -626,6 +626,17 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Project icons
+
+A Project shows the favicon or app icon found inside its own folder wherever Projects are listed, and keeps its letter tile or folder glyph when there is none.
+
+- The host owns the read, over a short fixed list of well-known relative paths with the first valid file winning; there is no directory walk, no pattern search and no network fetch. The renderer never reads disk.
+- A file counts only when no component of its path below the Project's folder is a symbolic link (the host opens it anchored to the folder with a no-follow open on macOS and Linux, and finds no icon on other platforms, so a link swapped in during the lookup cannot lead outside; an icon reached through any link, even inside the folder, is not used), it is a regular file of at most 256 KB, and its first bytes match its extension; a Chat Project, which has no folder, has no icon.
+- It is served on the authenticated Project API (a window capability, or a paired device's read of the host) with `nosniff`, a script-forbidding content security policy and an ETag; a missing icon is a plain 404, not a logged error.
+- The renderer draws it as an `<img>` at the icon scale, fetched once per Project per session, so the polled navigation model never causes a request.
+
+Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Code starting posture and Plan
 
@@ -1415,6 +1426,7 @@ One journaled session per thread is the only state, and every surface reads and 
 - A person sets, raises or clears a goal's turn, time and token budgets when revising it; a revision's budget replaces the whole budget. A loop refuses to start on a goal with none. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
 - Harness parity with the first-class runtimes is claimed only while every checklist item holds in Chat, Work and Code.
+- Built: the terminal starts like a coding CLI. `octant` alone at a terminal, `octant --<agent flag>`, or `octant "<prompt>"` opens `octant agent` on the folder's thread, a bare prompt being the first message of a session that stays open (`--prompt` still runs one turn and exits). Inside a Git checkout no Project holds, a person at the terminal is asked whether to add its root as a Code Project, through the same bind-and-create as `octant project add`; nothing is asked without a terminal or with `--json`, and a no adds nothing.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
@@ -2089,6 +2101,7 @@ Release notes show once after an update the person chose finishes applying, and 
 
 - Settings > General > Updates links the notes for the running build. _Here only._
 - First-run setup never shows release notes, and opening What's New is never counted or reported. _Here only._
+- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one announcement (`whats-new-announcement.json`, strict and size-bounded, with an optional picture beside it whose name cannot leave the folder); it shows once as a dialog instead of the card. Dismissing the card, answering the announcement, or opening the notes acknowledges the update. An invalid announcement is treated as absent. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -2414,7 +2427,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row under the card. Where a new thread runs is one row of chips above it. Both rows and the card are held by the composer's tray, one raised frame a step under the card, so the composer is one object in two layers; the tray is the glass surface over a ground or under Window glass. The working folder is one of the chips above the card, and opens its fields over the page.
+- A composer's pill holds only attach, the prompt, the microphone and send, on a start screen and under a thread alike, and is one line tall until the person types more. How the thread runs (access, the model, the context ring) is one row under the pill. Where a new thread runs is one row of chips above it. Both rows stand on the page with no frame, so the pill is the composer's one raised surface; it is the glass surface over a ground, and takes the control tint under Window glass. The working folder is one of the chips above the pill, and opens its fields over the page.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).

@@ -305,13 +305,15 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                       ? {}
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
                   />
-                  <ComposerVoiceButton
-                    disabled={!ready || props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
                 </>
+              ),
+              dictate: (
+                <ComposerVoiceButton
+                  disabled={!ready || props.creating === true}
+                  onTranscript={(transcript) =>
+                    setPrompt((current) => appendTranscript(current, transcript))
+                  }
+                />
               ),
               actions: {
                 kind: "send",

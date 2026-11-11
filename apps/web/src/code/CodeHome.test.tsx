@@ -7,6 +7,8 @@ import type {
   GithubCatalogueReadResponse,
 } from "@octant/contracts";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import { ProjectIconContext } from "../projects/ProjectIcon";
+import { iconSourceFor } from "../projects/projectIcon.test-support";
 import { CodeHome, cardBadge } from "./CodeHome";
 
 function githubClient(
@@ -133,6 +135,58 @@ function card(overrides: Partial<CodeBoardCard>): CodeBoardCard {
     ...overrides,
   } as unknown as CodeBoardCard;
 }
+
+describe("CodeHome Project icon", () => {
+  const projectId = "20000000-0000-4000-8000-000000000001";
+
+  function home(source: ReturnType<typeof iconSourceFor>["source"], count = 1) {
+    return render(
+      <ProjectIconContext.Provider value={source}>
+        <CodeHome
+          continueCards={{
+            kind: "ready",
+            cards: Array.from({ length: count }, (_, index) =>
+              card({
+                threadId:
+                  `10000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}` as never,
+              }),
+            ),
+            running: [],
+            runningTotal: 0,
+          }}
+          onOpenThread={vi.fn()}
+          onPickGithub={vi.fn()}
+          onPickIssue={vi.fn()}
+          projectNames={new Map([[projectId, "Octant"]])}
+        />
+      </ProjectIconContext.Provider>,
+    );
+  }
+
+  it("draws the Project's image in a continue card when the host has an icon", async () => {
+    const { container } = home(iconSourceFor([projectId]).source);
+    await waitFor(() =>
+      expect(container.querySelector(".code-home__fact img.project-icon")).not.toBeNull(),
+    );
+  });
+
+  it("keeps the folder glyph when the host has no icon", async () => {
+    const { fetcher, source } = iconSourceFor([]);
+    const { container } = home(source);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".code-home__fact img.project-icon")).toBeNull();
+    expect(container.querySelector(".code-home__fact svg.lucide-folder-open")).not.toBeNull();
+  });
+
+  it("makes one icon request for many cards in the same Project", async () => {
+    const { fetcher, source } = iconSourceFor([projectId]);
+    const { container } = home(source, 6);
+    await waitFor(() =>
+      expect(container.querySelectorAll(".code-home__fact img.project-icon")).toHaveLength(6),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("CodeHome", () => {
   it("keeps local threads available without integrations and resumes them with the keyboard", async () => {

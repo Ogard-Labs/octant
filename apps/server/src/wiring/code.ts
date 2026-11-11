@@ -77,6 +77,7 @@ import { createAgentProfileRouteHandler } from "../agentProfileRoutes";
 import { AgentProfileService } from "../agentProfileService";
 import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
+import { createProjectIconReader } from "../projectIcon";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
@@ -764,6 +765,7 @@ export function wireCode(deps: CodeDependencies) {
       service: projectService,
       environmentService,
       windowAuthorityStore,
+      icons: createProjectIconReader({ projects: projectService }),
       memoryProposals: deps.projectMemoryAccess.proposals,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });

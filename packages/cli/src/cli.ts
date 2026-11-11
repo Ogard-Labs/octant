@@ -42,7 +42,12 @@ import {
   runPluginCliCommand,
 } from "./pluginCommand";
 import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
-import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import {
+  AGENT_SWITCHES,
+  isAgentFlag,
+  resolveAgentCliCommand,
+  runAgentCliCommand,
+} from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import { AGENT_MCP_HELP, runAgentMcpServer } from "./agentMcpServer";
 import {
@@ -73,9 +78,16 @@ interface ParsedArgs {
   readonly positional: readonly string[];
 }
 
-export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
+/**
+ * Each flag takes the next word as its value unless that word starts with
+ * `--`; a command's switches never take one. `octant agent` names its
+ * switches so the words around them stay in the prompt, in order:
+ * `octant agent compare A --plain B` is the prompt "compare A B".
+ */
+export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs | undefined {
   const [command, ...rest] = argv;
   if (command === undefined) return undefined;
+  const switches = command === "agent" ? AGENT_SWITCHES : [];
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];
   for (let i = 0; i < rest.length; i += 1) {
@@ -84,7 +96,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
     if (arg.startsWith("--")) {
       const name = arg.slice(2);
       const next = rest[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (next !== undefined && !next.startsWith("--") && !switches.includes(name)) {
         flags[name] = next;
         i += 1;
       } else {
@@ -95,6 +107,26 @@ export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
     }
   }
   return { command, flags, positional };
+}
+
+/**
+ * `octant` alone at a terminal opens the agent in this folder, and a run that
+ * starts with one of the agent's flags (`octant --last`) or with a quoted
+ * prompt (`octant "fix the tests"`) is the agent too, so a coding session
+ * needs no subcommand. Without a terminal a bare `octant`
+ * still prints the usage, so a script that forgets its command is not left
+ * waiting on an agent.
+ */
+export function agentShorthand(
+  argv: ReadonlyArray<string>,
+  interactive: boolean,
+): ReadonlyArray<string> {
+  const [first] = argv;
+  if (first === undefined) return interactive ? ["agent"] : argv;
+  if (first.startsWith("--") && isAgentFlag(first.slice(2))) return ["agent", ...argv];
+  // No command name has a space in it, so a quoted sentence is a prompt.
+  if (/\s/.test(first.trim())) return ["agent", ...argv];
+  return argv;
 }
 
 /** What every command of one run reads instead of the process's own identity and environment. */
@@ -117,7 +149,9 @@ export async function runCli(
   argv: ReadonlyArray<string>,
   identity: DesktopIdentity,
 ): Promise<number> {
-  const args = parseArgs(argv);
+  const args = parseArgs(
+    agentShorthand(argv, process.stdin.isTTY === true && process.stdout.isTTY === true),
+  );
   if (args === undefined) {
     printUsage(identity);
     return 1;
@@ -322,16 +356,14 @@ export async function runCli(
     }
     return await runServerRunCommand(options);
   }
-  if (args.command === "agent" && args.positional[0] === "mcp") {
-    if (
-      args.positional.length === 1 &&
-      Object.keys(args.flags).length === 1 &&
-      args.flags.help === true
-    ) {
+  // `octant agent mcp` is the one-word form; longer words after `agent` are a
+  // prompt, so `octant agent mcp servers are slow` still reaches the agent.
+  if (args.command === "agent" && args.positional.length === 1 && args.positional[0] === "mcp") {
+    if (Object.keys(args.flags).length === 1 && args.flags.help === true) {
       process.stdout.write(AGENT_MCP_HELP);
       return 0;
     }
-    if (args.positional.length !== 1 || Object.keys(args.flags).length > 0) {
+    if (Object.keys(args.flags).length > 0) {
       // stdout carries protocol frames only.
       process.stderr.write(
         `${context.identity.commandName} agent mcp takes no arguments. Run \`${context.identity.commandName} agent mcp --help\`.\n`,
@@ -766,7 +798,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   {
     octant:
-      "agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--detach] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--detach] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
   { octant: "agent status <thread-id> [--json]" },
   { octant: "agent mcp  (an MCP server that lets other agents start and follow work here)" },
@@ -849,6 +881,7 @@ function printUsage(identity: DesktopIdentity): void {
       `${identity.productName} CLI`,
       "",
       "Usage:",
+      `  ${identity.commandName} [<prompt>] [agent flags]  (at a terminal: the agent in this folder)`,
       ...lines,
       `  ${identity.commandName} --version`,
       "",
