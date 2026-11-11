@@ -123,7 +123,7 @@ describe("ThreadComposer", () => {
     expect(row).toContainElement(meters);
     expect(row?.firstElementChild).toHaveClass("composer-tray");
     expect(row?.lastElementChild).toBe(meters);
-    expect(meters).toHaveTextContent("5h85%wk43%");
+    expect(meters).toHaveTextContent("5h85%week43%");
   });
 
   it("keeps follow-up feedback in the card and checkout context in the row under it", () => {
@@ -210,17 +210,17 @@ describe("ThreadComposer", () => {
     // their markup — no empty rows or labels for capabilities it lacks.
     expect(container.querySelector("label")).toBeNull();
     expect(container.querySelector(".composer-field__attach")).toBeNull();
-    // The composer is its tray alone, and the tray holds the card and the
+    // The composer is its frame alone, and the frame holds the pill and the
     // line under it.
     expect(frame?.children).toHaveLength(1);
-    const tray = frame?.children[0];
-    expect(tray).toHaveClass("composer-frame");
-    expect(tray?.children).toHaveLength(2);
-    expect(tray?.children[0]).toBe(container.querySelector(".thread-composer__surface"));
-    expect(tray?.children[0]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
-    expect(tray?.children[1]).toBe(container.querySelector(".composer-under"));
-    expect(tray?.children[1]?.children).toHaveLength(1);
-    expect(tray?.children[1]?.children[0]).toBe(container.querySelector(".composer-row"));
+    const inner = frame?.children[0];
+    expect(inner).toHaveClass("composer-frame");
+    expect(inner?.children).toHaveLength(2);
+    expect(inner?.children[0]).toBe(container.querySelector(".thread-composer__surface"));
+    expect(inner?.children[0]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
+    expect(inner?.children[1]).toBe(container.querySelector(".composer-under"));
+    expect(inner?.children[1]?.children).toHaveLength(1);
+    expect(inner?.children[1]?.children[0]).toBe(container.querySelector(".composer-row"));
   });
 
   it("keeps the message label a direct child of the prompt cell so the input stays full width", () => {

@@ -1090,7 +1090,7 @@ export function pickAgentModel<T extends { readonly endpoint: string; readonly m
 }
 
 /** The Work or Code Project whose bound folder holds the directory, deepest match first. */
-function projectHolding<
+export function projectHolding<
   T extends {
     readonly type: "chat" | "work" | "code";
     readonly binding?: { readonly canonicalRoot: string };

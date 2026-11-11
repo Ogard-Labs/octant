@@ -80,6 +80,16 @@ function hostProps(): ShellDialogHostProps {
     announcement: "",
     announcementSequence: 0,
     createOpen: false,
+    whatsNew: {
+      announcement: undefined,
+      card: undefined,
+      document: undefined,
+      notesOpen: false,
+      restoreFocus: { current: null },
+      closeNotes: vi.fn(),
+      dismiss: vi.fn(),
+      openNotes: vi.fn(),
+    },
     folderBrowseClient: { browse: vi.fn(), select: vi.fn() } as never,
     firstRun: {
       controller: {

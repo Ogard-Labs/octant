@@ -234,6 +234,7 @@ import {
   useHostFirstPartyPluginsEffective,
 } from "./shell/firstPartyPluginsEffective";
 import { isThreadBoardAvailable } from "./shell/contributionRegistry";
+import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
 import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
@@ -3530,6 +3531,10 @@ function LaunchedShell(
     shellStatus: controller.status,
     resolve: recordFirstRunOutcome,
     concealed: controller.settingsOpen || createOpen,
+  });
+  const whatsNew = useWhatsNewAfterUpdate({
+    hostBridge: props.hostBridge,
+    firstRunVisible: firstRunController.visible,
   });
   const firstRunProjects: ReadonlyArray<FirstRunHandoffProject> = projectController.allProjects.map(
     (project) => ({
@@ -7434,6 +7439,7 @@ function LaunchedShell(
               sidebarRail={sidebarRail}
               sidebarRailBeside={sidebarRailBeside}
               {...(railUsage === undefined ? {} : { railUsage })}
+              whatsNew={whatsNew}
               sidebarTileCounts={sidebarTileCounts}
               {...(projectThreadsAccess.errorMessage === undefined
                 ? {}
@@ -7702,6 +7708,7 @@ function LaunchedShell(
           {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          whatsNew={whatsNew}
           mode={projectCreateMode ?? controller.workspace.activeMode}
           onCloseCreate={() => {
             setCreateOpen(false);

@@ -26,6 +26,7 @@ import {
   publishIncreasedContrastSetting,
   SYSTEM_INCREASED_CONTRAST,
 } from "./increasedContrastAttribute";
+import { rememberThemeMode } from "./firstPaintTheme";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -181,6 +182,7 @@ export function ThemeSettingsProvider(props: {
         }
       }
       root.dataset.octantThemeMode = resolved.mode;
+      rememberThemeMode(accessible.mode);
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
       // Increased contrast keeps the monochrome chrome: colour as decoration is
