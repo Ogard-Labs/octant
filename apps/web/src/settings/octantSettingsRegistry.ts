@@ -1607,6 +1607,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pair pairing another computer code",
         },
         {
+          id: settingId("agent-access"),
+          label: "Agents on other computers",
+          scope: "host",
+          keywords:
+            "agent access grant bot outside agent another computer mcp connection code key fingerprint confirm direct key revoke started by",
+        },
+        {
           id: settingId("browser-hub-code"),
           label: "Join the hub as a guest",
           scope: "host",
