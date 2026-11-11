@@ -4017,6 +4017,14 @@ html[data-octant-increased-contrast="true"]
   white-space: nowrap;
 }
 
+/* A list whose meta names a source (a plugin, a server) lets it wrap rather
+   than cut the name off. */
+.crow[data-meta="wrap"] .crow__meta {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .crow[data-attention="true"] .crow__meta {
   color: var(--oct-warn-fg);
 }

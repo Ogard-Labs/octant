@@ -86,7 +86,7 @@ describe("ShieldServersSettings", () => {
     const { user } = setup({});
 
     const list = await screen.findByRole("list", { name: "Registered servers" });
-    expect(within(list).getByText("Operate")).toBeVisible();
+    expect(within(list).getByText("Operate · 1 deploy command")).toBeVisible();
     expect(within(list).queryByText("deploy@web-1")).toBeNull();
     const toggle = within(list).getByRole("button", { name: "web-1" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -94,7 +94,6 @@ describe("ShieldServersSettings", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(list).getByText("deploy@web-1")).toBeVisible();
     expect(within(list).getByText("/Users/me/notes/web-1.md")).toBeVisible();
-    expect(within(list).getByText("1 deploy command")).toBeVisible();
     expect(screen.getByText(SHIELD_SERVERS_ALWAYS_ASK_NOTE)).toBeVisible();
     expect(screen.queryByText(SHIELD_SSH_AGENT_MISSING_NOTE)).toBeNull();
   });

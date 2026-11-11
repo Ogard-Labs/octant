@@ -231,6 +231,8 @@ export interface SettingsCompactRowProps {
   readonly meta?: ReactNode;
   /** Paths, permissions and secondary actions, opened by the name. */
   readonly detail?: ReactNode;
+  /** Lets the meta run onto a second line, for a list whose meta names a source that must not be cut. */
+  readonly metaWraps?: boolean;
   /** The row needs a decision; it is drawn above the rest by its caller and marked here. */
   readonly attention?: boolean;
   /** Deep links and search land on the row's first control by this id. */
@@ -256,6 +258,7 @@ export function SettingsCompactRow(props: SettingsCompactRowProps) {
       aria-label={`${props.label} setting`}
       className="crow"
       data-attention={props.attention === true ? "true" : undefined}
+      data-meta={props.metaWraps === true ? "wrap" : undefined}
       data-open={open ? "true" : "false"}
       {...(props.settingId === undefined ? {} : { "data-setting-id": props.settingId })}
       ref={rowRef}
@@ -400,7 +403,6 @@ export function SettingsSection({
         <div className="settings-section-head settings-section-head--collapsible">
           <h2 id={titleId}>
             <OctantButton
-              aria-controls={anchorId}
               aria-expanded={open}
               className="settings-collapse__toggle"
               onClick={() => setChosen(!open)}

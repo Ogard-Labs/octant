@@ -126,7 +126,14 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
                 focused={props.focusedSetting === "protected-files" && index === 0}
                 key={group.id}
                 label={group.removed ? `${group.label} (not protected)` : group.label}
-                meta={group.removed ? "Not protected" : "Protected"}
+                meta={
+                  // The paths are what is guarded, so they read on the closed
+                  // row, cut to one line; the detail holds the full list.
+                  <>
+                    {group.removed ? "Not protected" : "Protected"} ·{" "}
+                    <span>{group.paths.join(", ")}</span>
+                  </>
+                }
                 settingId="protected-files"
               >
                 {group.removed ? (

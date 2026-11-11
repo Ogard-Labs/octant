@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { LibraryView, monogramFor } from "./LibraryView";
-import { buildLibrary } from "./libraryModel";
+import { buildLibrary, type LibraryItem } from "./libraryModel";
 
 const active = {
   installed: true,
@@ -347,35 +347,36 @@ describe("the library view", () => {
   });
 
   describe("a long list", () => {
-    /** Installed items: some awaiting trust, the rest off, in a fixed order. */
-    function installedItems(waiting: number, quiet: number) {
-      const make = (name: string, state: "needs-trust" | "off") => ({
-        id: `package:${name}`,
-        kind: "skill" as const,
-        name,
-        summary: `${name} does one thing.`,
-        source: "Installed",
-        provider: "Every provider",
-        providers: ["Every provider"],
-        featured: false,
-        state,
-        stateLabel: state === "off" ? "Off" : "Needs trust",
-        steps: { install: "done", trust: "todo", enable: "todo" },
-        abilities: ["Reads files"],
-        authority: { level: "low", lines: ["Reads files"] },
-        handoff: "installed",
-      });
-      return [
-        ...Array.from({ length: quiet }, (_, n) =>
-          make(`Quiet ${String(n + 1).padStart(2, "0")}`, "off"),
-        ),
-        ...Array.from({ length: waiting }, (_, n) => make(`Waiting ${n + 1}`, "needs-trust")),
-      ] as never as React.ComponentProps<typeof LibraryView>["items"];
-    }
+    const make = (name: string, state: LibraryItem["state"]): LibraryItem => ({
+      id: `package:${name}`,
+      kind: "skill",
+      name,
+      summary: `${name} does one thing.`,
+      source: "Installed",
+      provider: "Every provider",
+      providers: ["Every provider"],
+      featured: false,
+      state,
+      stateLabel: {
+        available: "Not installed",
+        "needs-trust": "Needs trust",
+        off: "Off",
+        on: "On",
+        blocked: "Blocked",
+      }[state],
+      steps: { install: "done", trust: "todo", enable: "todo" },
+      abilities: ["Reads files"],
+      authority: { level: "low", lines: ["Reads files"] },
+      handoff: "installed",
+    });
+    const many = (prefix: string, count: number, state: LibraryItem["state"]) =>
+      Array.from({ length: count }, (_, n) =>
+        make(`${prefix} ${String(n + 1).padStart(2, "0")}`, state),
+      );
 
     it("shows each row's state on its line and keeps the description in the detail", async () => {
       const user = userEvent.setup();
-      renderLibrary({ items: installedItems(1, 2) });
+      renderLibrary({ items: [...many("Quiet", 2, "off"), ...many("Waiting", 1, "needs-trust")] });
       const row = screen.getByRole("button", { name: "Quiet 01" }).closest("article");
       if (row === null) throw new Error("expected a row");
       expect(within(row).getByText("Off")).toBeVisible();
@@ -388,39 +389,38 @@ describe("the library view", () => {
       ).toBeVisible();
     });
 
-    it("lists what awaits a decision first and never leaves it behind Show all", async () => {
-      const user = userEvent.setup();
-      renderLibrary({ items: installedItems(3, 14) });
+    it("lists what awaits a decision first and draws every installed item", () => {
+      renderLibrary({ items: [...many("Quiet", 14, "off"), ...many("Waiting", 3, "needs-trust")] });
       const list = screen.getByRole("list", { name: "Installed" });
-      const names = () =>
-        within(list)
-          .getAllByRole("button", { name: /^(Waiting|Quiet)/ })
-          .map((button) => button.textContent);
-      expect(names()).toEqual([
-        "Waiting 1",
-        "Waiting 2",
-        "Waiting 3",
-        "Quiet 01",
-        "Quiet 02",
-        "Quiet 03",
-        "Quiet 04",
-        "Quiet 05",
-      ]);
-      await user.click(screen.getByRole("button", { name: "Show all 17" }));
-      expect(names()).toHaveLength(17);
-      expect(names().slice(0, 3)).toEqual(["Waiting 1", "Waiting 2", "Waiting 3"]);
+      const names = within(list)
+        .getAllByRole("button", { name: /^(Waiting|Quiet)/ })
+        .map((button) => button.textContent);
+      expect(names).toHaveLength(17);
+      expect(names.slice(0, 3)).toEqual(["Waiting 01", "Waiting 02", "Waiting 03"]);
+      expect(screen.queryByRole("button", { name: /^Show all/ })).toBeNull();
     });
 
-    it("keeps every item that awaits a decision even when they outnumber the cap", () => {
-      renderLibrary({ items: installedItems(12, 3) });
+    it("draws every installed item that is switched on, however many there are", () => {
+      renderLibrary({ items: many("Active", 12, "on") });
       const list = screen.getByRole("list", { name: "Installed" });
-      expect(within(list).getAllByRole("button", { name: /^Waiting/ })).toHaveLength(12);
-      expect(within(list).queryAllByRole("button", { name: /^Quiet/ })).toHaveLength(0);
-      expect(screen.getByRole("button", { name: "Show all 15" })).toBeVisible();
+      expect(within(list).getAllByRole("button", { name: /^Active/ })).toHaveLength(12);
+      expect(screen.queryByRole("button", { name: /^Show all/ })).toBeNull();
+    });
+
+    it("caps only what is not installed, and keeps the installed rows beside it", async () => {
+      const user = userEvent.setup();
+      renderLibrary({ items: [...many("Catalog", 14, "available"), ...many("Active", 2, "on")] });
+      const catalog = screen.getByRole("list", { name: "More" });
+      expect(within(catalog).getAllByRole("button", { name: /^Catalog/ })).toHaveLength(8);
+      expect(
+        within(screen.getByRole("list", { name: "Installed" })).getAllByRole("button"),
+      ).toHaveLength(2);
+      await user.click(screen.getByRole("button", { name: "Show all 14" }));
+      expect(within(catalog).getAllByRole("button", { name: /^Catalog/ })).toHaveLength(14);
     });
 
     it("draws a short list in full without a Show all", () => {
-      renderLibrary({ items: installedItems(1, 5) });
+      renderLibrary({ items: many("Catalog", 5, "available") });
       expect(screen.queryByRole("button", { name: /^Show all/ })).toBeNull();
     });
   });

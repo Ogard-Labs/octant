@@ -474,8 +474,13 @@ error instead of retaining another integration's account controls.
 - **Compact row.** A long list (more than a handful of items: protected paths,
   registered servers, the Library's items) is drawn as one line per item, 36px
   tall and the same height all down the list, with no description: the name,
-  a short state in the meta ink (Protected, Operate, Needs trust, From where),
-  and the one main control at the trailing edge (`SettingsCompactRow`). The
+  a short state in the meta ink, and the one main control at the trailing
+  edge (`SettingsCompactRow`). What the item guards or may be asked to do
+  stays on the closed line, cut to one line with the full text in the detail:
+  a protected group's paths ("Protected · ~/.ssh/id_*, …"), a server's profile
+  and deploy-command count ("Operate · 3 deploy commands"). A list whose meta
+  names a source that must not be cut off (remembered tool approvals) lets it
+  wrap instead. The
   name is a button with `aria-expanded` that opens the row's own detail
   (paths, permissions, a longer sentence, secondary actions) in place; focus
   stays on it. A row that awaits a decision (a protection removed, a server
@@ -484,8 +489,9 @@ error instead of retaining another integration's account controls.
   switched-on, trusted or protected item reads as such closed.
 - **List head and cap.** A list over ten items has its filter field and the
   counts at its head (the Library's search, kind counts and group counts) and
-  shows its first eight with "Show all N"; items that await a decision lead
-  and are never behind it, however many there are.
+  shows its first eight with "Show all N", but only for items not installed
+  (the catalog and what was found): what a person has installed, switched on or
+  off, is never capped, and items that await a decision lead.
 - **Collapsed section.** Only reference material or an empty section folds
   (`collapse` on `SettingsSection`): its label becomes a button with
   `aria-expanded` and the closed line says what it holds ("None remembered",

@@ -47,15 +47,16 @@ describe("ProtectedFilesSettings", () => {
     const user = userEvent.setup();
     render(<ProtectedFilesSettings client={fake} />);
     expect(await screen.findByText("SSH private keys")).toBeVisible();
-    // A closed row already says it is protected; its paths wait in the detail.
-    expect(screen.getAllByText("Protected").length).toBeGreaterThan(0);
-    expect(screen.queryByText("~/.ssh/id_* (not .pub)")).not.toBeInTheDocument();
+    // A closed row already says it is protected and which paths it guards.
+    expect(screen.getAllByText(/^Protected ·/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/~\/\.ssh\/id_\* \(not \.pub\)/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "SSH private keys" }));
     expect(screen.getByRole("button", { name: "SSH private keys" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-    expect(screen.getByText("~/.ssh/id_* (not .pub)")).toBeVisible();
+    // The detail holds the full list again, beside the closed row's cut line.
+    expect(screen.getAllByText(/~\/\.ssh\/id_\* \(not \.pub\)/)).toHaveLength(2);
     expect(screen.getByText(PROTECTED_FILES_FACT)).toBeVisible();
   });
 

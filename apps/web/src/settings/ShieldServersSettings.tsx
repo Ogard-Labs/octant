@@ -292,20 +292,22 @@ function ServerEditor(props: ServerEditorProps) {
                     {server.runbookPath === undefined ? null : (
                       <span className="shield-servers__runbook">{server.runbookPath}</span>
                     )}
-                    {server.deployCommands.length === 0 ? null : (
-                      <span className="shield-servers__deploys">
-                        {server.deployCommands.length === 1
-                          ? "1 deploy command"
-                          : `${server.deployCommands.length} deploy commands`}
-                      </span>
-                    )}
                     {server.signIn === "octant-key" ? (
                       <span className="shield-servers__deploys">Key Octant keeps</span>
                     ) : null}
                   </>
                 }
                 label={server.alias}
-                meta={PROFILE_LABELS[server.profile]}
+                meta={
+                  // What the server may be asked to do reads on the closed row.
+                  server.deployCommands.length === 0
+                    ? PROFILE_LABELS[server.profile]
+                    : `${PROFILE_LABELS[server.profile]} · ${
+                        server.deployCommands.length === 1
+                          ? "1 deploy command"
+                          : `${server.deployCommands.length} deploy commands`
+                      }`
+                }
               >
                 {server.signIn === "octant-key" ? (
                   <OctantButton

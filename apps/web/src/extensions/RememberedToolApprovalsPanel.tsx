@@ -162,6 +162,7 @@ export function RememberedToolApprovalsPanel(props: {
                   }
                   key={String(grant.grantId)}
                   label={grant.mcpToolName}
+                  metaWraps
                   meta={`Always allowed · From ${plugin}${server === undefined ? "" : `, server ${server}`}`}
                   settingId="tool-approvals"
                 >

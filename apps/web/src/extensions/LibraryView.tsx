@@ -270,7 +270,7 @@ export function LibraryView(props: LibraryViewProps) {
           >
             Show all {items.length}
           </OctantButton>
-        ) : everyItem.has(key) && items.length > LIST_CAP_TRIGGER ? (
+        ) : everyItem.has(key) && items.filter(isCatalogItem).length > LIST_CAP_TRIGGER ? (
           <OctantButton
             className="library__more"
             onClick={() => toggle(false)}
@@ -502,19 +502,30 @@ function needsAttention(item: LibraryItem): boolean {
   );
 }
 
+/** What a person has installed is never capped; only what is merely available is. */
+function isCatalogItem(item: LibraryItem): boolean {
+  return item.state === "available";
+}
+
 /**
- * Items that need a decision lead and are never left behind "Show all": a
- * capped list is those, then the first of the rest up to the cap.
+ * Items that need a decision lead. Everything installed, on or off, is always
+ * drawn: switched-on items are what a person must be able to see. Only the
+ * catalog and discovery items (not installed) are capped, to their first few
+ * with "Show all".
  */
 function visibleRows(
   items: ReadonlyArray<LibraryItem>,
   everyItem: boolean,
 ): { readonly shown: ReadonlyArray<LibraryItem>; readonly hidden: number } {
-  const attention = items.filter(needsAttention);
-  const rest = items.filter((item) => !needsAttention(item));
-  const ordered = [...attention, ...rest];
-  if (everyItem || items.length <= LIST_CAP_TRIGGER) return { shown: ordered, hidden: 0 };
-  const shown = [...attention, ...rest.slice(0, Math.max(0, LIST_CAP - attention.length))];
+  const catalog = items.filter(isCatalogItem);
+  const installed = items.filter((item) => !isCatalogItem(item));
+  const ordered = [
+    ...installed.filter(needsAttention),
+    ...installed.filter((item) => !needsAttention(item)),
+    ...catalog,
+  ];
+  if (everyItem || catalog.length <= LIST_CAP_TRIGGER) return { shown: ordered, hidden: 0 };
+  const shown = ordered.slice(0, installed.length + LIST_CAP);
   return { shown, hidden: ordered.length - shown.length };
 }
 
