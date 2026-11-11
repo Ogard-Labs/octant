@@ -1,0 +1,243 @@
+# Octant Nightly: the scheduled ring, and the only workflow that builds it.
+#
+# Builds what is on `main` each night as Octant Nightly on the `preview` ring,
+# signs and notarizes darwin-arm64, packages the linux-x64 AppImage dogfood
+# artifact, and publishes signed feeds at
+# `<base>/preview/<platform>-<arch>.octant-nightly.json` when feed signing
+# material is present. Signed with the preview key only. The older preview
+# names (`.json`, `.preview-key.json`) were read by Octant builds published on
+# this ring before Nightly took it; nothing writes them again, so those installs
+# are never offered Nightly. A run that finds `main` unmoved since the last
+# Nightly builds nothing. A manual run needs `rollback_ref`: it rebuilds a
+# published Nightly tag on `main` under a new, strictly newer version (the
+# updater only moves forward, so a rollback is a roll-forward). Octant's
+# Preview channel is a separate, manual workflow, `release-preview.yml`.
+# A Nightly builds only after its secret-free usable-client preflight passes.
+# The build, signing and feed jobs are `release-build.yml`, which runs this
+# workflow's code against the built source's archive, so the feed key lives
+# only there (`docs/design/nightly-app.md`, "Which build is which").
+#
+# Nightly rather than per-merge on purpose. Ten merges in a day are one useful
+# preview, and each build costs a notarization and a download for everyone
+# following the ring.
+name: Release (nightly)
+
+on:
+  schedule:
+    # 00:00 UTC is 01:00 CET and 02:00 CEST, inside the 01:00-03:00
+    # Europe/Berlin window year-round, and outside the working day so a
+    # failure is waiting rather than interrupting.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      rollback_ref:
+        description: "Published Nightly tag (v<version>-preview.<date>.<run>, on main) to rebuild on preview with a new version."
+        required: true
+        type: string
+
+# One release run at a time across Nightly and Preview: both write feed files
+# to the same mailbox releases.
+concurrency:
+  group: release-preview
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Split from the build so the "nothing changed" answer costs seconds on a
+  # Linux runner rather than minutes on a macOS one.
+  decide:
+    name: Decide whether there is anything to build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      version: ${{ steps.decide.outputs.version }}
+      ring: ${{ steps.decide.outputs.ring }}
+      flavor: ${{ steps.decide.outputs.flavor }}
+      product: ${{ steps.decide.outputs.product }}
+      asset_prefix: ${{ steps.decide.outputs.asset_prefix }}
+      source_commit: ${{ steps.decide.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # The decide script peels the latest published preview tag to a
+          # commit. Depth 0 already fetches tags; this keeps that explicit.
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A scheduled run builds only when main moved. A dispatched run is a
+          # rollback; clicking the button is the intent, so it always builds.
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
+        run: |
+          set -euo pipefail
+          # The declared version is this workflow's own, never the rollback
+          # ref's: with the date and the run number it keeps every build of this
+          # workflow strictly newer than the last, which is all the updater
+          # accepts.
+          declared=$(grep -oE 'version: "[^"]+"' scripts/package-desktop.ts | head -1 | cut -d'"' -f2)
+          ring="preview"
+          flavor="nightly"
+          product="Octant Nightly"
+          # Release asset names carry no space: GitHub renames an uploaded
+          # asset with one, and the feed URL and the bridge both need the
+          # exact published name.
+          asset_prefix="Octant-Nightly"
+          source_commit=""
+          if [ -n "${ROLLBACK_REF:-}" ]; then
+            # The rollback source runs in a job that holds the Developer ID and
+            # notary credentials, so it must be code that was already reviewed
+            # and shipped: a published Nightly tag (`v*-preview.*`, built on
+            # schedule from `main`) whose commit is on `main`. A branch, a
+            # candidate tag (built from any ref) or a bare commit is refused
+            # before anything is checked out or built. The workflow itself must
+            # also run from `main`, so the scripts that sign are main's.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "::error::A rollback runs only from main."
+              exit 1
+            fi
+            case "${ROLLBACK_REF}" in
+              v[0-9]*.[0-9]*.[0-9]*-preview.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::${ROLLBACK_REF} is not a published Nightly tag (v<version>-preview.<date>.<run>)."
+                exit 1
+                ;;
+            esac
+            if ! gh release view "${ROLLBACK_REF}" --json tagName >/dev/null 2>&1; then
+              echo "::error::${ROLLBACK_REF} is not a published release."
+              exit 1
+            fi
+            source_commit=$(git rev-parse --verify --quiet "refs/tags/${ROLLBACK_REF}^{commit}") || {
+              echo "::error::${ROLLBACK_REF} does not name a tag in this repository."
+              exit 1
+            }
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "${source_commit}" origin/main; then
+              echo "::error::${ROLLBACK_REF} (${source_commit}) is not on main."
+              exit 1
+            fi
+            # The rebuilt Nightly must refuse Octant's builds and read the feed
+            # name this workflow publishes; an older ref would decode the new
+            # feed as malformed and never update again.
+            if ! git show "${source_commit}:apps/desktop/src/appUpdateFeed.ts" | grep -qF '.octant-nightly.json'; then
+              echo "::error::${ROLLBACK_REF} predates the feed that names its app; it cannot be rolled forward to."
+              exit 1
+            fi
+            echo "Rolling Nightly forward to ${ROLLBACK_REF} (${source_commit})."
+          fi
+          {
+            echo "ring=${ring}"
+            echo "flavor=${flavor}"
+            echo "product=${product}"
+            echo "asset_prefix=${asset_prefix}"
+            echo "source_commit=${source_commit}"
+          } >> "$GITHUB_OUTPUT"
+          # The date and the run number both go in: the date is for whoever
+          # reads the version, and the run number keeps two builds on one day
+          # distinct. Both are numeric, so they order the way the updater
+          # compares prerelease identifiers.
+          version="${declared}-${ring}.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # Compare HEAD to the peeled commit of the latest published preview
+          # tag. `gh release list` has no `targetCommitish` JSON field, and a
+          # release target can be a branch name even when a SHA is needed.
+          bun scripts/decide-preview-release.ts
+
+  # The usable-client preflight a Nightly build must pass before anything is
+  # built, signed or published (`docs/design/nightly-app.md`, "Before Nightly
+  # publishes"). It holds no secret and no environment: the channel table, the
+  # synthetic client smoke, an unsigned packaged Nightly, and the newest
+  # published Octant's host feature list, read with a read-only token.
+  nightly-preflight:
+    name: Nightly usable-client preflight
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      # A rollback is checked as the source it rebuilds, against today's Octant.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      # The client smoke runs the Electron the desktop app pins, which its
+      # package fetches only on demand.
+      - run: node node_modules/electron/install.js
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      - run: bun run --cwd apps/desktop build
+      # The packaged check reads the development-build refusal through System
+      # Events; without Accessibility access on the runner it reports that one
+      # check unverified and the rest still decide.
+      - name: Run the Nightly preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run nightly:preflight
+
+  # Linux Nightly's equivalents: the client trust tests the "Desktop Linux
+  # client trust" CI job runs, on this run's source. The AppImage payload check
+  # is part of packaging itself, which refuses before anything is uploaded.
+  # Keep the steps in step with that job in ci.yml.
+  nightly-preflight-linux:
+    name: Nightly Linux client trust
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.source_commit != '' && needs.decide.outputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          bubblewrap dbus gnome-keyring libsecret-tools
+      - env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: bun run --cwd scripts test -- build-desktop-peer-linux.test.ts
+      - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
+      - env:
+          OCTANT_SECRET_SERVICE_KEYRING_TEST: "1"
+        run: >-
+          dbus-run-session -- sh -c
+          'printf octant-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          bun run --cwd packages/host-runtime test -- src/secretServiceKeyringSeparation.test.ts'
+
+  release:
+    name: Build, sign and publish
+    needs: [decide, nightly-preflight, nightly-preflight-linux]
+    # Runs only after both preflights passed: a failed, cancelled or skipped
+    # preflight skips this, so it never lets a Nightly through.
+    if: needs.decide.outputs.build == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.decide.outputs.version }}
+      ring: ${{ needs.decide.outputs.ring }}
+      flavor: ${{ needs.decide.outputs.flavor }}
+      product: ${{ needs.decide.outputs.product }}
+      asset_prefix: ${{ needs.decide.outputs.asset_prefix }}
+      source_commit: ${{ needs.decide.outputs.source_commit }}
+      rollback_ref: ${{ inputs.rollback_ref }}
+    secrets: inherit

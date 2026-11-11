@@ -2122,9 +2122,9 @@ input.switch:checked::after {
   /* No border of its own: the overlay shadow already carries the hairline, and
      the two together drew a double ring. */
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  background: var(--octant-float);
   color: var(--oct-fg);
-  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+  box-shadow: var(--octant-shadow-overlay);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
   outline: none;
@@ -2227,7 +2227,7 @@ input.switch:checked::after {
   padding: var(--oct-space-3);
   border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   box-shadow: var(--octant-shadow-overlay);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
@@ -3969,7 +3969,7 @@ input.switch:checked::after {
 }
 .sidebar-item[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -4073,7 +4073,7 @@ input.switch:checked::after {
 }
 .mode[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -4471,7 +4471,7 @@ input.switch:checked::after {
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
@@ -4894,9 +4894,9 @@ input.switch:checked::after {
   max-height: min(60vh, 520px);
   overflow-y: auto;
   padding: var(--oct-space-1);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-floating);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-float);
   box-shadow: var(--octant-shadow-overlay);
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -7837,6 +7837,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    Onyx the open page read as a green slab on the glass. */
 .setnav-item[aria-current="page"] {
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 

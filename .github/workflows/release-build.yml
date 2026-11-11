@@ -1,0 +1,355 @@
+# The build, signing, publication and feed steps both release workflows share.
+#
+# `release-nightly.yml` (Octant Nightly, scheduled, on the `preview` ring) and
+# `release-preview.yml` (Octant, started by hand, on the `candidate` ring)
+# decide what to build and then call this. Gating a build on its own checks
+# (the Nightly usable-client preflight) stays in the caller, so a failed check
+# never reaches the jobs that hold the Developer ID and the feed key. The
+# ring, flavor and names arrive as inputs and decide everything that differs
+# between the two (`docs/design/nightly-app.md`, "Which build is which").
+#
+# An updater fed by unsigned builds is an unauthenticated code-delivery
+# channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
+# publishes a signed feed or refuses; never an unsigned document at the live
+# path.
+name: Release build (shared)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to build and publish, with its ring, date and run number."
+        required: true
+        type: string
+      ring:
+        description: "Update ring: preview (Octant Nightly) or candidate (Octant's Preview channel)."
+        required: true
+        type: string
+      flavor:
+        description: "Packaged flavor: nightly or stable."
+        required: true
+        type: string
+      product:
+        description: "Product name, with its space: Octant Nightly or Octant."
+        required: true
+        type: string
+      asset_prefix:
+        description: "Release asset name prefix, with no space."
+        required: true
+        type: string
+      source_commit:
+        description: "Commit a Nightly rollback rebuilds; empty to build the running ref."
+        required: false
+        default: ""
+        type: string
+      rollback_ref:
+        description: "Published Nightly tag a rollback rebuilds, for the release notes."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish (${{ matrix.target }})
+    # Holds the Developer ID and the notary profile, which packaging needs.
+    # Scoping them to an environment keeps them off every other workflow in the
+    # repository. This job runs the built source's own code (install scripts,
+    # build, packaging), so the feed signing key is never in it: the `feed` job
+    # signs from the uploaded archive alone.
+    environment: preview
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            platform: darwin
+            arch: arm64
+            apple_signing: true
+            artifact_suffix: "-darwin-arm64.zip"
+          - target: linux-x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            apple_signing: false
+            artifact_suffix: "-linux-x64.AppImage"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      # A rollback builds the published Nightly tag in its own checkout; the
+      # `feed` job still signs and publishes with this workflow's scripts, so
+      # the feed carries the fields and names current installs require.
+      SOURCE_DIR: ${{ inputs.source_commit != '' && 'release-source' || '.' }}
+      SOURCE_COMMIT: ${{ inputs.source_commit != '' && inputs.source_commit || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the known-good ref
+        if: inputs.source_commit != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: release-source
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Install the known-good ref
+        if: inputs.source_commit != ''
+        working-directory: release-source
+        run: bun install --frozen-lockfile
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+        working-directory: ${{ env.SOURCE_DIR }}
+      - run: bun run --cwd apps/desktop build
+        working-directory: ${{ env.SOURCE_DIR }}
+
+      # Values that are not credentials are repository variables rather than
+      # secrets: the team id and the identity appear in the signature.
+      # Keeping them out of the secret store means the secrets that remain are all things
+      # whose disclosure would actually matter.
+      - name: Import the Developer ID certificate
+        if: matrix.apple_signing
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_P12 }}
+          p12-password: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_PASSWORD }}
+
+      - name: Store the notary credentials
+        if: matrix.apple_signing
+        env:
+          NOTARY_KEY: ${{ secrets.OCTANT_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ vars.OCTANT_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.OCTANT_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$NOTARY_KEY" > "${RUNNER_TEMP}/notary.p8"
+          xcrun notarytool store-credentials octant-notary \
+            --key "${RUNNER_TEMP}/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID"
+          rm -f "${RUNNER_TEMP}/notary.p8"
+
+      - name: Package Apple Silicon (sign and notarize)
+        if: matrix.apple_signing
+        env:
+          OCTANT_RELEASE_BUILD: "1"
+          OCTANT_PACKAGE_FLAVOR: ${{ inputs.flavor }}
+          OCTANT_RELEASE_VERSION: ${{ inputs.version }}
+          OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
+          OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
+          OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
+          OCTANT_NOTARY_PROFILE: octant-notary
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: bun run package:desktop
+
+      - name: Package Linux AppImage (unsigned dogfood)
+        if: ${{ !matrix.apple_signing }}
+        env:
+          OCTANT_PACKAGE_FLAVOR: ${{ inputs.flavor }}
+          OCTANT_RELEASE_VERSION: ${{ inputs.version }}
+          OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: bun run package:desktop
+
+      # The candidate that could not start imported @modelcontextprotocol/sdk
+      # from a checkout the installed app does not have. Stage outside the
+      # repository and require the packaged server to become storage-ready
+      # before a tag is published.
+      - name: Refuse to publish if the packaged server cannot start
+        if: matrix.apple_signing
+        env:
+          OCTANT_PACKAGE_FLAVOR: ${{ inputs.flavor }}
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: bun scripts/assert-packaged-server-starts.ts
+
+      # The signed and notarized bundle, read again: a Developer ID from the
+      # release's team, its fuses, the peer-status addon, its link scheme, its
+      # command and no client smoke harness. This workflow's own check runs on
+      # a rollback's bundle too.
+      - name: Refuse to publish a Nightly that is not the packaged client
+        if: matrix.apple_signing && inputs.flavor == 'nightly'
+        env:
+          OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
+        run: bun scripts/assert-packaged-nightly-client.ts --bundle "${SOURCE_DIR}/out/Octant Nightly.app" --require-developer-id
+
+      - name: Publish the release archive
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          PRODUCT: ${{ inputs.product }}
+          ASSET_PREFIX: ${{ inputs.asset_prefix }}
+          ARTIFACT_SUFFIX: ${{ matrix.artifact_suffix }}
+          TARGET: ${{ matrix.target }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
+        run: |
+          set -euo pipefail
+          # `Octant-*` cannot match `Octant Nightly-*`, so the glob names one
+          # flavor's artifact and a stray build of the other is not published.
+          built=$(python3 -c 'import glob, os; artifacts = glob.glob(os.path.join(os.environ["SOURCE_DIR"], "out", glob.escape(os.environ["PRODUCT"]) + "-*" + os.environ["ARTIFACT_SUFFIX"])); assert len(artifacts) == 1, "Expected one " + os.environ["PRODUCT"] + " release artifact"; print(artifacts[0])')
+          # Copied to the exact space-free name the release and feed use, so
+          # the bytes uploaded are the bytes the feed step hashes and signs.
+          mkdir -p "${RUNNER_TEMP}/release"
+          archive="${RUNNER_TEMP}/release/${ASSET_PREFIX}-${VERSION}${ARTIFACT_SUFFIX}"
+          cp "$built" "$archive"
+          tag="v${VERSION}"
+          # Matrix rows share one tag. The first arch creates the release;
+          # later arches attach their artifact without racing a second create.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$archive" --clobber
+          else
+            gh release create "$tag" "$archive" \
+              --prerelease \
+              --target "${SOURCE_COMMIT}" \
+              --title "${PRODUCT} ${VERSION} (${RING})" \
+              --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release." \
+              || gh release upload "$tag" "$archive" --clobber
+          fi
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+
+      # What this Octant candidate's host offers an Octant Nightly window, so
+      # a Nightly build can be checked against the published Octant before it
+      # ships. One row attaches it; the document does not depend on the
+      # platform. A candidate is built from this checkout, so the contracts
+      # read here are the build's own.
+      - name: Attach the host feature list
+        if: inputs.ring == 'candidate' && matrix.target == 'linux-x64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/host-features/octant-host-features.json"
+          bun scripts/write-host-features.ts --version "$VERSION" --out "$out"
+          gh release upload "v${VERSION}" "$out" --clobber
+
+      # The exact bytes uploaded to the release, for the job that signs them.
+      - name: Hand the archive to the feed job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ steps.release.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Signs and publishes the feed without running any of the built source's
+  # code: it checks out this workflow's own commit, downloads the archive the
+  # build job uploaded, hashes it into the signature and publishes. Only this
+  # job reads the preview feed key (never the stable one: unreviewed main runs
+  # in the preview workflow and could read it).
+  feed:
+    name: Sign and publish the feed (${{ matrix.target }})
+    needs: publish
+    # A target whose build failed has no archive and fails here; the other
+    # target's feed still publishes, as when each build signed its own.
+    if: ${{ !cancelled() }}
+    environment: preview
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            platform: darwin
+            arch: arm64
+            apple_signing: true
+          - target: linux-x64
+            platform: linux
+            arch: x64
+            apple_signing: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Writes the feed files to the ring's mailbox release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/release
+
+      - name: Sign the feed (or dry-run when unsigned)
+        id: feed
+        env:
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          FLAVOR: ${{ inputs.flavor }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          APPLE_SIGNING: ${{ matrix.apple_signing }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=("${RUNNER_TEMP}"/release/*)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "Expected one release archive, found ${#archives[@]}." >&2
+            exit 1
+          fi
+          archive="${archives[0]}"
+          # Constructed rather than read back from the API: the download URL of
+          # a release asset is determined by the tag and the file name, and
+          # deriving it means the feed cannot end up pointing at whichever
+          # asset a list query happened to return first.
+          asset=$(python3 -c 'import os, sys, urllib.parse; print(urllib.parse.quote(os.path.basename(sys.argv[1]), safe=""))' "$archive")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${asset}"
+          machine=(--ring "$RING" --platform "$PLATFORM" --arch "$ARCH")
+          # The names `updateFeedRelativePath` gives this ring, never the older
+          # preview names: Octant builds published on preview read those, and
+          # must never be offered Nightly.
+          out="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path "${machine[@]}")"
+          args=(
+            --version "$VERSION"
+            "${machine[@]}"
+            --flavor "$FLAVOR"
+            --url "$url"
+            --artifact "$archive"
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          )
+          if [ -z "${OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:-}" ]; then
+            # macOS Apple Silicon remains a hard require: an unsigned zip at the
+            # live feed path would be an unauthenticated channel. Linux matrix
+            # scaffolding may dry-run without maintainer feed key material.
+            if [ "$APPLE_SIGNING" = "true" ]; then
+              echo "OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY is required for darwin-arm64 releases." >&2
+              exit 1
+            fi
+            bun scripts/sign-update-feed.ts --dry-run "${args[@]}" --out "$out"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun scripts/sign-update-feed.ts "${args[@]}" --out "$out"
+          # Published in this order: the new name first, so the build an older
+          # install is moved to already finds its own feed.
+          printf '%s\n' "$out" > "${RUNNER_TEMP}/feed-files"
+          if [ "$RING" = "candidate" ]; then
+            # Candidate installs built before the release named its app decode
+            # a feed strictly; they read this old-shape document and move to a
+            # build that reads the new name.
+            legacy="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path "${machine[@]}" --legacy-document)"
+            bun scripts/sign-update-feed.ts "${args[@]}" --legacy-document --out "$legacy"
+            printf '%s\n' "$legacy" >> "${RUNNER_TEMP}/feed-files"
+          fi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the feed
+        if: steps.feed.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RING: ${{ inputs.ring }}
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "${RUNNER_TEMP}/feed-files"
+          scripts/publish-update-feed.sh "$RING" "${files[@]}"

@@ -27,7 +27,7 @@
      Octant's three steps line up with the app's three: the page ground,
      the card raised off it, and the neutral control surface. */
   --oct-bg: var(--octant-workspace);
-  --oct-surface: var(--octant-floating);
+  --oct-surface: var(--octant-card);
   --oct-surface-warm: var(--octant-control);
 
   /* ─── text ──────────────────────────────────────────────────────────

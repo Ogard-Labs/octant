@@ -171,8 +171,10 @@ describe("the public-block visual language", () => {
 
     expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
-    expect(darkShadow).toMatch(/0 10px 18px -8px/);
-    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 10px 15px -3px/s);
+    // A raised step is light on its top edge, then the shadow that lifts it.
+    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-bevel\)/);
+    expect(darkShadow).toMatch(/0 12px 24px -8px/);
+    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 12px 24px -8px/s);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
