@@ -605,8 +605,10 @@ neither puts a break between one agent message and the next. For Claude Code
 a tool-use block or a tool result ends the agent's message. For OpenCode a
 tool part or a tool event ends it, and text that continues a part already
 streaming is never broken. Codex names each agent message, so its mapper
-breaks between any two. Pi and the Octant Harness pass an agent's text on as
-sent.
+breaks between any two. The Octant Harness sends one request per agent
+message, so the first text of a later request in a turn starts a new
+paragraph, under the same line-break exception; the history the model reads
+keeps each message as sent. Pi passes an agent's text on as sent.
 
 ### What an ACP agent cannot do
 
