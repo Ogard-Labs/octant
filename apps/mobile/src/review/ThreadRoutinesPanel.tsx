@@ -32,13 +32,24 @@ export function ThreadRoutinesPanel(props: {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
-      try {
-        const routines = await loadMobileThreadRoutines(transport, { threadId, mode, projectId });
-        if (!disposed) setRead({ threadId, routines });
-      } catch {
-        // A failed read keeps the last one; the next poll tries again.
+      const result = await loadMobileThreadRoutines(transport, { threadId, mode, projectId });
+      if (!disposed) {
+        switch (result.status) {
+          // A list cut short still says what it read; it is true, if not whole.
+          case "loaded":
+          case "truncated":
+            setRead({ threadId, routines: result.routines });
+            break;
+          // The host does not let this phone read routines, so none are shown.
+          case "refused":
+            setRead({ threadId, routines: [] });
+            break;
+          // A failed read keeps the last answer; the next poll tries again.
+          case "failed":
+            break;
+        }
+        timer = setTimeout(() => void load(), REFRESH_MS);
       }
-      if (!disposed) timer = setTimeout(() => void load(), REFRESH_MS);
     };
     void load();
     return () => {

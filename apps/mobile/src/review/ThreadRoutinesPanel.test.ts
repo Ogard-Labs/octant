@@ -17,6 +17,7 @@ const PROJECT = "20000000-0000-4000-8000-000000000010";
 const roots: Root[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   while (roots.length > 0) {
     const root = roots.pop();
     act(() => root?.unmount());
@@ -45,14 +46,22 @@ const routine = (paused: boolean) => ({
 });
 
 async function show(items: ReadonlyArray<unknown>): Promise<string> {
+  const [first] = await showPolls([() => Response.json({ kind: "automation-list", items })]);
+  return first ?? "";
+}
+
+/** Renders the panel and returns its text after each poll, one answer per poll. */
+async function showPolls(answers: ReadonlyArray<() => Response>): Promise<ReadonlyArray<string>> {
+  let served = 0;
   const transport: MobileRemoteTransport = {
     hostId: "host-1",
-    authenticatedFetch: (async () =>
-      Response.json({
-        kind: "automation-list",
-        items,
-      })) as MobileRemoteTransport["authenticatedFetch"],
+    authenticatedFetch: (async () => {
+      const answer = answers[Math.min(served, answers.length - 1)];
+      served += 1;
+      return answer?.() ?? new Response("{}", { status: 500 });
+    }) as MobileRemoteTransport["authenticatedFetch"],
   };
+  vi.useFakeTimers();
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -71,7 +80,15 @@ async function show(items: ReadonlyArray<unknown>): Promise<string> {
       ),
     );
   });
-  return host.textContent ?? "";
+  const seen = [host.textContent ?? ""];
+  for (let poll = 1; poll < answers.length; poll += 1) {
+    // The panel reads again every ten seconds.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    seen.push(host.textContent ?? "");
+  }
+  return seen;
 }
 
 describe("the Scheduled panel on the phone", () => {
@@ -92,5 +109,19 @@ describe("the Scheduled panel on the phone", () => {
 
   it("draws nothing when the thread has no routine", async () => {
     expect(await show([])).toBe("");
+  });
+
+  it("keeps what it showed when a later read fails", async () => {
+    const list = () => Response.json({ kind: "automation-list", items: [routine(false)] });
+    const [first, second] = await showPolls([list, () => new Response("{}", { status: 500 })]);
+    expect(first).toContain("Demo: Workspace Summary");
+    expect(second).toContain("Demo: Workspace Summary");
+  });
+
+  it("shows nothing once the host refuses this phone the read", async () => {
+    const list = () => Response.json({ kind: "automation-list", items: [routine(false)] });
+    const [first, second] = await showPolls([list, () => new Response("{}", { status: 403 })]);
+    expect(first).toContain("Demo: Workspace Summary");
+    expect(second).toBe("");
   });
 });

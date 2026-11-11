@@ -4,7 +4,7 @@ import {
   type AutomationScheduledTrigger,
   type AutomationSummary,
 } from "@octant/contracts";
-import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 const ROUTINE_PAGE_LIMIT = 100;
 /**
@@ -27,12 +27,29 @@ export interface MobileThreadRoutine {
 }
 
 /**
+ * What reading a thread's routines came to. A refusal, a failed read, and a
+ * list cut short are answers a caller has to handle, so none of them is thrown.
+ */
+export type MobileThreadRoutinesResult =
+  | { readonly status: "loaded"; readonly routines: ReadonlyArray<MobileThreadRoutine> }
+  /**
+   * The Project has more routines than one read walks, so the list may leave
+   * out one of this thread's; what was read is still true.
+   */
+  | { readonly status: "truncated"; readonly routines: ReadonlyArray<MobileThreadRoutine> }
+  /** The host does not allow this device to read routines. */
+  | { readonly status: "refused" }
+  /** The host could not be reached, or answered with something that is not a routine list. */
+  | { readonly status: "failed"; readonly reason: "unreachable" | "unavailable" | "invalid" };
+
+/**
  * The enabled and paused routines this thread created or follows up with, read
  * from the host over the paired session. A paired device may read routines
  * (the remote route policy classifies the read as a Project overview); it
  * changes none of them here, because resuming or editing a routine stays with
  * a window on the computer. A routine the Project lists for another thread is
- * left out, and so is a follow-up whose one run has started.
+ * left out, and so is a follow-up whose one run has started. A refused or
+ * failed read comes back as a value and never throws.
  */
 export async function loadMobileThreadRoutines(
   transport: MobileRemoteTransport,
@@ -41,9 +58,10 @@ export async function loadMobileThreadRoutines(
     readonly mode: "work" | "code";
     readonly projectId: string;
   },
-): Promise<ReadonlyArray<MobileThreadRoutine>> {
+): Promise<MobileThreadRoutinesResult> {
   const kept: AutomationSummary[] = [];
   let cursor: string | undefined;
+  let truncated = false;
   for (let page = 0; page < MAX_ROUTINE_PAGES; page += 1) {
     const query = new URLSearchParams({
       mode: thread.mode,
@@ -51,25 +69,23 @@ export async function loadMobileThreadRoutines(
       limit: String(ROUTINE_PAGE_LIMIT),
     });
     if (cursor !== undefined) query.set("cursor", cursor);
-    const response = await transport.authenticatedFetch({
-      method: "GET",
-      path: "/api/automations/list",
-      query: `?${query.toString()}`,
-    });
-    if (!response.ok) {
-      throw new MobileInboxFailure(
-        response.status === 403 ? "rejected" : "unavailable",
-        "Could not load this thread's routines from the host.",
-      );
+    let response: Response;
+    try {
+      response = await transport.authenticatedFetch({
+        method: "GET",
+        path: "/api/automations/list",
+        query: `?${query.toString()}`,
+      });
+    } catch {
+      return { status: "failed", reason: "unreachable" };
     }
+    if (response.status === 403) return { status: "refused" };
+    if (!response.ok) return { status: "failed", reason: "unavailable" };
     let listed: AutomationListResponse;
     try {
       listed = decodeHostAnswer(AutomationListResponse)(await response.json());
     } catch {
-      throw new MobileInboxFailure(
-        "unavailable",
-        "Could not load this thread's routines from the host. The host returned an invalid response.",
-      );
+      return { status: "failed", reason: "invalid" };
     }
     for (const item of listed.items) {
       if (item.originThreadId === undefined || String(item.originThreadId) !== thread.threadId) {
@@ -82,8 +98,9 @@ export async function loadMobileThreadRoutines(
     }
     if (listed.nextCursor === undefined) break;
     cursor = listed.nextCursor;
+    truncated = page === MAX_ROUTINE_PAGES - 1;
   }
-  return kept
+  const routines = kept
     .filter((item): item is AutomationSummary & { trigger: AutomationScheduledTrigger } =>
       isScheduled(item),
     )
@@ -96,6 +113,7 @@ export async function loadMobileThreadRoutines(
       nextDueAt: item.nextDueAt,
       followUp: item.targetPolicy === "same-thread",
     }));
+  return truncated ? { status: "truncated", routines } : { status: "loaded", routines };
 }
 
 /** A routine started by a schedule; an event or file routine has no time to show. */

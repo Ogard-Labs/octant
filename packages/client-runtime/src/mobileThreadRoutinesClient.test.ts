@@ -30,11 +30,12 @@ function summary(suffix: string, fields: Record<string, unknown> = {}): Record<s
   };
 }
 
-function transportOf(pages: ReadonlyArray<unknown>, status = 200) {
+function transportOf(pages: ReadonlyArray<unknown>, status = 200, unreachable = false) {
   const requests: Array<{ method: string; path: string; query?: string }> = [];
   let served = 0;
   const fetch = vi.fn(async (input: { method: string; path: string; query?: string }) => {
     requests.push(input);
+    if (unreachable) throw new Error("offline");
     if (status !== 200) return new Response("{}", { status });
     return Response.json(pages[served++] ?? pages[pages.length - 1]);
   });
@@ -67,7 +68,10 @@ describe("reading a thread's routines over a paired session", () => {
         ],
       },
     ]);
-    const routines = await loadMobileThreadRoutines(transport, thread);
+    const result = await loadMobileThreadRoutines(transport, thread);
+    if (result.status !== "loaded")
+      throw new Error(`Expected a loaded list, got ${result.status}.`);
+    const routines = result.routines;
     expect(routines.map((routine) => routine.name)).toEqual([
       "Routine 05",
       "Routine 01",
@@ -94,22 +98,42 @@ describe("reading a thread's routines over a paired session", () => {
         ],
       },
     ]);
-    const routines = await loadMobileThreadRoutines(transport, thread);
+    const result = await loadMobileThreadRoutines(transport, thread);
+    if (result.status !== "loaded")
+      throw new Error(`Expected a loaded list, got ${result.status}.`);
+    const routines = result.routines;
     expect(routines).toHaveLength(1);
     expect(routines[0]).toMatchObject({ name: "Routine 02", followUp: true });
   });
 
-  it("refuses with a rejected failure when the host does not allow the read", async () => {
+  it("says the host refused when it does not allow this device to read routines", async () => {
     const { transport } = transportOf([], 403);
-    await expect(loadMobileThreadRoutines(transport, thread)).rejects.toMatchObject({
-      category: "rejected",
-    });
+    expect(await loadMobileThreadRoutines(transport, thread)).toEqual({ status: "refused" });
   });
 
-  it("refuses a response that is not a routine list", async () => {
-    const { transport } = transportOf([{ kind: "something-else" }]);
-    await expect(loadMobileThreadRoutines(transport, thread)).rejects.toMatchObject({
-      category: "unavailable",
+  it("says the read failed, and why, instead of throwing", async () => {
+    expect(await loadMobileThreadRoutines(transportOf([], 500).transport, thread)).toEqual({
+      status: "failed",
+      reason: "unavailable",
     });
+    expect(await loadMobileThreadRoutines(transportOf([], 200, true).transport, thread)).toEqual({
+      status: "failed",
+      reason: "unreachable",
+    });
+    expect(
+      await loadMobileThreadRoutines(transportOf([{ kind: "something-else" }]).transport, thread),
+    ).toEqual({ status: "failed", reason: "invalid" });
+  });
+
+  it("says the list was cut short, and keeps what it read, when the Project has more pages than one read walks", async () => {
+    const { transport, requests } = transportOf([
+      { kind: "automation-list", items: [summary("01")], nextCursor: "more" },
+    ]);
+    const result = await loadMobileThreadRoutines(transport, thread);
+    expect(result.status).toBe("truncated");
+    if (result.status !== "truncated") return;
+    expect(result.routines.length).toBeGreaterThan(0);
+    // One read walks a bounded number of pages and then stops.
+    expect(requests).toHaveLength(10);
   });
 });
