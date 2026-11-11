@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID, sign, createHash } from "node:crypto";
+import { generateKeyPairSync, randomUUID, sign, createHash, type KeyObject } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,11 +14,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import {
-  AGENT_ACCESS_LOCAL_ACTOR,
-  AgentAccessService,
-  agentProofPayload,
-} from "./agentAccessService";
+import { agentProofPayload } from "@octant/domain";
+import { AGENT_ACCESS_LOCAL_ACTOR, AgentAccessService } from "./agentAccessService";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -98,7 +95,7 @@ function enroll(service: AgentAccessService, grantId: string) {
 function proof(input: {
   readonly grantId: string;
   readonly fingerprint: string;
-  readonly privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
+  readonly privateKey: KeyObject;
   readonly at: number;
   readonly nonce: string;
   readonly body: Uint8Array;
@@ -106,7 +103,7 @@ function proof(input: {
   const payload = agentProofPayload({
     method: "POST",
     pathWithQuery: "/api/agent-access/mcp",
-    body: input.body,
+    bodyDigest: createHash("sha256").update(input.body).digest("hex"),
     timestamp: String(input.at),
     nonce: input.nonce,
     hostId,

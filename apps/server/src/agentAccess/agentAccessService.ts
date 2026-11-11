@@ -31,6 +31,7 @@ import {
   type AgentPendingClaim,
   type EventActor,
 } from "@octant/contracts";
+import { agentProofPayload } from "@octant/domain";
 import { Schema } from "effect";
 import { canonicalDeviceKeyFacts } from "../remote/deviceKeyFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -63,7 +64,8 @@ export type AgentSourceClass = "lan-private" | "tailscale";
 
 export interface AgentListenerFacts {
   readonly origin: string;
-  readonly pin: string;
+  /** The self-made certificate's pin; absent for a certificate the person serves. */
+  readonly pin?: string;
   readonly hostId: string;
 }
 
@@ -237,7 +239,7 @@ export class AgentAccessService {
       const payload = agentProofPayload({
         method: input.method,
         pathWithQuery: input.pathWithQuery,
-        body: input.body,
+        bodyDigest: createHash("sha256").update(input.body).digest("hex"),
         timestamp,
         nonce,
         hostId: listener.hostId,
@@ -446,7 +448,7 @@ export class AgentAccessService {
       grantId,
       ticketId,
       ticketProof: proof.toString("base64url"),
-      pin: listener.pin,
+      ...(listener.pin === undefined ? {} : { pin: listener.pin }),
     };
     return {
       kind: "ticket",
@@ -700,30 +702,6 @@ export class AgentAccessService {
       ],
     });
   }
-}
-
-/** The exact bytes a bridge signs for one request. */
-export function agentProofPayload(input: {
-  readonly method: string;
-  readonly pathWithQuery: string;
-  readonly body: Uint8Array;
-  readonly timestamp: string;
-  readonly nonce: string;
-  readonly hostId: string;
-  readonly grantId: string;
-  readonly fingerprint: string;
-}): string {
-  return [
-    "octant-agent-proof-v1",
-    input.method.toUpperCase(),
-    input.pathWithQuery,
-    createHash("sha256").update(input.body).digest("hex"),
-    input.timestamp,
-    input.nonce,
-    input.hostId,
-    input.grantId,
-    input.fingerprint,
-  ].join("\n");
 }
 
 function isActive(grant: AgentGrant | undefined): grant is AgentGrant {

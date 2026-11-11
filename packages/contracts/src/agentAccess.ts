@@ -231,8 +231,12 @@ export const AgentConnectionCode = Schema.Struct({
   grantId: AgentGrantId,
   ticketId: AgentTicketId,
   ticketProof: base64Url,
-  /** `sha256-<base64url SPKI hash>`, the listener certificate pin. */
-  pin: Schema.String.pipe(Schema.pattern(/^sha256-[A-Za-z0-9_-]{43}$/)),
+  /**
+   * `sha256-<base64url SPKI hash>`, the self-made listener certificate's pin.
+   * Absent when the person serves their own certificate (a Tailscale one, for
+   * example); the bridge then checks it against the system's authorities.
+   */
+  pin: Schema.optional(Schema.String.pipe(Schema.pattern(/^sha256-[A-Za-z0-9_-]{43}$/))),
 }).annotations(strict);
 export type AgentConnectionCode = typeof AgentConnectionCode.Type;
 

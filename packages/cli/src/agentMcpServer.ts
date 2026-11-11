@@ -32,6 +32,14 @@ import {
 } from "./mcpCommand";
 import { addProject } from "./projectCommand";
 
+export { stopAgentTurn } from "./agentStart";
+export type {
+  LocalControlRequest,
+  LocalControlResponse,
+  LocalControlSession,
+  OpenedLocalControlSession,
+} from "./localControl";
+
 /**
  * `octant agent mcp`: `octant agent` spoken as a stdio MCP server, so another
  * agent (a coding CLI, a bot) can start work in Octant and follow it.
@@ -261,11 +269,41 @@ export interface AgentMcpPorts {
   readonly pollIntervalMs?: number;
 }
 
-interface ToolAnswer {
+export interface ToolAnswer {
   readonly value: JsonObject | string;
   readonly isError: boolean;
   /** A send still running under this call's session; the session closes after it. */
   readonly keepOpenUntil?: Promise<void>;
+}
+
+/**
+ * How a host narrows the tools for a caller that is not the person at this
+ * host (an outside agent under an agent grant). Every rule here is also
+ * enforced where the host dispatches each request; the policy gives the caller
+ * a plain refusal before a request is even made.
+ */
+export interface AgentToolPolicy {
+  readonly tools: ReadonlySet<string>;
+  readonly projectAllowed: (projectId: string) => boolean;
+  readonly threadAllowed: (threadId: string) => boolean;
+  /** The level a new Work or Code thread starts at when the call names none. */
+  readonly defaultAccess: PermissionMode;
+  /** A refusal when the caller's limits do not allow another turn now. */
+  readonly beforeTurn: () => string | undefined;
+}
+
+export interface AgentToolCallOptions {
+  readonly openSession: () => Promise<LocalControlSession>;
+  readonly signal: AbortSignal;
+  readonly pollIntervalMs?: number;
+  readonly policy?: AgentToolPolicy;
+}
+
+/** The tools a caller may see: all of them, or those its policy lists. */
+export function agentToolList(policy?: AgentToolPolicy): ReadonlyArray<JsonObject> {
+  return policy === undefined
+    ? AGENT_MCP_TOOLS
+    : AGENT_MCP_TOOLS.filter((tool) => policy.tools.has(String(tool["name"])));
 }
 
 /** Runs until the caller closes its input. */
@@ -324,7 +362,7 @@ export async function runAgentMcpServer(ports: AgentMcpPorts): Promise<number> {
   return 0;
 }
 
-function initializeResult(params: JsonObject | undefined, version: string): JsonObject {
+export function initializeResult(params: JsonObject | undefined, version: string): JsonObject {
   const asked = params?.["protocolVersion"];
   return {
     protocolVersion:
@@ -349,7 +387,11 @@ async function answerToolCall(
   if (typeof name !== "string" || !AGENT_MCP_TOOLS.some((tool) => tool["name"] === name)) {
     return failure(id, -32602, `Unknown tool: ${String(name)}`);
   }
-  const answer = await callTool(name, args, ports, signal).catch(
+  const answer = await callAgentTool(name, args, {
+    openSession: ports.openSession,
+    signal,
+    ...(ports.pollIntervalMs === undefined ? {} : { pollIntervalMs: ports.pollIntervalMs }),
+  }).catch(
     (error: unknown): ToolAnswer => ({
       value: `Octant could not finish this call: ${error instanceof Error ? error.message : String(error)}`,
       isError: true,
@@ -363,19 +405,26 @@ async function answerToolCall(
   });
 }
 
-async function callTool(
+/**
+ * One tool call: parse its arguments, open a session, run it, and close the
+ * session once the call (and any send it started) has finished. Shared by the
+ * stdio server and the host's agent-access endpoint.
+ */
+export async function callAgentTool(
   name: string,
   args: JsonObject,
-  ports: AgentMcpPorts,
-  signal: AbortSignal,
+  options: AgentToolCallOptions,
 ): Promise<ToolAnswer> {
   const parsed = parseToolArguments(name, args);
   if (parsed.kind === "invalid") return { value: parsed.message, isError: true };
-  const session = await ports.openSession();
+  if (options.policy !== undefined && !options.policy.tools.has(parsed.call.tool)) {
+    return { value: `This agent's grant does not include ${parsed.call.tool}.`, isError: true };
+  }
+  const session = await options.openSession();
   if (session.kind === "refuses") return { value: session.reason, isError: true };
   let answer: ToolAnswer | undefined;
   try {
-    answer = await runTool(parsed.call, session, ports, signal);
+    answer = await runTool(parsed.call, session, options);
     return answer;
   } finally {
     if (answer?.keepOpenUntil === undefined) await session.close();
@@ -581,13 +630,17 @@ export function parseToolArguments(
 async function runTool(
   call: ToolCall,
   session: OpenedLocalControlSession,
-  ports: AgentMcpPorts,
-  signal: AbortSignal,
+  options: AgentToolCallOptions,
 ): Promise<ToolAnswer> {
-  const poll = ports.pollIntervalMs === undefined ? {} : { pollIntervalMs: ports.pollIntervalMs };
+  const { signal, policy } = options;
+  const poll =
+    options.pollIntervalMs === undefined ? {} : { pollIntervalMs: options.pollIntervalMs };
+  if (policy !== undefined && "threadId" in call && !policy.threadAllowed(call.threadId)) {
+    return { value: "That thread is not in this agent's grant.", isError: true };
+  }
   switch (call.tool) {
     case "start_work":
-      return await startWork(call, session, poll, signal);
+      return await startWork(call, session, poll, signal, policy);
     case "send_message": {
       const opened = await openAgentThreadById(session, call.threadId);
       if (opened.kind === "refused") return refused(opened);
@@ -596,7 +649,7 @@ async function runTool(
         mode: opened.mode,
         ...(opened.projectName === undefined ? {} : { projectName: opened.projectName }),
       };
-      return await sendAndFollow(session, thread, call.prompt, call, poll, signal);
+      return await sendAndFollow(session, thread, call.prompt, call, poll, signal, policy);
     }
     case "read_thread": {
       const read = await openAndReadAgentThread(session, call.threadId, { turns: call.turns });
@@ -616,18 +669,27 @@ async function runTool(
       const projects = await readActiveProjects(session);
       return projects.kind === "refused"
         ? refused(projects)
-        : answered({ projects: projects.active.map(projectRow) });
+        : answered({
+            projects: projects.active
+              .filter((project) => policy?.projectAllowed(String(project.id)) ?? true)
+              .map(projectRow),
+          });
     }
     case "list_waiting": {
       const listed = await listWaitingRequests(session);
       return listed.kind === "refused"
         ? refused(listed)
         : answered({
-            waiting: listed.requests,
+            waiting: listed.requests.filter(
+              (request) => policy?.threadAllowed(request.threadId) ?? true,
+            ),
             ...(listed.complete ? {} : { incomplete: INCOMPLETE_WAITING }),
           });
     }
     case "add_project": {
+      if (policy !== undefined) {
+        return { value: "Adding a Project stays with the person, at the host.", isError: true };
+      }
       const added = await addProject(session, {
         path: call.folder,
         projectType: call.type,
@@ -638,8 +700,11 @@ async function runTool(
         : answered({ project: { name: added.name, type: call.type, folder: added.path } });
     }
     case "list_threads": {
-      const projects = await readActiveProjects(session);
-      if (projects.kind === "refused") return refused(projects);
+      const read = await readActiveProjects(session);
+      if (read.kind === "refused") return refused(read);
+      const projects = {
+        active: read.active.filter((project) => policy?.projectAllowed(String(project.id)) ?? true),
+      };
       const project =
         call.folder !== undefined
           ? projectHolding(projects.active, call.folder)
@@ -661,7 +726,11 @@ async function runTool(
         projects: projects.active,
         ...(project === undefined ? {} : { project }),
       });
-      return answered({ threads: threads.slice(0, call.limit) });
+      return answered({
+        threads: threads
+          .filter((thread) => policy?.threadAllowed(thread.threadId) ?? true)
+          .slice(0, call.limit),
+      });
     }
   }
 }
@@ -671,9 +740,32 @@ async function startWork(
   session: OpenedLocalControlSession,
   poll: { readonly pollIntervalMs?: number },
   signal: AbortSignal,
+  policy: AgentToolPolicy | undefined,
 ): Promise<ToolAnswer> {
   let mode = call.mode;
   let addedProject: string | undefined;
+  if (policy !== undefined) {
+    if (call.addProject) {
+      return { value: "Adding a Project stays with the person, at the host.", isError: true };
+    }
+    if (call.folder !== undefined || call.project !== undefined) {
+      const projects = await readActiveProjects(session);
+      if (projects.kind === "refused") return refused(projects);
+      const named =
+        call.folder !== undefined
+          ? projectHolding(projects.active, call.folder)
+          : projects.active.find(
+              (entry) => entry.name.trim().toLowerCase() === call.project?.trim().toLowerCase(),
+            );
+      if (named === undefined || !policy.projectAllowed(String(named.id))) {
+        return {
+          value:
+            "That Project is not in this agent's grant. list_projects shows the ones it may use.",
+          isError: true,
+        };
+      }
+    }
+  }
   if (mode !== "chat" && call.folder !== undefined) {
     const projects = await readActiveProjects(session);
     if (projects.kind === "refused") return refused(projects);
@@ -713,7 +805,7 @@ async function startWork(
     projectName: call.project,
     cwd: call.folder,
     model: call.model,
-    access: call.access,
+    access: call.access ?? (mode === "chat" ? undefined : policy?.defaultAccess),
   });
   if (created.kind === "refused") return refused(created);
   const thread = {
@@ -721,7 +813,7 @@ async function startWork(
     mode: created.mode,
     ...(created.projectName === undefined ? {} : { projectName: created.projectName }),
   };
-  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal);
+  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal, policy);
   if (addedProject === undefined || typeof answer.value === "string") return answer;
   return { ...answer, value: { ...answer.value, addedProject } };
 }
@@ -737,7 +829,10 @@ async function sendAndFollow(
   options: { readonly wait: boolean; readonly timeoutSeconds: number },
   poll: { readonly pollIntervalMs?: number },
   signal: AbortSignal,
+  policy: AgentToolPolicy | undefined,
 ): Promise<ToolAnswer> {
+  const limited = policy?.beforeTurn();
+  if (limited !== undefined) return { value: limited, isError: true };
   const started = await startAgentTurn(
     agentThreadPort(session, thread.mode, thread.threadId),
     prompt,

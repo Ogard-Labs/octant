@@ -10,6 +10,7 @@
     "./web": "./src/web.ts",
     "./status": "./src/status.ts",
     "./mcp": "./src/mcpCommand.ts",
+    "./agent-tools": "./src/agentMcpServer.ts",
     "./terminal-launcher": "./src/terminalLauncher.ts"
   },
   "scripts": {

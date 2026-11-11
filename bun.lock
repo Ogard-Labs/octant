@@ -84,6 +84,7 @@
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "catalog:",
         "@modelcontextprotocol/sdk": "1.31.0",
+        "@octant/cli": "workspace:*",
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
         "@octant/host-runtime": "workspace:*",
@@ -100,7 +101,6 @@
         "yaml": "catalog:",
       },
       "devDependencies": {
-        "@octant/cli": "workspace:*",
         "@octant/client-runtime": "workspace:*",
         "@types/better-sqlite3": "catalog:",
         "@types/bun": "catalog:",

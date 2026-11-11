@@ -1,3 +1,4 @@
+import { AGENT_PROOF_HEADER } from "@octant/contracts/agent-access";
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
@@ -117,6 +118,17 @@ export const HUB_WAKE_COPY_MAX_BODY_BYTES =
 /** A hand-back adds up to 64 members the standby made (a few KiB each) and the ids it removed. */
 export const HUB_HANDBACK_MAX_BODY_BYTES = HUB_WAKE_COPY_MAX_BODY_BYTES + 1_048_576;
 
+/**
+ * The routes an outside agent reaches (docs/design/agent-access.md): a key
+ * claim against a one-time ticket, and its one MCP endpoint. They sit on the
+ * pre-auth surface because each authenticates itself, a signed bridge request
+ * or a bearer agent key, as the hub's signed routes do.
+ */
+export const REMOTE_AGENT_ACCESS_ROUTE_IDS = {
+  claim: "agent-access-claim",
+  mcp: "agent-access-mcp",
+} as const;
+
 export const REMOTE_HUB_LINK_ROUTE_IDS = {
   join: "hub-link-join",
   leave: "hub-link-leave",
@@ -212,6 +224,35 @@ const THREAD_MOVE_PEER_ROUTES: ReadonlyArray<{
 ];
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
+  {
+    id: REMOTE_AGENT_ACCESS_ROUTE_IDS.claim,
+    match: { kind: "exact", path: "/api/agent-access/claim" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type"],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 8_192,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_AGENT_ACCESS_ROUTE_IDS.mcp,
+    match: { kind: "exact", path: "/api/agent-access/mcp" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: [
+      "content-type",
+      "accept",
+      "authorization",
+      AGENT_PROOF_HEADER,
+      "mcp-protocol-version",
+      "mcp-session-id",
+    ],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 262_144,
+    maxResponseBytes: 1_048_576,
+  },
   {
     id: REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
     match: { kind: "exact", path: CANVAS_DESIGN_PAGE_PATH },
