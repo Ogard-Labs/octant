@@ -137,6 +137,23 @@ describe("theme fallback policy", () => {
     expect(dark.tokens["accent"]).toBe("#ffffff");
   });
 
+  it("checks a shared ink against an accent scoped to this mode, wherever the accent is listed", () => {
+    const resolved = resolveEffectiveTokens(
+      makeSettings({
+        mode: "dark",
+        semanticOverrides: [
+          { role: "accent-foreground", color: "#141414" },
+          { role: "accent", color: "#2b2b2e", mode: "dark" },
+        ],
+      }),
+      false,
+    );
+    expect(resolved.tokens["accent"]).toBe("#2b2b2e");
+    expect(resolved.droppedOverrides).toEqual([
+      { role: "accent-foreground", reason: "insufficient-contrast" },
+    ]);
+  });
+
   it("keeps a non-text accent override even when its contrast against the workspace is low", () => {
     const resolved = resolveEffectiveTokens(
       makeSettings({ mode: "dark", semanticOverrides: [{ role: "accent", color: "#222225" }] }),

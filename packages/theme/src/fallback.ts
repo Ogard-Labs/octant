@@ -66,8 +66,7 @@ export function applySemanticOverrides(
 } {
   const tokens: Record<string, string> = { ...base };
   const dropped: DroppedOverride[] = [];
-  for (const entry of overrides) {
-    if (entry.mode !== undefined && entry.mode !== mode) continue;
+  for (const entry of inApplyOrder(overrides, mode)) {
     const result = validateOverride(entry.role, entry.color, tokens);
     if (result.ok) {
       tokens[entry.role] = entry.color;
@@ -76,6 +75,26 @@ export function applySemanticOverrides(
     }
   }
   return { tokens, droppedOverrides: dropped };
+}
+
+// Text roles are checked against the surface they sit on, so every surface
+// lands first; within each group an override scoped to this mode follows the
+// shared ones and wins. Array order alone checked a shared accent-foreground
+// against the preset accent when a dark-only accent came after it.
+function inApplyOrder(
+  overrides: ReadonlyArray<ThemeSemanticOverrideEntry>,
+  mode: "light" | "dark",
+): ReadonlyArray<ThemeSemanticOverrideEntry> {
+  const rank = (entry: ThemeSemanticOverrideEntry): number => {
+    const level = isKnownThemeTokenRole(entry.role)
+      ? getRoleDefinition(entry.role).contrastLevel
+      : undefined;
+    const text = level === "normal-text" || level === "large-text";
+    return (text ? 2 : 0) + (entry.mode === undefined ? 0 : 1);
+  };
+  return overrides
+    .filter((entry) => entry.mode === undefined || entry.mode === mode)
+    .toSorted((a, b) => rank(a) - rank(b));
 }
 
 export function resolveEffectiveTokens(
