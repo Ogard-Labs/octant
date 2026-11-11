@@ -528,6 +528,9 @@ async function showThreadState(
     input.stdout.write(`? ${question.prompt}\n`);
     question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
   }
+  if (state.waitingIncomplete === true) {
+    input.stdout.write("! Octant could not list everything waiting on you; check Octant.\n");
+  }
   for (const request of state.waitingInOctant) {
     input.stdout.write(
       `! Waits on you in Octant: ${request.kind}${request.text === undefined ? "" : ` — ${request.text}`}\n`,

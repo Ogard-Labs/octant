@@ -8476,7 +8476,12 @@ the model at another size.
   the folder's Project decides Code or Work, none means Chat), `send_message`,
   `read_thread`, `answer_question`, `stop_turn`, `list_projects`,
   `add_project`, `list_threads`, and `list_waiting` (the host's whole Needs
-  you list, each row marked whether `answer_question` may answer it). `agentStart.ts` holds the start, wait,
+  you list, each row marked whether `answer_question` may answer it). The
+  host lists a Work or Code Project's requests only to a window that has
+  that Project open, so `list_waiting` opens each active Project in turn and
+  merges what each read lists, and a thread's own read happens in the
+  window that opened it. A read that fails or comes back cut off is reported
+  as incomplete, never as nothing waiting. `agentStart.ts` holds the start, wait,
   read, and answer steps both share, over the thread ports above. Each tool
   call opens its own window authority with the bridge secret, as a CLI
   command does, and revokes it when the call ends; a Chat send keeps its

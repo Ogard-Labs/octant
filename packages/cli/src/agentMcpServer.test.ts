@@ -78,6 +78,10 @@ function host(
     readonly projects?: ReadonlyArray<unknown>;
     readonly pending?: ReadonlyArray<unknown>;
     readonly harnessQuestions?: ReadonlyArray<unknown>;
+    /** Rows the host lists only to a window that has the row's Project open, as for Code. */
+    readonly projectScoped?: ReadonlyArray<{ readonly projectId: string; readonly row: unknown }>;
+    /** The pending-requests read fails. */
+    readonly pendingFails?: boolean;
   } = {},
 ) {
   const seen: LocalControlRequest[] = [];
@@ -85,6 +89,7 @@ function host(
   let closed = 0;
   const session = (): OpenedLocalControlSession => {
     opened += 1;
+    let boundProject: string | undefined;
     return {
       kind: "opened",
       windowId: `window-${opened}`,
@@ -97,7 +102,24 @@ function host(
           };
         }
         if (request.path === "/api/pending-requests") {
-          return { status: 200, body: { requests: options.pending ?? [], truncated: false } };
+          if (options.pendingFails === true) return { status: 503, body: { message: "Busy" } };
+          const scoped = (options.projectScoped ?? []).flatMap((entry) =>
+            entry.projectId === boundProject ? [entry.row] : [],
+          );
+          return {
+            status: 200,
+            body: { requests: [...(options.pending ?? []), ...scoped], truncated: false },
+          };
+        }
+        if (request.path === "/api/shell/bootstrap") {
+          return { status: 200, body: { workspaceVersion: 1 } };
+        }
+        if (request.path === "/api/shell/commands") {
+          const surface = (
+            request.body as { operation?: { surface?: { kind?: string; projectId?: string } } }
+          ).operation?.surface;
+          if (surface?.kind === "project") boundProject = surface.projectId;
+          return { status: 200, body: {} };
         }
         if (request.path === `/api/native-harness/sessions/${threadId}`) {
           return {
@@ -470,6 +492,70 @@ describe("octant agent mcp", () => {
 
     sendAnswers.resolve();
     await vi.waitFor(() => expect(fake.closed()).toBe(1));
+    await server.end();
+  });
+
+  it("lists a Code approval that the host shows only to a window with its Project open", async () => {
+    const codeThread = "60000000-0000-4000-8000-000000000009";
+    const fake = host({
+      projects: [codeProject()],
+      projectScoped: [
+        {
+          projectId,
+          row: {
+            mode: "code",
+            kind: "approval",
+            projectId,
+            threadId: codeThread,
+            threadTitle: "Fix the flaky test",
+            requestedAt: now,
+            text: "Run bun test",
+            answer: {
+              threadId: codeThread,
+              checkoutId: "40000000-0000-4000-8000-000000000001",
+              approvalId: "90000000-0000-4000-8000-000000000001",
+            },
+          },
+        },
+      ],
+    });
+    const server = serve(fake);
+
+    const waiting = await server.call("list_waiting", {});
+
+    expect(waiting.value).toEqual({
+      waiting: [
+        {
+          threadId: codeThread,
+          threadTitle: "Fix the flaky test",
+          mode: "code",
+          kind: "approval",
+          text: "Run bun test",
+          waitingSince: now,
+          answerableHere: false,
+        },
+      ],
+    });
+    await server.end();
+  });
+
+  it("says what waits could not be read instead of reporting that nothing waits", async () => {
+    const fake = host({ pendingFails: true });
+    vi.spyOn(agentThreads, "openAgentThreadById").mockResolvedValue({
+      kind: "opened",
+      mode: "code",
+      projectName: "Repo",
+    });
+    const work = thread("code");
+    await work.port.send("Fix the flaky test");
+    work.finish("Waiting on an approval.");
+    vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue(work.port);
+    const server = serve(fake);
+
+    const read = await server.call("read_thread", { threadId });
+
+    expect(read.value?.["waitingIncomplete"]).toContain("could not list everything");
+    expect((await server.call("list_waiting", {})).isError).toBe(true);
     await server.end();
   });
 });

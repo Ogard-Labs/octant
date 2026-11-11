@@ -17,6 +17,7 @@ import {
   type AgentTurnOutcome,
 } from "./agentThread";
 import type { OpenedLocalControlSession } from "./localControl";
+import { openAgentWindow } from "./agentWindow";
 
 /**
  * Starting and following a thread for a caller that does not sit at a
@@ -117,6 +118,12 @@ export interface AgentThreadState {
   }>;
   readonly questions: ReadonlyArray<AgentOpenQuestion>;
   readonly waitingInOctant: ReadonlyArray<AgentPersonRequest>;
+  /**
+   * The host's list of what waits on the person could not be read whole (it
+   * failed, or held more than it returned), so an empty `waitingInOctant`
+   * does not prove nothing waits.
+   */
+  readonly waitingIncomplete?: true;
 }
 
 /**
@@ -144,7 +151,8 @@ export async function readAgentThreadState(
           },
         ]),
   ];
-  const waitingInOctant = await personRequests(session, opened.threadId);
+  const waiting = await personRequests(session, opened.threadId);
+  const waitingInOctant = waiting.requests;
   return {
     kind: "read",
     state: {
@@ -168,6 +176,7 @@ export async function readAgentThreadState(
       })),
       questions,
       waitingInOctant,
+      ...(waiting.complete ? {} : { waitingIncomplete: true as const }),
     },
   };
 }
@@ -405,19 +414,20 @@ export interface AgentWaitingRequest {
   readonly answerableHere: boolean;
 }
 
-/**
- * Everything waiting on the person, from the same list every Needs you
- * surface reads, oldest first. `truncated` says the host held more than it
- * returned.
- */
-export async function listWaitingRequests(session: OpenedLocalControlSession): Promise<
+type WaitingRead =
   | HostRefusal
   | {
       readonly kind: "read";
       readonly requests: ReadonlyArray<AgentWaitingRequest>;
       readonly truncated: boolean;
-    }
-> {
+    };
+
+/**
+ * One read of the Needs you list as this window may see it. The host lists a
+ * Work or Code Project's requests (and the agents waiting in them) only to a
+ * window that has that Project open, so the caller opens it first.
+ */
+async function readWaitingRows(session: OpenedLocalControlSession): Promise<WaitingRead> {
   const response = await session.send({ path: "/api/pending-requests", method: "GET" });
   if (response.status !== 200) {
     return {
@@ -455,20 +465,76 @@ export async function listWaitingRequests(session: OpenedLocalControlSession): P
 }
 
 /**
- * What waits on the person for this thread. A harness question and a Chat
- * turn's question are left out: they are listed as open questions instead.
+ * Everything waiting on the person across the host, oldest first. A fresh
+ * window sees Chat and nothing scoped to a Project, so each active Work and
+ * Code Project is opened in turn and its rows merged. `complete` is false
+ * when any read failed or the host held more than it returned.
+ */
+export async function listWaitingRequests(session: OpenedLocalControlSession): Promise<
+  | HostRefusal
+  | {
+      readonly kind: "read";
+      readonly requests: ReadonlyArray<AgentWaitingRequest>;
+      readonly complete: boolean;
+    }
+> {
+  const projects = await readActiveProjects(session);
+  if (projects.kind === "refused") return projects;
+  const first = await readWaitingRows(session);
+  if (first.kind === "refused") return first;
+  const found = new Map<string, AgentWaitingRequest>();
+  let complete = true;
+  const take = (read: WaitingRead) => {
+    if (read.kind === "refused" || read.truncated) complete = false;
+    if (read.kind === "refused") return;
+    for (const request of read.requests) {
+      found.set(
+        JSON.stringify([request.threadId, request.kind, request.text, request.waitingSince]),
+        request,
+      );
+    }
+  };
+  take(first);
+  for (const project of projects.active) {
+    if (project.type !== "work" && project.type !== "code") continue;
+    const opened = await openAgentWindow(session, {
+      mode: project.type,
+      projectId: String(project.id),
+      projectName: project.name,
+    });
+    if (opened.kind === "refused") {
+      complete = false;
+      continue;
+    }
+    take(await readWaitingRows(session));
+  }
+  return {
+    kind: "read",
+    complete,
+    requests: [...found.values()].toSorted((a, b) => a.waitingSince.localeCompare(b.waitingSince)),
+  };
+}
+
+/**
+ * What waits on the person for this thread, read in the window that has the
+ * thread's Project open. A harness question and a Chat turn's question are
+ * left out: they are listed as open questions instead. A failed or cut-off
+ * read is reported as incomplete, never as nothing waiting.
  */
 async function personRequests(
   session: OpenedLocalControlSession,
   threadId: string,
-): Promise<ReadonlyArray<AgentPersonRequest>> {
-  const listed = await listWaitingRequests(session);
-  if (listed.kind === "refused") return [];
-  return listed.requests.flatMap((request) =>
-    request.threadId !== threadId || request.answerableHere
-      ? []
-      : [{ kind: request.kind, ...(request.text === undefined ? {} : { text: request.text }) }],
-  );
+): Promise<{ readonly requests: ReadonlyArray<AgentPersonRequest>; readonly complete: boolean }> {
+  const listed = await readWaitingRows(session);
+  if (listed.kind === "refused") return { requests: [], complete: false };
+  return {
+    complete: !listed.truncated,
+    requests: listed.requests.flatMap((request) =>
+      request.threadId !== threadId || request.answerableHere
+        ? []
+        : [{ kind: request.kind, ...(request.text === undefined ? {} : { text: request.text }) }],
+    ),
+  };
 }
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {

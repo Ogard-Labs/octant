@@ -71,6 +71,9 @@ const INSTRUCTIONS =
   "it with read_thread, continue it with send_message. Approvals are never answered " +
   "here, and Full access is only turned on by the person in Octant.";
 
+const INCOMPLETE_WAITING =
+  "Octant could not list everything waiting on the person, so more may be waiting; the person can see it all in Octant.";
+
 const ACCESS_LEVELS = ["ask-first", "accept-edits", "auto", "plan"] as const;
 
 const WAIT_PROPERTIES = {
@@ -621,7 +624,7 @@ async function runTool(
         ? refused(listed)
         : answered({
             waiting: listed.requests,
-            ...(listed.truncated ? { truncated: true } : {}),
+            ...(listed.complete ? {} : { incomplete: INCOMPLETE_WAITING }),
           });
     }
     case "add_project": {
@@ -797,6 +800,7 @@ function stateAnswer(state: AgentThreadState): JsonObject {
     })),
     ...(state.questions.length === 0 ? {} : { questions: state.questions }),
     ...(state.waitingInOctant.length === 0 ? {} : { waitingInOctant: state.waitingInOctant }),
+    ...(state.waitingIncomplete === true ? { waitingIncomplete: INCOMPLETE_WAITING } : {}),
     next,
   };
 }
