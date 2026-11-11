@@ -110,6 +110,20 @@ describe("accent swatches", () => {
       expect(currentAccentSwatch(withOverrides([]))).toBe("blue");
     });
 
+    it("leaves an old swatch alone when one of its roles is also set for a single mode", () => {
+      const mixed = decodeThemeSemanticOverrides([
+        { role: "accent", color: "#a37cf0" },
+        { role: "accent-foreground", color: "#141414" },
+        { role: "primary-foreground", color: "#141414" },
+        { role: "accent", color: "#335577", mode: "light" },
+      ]);
+      expect(upgradeLegacyAccent(mixed)).toBe(mixed);
+      expect(currentAccentSwatch(withOverrides(mixed))).toBe("custom");
+      expect(
+        resolveEffectiveTokens({ ...withOverrides(mixed), mode: "light" }, false).tokens["accent"],
+      ).toBe("#335577");
+    });
+
     it("leaves a swatch whose fills never changed alone", () => {
       const slate = decodeThemeSemanticOverrides([
         { role: "accent", color: "#64748b" },

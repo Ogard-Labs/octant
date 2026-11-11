@@ -112,12 +112,24 @@ function accentFor(settings: ThemeSettings, mode: "light" | "dark"): string | un
  * person's choice keeps its name and reads at 3:1 on the light card with no
  * write to their settings. Only an exact match is upgraded: a colour that is
  * no swatch's old value, or whose ink entries differ, is left as stored, and
- * so is any swatch whose light and dark fills never differed.
+ * so is any swatch whose light and dark fills never differed, and any set
+ * that already scopes one of the accent roles to a mode.
  */
 export function upgradeLegacyAccent(overrides: ThemeSemanticOverrides): ThemeSemanticOverrides {
   const legacy = (role: string) => overrides.find((e) => e.role === role && e.mode === undefined);
   const accent = legacy("accent");
   if (accent === undefined) return overrides;
+  // A set that also scopes one of these roles to a mode is the person's own
+  // arrangement, not a swatch's old write. Upgrading it would add a second
+  // entry for the same role and mode, which the overrides refuse.
+  const scopedToMode = overrides.some(
+    (entry) =>
+      entry.mode !== undefined &&
+      (entry.role === "accent" ||
+        entry.role === "accent-foreground" ||
+        entry.role === "primary-foreground"),
+  );
+  if (scopedToMode) return overrides;
   const swatch = SWATCHES.find(
     (candidate) =>
       candidate.light !== undefined &&
