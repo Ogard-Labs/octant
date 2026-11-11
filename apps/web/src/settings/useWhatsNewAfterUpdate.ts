@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -129,17 +130,27 @@ export function useWhatsNewAfterUpdate(options: {
     document.version !== acknowledgedVersion
       ? document
       : undefined;
-  return {
-    announcement: due?.announcement,
-    card:
+  const card = useMemo(
+    () =>
       due === undefined || due.announcement !== undefined
         ? undefined
         : whatsNewCardContent(due.version, due.text),
-    document,
-    notesOpen,
-    restoreFocus,
-    closeNotes,
-    dismiss,
-    openNotes,
-  };
+    [due],
+  );
+  // One controller until something in it changes. The sidebar takes it as a
+  // prop, and a new object on every render of the app made the sidebar
+  // commit on each streamed transcript event.
+  return useMemo(
+    () => ({
+      announcement: due?.announcement,
+      card,
+      document,
+      notesOpen,
+      restoreFocus,
+      closeNotes,
+      dismiss,
+      openNotes,
+    }),
+    [card, closeNotes, dismiss, document, due, notesOpen, openNotes],
+  );
 }
