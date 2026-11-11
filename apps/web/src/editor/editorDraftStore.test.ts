@@ -32,4 +32,35 @@ describe("editor recovery", () => {
     expect(store.read("file")).toBe("my work");
     expect(store.error?.()).toContain("Save before closing");
   });
+  it("warns until every memory-only draft is saved or discarded", () => {
+    const values = new Map<string, string>();
+    const store = createEditorDraftStore("host", {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        if (value.length > 8) throw Error("quota");
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+    });
+    store.write("first", "a large unsaved draft");
+    store.write("first:base", "revision");
+    expect(store.error?.()).toContain("Save before closing");
+    expect(store.read("first")).toBe("a large unsaved draft");
+    store.write("second", "another large draft");
+    store.clear("first:base");
+    expect(store.error?.()).toContain("Save before closing");
+    store.write("first", "short");
+    expect(store.error?.()).toContain("Save before closing");
+    store.clear("second");
+    expect(store.error?.()).toBeUndefined();
+    expect(
+      createEditorDraftStore("host", {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      }).read("first"),
+    ).toBe("short");
+  });
 });

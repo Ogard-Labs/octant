@@ -154,6 +154,39 @@ describe("Preview routes", () => {
     expect(await call(route)).toMatchObject({ kind: "ready", text: "my edit" });
   });
 
+  it("lets only one concurrent save replace a Work file's revision across service instances", async () => {
+    const otherRoute = createRoute(makeService(root, records));
+    const call = async (handler: typeof route, change?: { text: string; revision: string }) => {
+      const response = await handler(
+        new Request("http://127.0.0.1/api/preview/text", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body: JSON.stringify({
+            target: makeTarget(),
+            ...(change === undefined ? {} : { change }),
+          }),
+        }),
+      );
+      return response?.json();
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const baseline = await call(route);
+      const texts = Array.from({ length: 4 }, (_, index) =>
+        `Draft ${attempt}/${index}\n`.repeat(1000 + index),
+      );
+      const replies = await Promise.all(
+        texts.map((text, index) =>
+          call(index % 2 === 0 ? route : otherRoute, { text, revision: baseline.revision }),
+        ),
+      );
+      expect(replies.filter((reply) => reply.kind === "saved")).toHaveLength(1);
+      expect(replies.filter((reply) => reply.kind === "conflict")).toHaveLength(3);
+      const winner = texts[replies.findIndex((reply) => reply.kind === "saved")];
+      expect(readFileSync(join(root, "notes.md"), "utf8")).toBe(winner);
+      expect(await call(route)).toMatchObject({ kind: "ready", text: winner });
+    }
+  });
+
   it("preserves BOM and CRLF source and refuses immutable versions and escaping links", async () => {
     const send = async (
       target: ReturnType<typeof makeTarget>,

@@ -7,6 +7,10 @@ import {
   type PreviewTextRequest,
 } from "@octant/contracts/previews";
 
+// One host serves all windows and Project aliases. Include reads so they cannot
+// observe an in-progress save; paths alone would not identify the shared file.
+const fileEdits = new Map<string, Promise<void>>();
+
 /** The same proved descriptor supplies the baseline, comparison and human write. */
 export async function editPreviewText(input: {
   readonly path: string;
@@ -31,7 +35,19 @@ export async function editPreviewText(input: {
       input.path,
       (writable ? constants.O_RDWR : constants.O_RDONLY) | constants.O_NONBLOCK,
     );
+    let release: (() => void) | undefined;
     try {
+      const identity = await file.stat({ bigint: true });
+      const physicalFile = `${identity.dev}:${identity.ino}`;
+      const previous = fileEdits.get(physicalFile);
+      const next = Promise.withResolvers<void>();
+      fileEdits.set(physicalFile, next.promise);
+      release = () => {
+        next.resolve();
+        if (fileEdits.get(physicalFile) === next.promise) fileEdits.delete(physicalFile);
+      };
+      await previous;
+      // Read both metadata and bytes after the previous operation completes.
       const stat = await file.stat({ bigint: true });
       if (!stat.isFile() || stat.nlink !== 1n) return { kind: "unsupported" };
       if (stat.size > BigInt(MAX_PREVIEW_EDITOR_BYTES)) return { kind: "too-large" };
@@ -93,6 +109,7 @@ export async function editPreviewText(input: {
       await file.sync();
       return { kind: "saved", fileKey, text: change.text, revision: revision(replacement) };
     } finally {
+      release?.();
       await file.close();
     }
   } catch {

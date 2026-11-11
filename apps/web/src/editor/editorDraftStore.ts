@@ -59,6 +59,9 @@ export function createEditorDraftStore(
         failure = "The recovery copy could not be removed. It may return after restart.";
       }
     },
-    error: () => failure,
+    error: () =>
+      unpersisted.size > 0
+        ? "Your edits are held in this window only. Save before closing it."
+        : failure,
   };
 }

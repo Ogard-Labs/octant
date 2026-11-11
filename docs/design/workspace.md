@@ -646,7 +646,10 @@ preserves BOM and line endings, and rejects binary or invalid text. The host
 resolves the opaque target inside the current main or extra folder on every
 request, opens through the existing confinement proof, and checks authority,
 root, physical file identity and source revision before writing through that
-same descriptor. It never creates a missing source. Saves flush the descriptor;
+same descriptor. The host serializes source reads and saves by physical file
+identity across windows and Project aliases, reading the baseline again after
+the preceding operation completes; concurrent stale saves return a conflict.
+It never creates a missing source. Saves flush the descriptor;
 an I/O failure can leave a partial write and its outcome is never retried
 implicitly. This is a human file save, not a new artifact version or a multi-file
 transaction. Code retains its existing file-helper save path.
@@ -666,7 +669,9 @@ not lose a draft on host restart. A recovered draft retains its original source
 revision. A newer disk version requires comparison and an explicit choice to
 keep the draft against that version or discard it; Save never silently adopts
 a newer baseline. Failed local storage keeps edits in memory with a warning to
-save before closing. Saving or discarding removes that file's recovery copy.
+save before closing. That warning stays visible while any draft remains
+unpersisted, even when its baseline or another draft was stored successfully.
+Saving or discarding removes that file's recovery copy.
 Opening source is authorized before a recovery copy is shown.
 
 Code's content search offers literal, case-insensitive replacement in its
