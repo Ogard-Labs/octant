@@ -2059,6 +2059,17 @@ it changes no setting or readiness answer. It adds no step or progress count.
 [Start screen](docs/design/start-screen.md#optional-capability-card-in-your-first-task)
 owns its behavior.
 
+File editors share a compact command toolbar and one Editor settings disclosure.
+The primary Save and the unsaved/saving/error state stay visible above the
+source; preferences are secondary. Source/preview switching retains selection
+and undo, and a Markdown split stacks at narrow widths. Each source/preview
+region owns its scrolling. Conflicts show a bounded disk-versus-draft comparison
+with explicit keep-draft or discard actions. A selection proposal or replacement
+review remains a separate disclosure above the editor, with its own before/after
+comparison and an explicit apply action. Colors and typography come from the
+existing editor projection and shared controls. Behavioral detail is in
+[Workspace: File editing](docs/design/workspace.md#file-editing).
+
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
 Inbox, pull requests, issues, Archive) holds the pane: a reader is a page about

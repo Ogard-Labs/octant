@@ -345,6 +345,24 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
                 : "Project folder"
           }
           draftStore={props.controller.editorDrafts}
+          onAddSelectionToChat={(prompt) =>
+            props.controller.setPendingDraft(
+              props.controller.pendingDraft === ""
+                ? prompt
+                : `${props.controller.pendingDraft}\n\n${prompt}`,
+            )
+          }
+          {...(() => {
+            const response = props.controller.conversation.findLast(
+              (message) =>
+                message.role === "assistant" &&
+                message.status === "completed" &&
+                (message.sourceThreadId === undefined ||
+                  message.sourceThreadId === view.thread.id) &&
+                (message.checkoutId === undefined || message.checkoutId === view.checkout.id),
+            );
+            return response === undefined ? {} : { agentResponse: response.text };
+          })()}
           file={props.projections.file}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           {...(props.onRequestFileRefresh === undefined

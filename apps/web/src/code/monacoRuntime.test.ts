@@ -59,6 +59,8 @@ const mocks = vi.hoisted(() => ({
   }>,
 }));
 
+vi.mock("./monacoIntelligence", () => ({ installMonacoIntelligence: vi.fn() }));
+
 const modelUri = { scheme: "octant-code", toString: () => "octant-code://checkout/file" };
 
 mocks.model = {

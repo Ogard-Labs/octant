@@ -1,3 +1,12 @@
+import {
+  INTELLIGENCE_METHODS,
+  INTELLIGENCE_CAPABILITIES,
+  intelligenceItems,
+} from "./languageIntelligence";
+import type {
+  CodeIntelligenceFeature,
+  CodeIntelligenceAnswer,
+} from "@octant/contracts/code-language";
 import { createHash, randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -331,6 +340,7 @@ interface ServerRecord {
   referencesSupport: CodeLanguageReferenceSupport;
   renameSupport: CodeLanguageReferenceSupport;
   quickFixesSupport: CodeLanguageReferenceSupport;
+  intelligence: ReadonlyArray<CodeIntelligenceFeature>;
   watch: AbortController | undefined;
   readonly documents: Map<string, OpenDocument>;
   readonly pushed: Map<string, ReadonlyArray<unknown>>;
@@ -531,7 +541,8 @@ export class CodeLanguageService {
       request.kind === "references" ||
       request.kind === "capabilities" ||
       request.kind === "rename" ||
-      request.kind === "quick-fixes"
+      request.kind === "quick-fixes" ||
+      request.kind === "intelligence"
     )
       return this.#readFeature(caller, request);
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
@@ -574,7 +585,7 @@ export class CodeLanguageService {
     caller: CodeLanguageCaller,
     request: Extract<
       CodeLanguageReadRequest,
-      { readonly kind: "references" | "capabilities" | "rename" | "quick-fixes" }
+      { readonly kind: "references" | "capabilities" | "rename" | "quick-fixes" | "intelligence" }
     >,
   ): Promise<CodeLanguageReadResult> {
     const deadline = performance.now() + this.#requestDeadlineMs;
@@ -668,9 +679,41 @@ export class CodeLanguageService {
       if (afterStart.status === "refused") return afterStart;
       const support = this.#referencesSupport(record, document);
       let mapped: Awaited<ReturnType<typeof toReferenceTargets>> | undefined;
+      let intelligence:
+        | Omit<
+            CodeIntelligenceAnswer,
+            | "status"
+            | "feature"
+            | "threadId"
+            | "checkoutId"
+            | "fileId"
+            | "documentVersion"
+            | "documentRevision"
+          >
+        | undefined;
       let editPreviews:
         | Extract<CodeLanguageReadResult, { status: "edit-previews" }>["previews"]
         | undefined;
+      if (request.kind === "intelligence") {
+        if (!record.intelligence.includes(request.feature))
+          return { status: "unsupported", capability: "intelligence", support: "unsupported" };
+        const response = await connection.request(
+          INTELLIGENCE_METHODS[request.feature],
+          {
+            textDocument: { uri: document.uri },
+            ...(request.feature === "symbols" || request.feature === "formatting"
+              ? {}
+              : { position: request.position }),
+            ...(request.feature === "formatting"
+              ? { options: request.formatting ?? { tabSize: 2, insertSpaces: true } }
+              : {}),
+          },
+          Math.max(1, deadline - performance.now()),
+        );
+        if (!current()) return { status: "stale" };
+        if (response.status !== "answered") return unavailable(response);
+        intelligence = intelligenceItems(request.feature, response.result, record.rootPath);
+      }
       if (request.kind === "rename" || request.kind === "quick-fixes") {
         const editSupport =
           request.kind === "rename" ? record.renameSupport : record.quickFixesSupport;
@@ -859,6 +902,16 @@ export class CodeLanguageService {
           references: finalSupport,
           rename: record.renameSupport,
           quickFixes: record.quickFixesSupport,
+          intelligence: record.intelligence,
+        };
+      if (request.kind === "intelligence")
+        return {
+          status: "intelligence",
+          feature: request.feature,
+          ...scope,
+          documentVersion: version,
+          documentRevision: revision,
+          ...(intelligence ?? { items: [], truncated: false }),
         };
       if (request.kind === "rename" || request.kind === "quick-fixes")
         return {
@@ -1442,6 +1495,7 @@ export class CodeLanguageService {
         referencesSupport: "unknown",
         renameSupport: "unknown",
         quickFixesSupport: "unknown",
+        intelligence: [],
         watch: undefined,
         documents: new Map(),
         pushed: new Map(),
@@ -1643,6 +1697,12 @@ export class CodeLanguageService {
         : "unknown";
     record.renameSupport = referenceSupport(capabilities.renameProvider);
     record.quickFixesSupport = quickFixSupport(capabilities.codeActionProvider);
+    record.intelligence = (
+      Object.keys(INTELLIGENCE_CAPABILITIES) as CodeIntelligenceFeature[]
+    ).filter(
+      (feature) =>
+        referenceSupport(capabilities[INTELLIGENCE_CAPABILITIES[feature]]) === "supported",
+    );
     record.pullsDiagnostics =
       capabilities.diagnosticProvider !== undefined && capabilities.diagnosticProvider !== null;
     connection.notify("initialized", {});

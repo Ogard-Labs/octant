@@ -1,3 +1,6 @@
+import { CodeSelectionReview, selectionPrompt } from "./CodeSelectionReview";
+import type { MonacoTextSelection } from "./MonacoEditorAdapter";
+import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { CodeClient, CodeFileSaveResult } from "@octant/client-runtime/code-client";
 import type {
@@ -87,6 +90,8 @@ export type CodeEditorFileProjection = CodeEditorFileFields &
 
 export interface MonacoEditorPaneProps {
   readonly checkoutLabel?: string;
+  readonly agentResponse?: string;
+  readonly onAddSelectionToChat?: (prompt: string) => void;
   readonly debugProjectId?: ProjectId;
   /**
    * The language methods are optional: without them the editor keeps
@@ -95,7 +100,8 @@ export interface MonacoEditorPaneProps {
   readonly client: Pick<
     CodeClient,
     "content" | "save" | "syncLanguageDocument" | "readLanguage" | "approveLanguageServer"
-  >;
+  > &
+    Partial<Pick<CodeClient, "openFile">>;
   readonly draftStore?: CodeEditorDraftStore;
   readonly file: CodeEditorFileProjection;
   readonly loadRuntime?: () => Promise<MonacoAdapterRuntime>;
@@ -111,6 +117,7 @@ export interface MonacoEditorPaneProps {
 }
 
 export interface CodeEditorDraftStore {
+  readonly error?: () => string | undefined;
   readonly clear: (key: string) => void;
   readonly read: (key: string) => string | undefined;
   readonly write: (key: string, value: string) => void;
@@ -124,7 +131,13 @@ type LoadState =
 export function MonacoEditorPane(props: MonacoEditorPaneProps) {
   if (props.file.state === "read-only") return <ReadOnlyFile file={props.file} />;
   if (props.file.state === "unavailable") return <UnavailableFile file={props.file} />;
-  return <AvailableEditor {...props} file={props.file} />;
+  return (
+    <AvailableEditor
+      key={`${props.file.threadId}:${props.file.checkoutId}:${props.file.fileId}`}
+      {...props}
+      file={props.file}
+    />
+  );
 }
 
 function AvailableEditor(
@@ -136,9 +149,19 @@ function AvailableEditor(
 
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [draft, setDraft] = useState("");
+  const [agentSelection, setAgentSelection] = useState<{
+    readonly selection: MonacoTextSelection;
+    readonly baseline: string;
+  }>();
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const editorSave = useRef<(() => Promise<void>) | undefined>(undefined);
   const [message, setMessage] = useState<string>();
+  const [comparison, setComparison] = useState<{
+    readonly text: string;
+    readonly metadata: CodeFileMetadata;
+  }>();
   const [conflict, setConflict] = useState<"external" | "save">();
   const [reloadGeneration, setReloadGeneration] = useState(0);
   const dirtyRef = useRef(false);
@@ -180,6 +203,18 @@ function AvailableEditor(
     // external edit without the host ever seeing a conflict.
     if (dirtyRef.current && !sameRevision(metadataRef.current, props.file.metadata)) {
       setConflict("external");
+      void props.client
+        .content(props.file.content.contentId)
+        .then((bytes) => {
+          if (mounted.current && currentDebugFileKey.current === debugFileKey)
+            setComparison({
+              text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+              metadata: props.file.metadata,
+            });
+        })
+        .catch(() =>
+          setMessage("The current disk version could not be loaded. Refresh before comparing."),
+        );
       setMessage(undefined);
       return;
     }
@@ -201,6 +236,15 @@ function AvailableEditor(
         if (!mounted.current || request !== requestGeneration.current) return;
         debugLoadedFile.current = { key: debugFileKey, metadata: props.file.metadata };
         const restoredDraft = props.draftStore?.read(draftKey);
+        const baseline = props.draftStore?.read(`${draftKey}:base`);
+        if (
+          restoredDraft !== undefined &&
+          baseline !== undefined &&
+          baseline !== editorFileRevision(props.file.metadata)
+        ) {
+          setConflict("external");
+          setComparison({ text, metadata: props.file.metadata });
+        }
         const nextDraft = restoredDraft ?? text;
         const nextDirty = nextDraft !== text;
         setLoadState({ kind: "ready", text });
@@ -227,8 +271,16 @@ function AvailableEditor(
   ]);
 
   const save = useCallback(async () => {
-    if (!writable || !dirty || saving || loadState.kind !== "ready") return;
+    if (
+      !writable ||
+      draftRef.current === (loadState.kind === "ready" ? loadState.text : undefined) ||
+      savingRef.current ||
+      conflict !== undefined ||
+      loadState.kind !== "ready"
+    )
+      return;
     const savedDraft = draftRef.current;
+    savingRef.current = true;
     setSaving(true);
     setConflict(undefined);
     setMessage(undefined);
@@ -246,6 +298,7 @@ function AvailableEditor(
     } catch (error) {
       if (mounted.current) setMessage(saveFailureMessage(error));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
 
@@ -259,9 +312,17 @@ function AvailableEditor(
           const nextDirty = draftRef.current !== savedDraft;
           setDirty(nextDirty);
           dirtyRef.current = nextDirty;
-          if (nextDirty) props.draftStore?.write(draftKey, draftRef.current);
-          else props.draftStore?.clear(draftKey);
-          setMessage(nextDirty ? "Saved earlier changes. New edits remain unsaved." : "Saved");
+          if (nextDirty) {
+            props.draftStore?.write(draftKey, draftRef.current);
+            props.draftStore?.write(`${draftKey}:base`, editorFileRevision(result.metadata));
+          } else {
+            props.draftStore?.clear(draftKey);
+            props.draftStore?.clear(`${draftKey}:base`);
+          }
+          setMessage(
+            props.draftStore?.error?.() ??
+              (nextDirty ? "Saved earlier changes. New edits remain unsaved." : "Saved"),
+          );
           return;
         case "conflict":
           setConflict("save");
@@ -274,10 +335,11 @@ function AvailableEditor(
       }
     }
   }, [
+    conflict,
     dirty,
     debugFileKey,
     draftKey,
-    loadState.kind,
+    loadState,
     props.client,
     props.draftStore,
     props.file,
@@ -291,6 +353,8 @@ function AvailableEditor(
     setConflict(undefined);
     setMessage(undefined);
     props.draftStore?.clear(draftKey);
+    props.draftStore?.clear(`${draftKey}:base`);
+    setComparison(undefined);
     setReloadGeneration((value) => value + 1);
     props.onRequestRefresh?.();
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
@@ -404,6 +468,8 @@ function AvailableEditor(
   const { definition, refresh: refreshLanguage, retry: retryLanguage } = language;
   const languageBridge = useMemo<MonacoLanguageBridge>(
     () => ({
+      intelligence: (position, feature, formatting) =>
+        language.intelligence(toLanguagePosition(position), feature, formatting),
       definitions: async (position) => {
         setLanguageNotice(undefined);
         const outcome = await definition(toLanguagePosition(position));
@@ -426,7 +492,7 @@ function AvailableEditor(
         onOpenFile(link.path);
       },
     }),
-    [checkoutId, definition, onOpenFile, path, threadId],
+    [checkoutId, definition, language.intelligence, onOpenFile, path, threadId],
   );
   // A definition that opened this file asks for its place once the text is in.
   const ready = loadState.kind === "ready";
@@ -585,8 +651,8 @@ function AvailableEditor(
         {writable ? (
           <OctantButton
             aria-label={`Save ${props.file.path}`}
-            disabled={!dirty || saving || loadState.kind !== "ready"}
-            onClick={() => void save()}
+            disabled={!dirty || saving || conflict !== undefined || loadState.kind !== "ready"}
+            onClick={() => void (editorSave.current?.() ?? save())}
             size="sm"
             type="button"
             variant="secondary"
@@ -604,6 +670,66 @@ function AvailableEditor(
               : "A new external revision is available."}
           </strong>
           <p>Your draft is preserved. Reload only after deciding how to reconcile it.</p>
+          {comparison === undefined ? (
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                props.onRequestRefresh?.();
+                if (props.client.openFile === undefined) {
+                  setMessage("Refresh this file to load the current disk version.");
+                  return;
+                }
+                void props.client
+                  .openFile(props.file.threadId, props.file.checkoutId, props.file.path)
+                  .then(async (file) => {
+                    if (file.status !== "editable") throw new Error("unavailable");
+                    const bytes = await props.client.content(file.content.contentId);
+                    if (mounted.current)
+                      setComparison({
+                        text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+                        metadata: file.metadata,
+                      });
+                  })
+                  .catch(() =>
+                    setMessage(
+                      "The current disk version could not be loaded. Refresh before comparing.",
+                    ),
+                  );
+              }}
+            >
+              Compare disk and draft
+            </OctantButton>
+          ) : (
+            <>
+              <MonacoDiffAdapter
+                ariaLabel="Disk and draft comparison"
+                language={props.file.language}
+                modelUriBase={`octant-code:/conflict/${props.file.fileId}`}
+                original={comparison.text}
+                modified={draft}
+                renderSideBySide={false}
+              />
+              <OctantButton
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  metadataRef.current = comparison.metadata;
+                  setLoadState({ kind: "ready", text: comparison.text });
+                  props.draftStore?.write(
+                    `${draftKey}:base`,
+                    editorFileRevision(comparison.metadata),
+                  );
+                  setDirty(draft !== comparison.text);
+                  dirtyRef.current = draft !== comparison.text;
+                  setConflict(undefined);
+                  setComparison(undefined);
+                }}
+              >
+                Keep draft against this version
+              </OctantButton>
+            </>
+          )}
           <OctantButton onClick={discardDraftAndReload} size="sm" type="button" variant="secondary">
             Discard draft and reload
           </OctantButton>
@@ -757,8 +883,73 @@ function AvailableEditor(
               })}
         />
       )}
+      <nav aria-label="File location" className="editor-tools">
+        {props.file.path.split("/").map((part, index) => (
+          <span key={index}>
+            {index > 0 ? "/ " : ""}
+            {part}
+          </span>
+        ))}
+      </nav>
+      {language.diagnostics === undefined ? null : (
+        <details className="code-editor-pane__references">
+          <summary>
+            Problems ({language.diagnostics.filter((item) => item.path === path).length})
+          </summary>
+          {language.diagnostics.filter((item) => item.path === path).length === 0 ? (
+            <p>No problems reported for this file</p>
+          ) : (
+            <ul>
+              {language.diagnostics
+                .filter((item) => item.path === path)
+                .map((diagnostic, index) => (
+                  <li key={index}>
+                    <OctantButton
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setReveal({ range: toEditorRange(diagnostic.range) })}
+                    >
+                      {diagnostic.range.start.line + 1}: {diagnostic.message}
+                    </OctantButton>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </details>
+      )}
       {breakpointNotice === undefined ? null : <p role="status">{breakpointNotice}</p>}
 
+      {agentSelection === undefined ? null : (
+        <CodeSelectionReview
+          selection={agentSelection.selection}
+          baseline={agentSelection.baseline}
+          currentText={draft}
+          {...(props.agentResponse === undefined ? {} : { response: props.agentResponse })}
+          language={props.file.language}
+          modelUri={modelUri(props.file.checkoutId, props.file.fileId)}
+          readOnly={!writable}
+          onClose={() => setAgentSelection(undefined)}
+          onApply={(text) => {
+            setDraft(text);
+            draftRef.current = text;
+            const dirty = loadState.kind === "ready" && text !== loadState.text;
+            setDirty(dirty);
+            dirtyRef.current = dirty;
+            if (dirty) {
+              props.draftStore?.write(draftKey, text);
+              if (props.draftStore?.read(`${draftKey}:base`) === undefined)
+                props.draftStore?.write(
+                  `${draftKey}:base`,
+                  editorFileRevision(metadataRef.current),
+                );
+            } else {
+              props.draftStore?.clear(draftKey);
+              props.draftStore?.clear(`${draftKey}:base`);
+            }
+            setAgentSelection(undefined);
+          }}
+        />
+      )}
       {loadState.kind === "loading" ? <p role="status">Loading file…</p> : null}
       {loadState.kind === "unavailable" ? (
         <OctantAlert tone="warning">{loadState.message}</OctantAlert>
@@ -766,6 +957,14 @@ function AvailableEditor(
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
           ariaLabel={`Editor for ${props.file.path}`}
+          {...(props.onAddSelectionToChat === undefined
+            ? {}
+            : {
+                onAddSelectionToChat: (selection: MonacoTextSelection) => {
+                  setAgentSelection({ selection, baseline: draftRef.current });
+                  props.onAddSelectionToChat?.(selectionPrompt(props.file.path, selection));
+                },
+              })}
           viewState={savedView?.kind === "editor" ? savedView : undefined}
           {...(viewStore === undefined
             ? {}
@@ -794,11 +993,23 @@ function AvailableEditor(
             const nextDirty = value !== loadState.text;
             setDirty(nextDirty);
             dirtyRef.current = nextDirty;
-            if (nextDirty) props.draftStore?.write(draftKey, value);
-            else props.draftStore?.clear(draftKey);
-            setMessage(undefined);
+            if (nextDirty) {
+              props.draftStore?.write(draftKey, value);
+              if (props.draftStore?.read(`${draftKey}:base`) === undefined)
+                props.draftStore?.write(
+                  `${draftKey}:base`,
+                  editorFileRevision(metadataRef.current),
+                );
+            } else {
+              props.draftStore?.clear(draftKey);
+              props.draftStore?.clear(`${draftKey}:base`);
+            }
+            setMessage(props.draftStore?.error?.());
           }}
-          {...(writable ? { onSave: () => void save() } : {})}
+          {...(writable ? { onSave: save } : {})}
+          onReadySave={(save) => {
+            editorSave.current = save;
+          }}
           debugDecorations={debugDecorations}
           onToggleBreakpoint={toggleBreakpoint}
           readOnly={!writable}
@@ -883,4 +1094,8 @@ function saveFailureMessage(error: unknown): string {
     return "Code save is unavailable. Your draft remains in this editor; restore Code authority and retry save.";
   }
   return safeMessage(error, "Code file save failed.");
+}
+
+function editorFileRevision(metadata: CodeFileMetadata): string {
+  return JSON.stringify([metadata.identity.device, metadata.identity.inode, metadata.digest]);
 }

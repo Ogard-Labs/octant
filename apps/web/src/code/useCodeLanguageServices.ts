@@ -1,3 +1,7 @@
+import type {
+  CodeIntelligenceFeature,
+  CodeIntelligenceAnswer,
+} from "@octant/contracts/code-language";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutId,
@@ -68,7 +72,23 @@ type EditQuery =
   | { readonly kind: "rename"; readonly newName: string }
   | { readonly kind: "quick-fixes" };
 
+type CompanionQuery =
+  | EditQuery
+  | {
+      readonly kind: "intelligence";
+      readonly feature: CodeIntelligenceFeature;
+      readonly formatting?: { readonly tabSize: number; readonly insertSpaces: boolean };
+    };
+type CompanionOutcome =
+  | CodeLanguageReferencesOutcome
+  | CodeLanguageEditOutcome
+  | CodeIntelligenceAnswer;
 export interface CodeLanguageServices {
+  readonly intelligence: (
+    position: CodeLanguagePosition,
+    feature: CodeIntelligenceFeature,
+    formatting?: { readonly tabSize: number; readonly insertSpaces: boolean },
+  ) => Promise<CodeIntelligenceAnswer | undefined>;
   readonly prepareEdits: (
     position: CodeLanguagePosition,
     query: EditQuery,
@@ -437,8 +457,8 @@ export function useCodeLanguageServices(
   const queryCompanion = useCallback(
     async (
       position: CodeLanguagePosition,
-      query?: EditQuery,
-    ): Promise<CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined> => {
+      query?: CompanionQuery,
+    ): Promise<CompanionOutcome | undefined> => {
       const unavailable = (message: string): CodeLanguageReferencesOutcome => ({
         status: "unavailable",
         message,
@@ -510,9 +530,7 @@ export function useCodeLanguageServices(
             : unavailable(
                 "References are not available from this host. Retry or open this file externally.",
               );
-      const operation = async (): Promise<
-        CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined
-      > => {
+      const operation = async (): Promise<CompanionOutcome | undefined> => {
         const support = await read(
           { kind: "capabilities", threadId, checkoutId, fileId: opened },
           controller.signal,
@@ -521,11 +539,15 @@ export function useCodeLanguageServices(
         if (support.status !== "capabilities" || !matches(support)) return unanswered(support);
         const capability = query?.kind ?? "references";
         const available =
-          query?.kind === "rename"
-            ? (support.rename ?? "unknown")
-            : query?.kind === "quick-fixes"
-              ? (support.quickFixes ?? "unknown")
-              : support.references;
+          query?.kind === "intelligence"
+            ? support.intelligence?.includes(query.feature)
+              ? "supported"
+              : "unsupported"
+            : query?.kind === "rename"
+              ? (support.rename ?? "unknown")
+              : query?.kind === "quick-fixes"
+                ? (support.quickFixes ?? "unknown")
+                : support.references;
         if (available !== "supported")
           return { status: "unsupported", capability, support: available };
         // This is an acknowledgement of the person's current draft, not a save.
@@ -602,7 +624,11 @@ export function useCodeLanguageServices(
         if (!current()) return stopped();
         if (answer.status === "unsupported") return answer;
         if (answer.status === "edit-unavailable") return answer;
-        if (answer.status !== "references" && answer.status !== "edit-previews")
+        if (
+          answer.status !== "references" &&
+          answer.status !== "edit-previews" &&
+          answer.status !== "intelligence"
+        )
           return unanswered(answer);
         if (
           !matches(answer) ||
@@ -624,16 +650,14 @@ export function useCodeLanguageServices(
                 )
               : stopped(),
           ),
-          new Promise<CodeLanguageReferencesOutcome | CodeLanguageEditOutcome | undefined>(
-            (resolve) => {
-              controller.signal.addEventListener(
-                "abort",
-                () => resolve(live() ? timedOut : undefined),
-                { once: true },
-              );
-              timer = setTimeout(() => controller.abort(), 15000);
-            },
-          ),
+          new Promise<CompanionOutcome | undefined>((resolve) => {
+            controller.signal.addEventListener(
+              "abort",
+              () => resolve(live() ? timedOut : undefined),
+              { once: true },
+            );
+            timer = setTimeout(() => controller.abort(), 15000);
+          }),
         ]);
         return current() ? answer : stopped();
       } finally {
@@ -648,7 +672,9 @@ export function useCodeLanguageServices(
   const references = useCallback(
     async (position: CodeLanguagePosition): Promise<CodeLanguageReferencesOutcome | undefined> => {
       const answer = await queryCompanion(position);
-      return answer?.status === "edit-previews" || answer?.status === "edit-unavailable"
+      return answer?.status === "edit-previews" ||
+        answer?.status === "edit-unavailable" ||
+        answer?.status === "intelligence"
         ? undefined
         : answer;
     },
@@ -660,7 +686,25 @@ export function useCodeLanguageServices(
       query: EditQuery,
     ): Promise<CodeLanguageEditOutcome | undefined> => {
       const answer = await queryCompanion(position, query);
-      return answer?.status === "references" ? undefined : answer;
+      return answer?.status === "references" || answer?.status === "intelligence"
+        ? undefined
+        : answer;
+    },
+    [queryCompanion],
+  );
+
+  const intelligence = useCallback(
+    async (
+      position: CodeLanguagePosition,
+      feature: CodeIntelligenceFeature,
+      formatting?: { readonly tabSize: number; readonly insertSpaces: boolean },
+    ) => {
+      const answer = await queryCompanion(position, {
+        kind: "intelligence",
+        feature,
+        ...(formatting === undefined ? {} : { formatting }),
+      });
+      return answer?.status === "intelligence" && answer.feature === feature ? answer : undefined;
     },
     [queryCompanion],
   );
@@ -699,6 +743,7 @@ export function useCodeLanguageServices(
     definition,
     references,
     prepareEdits,
+    intelligence,
     cancelReferences,
     retry,
     refresh,
