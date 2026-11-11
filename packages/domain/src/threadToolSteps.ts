@@ -3,6 +3,7 @@ import {
   MAX_THREAD_TOOL_STEPS_PER_TURN,
   type ProviderRuntimeEvent,
   type ShieldDecision,
+  type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
   type ThreadToolStep,
   type ThreadToolStepList,
@@ -89,6 +90,7 @@ export function recordThreadToolStep(
         ...(previous?.outsideContent === undefined
           ? {}
           : { outsideContent: previous.outsideContent }),
+        ...(previous?.routine === undefined ? {} : { routine: previous.routine }),
       };
       break;
     }
@@ -106,6 +108,7 @@ export function recordThreadToolStep(
         ...(previous?.outsideContent === undefined
           ? {}
           : { outsideContent: previous.outsideContent }),
+        ...(previous?.routine === undefined ? {} : { routine: previous.routine }),
       };
       break;
     }
@@ -156,6 +159,44 @@ export function markThreadToolStepOutsideContent(
           outsideContent,
         }
       : { ...previous, outsideContent };
+  const nextSteps = steps.slice();
+  if (index === -1) nextSteps.push(next);
+  else nextSteps[index] = next;
+  return { steps: nextSteps, truncated: current?.truncated === true };
+}
+
+/**
+ * Puts the routine a tool call created on that call's step, so the transcript
+ * can show what was set up. A call with no step yet gets a completed one, since
+ * a tool Octant ran for the turn announces no start. A later progress or
+ * success event keeps the receipt. Returns the same value when the step
+ * already carries it.
+ */
+export function markThreadToolStepRoutine(
+  current: ThreadToolSteps | undefined,
+  call: {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly routine: ThreadRoutineReceipt;
+  },
+): ThreadToolSteps | undefined {
+  const steps = current?.steps ?? [];
+  const toolCallId = boundedIdentifier(call.toolCallId);
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+  const previous = index === -1 ? undefined : steps[index];
+  if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+    return current?.truncated === true ? current : { steps, truncated: true };
+  }
+  if (previous?.routine?.routineId === call.routine.routineId) return current;
+  const next: ThreadToolStep =
+    previous === undefined
+      ? {
+          toolCallId,
+          toolName: boundedIdentifier(call.toolName),
+          state: "completed",
+          routine: call.routine,
+        }
+      : { ...previous, routine: call.routine };
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);
   else nextSteps[index] = next;

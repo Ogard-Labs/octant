@@ -809,7 +809,7 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 16, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 17, blocks: [] }),
     ).toThrow();
   });
 
@@ -847,6 +847,53 @@ describe("Canvas share contracts", () => {
         decodeCanvasStaticExportDocument({ ...document, schemaVersion: 10, blocks: [block] }),
       ).toThrow();
     }
+  });
+
+  it("carries a choice's questions from share version 16, refuses it earlier, and refuses secret-bearing option text", () => {
+    const choice = {
+      blockId: "pick",
+      schemaVersion: 27,
+      kind: "choice",
+      prompt: "Which rollout?",
+      questions: [
+        {
+          id: "rollout",
+          prompt: "Rollout",
+          selection: "single",
+          options: [
+            { id: "staged", label: "Staged" },
+            { id: "all", label: "All at once" },
+          ],
+        },
+      ],
+    };
+    const shared = decodeCanvasStaticExportDocument({
+      ...document,
+      schemaVersion: 16,
+      blocks: [choice],
+    });
+    expect(shared.blocks).toEqual([choice]);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 15, blocks: [choice] }),
+    ).toThrow();
+    const [question] = choice.questions;
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...document,
+        schemaVersion: 16,
+        blocks: [
+          {
+            ...choice,
+            questions: [
+              {
+                ...question,
+                options: [{ id: "k", label: "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it("carries a flow from share version 12 and refuses it under an earlier one", () => {

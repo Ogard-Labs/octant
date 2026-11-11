@@ -328,6 +328,7 @@ describe("createCanvasAgentTools", () => {
     ["diagram", "terminator (a pill)"],
     ["diagram", "left to right"],
     ["design", "32px"],
+    ["choice", "their own next message in this thread"],
     ["design", "header, hero, features"],
     ["code-excerpt", "language mermaid"],
   ])(

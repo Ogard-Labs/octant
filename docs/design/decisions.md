@@ -33,11 +33,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 8         | 2       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 7       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 15        | 13      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 14      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
+| [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **194** | **32**       | **4**               |
+| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -474,6 +474,18 @@ The host watches its own size and the system's memory pressure and eases itself 
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
+### Other agents start work through the local CLI
+
+Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
+
+- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
+- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access, and adds a folder as a Project only when the call says the person asked to work there.
+- Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
+- `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.
+- Remote callers have no path here; a scoped grant for a bot on another machine would be its own decision.
+
+Status: Built. Since: 2026-11-11. Detail: [Architecture: Native harness, scripted callers and other agents](../architecture.md#native-harness).
+
 ## App-managed tools
 
 ### Tool families and transport
@@ -569,6 +581,7 @@ Apple development is simulator-only. Physical devices and store upload, submissi
 - Journals with earlier device or distribution validation events replay unchanged; leftover files and the stored store key are left in place and nothing reads them.
 - Apple discovery is derived and refreshable from the checkout; Octant never rewrites projects, schemes, build settings or manifests to make discovery pass. _Here only._
 - A test run preserves its result bundle and logs as evidence and reports a structured verdict. If parsing fails it keeps the raw artifact and reports the verdict incomplete. _Here only._
+- A build's derived data is private to its action and removed when the action ends; a test run's result bundle is kept as its artifact first, and the host clears any leftover derived data at start (maintainer request, 2026-11-10). _Here only._
 - After a restart, ambiguous device work is waiting or inconclusive, never verified. _Here only._
 
 Status: Built. Since: 2026-10-29. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence) and [Device workbench](device-workbench.md).
@@ -614,6 +627,17 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Projects pinned to the icon rail
+
+A person can pin a Project to the icon rail, and a pinned Project is a tile that opens it.
+
+- Pin and unpin are in the Project's own menu in the sidebar ("Pin to rail", "Unpin from rail") and in the context menu of the pinned tile; More never lists them, because it holds only the destinations the rail does not.
+- Pins are a saved shell preference stored and synced like the sidebar destinations, by Project id, in the order pinned. Settings saved before pins decode to none; a pin for a Project that no longer exists draws nothing and is dropped the next time pins are saved, but only once the Project list is loaded and complete; two quick pin actions both land.
+- A pinned tile shows in both rail placements, after the divider under the destinations. In the collapsed rail the pinned Projects come first and the automatic list fills what is left of six tiles without repeating one; the rail draws at most six pinned tiles so Settings and the usage rings stay in the window, and Pin to rail is disabled with its reason once six are pinned.
+- Opening a pinned tile is the same action as opening that Project anywhere else; pinning grants nothing.
+
+Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Project icons
 
@@ -687,7 +711,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A repository is identified by an opaque digest of its canonical Git common directory, not a path. File, terminal, test and Git operations are server-owned services; panes are clients, never owners.
 
-- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset, pruned or reused. _Here only._
+- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
+- Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
@@ -859,9 +884,10 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
 - A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
-- The wake switches (never the role) may also be set from an owner device through the owner routes, each change under its own fresh unlock and journaled as that device; no owner-device screen calls them yet.
+- The wake switches (never the role) may also be set from an owner device through the owner routes and the owner access recovery screen on the phone and in a browser, each change under its own fresh unlock and journaled as that device.
+- A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; paired browsers and phones show pending proposals read-only, and approval stays at a local window.
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
-- Wake, start and hop counts are held in host memory; a restart starts them again.
+- Wake, start and hop counts are kept in a host store (forward-only migration), so the hourly bounds and the hop count hold across a restart; the start count never reads fewer than the workers created in the last hour.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
 - A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
@@ -955,7 +981,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -2365,7 +2391,7 @@ Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#too
 
 ### Routines and subagents
 
-Agents may propose routines and delegate work, but only a person creates a routine, and only the thread's agent starts a subagent.
+Agents may propose routines and delegate work, but a routine exists only through a person's confirmation or request (created paused, so it runs only once the person enables it), and only the thread's agent starts a subagent.
 
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
@@ -2432,6 +2458,7 @@ Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#
 Waiting requests appear on several surfaces from one host list, at a local window only.
 
 - The start screen, board cards, palette, Inbox and Review page read the same list and answer through the mode's own command.
+- The Inbox page is raised cards in one 980px column, with its state in one line beside the title; see [Inbox page](workspace.md#inbox-page).
 - A remote window has no source. The desktop menu bar lists waiting threads but only opens them.
 
 Status: Built. Since: —. Detail: [Start screen: Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
@@ -2490,6 +2517,18 @@ Diagram and flow boards are editable by a local person, and comments are journal
 - A drawn mark (an area, a pen line, a pinned note) is a comment's anchor and never an object of its own, so it follows the comment rules and adds no aggregate, command or route. A pen line is a `stroke` anchor of 2 to 128 points bounded to the block's box; a note is a `region` of no size. A build older than the `stroke` kind cannot read a comment that carries one.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
+
+### Choices answered in a Canvas
+
+A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
+
+- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
+- The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
+- Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.
+- HTML design frames gain no submission ability.
+
+Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choice-block).
 
 ### Canvas shares and exports
 
@@ -3087,6 +3126,7 @@ A Code thread's editor gets diagnostics and go-to-definition from separately lau
 - Paired devices may read results; starting a `repo-tooling` server stays local-host only.
 - Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that never starts or reads through a `repo-tooling` server (real-provider smoke owed).
 - `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places, `references` and `diagnostics` stop before their list passes 48 KiB so a result fits the provider's tool result budget, and each says when it was cut.
+- The editor's acknowledged-document read seam also serves capability-checked completion, hover, signatures, symbols and formatting; replies contain bounded text and ranges, never server commands or edits to other files. Shared Work/Code editing, recovery, conflict comparison, reviewed replacements and selection-to-agent drafts follow [Workspace: File editing](workspace.md#file-editing).
 - Octant hosts no other editor's extension API.
 
 Status: Built. Since: 2026-10-26. Detail: [Language services: launch classes](language-services.md#launch-classes), [authority](language-services.md#authority) and [maintainer decisions](language-services.md#maintainer-decisions).

@@ -8,6 +8,7 @@ let AppleRuntimeStore: new (root: string) => {
   readArtifact(reference: string): Promise<Uint8Array | undefined>;
   persistReceipts(receipts: ReadonlyArray<Record<string, unknown>>): Promise<void>;
   loadReceipts(): Promise<ReadonlyArray<Record<string, unknown>>>;
+  removeLeftoverBuildData(): Promise<void>;
 };
 
 beforeAll(async () => {
@@ -19,6 +20,26 @@ beforeAll(async () => {
 });
 
 describe("AppleRuntimeStore", () => {
+  it("clears build trees a stopped host left behind and keeps the action logs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-apple-store-"));
+    try {
+      const store = new AppleRuntimeStore(root);
+      await store.writeArtifact("apple-log-kept", new TextEncoder().encode("log"));
+      const leftover = join(root, "artifacts", "derived-70000000-0000-4000-8000-000000000001");
+      await mkdir(join(leftover, "Build", "Products"), { recursive: true });
+      await writeFile(join(leftover, "Build", "Products", "Fixture.app"), "binary");
+
+      await store.removeLeftoverBuildData();
+
+      await expect(readFile(join(leftover, "Build", "Products", "Fixture.app"))).rejects.toThrow();
+      await expect(store.readArtifact("apple-log-kept")).resolves.toEqual(
+        new TextEncoder().encode("log"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("persists opaque artifacts and restart receipts without private paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-apple-store-"));
     try {

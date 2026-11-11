@@ -49,7 +49,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // literal set names each earlier version explicitly and ends at the current
 // one, so a future bump cannot silently drop an intermediate version from the
 // set that decodes.
-export const CANVAS_SCHEMA_VERSION = 26 as const;
+export const CANVAS_SCHEMA_VERSION = 27 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -76,6 +76,7 @@ export const CanvasSchemaVersion = Schema.Literal(
   23,
   24,
   25,
+  26,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;

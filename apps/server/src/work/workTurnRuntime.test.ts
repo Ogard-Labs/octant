@@ -1144,6 +1144,91 @@ describe("WorkTurnRuntime", () => {
     );
   });
 
+  it("records the routine an app-managed call created on that call's tool step", async () => {
+    const routine = {
+      routineId: "20000000-0000-4000-8000-0000000000a1",
+      name: "Daily summary",
+      trigger: { kind: "once", scheduledAt: "2026-11-12T09:00:00.000Z" },
+      firstRunAt: "2026-11-12T09:00:00.000Z",
+      paused: true,
+    } as const;
+    const stepUpdates: Array<unknown> = [];
+    const answerTool = vi.fn(() => Effect.void);
+    const execute = vi.fn(async () => {
+      return { result: { status: "created" }, routine: routine as never } as const;
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            instanceId: ids.provider,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+            kind: "tool-request",
+            sessionId: ids.session as never,
+            requestId: "work-tool-1",
+            toolName: "octant_propose_routine",
+            inputJson: "{}",
+          });
+          yield* Queue.offer(queue, {
+            instanceId: ids.provider,
+            sequence: 2,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
+            kind: "completed",
+            sessionId: ids.session as never,
+          });
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool,
+    };
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () => Effect.succeed(connection),
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+      onToolSteps: (steps) => stepUpdates.push(steps),
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the Work tool",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "octant_propose_routine", inputSchema: { type: "object" } }],
+        execute,
+      },
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+    expect(stepUpdates.at(-1)).toMatchObject({
+      steps: [{ toolCallId: "work-tool-1", state: "completed", routine }],
+    });
+  });
+
   it("clears the retry notice when the retried response only calls a tool", async () => {
     const seen: string[] = [];
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());

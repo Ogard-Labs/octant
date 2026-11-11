@@ -9,6 +9,7 @@ import {
   OWNER_UNLOCK_HEADER,
   decodeNewMemberConfirmation,
   decodeOwnerPostureChangeRequest,
+  decodeOwnerThreadWakeChangeRequest,
   type HubMemberId,
   type NewMemberAlert,
   type NewMemberAlertId,
@@ -709,6 +710,41 @@ describe("owner client unlock session", () => {
     expect(changes[0]?.headers.get(OWNER_SESSION_HEADER)).toBe(SESSION_ID);
     expect(changes[1]?.headers.get(OWNER_SESSION_HEADER)).toBeNull();
     expect(changes[1]?.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
+  });
+
+  it("reads wake switches under the session but asks its own unlock for every wake change", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+    await client.openSession();
+    const threadId = "77777777-7777-4777-8777-777777777777";
+
+    await client.readThreadWake(threadId);
+    expect(unlock.sessions.opened).toBe(1);
+    const change = decodeOwnerThreadWakeChangeRequest({
+      threadId,
+      expectedVersion: "a".repeat(64),
+      switch: "message-wake",
+      wake: true,
+    });
+    await client.changeThreadWake(change);
+    await client.changeThreadWake(change);
+
+    expect(unlock.sessions.opened).toBe(3);
+    const read = host.requests.find(
+      (request) => request.path === "/api/hub/owner/code-threads/wake/read",
+    );
+    expect(read?.headers.get(OWNER_SESSION_HEADER)).toBe(SESSION_ID);
+    const changes = host.requests.filter(
+      (request) => request.path === "/api/hub/owner/code-threads/wake/change",
+    );
+    expect(changes).toHaveLength(2);
+    for (const sent of changes) {
+      expect(sent.headers.get(OWNER_SESSION_HEADER)).toBeNull();
+      expect(sent.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
+    }
   });
 
   it("falls back to a fresh unlock when the host ended the session, and forgets it", async () => {

@@ -27,11 +27,14 @@ import { liveWorkFileWatchPort } from "../work/workFileWatchPort";
 import type { HarnessWiring } from "./harness";
 import {
   AutomationDefinitionSnapshot,
+  decodeAutomationCommand,
+  decodeAutomationId,
   decodeAutomationRunId,
   decodeAgentRunParentThreadId,
   type CapacityReservationId,
   type AutomationRun,
   type CodeThreadId,
+  type RoutineProposal,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
@@ -821,7 +824,11 @@ export function wireAutomation(deps: AutomationDependencies) {
       now: Date.now,
     };
     return combineAppManagedToolSets(
-      createRoutineProposalTools({ ...turn, proposals: routineProposalService }),
+      createRoutineProposalTools({
+        ...turn,
+        proposals: routineProposalService,
+        readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
+      }),
       createRoutineTools({
         ...turn,
         readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
@@ -837,6 +844,69 @@ export function wireAutomation(deps: AutomationDependencies) {
       }),
     );
   });
+  const draftThreadRoutine = (proposal: RoutineProposal) =>
+    buildThreadRoutineDraft(
+      {
+        hostId: String(LOCAL_HOST_ID),
+        actorId: OCTANT_LOCAL_ACTOR_ID,
+        readThread: (mode, threadId) => {
+          if (mode === "work") {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            return thread === undefined
+              ? undefined
+              : {
+                  projectId: String(thread.projectId),
+                  active: thread.lifecycle === "active",
+                  providerInstanceId: String(thread.providerInstanceId),
+                  modelId: String(thread.modelId),
+                };
+          }
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined
+            ? undefined
+            : {
+                projectId: String(thread.projectId),
+                active: thread.lifecycle !== "archived",
+                providerInstanceId: String(thread.providerInstanceId),
+                modelId: String(thread.modelId),
+                permissionPersistence: thread.permissionPersistence,
+                ...(thread.profileId === undefined ? {} : { profileId: String(thread.profileId) }),
+                checkout: {
+                  repositoryId: String(thread.repositoryId),
+                  checkoutId: String(thread.checkoutId),
+                },
+              };
+        },
+        readProject: (projectId) => {
+          const project = persistence.readProject(projectId as never);
+          if (project === undefined || (project.type !== "work" && project.type !== "code")) {
+            return undefined;
+          }
+          return {
+            name: project.name,
+            mode: project.type,
+            active: project.lifecycle === "active",
+            version: project.version,
+            bindingRevisionId:
+              project.bindingHistory.at(-1)?.revisionId === undefined
+                ? undefined
+                : String(project.bindingHistory.at(-1)?.revisionId),
+          };
+        },
+        checkoutAvailable: (checkoutId, repositoryId) => {
+          const checkout = persistence.readCodeCheckout(checkoutId as never);
+          return (
+            checkout !== undefined &&
+            checkout.availability === "available" &&
+            String(checkout.repositoryId) === repositoryId
+          );
+        },
+        profiles: () => persistence.readAgentProfiles(),
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      },
+      proposal,
+    );
   const automationRoutes = createAutomationRouteHandler({
     eventSourceChoices: integrationEventSources.choices,
     prepareEventSource: ({ command, current, signal }) => {
@@ -905,72 +975,45 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
     proposals: {
       service: routineProposalService,
-      draft: (proposal) =>
-        buildThreadRoutineDraft(
-          {
-            hostId: String(LOCAL_HOST_ID),
-            actorId: OCTANT_LOCAL_ACTOR_ID,
-            readThread: (mode, threadId) => {
-              if (mode === "work") {
-                const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
-                return thread === undefined
-                  ? undefined
-                  : {
-                      projectId: String(thread.projectId),
-                      active: thread.lifecycle === "active",
-                      providerInstanceId: String(thread.providerInstanceId),
-                      modelId: String(thread.modelId),
-                    };
-              }
-              const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-              return thread === undefined
-                ? undefined
-                : {
-                    projectId: String(thread.projectId),
-                    active: thread.lifecycle !== "archived",
-                    providerInstanceId: String(thread.providerInstanceId),
-                    modelId: String(thread.modelId),
-                    permissionPersistence: thread.permissionPersistence,
-                    ...(thread.profileId === undefined
-                      ? {}
-                      : { profileId: String(thread.profileId) }),
-                    checkout: {
-                      repositoryId: String(thread.repositoryId),
-                      checkoutId: String(thread.checkoutId),
-                    },
-                  };
-            },
-            readProject: (projectId) => {
-              const project = persistence.readProject(projectId as never);
-              if (project === undefined || (project.type !== "work" && project.type !== "code")) {
-                return undefined;
-              }
-              return {
-                name: project.name,
-                mode: project.type,
-                active: project.lifecycle === "active",
-                version: project.version,
-                bindingRevisionId:
-                  project.bindingHistory.at(-1)?.revisionId === undefined
-                    ? undefined
-                    : String(project.bindingHistory.at(-1)?.revisionId),
-              };
-            },
-            checkoutAvailable: (checkoutId, repositoryId) => {
-              const checkout = persistence.readCodeCheckout(checkoutId as never);
-              return (
-                checkout !== undefined &&
-                checkout.availability === "available" &&
-                String(checkout.repositoryId) === repositoryId
-              );
-            },
-            profiles: () => persistence.readAgentProfiles(),
-            uuid: randomUUID,
-            clock: () => new Date().toISOString(),
-          },
-          proposal,
-        ),
+      draft: draftThreadRoutine,
     },
+  });
+  // A routine the person asked a thread for is created at once, paused, as
+  // that window's principal through the same draft and command path a
+  // confirmed card takes, so only the card and the pause differ.
+  routineProposalService.bindRequestedCreate(({ windowId, proposal }) => {
+    if (!automationHistoryAvailable) {
+      return {
+        status: "not-created",
+        message: "Automation history could not be loaded, so Automations cannot change.",
+      };
+    }
+    const built = draftThreadRoutine(proposal);
+    if (built.status === "refused") return { status: "not-created", message: built.message };
+    const created = automationCommandService.execute(
+      decodeAutomationCommand({
+        kind: "create-automation",
+        automationId: decodeAutomationId(randomUUID()),
+        expectedVersion: 0,
+        principal: { kind: "local-window", windowId: String(windowId), capabilityGeneration: 0 },
+        origin: { kind: "interactive" },
+        definition: built.draft,
+        // Paused in its first journaled event, so nothing runs before the
+        // person enables it.
+        initialLifecycle: "paused",
+      }),
+      { originThreadId: proposal.threadId },
+    );
+    automationScheduler.poke();
+    return created.kind === "automation-created"
+      ? { status: "created", automationId: created.automation.id }
+      : {
+          status: "not-created",
+          message:
+            created.kind === "automation-command-failed"
+              ? created.message
+              : "The routine was not created.",
+        };
   });
   return {
     automationCommandService,

@@ -128,6 +128,11 @@ export interface CodeComposerAdapterProps {
   readonly baseBranch?: string;
   /** The mode the new thread starts in: the Project's, else Settings'. */
   readonly defaultPermissionMode: PermissionMode;
+  /**
+   * The modes this creation may offer, in picker order; all of them when
+   * absent. A coordinator's proposal limits them to its requested level.
+   */
+  readonly permissionModes?: ReadonlyArray<PermissionMode>;
   readonly defaultPermissionPersistence: PermissionPersistence;
   readonly onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Whether the selected provider has a reviewer of its own, so Auto applies. */
@@ -381,9 +386,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: (next) => setPrompt(next),
     attachDroppedThread: threadMentions.attachDroppedThread,
   });
-  const [permissionMode, setPermissionMode] = useState(
-    storedCheckout?.permissionMode ?? props.defaultPermissionMode,
-  );
+  const [permissionMode, setPermissionMode] = useState(() => {
+    const stored = storedCheckout?.permissionMode;
+    // A remembered draft mode never reaches above the modes this creation offers.
+    return stored !== undefined &&
+      (props.permissionModes === undefined || props.permissionModes.includes(stored))
+      ? stored
+      : props.defaultPermissionMode;
+  });
   const [permissionPersistence] = useState(
     storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
@@ -983,6 +993,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       props.onPermissionModeChange?.(next);
                     }}
                     value={permissionMode}
+                    {...(props.permissionModes === undefined
+                      ? {}
+                      : { modes: props.permissionModes })}
                     warningScope={
                       props.projectId === undefined
                         ? "machine"

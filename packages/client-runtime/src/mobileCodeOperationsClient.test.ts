@@ -3,6 +3,7 @@ import { MAX_CODE_EVIDENCE_BATCH_ITEMS } from "@octant/contracts";
 import {
   MOBILE_CODE_CONVERSATION_TURNS,
   loadMobileCodeConversation,
+  loadMobileCoordinatorProposals,
   loadMobilePullRequestMergeState,
   mergeMobilePullRequest,
   setMobileMergeWhenReady,
@@ -288,7 +289,10 @@ describe("mobile Code follow-through", () => {
     updatedAt: now,
   };
 
-  function transport(requests: Array<{ method: string; path: string; body?: string }>) {
+  function transport(
+    requests: Array<{ method: string; path: string; body?: string }>,
+    turnFields: Record<string, unknown> = {},
+  ) {
     const fetch = vi.fn(
       async (input: { method: string; path: string; query?: string; body?: string }) => {
         requests.push(input);
@@ -321,6 +325,7 @@ describe("mobile Code follow-through", () => {
                 status: "completed",
                 startedAt: now,
                 updatedAt: now,
+                ...turnFields,
               },
             ],
             hasEarlier: false,
@@ -369,11 +374,38 @@ describe("mobile Code follow-through", () => {
           status: "completed",
           prompt: "Fix the test",
           assistant: ["Done: the test now passes."],
+          routines: [],
           updatedAt: now,
         },
       ],
       hasEarlier: false,
     });
+  });
+
+  it("carries the routine a turn's tool call created, so the phone can show the same receipt", async () => {
+    const routine = {
+      routineId: "20000000-0000-4000-8000-0000000000a1",
+      name: "Daily summary",
+      trigger: { kind: "once", scheduledAt: "2026-11-12T09:00:00.000Z" },
+      firstRunAt: "2026-11-12T09:00:00.000Z",
+      paused: true,
+    };
+    const conversation = await loadMobileCodeConversation(
+      transport([], {
+        steps: [
+          { kind: "tool", toolCallId: "a", toolName: "Read", state: "completed" },
+          {
+            kind: "tool",
+            toolCallId: "b",
+            toolName: "octant_propose_routine",
+            state: "completed",
+            routine,
+          },
+        ],
+      }),
+      threadId,
+    );
+    expect(conversation.turns[0]?.routines).toEqual([routine]);
   });
 
   it("reads a Code conversation whose answer carries fields this build does not know", async () => {
@@ -404,6 +436,7 @@ describe("mobile Code follow-through", () => {
           status: "completed",
           prompt: "Fix the test",
           assistant: ["Done: the test now passes."],
+          routines: [],
           updatedAt: now,
         },
       ],
@@ -540,6 +573,7 @@ describe("mobile Code follow-through", () => {
           status: "completed",
           prompt: "Fix the test",
           assistant: assistant.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - 1).map((part) => part.text),
+          routines: [],
           updatedAt: now,
         },
       ],
@@ -719,5 +753,50 @@ describe("mobile Code follow-through", () => {
       kind: "start-provider-turn",
       attachmentIds: [photoId],
     });
+  });
+});
+
+describe("a coordinator's proposals on a paired phone", () => {
+  it("reads only the coordinator's own pending proposals from the planner view", async () => {
+    const projectId = "20000000-0000-4000-8000-000000000001";
+    const coordinatorId = "84000000-0000-4000-8000-000000000009";
+    const proposal = (id: string, overrides: Record<string, unknown> = {}) => ({
+      proposal: {
+        id: `70000000-0000-4000-8000-0000000001${id}`,
+        projectId,
+        plannerThreadId: coordinatorId,
+        fromCoordinator: true,
+        title: `Worker ${id}`,
+        intent: "Do it.",
+        status: "pending",
+        proposedAt: "2026-11-10T00:00:00.000Z",
+        ...overrides,
+      },
+      proposalVersion: 1,
+    });
+    const paths: string[] = [];
+    const transport: MobileRemoteTransport = {
+      hostId: "host-1",
+      authenticatedFetch: (async ({ method, path }: { method: string; path: string }) => {
+        paths.push(`${method} ${path}`);
+        return jsonResponse({
+          designation: { kind: "none", projectId, updatedAt: "2026-11-10T00:00:00.000Z" },
+          designationVersion: 0,
+          proposals: [
+            proposal("01"),
+            proposal("02", { plannerThreadId: threadId }),
+            proposal("03", { fromCoordinator: undefined }),
+          ],
+        });
+      }) as MobileRemoteTransport["authenticatedFetch"],
+    };
+
+    const proposals = await loadMobileCoordinatorProposals(transport, {
+      id: coordinatorId as never,
+      projectId: projectId as never,
+    });
+
+    expect(paths).toEqual([`GET /api/code/planner/${projectId}`]);
+    expect(proposals.map((entry) => entry.title)).toEqual(["Worker 01"]);
   });
 });

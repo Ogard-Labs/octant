@@ -1,7 +1,7 @@
 # Language services and debugging companion
 
 This topic specification owns how a Code thread's editor gets language
-services (diagnostics, go-to-definition, and explicit capability-aware references) and,
+services (diagnostics, definitions, references and capability-aware editing intelligence) and,
 in later slices, a debugger, from separately launched processes that run under
 Code Project and thread authority. Architecture owns the boundaries it builds
 on: [process topology](../architecture.md#process-topology), the
@@ -371,6 +371,36 @@ design left a choice open.
 - **Not built yet.** The bounded `window/logMessage` log and the lifecycle
   counts under Diagnostics, and removing a cache when its checkout is removed
   or its component uninstalled.
+
+### Editor intelligence
+
+The existing acknowledged-document read seam also serves completion, hover,
+signature help, document symbols and current-document formatting. Each request
+names the exact document version and revision and consumes an already ready
+connection; it never starts, retargets or upgrades a server. The same deadline,
+physical root, holder, Project binding, component activation, caller and launch
+checks used by explicit references run before publication. Initialized server
+capabilities decide which features are offered; older hosts without the
+capability list provide no project intelligence. The read-only agent tool does
+not gain these editor features.
+
+Only bounded application shapes cross the seam: at most 256 items, 512-character
+labels, 16,384-character insertions and 8,192-character detail, validated ranges,
+and bounded signature parameters. Server commands, resource operations,
+completion imports/additional edits and snippets requiring resolution are not
+accepted. Hover documentation is displayed as untrusted escaped text. Symbols
+are flattened to a bounded outline; completion and symbol kinds retain their
+protocol meaning. Signature help retains the active signature and parameter.
+
+Formatting takes the editor's indentation options and returns only edits to
+that current document. The renderer rejects an incomplete, malformed,
+out-of-bounds or overlapping edit set in full, and drops any answer for a
+changed model, document session or cancelled request. Applying formatting edits
+a draft; the ordinary save route owns disk changes. Format on save is opt-in and
+uses the same path for the Save button and keyboard shortcut. Monaco's own
+single-file services remain available where the host supplies no project
+service. This adds no extension host, server command execution, or agent write
+operation.
 
 ### Reviewed rename and quick fixes
 

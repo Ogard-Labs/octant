@@ -16,6 +16,7 @@ import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { useChatController } from "../chat/useChatController";
 import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
 import { useCodeController } from "../code/useCodeController";
+import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
 import { useProviderController } from "../providers/useProviderController";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -346,6 +347,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
   const threads = (controller.bootstrap?.threads ?? []).filter(
     (thread) => thread.lifecycle === "active",
   );
+  const activeThread = threads.find((thread) => String(thread.id) === String(activeThreadId));
   return (
     <RemoteThreadPane
       mode="code"
@@ -360,16 +362,21 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       emptyMessage="No Code threads on this host yet. Start one from the host; it will appear here."
     >
       {activeThreadId === undefined ? null : (
-        <CodeThreadWorkspace
-          canvasClient={props.clients.canvas}
-          onOpenCanvas={props.onOpenCanvas}
-          onOpenCanvasInSidebar={props.onOpenCanvas}
-          canvasOpenLabel="Open Canvas"
-          controller={controller}
-          pairedDevice
-          threadId={activeThreadId}
-          providerGroups={props.providerGroups}
-        />
+        <>
+          {activeThread === undefined ? null : (
+            <RemoteCoordinatorProposals client={props.clients.code} thread={activeThread} />
+          )}
+          <CodeThreadWorkspace
+            canvasClient={props.clients.canvas}
+            onOpenCanvas={props.onOpenCanvas}
+            onOpenCanvasInSidebar={props.onOpenCanvas}
+            canvasOpenLabel="Open Canvas"
+            controller={controller}
+            pairedDevice
+            threadId={activeThreadId}
+            providerGroups={props.providerGroups}
+          />
+        </>
       )}
     </RemoteThreadPane>
   );

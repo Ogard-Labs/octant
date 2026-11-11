@@ -1908,3 +1908,95 @@ function twoVersionHistory(
     [String(quarterlyInventoryEntry.currentVersionId), quarterlyInventoryEntry.currentSequence],
   ]);
 }
+
+describe("CanvasWorkspaceTab choice blocks", () => {
+  const choice = {
+    blockId: "pick-rollout",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "choice" as const,
+    prompt: "Which rollout should we take?",
+    questions: [
+      {
+        id: "rollout",
+        prompt: "Rollout",
+        selection: "single" as const,
+        options: [
+          { id: "staged", label: "Staged" },
+          { id: "all", label: "All at once" },
+        ],
+      },
+    ],
+  };
+  const withChoice = {
+    ...readyVersion,
+    version: {
+      ...readyVersion.version,
+      definition: { ...canvasFixture, blocks: [...canvasFixture.blocks, choice] },
+    },
+  } as Awaited<ReturnType<CanvasClient["get"]>>;
+
+  function queueClient() {
+    const scope = { mode: "chat" as const, threadId: canvasFixture.provenance.threadId as never };
+    const snapshot = { scope, version: 0 as never, paused: false, items: [] };
+    return {
+      read: vi.fn(async () => snapshot),
+      execute: vi.fn(async (command: { readonly requestId: string }) => ({
+        status: "applied" as const,
+        requestId: command.requestId as never,
+        snapshot,
+      })),
+    };
+  }
+
+  it("sends the chosen answer once, as an ordinary message to the Canvas's own thread", async () => {
+    const user = userEvent.setup();
+    const queue = queueClient();
+    render(
+      <CanvasWorkspaceTab
+        tab={canvasTab}
+        client={createCanvasClient(withChoice)}
+        queueClient={queue as never}
+      />,
+    );
+    await user.click(await screen.findByRole("radio", { name: /Staged/ }));
+    expect(queue.execute).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Send to the Chat thread" }));
+
+    await waitFor(() => expect(queue.execute).toHaveBeenCalledTimes(1));
+    expect(queue.execute.mock.calls[0]?.[0]).toMatchObject({
+      kind: "enqueue",
+      scope: { mode: "chat", threadId: canvasFixture.provenance.threadId },
+      payload: {
+        mode: "chat",
+        prompt: [
+          `My answer to "Which rollout should we take?" in the Canvas "Signed Q3 report" (canvasId ${String(quarterlyCanvasId)}, choice block "pick-rollout"):`,
+          "- Rollout: Staged",
+        ].join("\n"),
+      },
+    });
+    expect(await screen.findByText(/Answers sent/)).toBeInTheDocument();
+  });
+
+  it("reads only where the window has no way to send to the Canvas's thread", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(withChoice)} />);
+    expect(
+      await screen.findByText("This window cannot send to this Canvas's thread."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Send to/ })).not.toBeInTheDocument();
+  });
+
+  it("reads only when the host gave no scope that reaches the Canvas's thread", async () => {
+    const { workspace: _workspace, ...unscoped } = withChoice as typeof readyVersion;
+    render(
+      <CanvasWorkspaceTab
+        tab={canvasTab}
+        client={createCanvasClient(unscoped as Awaited<ReturnType<CanvasClient["get"]>>)}
+        queueClient={queueClient() as never}
+      />,
+    );
+    expect(
+      await screen.findByText("This Canvas's thread cannot be reached from here."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Send to/ })).not.toBeInTheDocument();
+  });
+});

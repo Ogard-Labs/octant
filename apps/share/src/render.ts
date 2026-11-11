@@ -614,6 +614,23 @@ function blockBody(block: Block, ctx: RenderContext): string {
       }</figcaption></figure>`;
     case "design":
       return design(block, ctx);
+    case "choice":
+      // A public page has no thread to answer to, so it offers no control: the
+      // question reads as its options, with a note saying where answers go.
+      return `${paragraphs(block.prompt)}${block.questions
+        .map(
+          (question) =>
+            `${heading(3, question.prompt)}${list(
+              question.options.map((option) =>
+                option.description === undefined
+                  ? e(option.label)
+                  : `<strong>${e(option.label)}</strong> ${e(option.description)}`,
+              ),
+            )}`,
+        )
+        .join(
+          "",
+        )}<p class="choice-note">This is a shared copy. Answers are sent from the Canvas in Octant, not from this page.</p>`;
     case "dashboard":
     case "tabs":
     case "columns":

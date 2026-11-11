@@ -13,6 +13,7 @@ import type { IntegrationClient } from "@octant/client-runtime/integration-clien
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -87,6 +88,7 @@ export interface ShellSettingsSurfaceProps {
     "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly personMemoryClient?: PersonMemoryClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
@@ -184,6 +186,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}
+            {...(props.archivedWorktreesClient === undefined
+              ? {}
+              : { archivedWorktreesClient: props.archivedWorktreesClient })}
             {...(props.personMemoryClient === undefined
               ? {}
               : { personMemoryClient: props.personMemoryClient })}

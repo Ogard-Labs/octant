@@ -11,6 +11,7 @@ import {
 } from "@octant/client-runtime";
 import { useTheme } from "../../design-system/theme";
 import { space as mobileSpacing } from "../../design-system/tokens";
+import { OwnerThreadWakeControls } from "./OwnerThreadWakeControls";
 
 export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<OwnerSpoke> }) {
   const { colors } = useTheme();
@@ -148,6 +149,13 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
             false,
             requested === selected.posture.posture,
           )}
+          {selected.posture.subject.kind === "code-thread" && host !== undefined ? (
+            <OwnerThreadWakeControls
+              key={`${host.memberId}:${String(selected.posture.subject.threadId)}`}
+              client={host.client}
+              threadId={String(selected.posture.subject.threadId)}
+            />
+          ) : null}
         </>
       )}
       <Text accessibilityLiveRegion="polite" style={{ color: colors.textSecondary }}>

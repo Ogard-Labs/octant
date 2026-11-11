@@ -1,3 +1,7 @@
+import { CodeWorkspaceReplace } from "./CodeWorkspaceReplace";
+import { createCodeClient } from "@octant/client-runtime/code-client";
+import { createEditorDraftStore } from "../editor/editorDraftStore";
+import { OctantButton } from "../ui/base/OctantButton";
 import { createCodeFileListingClient, type CodeFileListingClient } from "@octant/client-runtime";
 import type {
   CodeCheckoutId,
@@ -48,6 +52,7 @@ export function isCodeContentSearchEvent(
 }
 
 export interface CodeSearchDialogProps {
+  readonly readOnly?: boolean;
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
   /** Injected in tests; otherwise built from the server URL and capability. */
@@ -78,6 +83,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
   const [scope, setScope] = useState<CodeSearchScope | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [resultQuery, setResultQuery] = useState("");
   const [matches, setMatches] = useState<ReadonlyArray<CodeSearchMatch>>([]);
   const [truncated, setTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -93,6 +99,22 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
     });
   }, [props.client, props.serverUrl, props.windowCapability]);
 
+  const files = useMemo(
+    () =>
+      props.serverUrl === undefined || props.windowCapability === undefined
+        ? undefined
+        : createCodeClient({
+            baseUrl: props.serverUrl,
+            fetch: globalThis.fetch,
+            windowCapability: props.windowCapability,
+          }),
+    [props.serverUrl, props.windowCapability],
+  );
+  const drafts = useMemo(
+    () => createEditorDraftStore(props.serverUrl ?? "local"),
+    [props.serverUrl],
+  );
+  const [composing, setComposing] = useState(false);
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
       const next = isCodePathSearchEvent(event, keybindings)
@@ -126,7 +148,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
   const trimmed = query.trim();
   const { threadId, checkoutId } = props;
   useEffect(() => {
-    if (scope === undefined || client === undefined || trimmed === "") {
+    if (scope === undefined || client === undefined || trimmed === "" || composing) {
       setMatches([]);
       setTruncated(false);
       setSearching(false);
@@ -149,6 +171,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
             return;
           }
           setMatches(result.search.matches);
+          setResultQuery(trimmed);
           setTruncated(result.search.truncated);
           setActiveIndex(0);
         })
@@ -167,7 +190,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [checkoutId, client, scope, threadId, trimmed]);
+  }, [checkoutId, client, scope, threadId, trimmed, composing]);
 
   const active = matches.length === 0 ? -1 : Math.min(activeIndex, matches.length - 1);
   const statusMessage =
@@ -263,13 +286,42 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
                 setQuery(event.target.value);
                 setActiveIndex(0);
               }}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(event) => {
+                if (!event.nativeEvent.isComposing) handleKeyDown(event);
+              }}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={() => setComposing(false)}
               placeholder={scope === "path" ? "Go to file" : "Find in repository"}
               ref={inputRef}
               role="combobox"
               value={query}
             />
+            {query === "" ? null : (
+              <OctantButton
+                size="sm"
+                variant="ghost"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery("");
+                  inputRef.current?.focus();
+                }}
+              >
+                Clear
+              </OctantButton>
+            )}
           </div>
+          {scope !== "content" || files === undefined ? null : (
+            <CodeWorkspaceReplace
+              client={files}
+              drafts={drafts}
+              threadId={threadId}
+              checkoutId={checkoutId}
+              query={trimmed}
+              matches={resultQuery === trimmed && !searching ? matches : []}
+              truncated={truncated}
+              readOnly={props.readOnly ?? true}
+            />
+          )}
           <p className="command-palette__scope" role="note">
             {scope === "path"
               ? "File names in the repository bound to this thread."

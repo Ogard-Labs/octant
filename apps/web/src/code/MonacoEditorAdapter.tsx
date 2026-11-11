@@ -1,3 +1,17 @@
+import { OctantSwitch } from "../ui/base/OctantSwitch";
+import type {
+  CodeIntelligenceFeature,
+  CodeIntelligenceAnswer,
+  CodeIntelligenceItem,
+} from "@octant/contracts/code-language";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSelectField } from "../ui/base/OctantSelect";
+import {
+  readEditorPreferences,
+  subscribeEditorPreferences,
+  writeEditorPreferences,
+  type EditorPreferences,
+} from "../editor/editorPreferences";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { EditorColorProjection } from "@octant/theme/editor-colors";
 import type { EditorTypographyProjection } from "@octant/theme/typography";
@@ -45,6 +59,11 @@ export type MonacoDefinitionLink =
 
 /** How an editor reaches the host's language server for its file. */
 export interface MonacoLanguageBridge {
+  readonly intelligence?: (
+    position: MonacoEditorPosition,
+    feature: CodeIntelligenceFeature,
+    formatting?: { readonly tabSize: number; readonly insertSpaces: boolean },
+  ) => Promise<CodeIntelligenceAnswer | undefined>;
   /** Undefined while no server serves the file: Monaco's own worker answers. */
   readonly definitions: (
     position: MonacoEditorPosition,
@@ -63,9 +82,18 @@ export interface MonacoDebugDecorations {
   readonly stoppedLine?: number;
 }
 
+export interface MonacoTextSelection {
+  readonly text: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+  readonly range: MonacoEditorRange;
+}
 export interface MonacoAdapterSession {
+  readonly selection?: () => MonacoTextSelection | undefined;
   readonly dispose: () => void;
   readonly focus: () => void;
+  readonly command?: (id: string) => Promise<void>;
+  readonly setPreferences?: (preferences: EditorPreferences) => void;
   readonly setReadOnly: (readOnly: boolean) => void;
   readonly setTypography?: (typography: EditorTypographyProjection) => void;
   /** Repaints in the app's current theme while the editor stays mounted. */
@@ -152,7 +180,9 @@ export interface MonacoEditorAdapterProps {
   readonly onChange: (value: string) => void;
   readonly onCursorPosition?: (position: MonacoEditorPosition) => void;
   readonly onReferences?: (position: MonacoEditorPosition) => void;
-  readonly onSave?: () => void;
+  readonly onSave?: () => void | Promise<void>;
+  readonly onReadySave?: (save: (() => Promise<void>) | undefined) => void;
+  readonly onAddSelectionToChat?: (selection: MonacoTextSelection) => void;
   readonly debugDecorations?: MonacoDebugDecorations;
   readonly onToggleBreakpoint?: (lineNumber: number) => void;
   readonly readOnly: boolean;
@@ -170,6 +200,78 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
   const latestTypography = useRef(typography);
   const latestColors = useRef(colors);
   const session = useRef<MonacoAdapterSession | undefined>(undefined);
+  const [preferences, setPreferences] = useState(readEditorPreferences);
+  const latestPreferences = useRef(preferences);
+  latestPreferences.current = preferences;
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [notice, setNotice] = useState<string>();
+  const [outline, setOutline] = useState<ReadonlyArray<CodeIntelligenceItem>>();
+  const [outlineBusy, setOutlineBusy] = useState(false);
+  const outlineGeneration = useRef(0);
+  useEffect(() => {
+    outlineGeneration.current += 1;
+    setOutline(undefined);
+    setOutlineBusy(false);
+    return () => {
+      outlineGeneration.current += 1;
+    };
+  }, [props.modelUri, props.value]);
+  const showOutline = async () => {
+    if (outline !== undefined) {
+      setOutline(undefined);
+      return;
+    }
+    const generation = ++outlineGeneration.current;
+    const uri = latestProps.current.modelUri;
+    const text = latestProps.current.value;
+    setOutlineBusy(true);
+    try {
+      const answer = await latestProps.current.languageBridge?.intelligence?.(
+        { lineNumber: 1, column: 1 },
+        "symbols",
+      );
+      if (
+        outlineGeneration.current !== generation ||
+        latestProps.current.modelUri !== uri ||
+        latestProps.current.value !== text
+      )
+        return;
+      if (answer === undefined)
+        setNotice("An outline is unavailable from this file's language server.");
+      else {
+        setOutline(answer.items);
+        setNotice(answer.truncated ? "The outline is incomplete." : undefined);
+      }
+    } catch {
+      if (outlineGeneration.current === generation)
+        setNotice("The outline could not be loaded. Try again.");
+    } finally {
+      if (outlineGeneration.current === generation) setOutlineBusy(false);
+    }
+  };
+  const command = async (id: string) => {
+    try {
+      await session.current?.command?.(id);
+    } catch {
+      setNotice("This command is unavailable for the current file.");
+    }
+  };
+  const save = async () => {
+    if (latestProps.current.readOnly || latestProps.current.onSave === undefined) return;
+    try {
+      if (latestPreferences.current.formatOnSave)
+        await session.current?.command?.("editor.action.formatDocument");
+      await latestProps.current.onSave?.();
+    } catch {
+      setNotice("Formatting failed. Turn off format on save to save the current text.");
+    }
+  };
+  const update = (next: EditorPreferences) => {
+    setPreferences(next);
+    session.current?.setPreferences?.(next);
+    if (!writeEditorPreferences(next))
+      setNotice("Editor preferences could not be kept on this device.");
+  };
   const loader = props.loadRuntime ?? loadMonacoRuntime;
 
   useLayoutEffect(() => {
@@ -199,6 +301,12 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
             ? {}
             : {
                 languageBridge: {
+                  intelligence: (position, feature, formatting) =>
+                    latestProps.current.languageBridge?.intelligence?.(
+                      position,
+                      feature,
+                      formatting,
+                    ) ?? Promise.resolve(undefined),
                   definitions: (position) =>
                     latestProps.current.languageBridge?.definitions(position) ??
                     Promise.resolve(undefined),
@@ -234,6 +342,8 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
           return;
         }
         session.current = mounted;
+        latestProps.current.onReadySave?.(save);
+        mounted.setPreferences?.(latestPreferences.current);
         mounted.setLanguageMarkers?.(latestProps.current.languageMarkers);
         const reveal = latestProps.current.reveal;
         if (reveal !== undefined) mounted.revealRange?.(reveal.range);
@@ -245,10 +355,21 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
       });
     return () => {
       disposed = true;
+      latestProps.current.onReadySave?.(undefined);
       session.current?.dispose();
       session.current = undefined;
     };
   }, [loader, props.language, props.modelUri]);
+
+  useEffect(
+    () =>
+      subscribeEditorPreferences(() => {
+        const next = readEditorPreferences();
+        setPreferences(next);
+        session.current?.setPreferences?.(next);
+      }),
+    [],
+  );
 
   useEffect(() => session.current?.setValue(props.value), [props.value]);
   useEffect(() => session.current?.setReadOnly(props.readOnly), [props.readOnly]);
@@ -269,6 +390,167 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
 
   return (
     <>
+      <div className="editor-tools" role="toolbar" aria-label="Editor commands">
+        <OctantButton
+          size="sm"
+          variant="ghost"
+          onClick={() => void command("editor.action.quickCommand")}
+        >
+          Commands
+        </OctantButton>
+        <OctantButton size="sm" variant="ghost" onClick={() => void command("actions.find")}>
+          Find
+        </OctantButton>
+        <OctantButton
+          size="sm"
+          variant="ghost"
+          disabled={props.readOnly}
+          onClick={() => void command("editor.action.startFindReplaceAction")}
+        >
+          Replace
+        </OctantButton>
+        <OctantButton
+          size="sm"
+          variant="ghost"
+          disabled={props.readOnly}
+          onClick={() => void command("editor.action.formatDocument")}
+        >
+          Format
+        </OctantButton>
+        <OctantButton
+          size="sm"
+          variant="ghost"
+          onClick={() => void command("editor.action.gotoLine")}
+        >
+          Go to line
+        </OctantButton>
+        {props.languageBridge?.intelligence === undefined ? null : (
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            disabled={outlineBusy}
+            aria-expanded={outline !== undefined}
+            onClick={() => void showOutline()}
+          >
+            Outline
+          </OctantButton>
+        )}
+        {props.onAddSelectionToChat === undefined ? null : (
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const selected = session.current?.selection?.();
+              if (selected === undefined) setNotice("Select some text in the editor first.");
+              else {
+                props.onAddSelectionToChat?.(selected);
+                setNotice(
+                  "Selection added to the conversation draft. Send it from the conversation to ask the agent.",
+                );
+              }
+            }}
+          >
+            Send selection to agent
+          </OctantButton>
+        )}
+        <OctantButton
+          size="sm"
+          variant="ghost"
+          aria-expanded={preferencesOpen}
+          onClick={() => setPreferencesOpen(!preferencesOpen)}
+        >
+          Editor settings
+        </OctantButton>
+      </div>
+      {preferencesOpen ? (
+        <fieldset className="editor-tools">
+          <legend>Editor settings</legend>
+          <span className="editor-preference">
+            <OctantSwitch
+              label="Wrap lines"
+              checked={preferences.wordWrap === "on"}
+              onCheckedChange={(checked) =>
+                update({ ...preferences, wordWrap: checked ? "on" : "off" })
+              }
+            />{" "}
+            Wrap lines
+          </span>
+          <span className="editor-preference">
+            <OctantSwitch
+              label="Show whitespace"
+              checked={preferences.renderWhitespace === "all"}
+              onCheckedChange={(checked) =>
+                update({ ...preferences, renderWhitespace: checked ? "all" : "none" })
+              }
+            />{" "}
+            Show whitespace
+          </span>
+          <span className="editor-preference">
+            <OctantSwitch
+              label="Minimap"
+              checked={preferences.minimap}
+              onCheckedChange={(checked) => update({ ...preferences, minimap: checked })}
+            />{" "}
+            Minimap
+          </span>
+          <span className="editor-preference">
+            <OctantSwitch
+              label="Insert spaces"
+              checked={preferences.insertSpaces}
+              onCheckedChange={(checked) => update({ ...preferences, insertSpaces: checked })}
+            />{" "}
+            Insert spaces
+          </span>
+          <span className="editor-preference">
+            <OctantSwitch
+              label="Format on save"
+              checked={preferences.formatOnSave}
+              onCheckedChange={(checked) => update({ ...preferences, formatOnSave: checked })}
+            />{" "}
+            Format on save
+          </span>
+          <OctantSelectField
+            aria-label="Indent size"
+            value={String(preferences.tabSize)}
+            options={[2, 4, 8].map((size) => ({ id: String(size), label: `${size} columns` }))}
+            onValueChange={(value) => update({ ...preferences, tabSize: Number(value) })}
+          />
+        </fieldset>
+      ) : null}
+      {notice === undefined ? null : <p role="status">{notice}</p>}
+      {outlineBusy ? <p role="status">Loading outline…</p> : null}
+      {outline === undefined ? null : (
+        <section className="code-editor-pane__references" aria-label="File outline">
+          {outline.length === 0 ? (
+            <p>No symbols returned for this file</p>
+          ) : (
+            <ul>
+              {outline.map((item, index) => (
+                <li key={index}>
+                  <OctantButton
+                    size="sm"
+                    variant="ghost"
+                    disabled={item.range === undefined}
+                    onClick={() => {
+                      if (item.range === undefined) return;
+                      session.current?.revealRange?.({
+                        startLineNumber: item.range.start.line + 1,
+                        startColumn: item.range.start.character + 1,
+                        endLineNumber: item.range.end.line + 1,
+                        endColumn: item.range.end.character + 1,
+                      });
+                      session.current?.focus();
+                    }}
+                  >
+                    {item.label}
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       <section
         aria-label={props.ariaLabel}
         data-read-only={props.readOnly}
@@ -280,7 +562,7 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
             event.key.toLocaleLowerCase() === "s"
           ) {
             event.preventDefault();
-            props.onSave();
+            if (!event.nativeEvent.isComposing) void save();
           }
         }}
         ref={element}

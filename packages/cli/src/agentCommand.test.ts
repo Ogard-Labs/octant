@@ -577,6 +577,119 @@ describe("octant agent command line", () => {
       json: true,
     });
     expect(resolveAgentCliCommand("harness", ["session"], {})).toBeUndefined();
+    const thread = "60000000-0000-4000-8000-000000000003";
+    expect(resolveAgentCliCommand("agent", ["status", thread], { json: true })).toEqual({
+      action: "agent-status",
+      threadId: thread,
+      json: true,
+    });
+    // Without a thread id, the words are a prompt like any other.
+    expect(resolveAgentCliCommand("agent", ["status", "of", "CI"], {})).toMatchObject({
+      action: "agent",
+      openingPrompt: "status of CI",
+    });
+    expect(resolveAgentCliCommand("agent", [], { prompt: "go", detach: true })).toMatchObject({
+      prompt: "go",
+      detach: true,
+    });
+    // Detaching starts one turn, so it is refused without the prompt for it.
+    expect(resolveAgentCliCommand("agent", [], { detach: true })).toBeUndefined();
+  });
+
+  it("detaches once the host lists the Work turn, without waiting for its reply", async () => {
+    const threadId = "60000000-0000-4000-8000-000000000002";
+    const stdout = sink();
+    const sent: string[] = [];
+    const turns: Array<agentThreads.AgentThreadSnapshot["turns"][number]> = [];
+    const create = vi.spyOn(agentThreads, "createAgentThread").mockResolvedValue({
+      kind: "created",
+      threadId,
+      mode: "work",
+      projectName: "Client",
+    });
+    const port = vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue({
+      mode: "work",
+      threadId,
+      read: async () => ({
+        id: threadId,
+        mode: "work",
+        title: "Report",
+        providerInstanceId: "provider",
+        modelId: "model",
+        version: 1,
+        workItems: [],
+        turns: [...turns],
+      }),
+      send: async (prompt) => {
+        sent.push(prompt);
+        turns.push({
+          id: "turn-1",
+          at: "now",
+          prompt,
+          reply: "",
+          replyAt: "now",
+          outcome: "streaming",
+        });
+        return { kind: "sent" };
+      },
+      interrupt: async () => ({ kind: "nothing-running" }),
+    });
+    try {
+      const code = await runAgentCliCommand({
+        command: {
+          action: "agent",
+          mode: "work",
+          project: "Client",
+          prompt: "Draft the weekly report",
+          detach: true,
+          json: true,
+          plain: false,
+          quiet: true,
+          last: false,
+        },
+        session: session(() => ({ status: 404, body: {} })),
+        stdin: Readable.from([]),
+        stdout,
+        stderr: sink(),
+        pollIntervalMs: 1,
+      });
+      expect(code).toBe(0);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent).toEqual(["Draft the weekly report"]);
+      expect(stdout.text()).toContain('{"kind":"started","turnId":"turn-1"}');
+      expect(stdout.text()).not.toContain('"kind":"outcome"');
+    } finally {
+      create.mockRestore();
+      port.mockRestore();
+    }
+  });
+
+  it("refuses to detach a Chat turn before creating anything", async () => {
+    const stderr = sink();
+    const create = vi.spyOn(agentThreads, "createAgentThread");
+    try {
+      const code = await runAgentCliCommand({
+        command: {
+          action: "agent",
+          mode: "chat",
+          prompt: "Hello",
+          detach: true,
+          json: false,
+          plain: false,
+          quiet: true,
+          last: false,
+        },
+        session: session(() => ({ status: 404, body: {} })),
+        stdin: Readable.from([]),
+        stdout: sink(),
+        stderr,
+      });
+      expect(code).toBe(1);
+      expect(stderr.text()).toContain("--detach starts Work and Code turns");
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      create.mockRestore();
+    }
   });
 
   it("prints the host's slots and job bindings from the same route the app reads", async () => {

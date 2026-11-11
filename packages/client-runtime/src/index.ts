@@ -105,6 +105,7 @@ export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";
 export * from "./chatNdjsonStream";
 export * from "./mobileCodeOperationsClient";
+export * from "./threadRoutineReceipts";
 export * from "./mobileThreadRewind";
 export * from "./mobileCodeCreateClient";
 export * from "./mobilePushTokenClient";
@@ -118,6 +119,7 @@ export * from "./providerUsageHistoryClient";
 export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClient";
 
 export * from "./ownerPosture";
+export * from "./ownerThreadWake";
 export { createBrowserPresentationClient } from "./browserPresentationClient";
 
 export * from "./ownerApprovals";

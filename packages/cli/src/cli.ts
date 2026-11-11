@@ -28,7 +28,11 @@ import {
 } from "./artifactCommand";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
+import {
+  openLocalControlSession,
+  type LocalControlSession,
+  type OpenedLocalControlSession,
+} from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
 import { resolveSettingsCliCommand, runSettingsCliCommand } from "./settingsCommand";
 import { runPluginAuthoringCommand } from "./pluginAuthoring";
@@ -45,6 +49,7 @@ import {
   runAgentCliCommand,
 } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
+import { AGENT_MCP_HELP, runAgentMcpServer } from "./agentMcpServer";
 import {
   readAllStdin,
   readHiddenLineFromTerminal,
@@ -351,6 +356,28 @@ export async function runCli(
     }
     return await runServerRunCommand(options);
   }
+  // `octant agent mcp` is the one-word form; longer words after `agent` are a
+  // prompt, so `octant agent mcp servers are slow` still reaches the agent.
+  if (args.command === "agent" && args.positional.length === 1 && args.positional[0] === "mcp") {
+    if (Object.keys(args.flags).length === 1 && args.flags.help === true) {
+      process.stdout.write(AGENT_MCP_HELP);
+      return 0;
+    }
+    if (Object.keys(args.flags).length > 0) {
+      // stdout carries protocol frames only.
+      process.stderr.write(
+        `${context.identity.commandName} agent mcp takes no arguments. Run \`${context.identity.commandName} agent mcp --help\`.\n`,
+      );
+      return 1;
+    }
+    return await runAgentMcpServer({
+      openSession: () => openCommandSession(context, { startHost: true }),
+      input: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      version: context.version,
+    });
+  }
   if (args.command === "agent" || args.command === "harness") {
     const command = resolveAgentCliCommand(args.command, args.positional, args.flags);
     if (command === undefined) {
@@ -546,6 +573,26 @@ async function withLocalControlSession(
   run: (session: OpenedLocalControlSession) => Promise<number>,
   options: { readonly startHost?: boolean } = {},
 ): Promise<number> {
+  const session = await openCommandSession(context, options);
+  if (session.kind === "refuses") {
+    process.stderr.write(`${session.reason}\n`);
+    return 1;
+  }
+  try {
+    return await run(session);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * One local control session on this CLI's host, starting the host first when
+ * asked and allowed. The refusal says why in the CLI's own words.
+ */
+async function openCommandSession(
+  context: CliContext,
+  options: { readonly startHost?: boolean } = {},
+): Promise<LocalControlSession> {
   const host = { env: context.environment, platform: process.platform, home: homedir() };
   let session = await openLocalControlSession({ host });
   if (
@@ -558,30 +605,18 @@ async function withLocalControlSession(
     // the host to write its local control files.
     process.stderr.write("Octant is not running here; starting it…\n");
     const started = await startHostForCommand(context);
-    if (started !== undefined) {
-      process.stderr.write(`${started}\n`);
-      return 1;
-    }
+    if (started !== undefined) return { kind: "refuses", reason: started };
     for (let attempt = 0; attempt < 40 && session.kind === "refuses"; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       session = await openLocalControlSession({ host });
     }
   }
-  if (session.kind === "refuses") {
-    // `octant-nightly` names the host it attaches to and never offers to
-    // start one; `octant` keeps its own wording.
-    const reason =
-      !context.mayStartHost && isNotRunning(session.reason)
-        ? hostNotRunningMessage(context.identity, context.target)
-        : session.reason;
-    process.stderr.write(`${reason}\n`);
-    return 1;
+  // `octant-nightly` names the host it attaches to and never offers to
+  // start one; `octant` keeps its own wording.
+  if (session.kind === "refuses" && !context.mayStartHost && isNotRunning(session.reason)) {
+    return { kind: "refuses", reason: hostNotRunningMessage(context.identity, context.target) };
   }
-  try {
-    return await run(session);
-  } finally {
-    await session.close();
-  }
+  return session;
 }
 
 /** Runs `server start` from `<install-root>/current`, so the service records that copy. */
@@ -763,8 +798,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   {
     octant:
-      "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--detach] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
+  { octant: "agent status <thread-id> [--json]" },
+  { octant: "agent mcp  (an MCP server that lets other agents start and follow work here)" },
   { octant: "harness slots [--json]" },
   { octant: "harness session <thread-id> [--json]" },
   { octant: "harness agents <thread-id> [<n>|<id>] [--json]" },

@@ -8,6 +8,7 @@ import {
   observeTurnMetrics,
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   markThreadToolStepOutsideContent,
+  markThreadToolStepRoutine,
   outsideContentRecordedOnly,
   refusesFullAccessSandbox,
   recordThreadShieldReview,
@@ -607,6 +608,17 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   // protected secret, which its row then shows.
                   if (execution.outsideContent !== undefined) {
                     markToolRow(event.requestId, event.toolName, execution.outsideContent.labels);
+                  }
+                  if (execution.isError !== true && execution.routine !== undefined) {
+                    const next = markThreadToolStepRoutine(toolSteps, {
+                      toolCallId: event.requestId,
+                      toolName: event.toolName,
+                      routine: execution.routine,
+                    });
+                    if (next !== undefined && next !== toolSteps) {
+                      toolSteps = next;
+                      input.onToolSteps?.(next);
+                    }
                   }
                   yield* connection
                     .answerTool({

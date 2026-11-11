@@ -3,6 +3,7 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_OPERATION_TEXT_BYTES,
   type CodeConversationTurn,
+  type ThreadRoutineReceipt,
   type CodeOperationCommand,
   CodeOperationResult,
   type CodePullRequestReview,
@@ -10,6 +11,7 @@ import {
   CodeBootstrap,
   CodeConversationPage,
   CodeConversationWindow,
+  CodePlannerView,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
   decodeCodeAttachmentId,
@@ -23,6 +25,7 @@ import {
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import { threadRoutineReceipts } from "./threadRoutineReceipts";
 import {
   sendWithOwnerUnlock,
   type OwnerMergeUnlock,
@@ -69,6 +72,36 @@ export async function loadMobileCodeThread(
     throw new MobileInboxFailure("unavailable", "Code thread is not available on this host.");
   }
   return decodeHostAnswer(CodeThread)(thread);
+}
+
+/** One pending worker a coordinator proposed, as a paired client may show it. */
+export type MobileCoordinatorProposal = CodePlannerView["proposals"][number]["proposal"];
+
+/**
+ * A coordinator's own pending proposals, read through the planner view the
+ * remote session may read. Approving and declining stay with a window on the
+ * host, whose proposal routes refuse a paired caller, so this only reads.
+ */
+export async function loadMobileCoordinatorProposals(
+  transport: MobileRemoteTransport,
+  thread: Pick<CodeThread, "id" | "projectId">,
+): Promise<ReadonlyArray<MobileCoordinatorProposal>> {
+  const view = await decodeJson(
+    await transport.authenticatedFetch({
+      method: "GET",
+      path: `/api/code/planner/${encodeURIComponent(String(thread.projectId))}`,
+    }),
+    decodeHostAnswer(CodePlannerView),
+    "Proposed workers could not be read over the remote session.",
+  );
+  return view.proposals
+    .map((entry) => entry.proposal)
+    .filter(
+      (proposal) =>
+        proposal.fromCoordinator === true &&
+        proposal.status === "pending" &&
+        String(proposal.plannerThreadId) === String(thread.id),
+    );
 }
 
 export async function executeMobileCodeOperation(
@@ -293,6 +326,8 @@ export interface MobileCodeConversationTurn {
   readonly status: CodeConversationTurn["status"];
   readonly prompt: string;
   readonly assistant: ReadonlyArray<string>;
+  /** The routines the turn's tool calls created, for the receipt cards under it. */
+  readonly routines: ReadonlyArray<ThreadRoutineReceipt>;
   readonly updatedAt: string;
 }
 
@@ -367,6 +402,9 @@ export async function loadMobileCodeConversation(
       assistant: turn.assistant
         .map((part) => resolve(String(turn.operationId), String(part.contentId)))
         .filter((part) => part.length > 0),
+      routines: threadRoutineReceipts(
+        (turn.steps ?? []).flatMap((step) => (step.kind === "tool" ? [step] : [])),
+      ),
       updatedAt: turn.updatedAt,
     })),
     hasEarlier: read.hasEarlier || kept.length < read.turns.length,

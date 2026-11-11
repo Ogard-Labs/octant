@@ -31,7 +31,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface ShellDialogHostCodeThreadView {
   readonly checkout: { readonly id: CodeCheckoutId };
-  readonly thread: { readonly id: CodeThreadId };
+  readonly thread: { readonly id: CodeThreadId; readonly executionPolicy?: string };
 }
 
 export interface ShellDialogHostProps {
@@ -155,6 +155,10 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           every split pane at once. */}
       {props.zenActive || props.activeCodeThreadView === undefined ? null : (
         <CodeSearchDialog
+          readOnly={
+            props.activeCodeThreadView.thread.executionPolicy === undefined ||
+            props.activeCodeThreadView.thread.executionPolicy === "plan"
+          }
           checkoutId={props.activeCodeThreadView.checkout.id}
           onOpenFile={props.onOpenCodeSearchFile}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}

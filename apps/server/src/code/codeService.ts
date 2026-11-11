@@ -795,6 +795,12 @@ export interface CodeServiceOptions {
       workingDirectory: ThreadWorkingDirectory,
     ) => Promise<string | undefined>;
   };
+  /**
+   * Told once a Code thread is archived, by a person or the host's timer,
+   * after the journal records it. Archiving keeps the thread; this lets the
+   * host reclaim the disk its managed worktree holds when that loses nothing.
+   */
+  readonly onThreadArchived?: (threadId: CodeThreadId) => void;
   readonly onWorkingDirectoryChanged: (scope: {
     readonly mode: "code";
     readonly projectId: ProjectId;
@@ -997,6 +1003,7 @@ export class CodeService {
   readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
+  readonly #onThreadArchived: CodeServiceOptions["onThreadArchived"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
@@ -1051,6 +1058,7 @@ export class CodeService {
     this.#isProviderModelAllowed = options.isProviderModelAllowed;
     this.#workingDirectories = options.workingDirectories;
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
+    this.#onThreadArchived = options.onThreadArchived;
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
     this.#liveTurns = options.liveTurns;
@@ -2635,6 +2643,7 @@ export class CodeService {
         command.lifecycle !== "active"
       ) {
         this.#sessionAuthority.revokeThread(authenticatedWindowId, current.id);
+        if (current.lifecycle === "active") this.#onThreadArchived?.(current.id);
       }
       const publicNext = this.#sessionAuthority.effectiveThread(authenticatedWindowId, next);
       return command.kind === "change-code-thread-lifecycle"
@@ -2722,6 +2731,7 @@ export class CodeService {
     // The same door a person's Archive closes: no window keeps a session
     // grant on a thread that just left the lists.
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    this.#onThreadArchived?.(current.id);
     return { status: "archived" };
   }
 
