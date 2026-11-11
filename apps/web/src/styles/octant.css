@@ -4595,9 +4595,20 @@ input.switch:checked::after {
   min-width: 0;
   min-height: 28px;
   padding: 0 var(--oct-space-1);
+  container: composer-under / inline-size;
 }
 .composer-under:empty {
   display: none;
+}
+/* At a phone's width the line cannot be one. It is then two: where the thread
+   runs with the thread's info at its trailing edge, and the row of controls
+   under them. In source order the info fell to a third line of its own. A
+   thread with no place to name keeps the order, since its row and its info
+   still share a line. */
+@container composer-under (max-width: 440px) {
+  .thread-composer__context:not(:empty) ~ .composer-row {
+    order: 1;
+  }
 }
 .composer-under > .thread-plan-windows {
   flex: 0 1 auto;
@@ -4664,9 +4675,12 @@ input.switch:checked::after {
 }
 /* An icon control in the row is a square tile with the control corner, as
    attach and send are in the card. */
-.composer-row button[data-size="icon"] {
+.composer-row button[data-size="icon"],
+.thread-info__trigger[data-size="icon"] {
   width: 28px;
   min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
@@ -4849,7 +4863,7 @@ input.switch:checked::after {
 .thread-composer__context:empty {
   display: none;
 }
-/* The thread's info panel: a quiet button at the end of the row and one
+/* The thread's info panel: a quiet icon button at the end of the row and one
    floating card above it. What it holds (access level, credential commands,
    provider cloud sessions, continuing elsewhere) used to sit at four places
    on the thread page, two of them outside the reading column. */
@@ -4867,9 +4881,10 @@ input.switch:checked::after {
   bottom: calc(100% + var(--oct-space-1));
   z-index: 5;
   display: grid;
-  /* Measured against the pane, as the composer is: in a split the viewport is
-     wider than the pane and a viewport width ran into the neighbour. */
-  width: min(440px, calc(var(--octant-split-composer-width, 100vw) - 48px));
+  /* Never wider than the line it opens from: it is anchored to that line's
+     trailing edge, and at a phone's width a card measured against the pane
+     ran off the leading edge and lost the start of every row. */
+  width: min(440px, 100cqi);
   max-height: min(60vh, 520px);
   overflow-y: auto;
   padding: var(--oct-space-2) var(--oct-space-3);
@@ -4898,6 +4913,27 @@ input.switch:checked::after {
   margin-block: var(--oct-space-1);
   padding-block: 0;
   border-top: 0;
+}
+/* An action row's words start on the panel's text edge, where the fact rows
+   start. A ghost button's own inset had them 8px in and a leading icon a
+   further 16px, so four rows began at three places; the hover tile reaches
+   into the panel's padding instead, and the rows are their words alone. */
+.thread-info__panel > button,
+.thread-info__panel > .task-access-details > button {
+  margin-inline-start: calc(var(--oct-space-2) * -1 - 1px);
+}
+.thread-info__panel > button > svg:first-child:not(:only-child) {
+  display: none;
+}
+/* The access level's details continue the level's own line, in the panel's
+   ink; the hairline comes after the pair, not through it. */
+.thread-info__panel > .task-access-details {
+  padding-top: 0;
+  border-top: 0;
+  color: inherit;
+}
+.thread-info__panel > .task-access-details:not(:last-child) {
+  border-bottom: 1px solid var(--oct-hairline);
 }
 .thread-info__panel summary {
   color: var(--oct-fg);

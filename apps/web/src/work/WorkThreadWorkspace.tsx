@@ -2147,6 +2147,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       : folder === undefined || folder === "."
         ? root
         : `${root.replace(/[/\\]+$/, "")}/${folder}`;
+  const folderLabel = folderUnavailable
+    ? "Working folder unavailable"
+    : folder === undefined || folder === "."
+      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+      : folder;
+  // A Project made from a folder carries that folder's name, so the line read
+  // "Downloads Downloads". The name is said once; its path stays on hover.
+  const folderRepeatsProject = path !== undefined && folderLabel === projectLabel;
   // The transcript draws the inline Canvases and the card list the rest.
   const threadCanvases = useThreadCanvasCards({
     client: props.canvasClient,
@@ -2765,17 +2773,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
               <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
               {projectLabel === undefined ? null : (
-                <span className="work-folder-bar__project" title={projectLabel}>
+                <span
+                  className="work-folder-bar__project"
+                  title={folderRepeatsProject ? path : projectLabel}
+                >
                   {projectLabel}
                 </span>
               )}
-              {path === undefined ? null : (
+              {path === undefined || folderRepeatsProject ? null : (
                 <span className="work-folder-bar__folder" title={path}>
-                  {folderUnavailable
-                    ? "Working folder unavailable"
-                    : folder === undefined || folder === "."
-                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                      : folder}
+                  {folderLabel}
                 </span>
               )}
             </div>
