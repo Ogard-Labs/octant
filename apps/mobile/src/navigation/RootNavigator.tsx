@@ -149,6 +149,7 @@ function HostsBody(props: {
           paddingHorizontal: mobileSpacing.md + mobileSpacing.md,
           marginBottom: mobileSpacing.md,
         },
+        gutter: { gap: mobileSpacing.md, paddingHorizontal: mobileSpacing.md },
         hostPanels: { gap: mobileSpacing.sm, paddingHorizontal: mobileSpacing.md },
         hostPanelsTitle: {
           color: colors.textSecondary,
@@ -186,7 +187,7 @@ function HostsBody(props: {
               />
             </ListSection>
           ) : (
-            <>
+            <View style={styles.gutter}>
               <PairingPanel
                 registry={registry}
                 deviceKeyStore={deviceKeyStore}
@@ -209,7 +210,7 @@ function HostsBody(props: {
                   }}
                 />
               ) : null}
-            </>
+            </View>
           )
         ) : (
           <>
@@ -246,21 +247,25 @@ function HostsBody(props: {
                 {MOBILE_COPY.hostKeyNotDeleted}
               </Text>
             ) : null}
-            <GuestHubRefusals refused={notAccepted} />
-            {offlineDemo || unlockKey === undefined ? null : (
-              <OwnerMovesPanel
-                deviceKeyStore={deviceKeyStore}
-                guestHubStore={guestHubStore}
-                unlockKey={unlockKey}
-              />
-            )}
-            {offlineDemo || unlockKey === undefined ? null : (
-              <OwnerAlertsPanel
-                deviceKeyStore={deviceKeyStore}
-                guestHubStore={guestHubStore}
-                unlockKey={unlockKey}
-              />
-            )}
+            {/* These panels draw their own layout; the gutter keeps them off the
+                screen edge now that the page itself has none for grouped lists. */}
+            <View style={styles.gutter}>
+              <GuestHubRefusals refused={notAccepted} />
+              {offlineDemo || unlockKey === undefined ? null : (
+                <OwnerMovesPanel
+                  deviceKeyStore={deviceKeyStore}
+                  guestHubStore={guestHubStore}
+                  unlockKey={unlockKey}
+                />
+              )}
+              {offlineDemo || unlockKey === undefined ? null : (
+                <OwnerAlertsPanel
+                  deviceKeyStore={deviceKeyStore}
+                  guestHubStore={guestHubStore}
+                  unlockKey={unlockKey}
+                />
+              )}
+            </View>
             {hosts.length === 0 ? (
               <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
             ) : (
