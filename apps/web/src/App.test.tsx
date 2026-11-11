@@ -5275,7 +5275,11 @@ describe("App", () => {
     // acting on the one the previous search left behind.
     await within(modeListbox).findByRole("option", { name: /Mode switcher/ });
     modeListbox.focus();
-    fireEvent.keyDown(modeListbox, { key: "ArrowDown" });
+    // Home, not ArrowDown: the list pre-selects its top result when results
+    // arrive again after it has opened, and ArrowDown then moves on to the
+    // second. Which of the two happens depends on how fast the host's
+    // entries load, so a slow runner opened the wrong page.
+    fireEvent.keyDown(modeListbox, { key: "Home" });
     fireEvent.keyDown(modeListbox, { key: "Enter" });
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
     await user.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
@@ -5292,11 +5296,8 @@ describe("App", () => {
       name: "Settings search results",
     });
     providersListbox.focus();
-    fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
+    fireEvent.keyDown(providersListbox, { key: "Home" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
-    // The page loads on demand, so its heading is waited for. Read at once,
-    // it was there only when the page happened to resolve within the same
-    // tick, which a busy runner does not promise.
     expect(await screen.findByRole("heading", { name: "Providers & Models" })).toBeVisible();
     expect(screen.getByLabelText("Permission persistence")).toHaveTextContent(
       "Current session only",
@@ -5306,7 +5307,7 @@ describe("App", () => {
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "OpenCode");
     const openCodeListbox = await screen.findByRole("listbox", { name: "Settings search results" });
     openCodeListbox.focus();
-    fireEvent.keyDown(openCodeListbox, { key: "ArrowDown" });
+    fireEvent.keyDown(openCodeListbox, { key: "Home" });
     fireEvent.keyDown(openCodeListbox, { key: "Enter" });
     expect(await screen.findByRole("heading", { name: "Providers & Models" })).toBeVisible();
   }, 15_000);
