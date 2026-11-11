@@ -405,7 +405,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     const fingerprint = journalVerificationFingerprint(runtime.events, connection);
     const scannedHead = journal.headSequence();
     const verifiedThrough =
-      migration.status.appliedVersions.length > 0
+      fingerprint === undefined || migration.status.appliedVersions.length > 0
         ? 0
         : readJournalWatermark(connection, fingerprint, scannedHead);
     const compatibility = journal.inspectCompatibility(100, verifiedThrough);
@@ -439,7 +439,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       console.warn(
         `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
       );
-    } else if (scannedHead !== verifiedThrough) {
+    } else if (fingerprint !== undefined && scannedHead !== verifiedThrough) {
       // Only a scan that found the journal compatible and left its rows
       // untouched may move the watermark.
       recordJournalWatermark(connection, fingerprint, scannedHead, clock());

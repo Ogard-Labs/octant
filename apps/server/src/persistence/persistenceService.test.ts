@@ -6,7 +6,7 @@ import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventRegistry } from "./eventRegistry";
 import { ShellService } from "../shellService";
-import { applyMigrations, MIGRATIONS } from "./migrations";
+import { applyMigrations, MIGRATIONS, type Migration } from "./migrations";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { Persistence, PersistenceStartupFailed, makePersistenceLive } from "./persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./shellProjection";
@@ -627,6 +627,24 @@ describe("PersistenceLive", () => {
       changed.close();
 
       expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+    });
+
+    it("scans from the start again when a migration is applied in this start", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const later: Migration = {
+        version: 9999,
+        name: "fixture_later_migration",
+        sql: "CREATE TABLE fixture_later_migration (id INTEGER PRIMARY KEY) STRICT;",
+      };
+      const migrations = MIGRATIONS as Array<Migration>;
+      migrations.push(later);
+      try {
+        expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+      } finally {
+        migrations.splice(migrations.indexOf(later), 1);
+      }
     });
 
     it("finds a bad row appended after the watermark", async () => {

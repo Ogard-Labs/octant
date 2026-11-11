@@ -64,6 +64,24 @@ export class EventRegistry {
       );
   }
 
+  /**
+   * The decode and persisted schema of every registration, in registration-name
+   * order, for fingerprinting what startup verification depended on.
+   */
+  schemaSources(): ReadonlyArray<{
+    readonly eventName: string;
+    readonly eventVersion: number;
+    readonly current: Schema.Schema.Any;
+    readonly persisted: Schema.Schema.Any;
+  }> {
+    return this.registrations().flatMap(({ eventName, eventVersion }) => {
+      const schemas = this.#schemas.get(this.#key(eventName, eventVersion));
+      return schemas === undefined
+        ? []
+        : [{ eventName, eventVersion, current: schemas.current, persisted: schemas.persisted }];
+    });
+  }
+
   #decode(
     eventName: string,
     eventVersion: number,

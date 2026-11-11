@@ -4429,8 +4429,11 @@ flowchart LR
   verify are `unknown`; the map never carries secret values.
 - **Startup check.** Startup decodes journal rows to prove the journal is
   readable, then records a disposable watermark: the sequence it verified
-  through plus a fingerprint of the event registry and the schema head. The next
-  start decodes only rows after the watermark. A different fingerprint, a
+  through plus a fingerprint of how the event registry decodes (a hash of each
+  registered event's name, version, decode schema and persisted schema, so a
+  schema change without a version bump counts) and the schema head. A schema
+  the host cannot serialize gives no fingerprint, which means a full scan. The
+  next start decodes only rows after the watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
   transaction, so purge, compaction and host-identity rewrites are covered)
