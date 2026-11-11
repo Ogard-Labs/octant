@@ -29,6 +29,7 @@ afterEach(async () => {
 });
 export function codeLanguageReferencesFixture(
   options: {
+    readonly intelligenceCapabilities?: boolean;
     readonly capability?: unknown;
     readonly editCapabilities?: boolean;
     readonly pullsDiagnostics?: boolean;
@@ -197,6 +198,15 @@ export function codeLanguageReferencesFixture(
                   textDocumentSync: 1,
                   ...(options.pullsDiagnostics ? { diagnosticProvider: {} } : {}),
                   definitionProvider: true,
+                  ...(options.intelligenceCapabilities
+                    ? {
+                        completionProvider: {},
+                        hoverProvider: true,
+                        signatureHelpProvider: {},
+                        documentSymbolProvider: true,
+                        documentFormattingProvider: true,
+                      }
+                    : {}),
                   referencesProvider: state.support.value,
                   ...(options.editCapabilities
                     ? { renameProvider: true, codeActionProvider: true }
@@ -211,7 +221,14 @@ export function codeLanguageReferencesFixture(
             } else if (message.method === "textDocument/definition") send(message.id, []);
             else if (
               message.method === "textDocument/rename" ||
-              message.method === "textDocument/codeAction"
+              message.method === "textDocument/codeAction" ||
+              [
+                "textDocument/completion",
+                "textDocument/hover",
+                "textDocument/signatureHelp",
+                "textDocument/documentSymbol",
+                "textDocument/formatting",
+              ].includes(message.method)
             )
               void (async () => {
                 await controls.beforeEdit?.();

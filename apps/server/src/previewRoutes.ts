@@ -1,3 +1,4 @@
+import { decodePreviewTextRequest, decodePreviewTextReply } from "@octant/contracts/previews";
 import {
   decodePreviewCancelReply,
   decodePreviewChunksReply,
@@ -101,7 +102,8 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
       route !== "refresh" &&
       route !== "chunks" &&
       route !== "cancel" &&
-      route !== "handoff"
+      route !== "handoff" &&
+      route !== "text"
     ) {
       return undefined;
     }
@@ -133,7 +135,10 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
       return failureResponse("Preview request is invalid.", 400, origin);
     }
 
-    const decoded = await readJson(request, jsonLimit);
+    const decoded = await readJson(
+      request,
+      route === "text" ? Math.max(jsonLimit, 32 * 1024 * 1024) : jsonLimit,
+    );
     if (decoded.kind === "too-large") {
       return failureResponse("Preview request body is too large.", 413, origin);
     }
@@ -142,6 +147,40 @@ export function createPreviewRouteHandler(dependencies: PreviewRouteDependencies
     }
 
     try {
+      if (route === "text") {
+        const body = decodePreviewTextRequest(decoded.value);
+        const principal = readPrincipalRouteContext(request)?.principal.kind ?? "local-window";
+        const current = async () => {
+          try {
+            const id = authenticateRouteWindowId({
+              request,
+              store: dependencies.windowAuthorityStore,
+              now: now(),
+            });
+            if (
+              id !== authenticatedWindowId ||
+              request.signal.aborted ||
+              principal !== "local-window"
+            )
+              return undefined;
+            const authority = await resolvePreviewAuthority(dependencies, id, body.target);
+            return authority.kind === "ok" ? authority.context : undefined;
+          } catch {
+            return undefined;
+          }
+        };
+        const authority = await current();
+        if (authority === undefined) return jsonResponse({ kind: "unauthorized" }, 200, origin);
+        const reply = await dependencies.service.text({
+          authority,
+          request: body,
+          current: async () => {
+            const latest = await current();
+            return latest !== undefined && JSON.stringify(latest) === JSON.stringify(authority);
+          },
+        });
+        return jsonResponse(decodePreviewTextReply(reply), 200, origin);
+      }
       if (route === "open") {
         const body = decodePreviewOpenRequest(decoded.value);
         const authority = await resolvePreviewAuthority(

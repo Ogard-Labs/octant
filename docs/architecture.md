@@ -512,6 +512,15 @@ seconds apart), and the systemd unit restarts it on failure, which includes a
 kill by signal. A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
+**Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
+the shared embedded editor and a local-window-only, Project-confined source
+read/save route. Full source, physical identity and revision are checked
+independently of preview chunks; no agent or remote write authority is added.
+Draft recovery remains on the client. Code keeps its authoritative file-helper
+save path. [Workspace: File editing](design/workspace.md#file-editing) owns
+source restrictions, recovery, conflict comparison, reviewed workspace
+replacements and selection-to-agent proposals.
+
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.

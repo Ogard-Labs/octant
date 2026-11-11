@@ -38,6 +38,7 @@ function fixture() {
     oldHost: boolean;
     beforeReference?: () => Promise<void>;
     beforeCapability?: () => Promise<void>;
+    beforeIntelligence?: () => Promise<void>;
     beforeSyncReply?: () => Promise<void>;
     loseSyncReply?: boolean;
     reopenRefusal?: "approval-required" | "no-reach";
@@ -82,6 +83,18 @@ function fixture() {
         await state.beforeReference?.();
       }
       if (request.kind === "capabilities") await state.beforeCapability?.();
+      if (request.kind === "intelligence") {
+        await state.beforeIntelligence?.();
+        return decodeCodeLanguageReadResult({
+          status: "intelligence",
+          feature: request.feature,
+          ...scope,
+          documentVersion: request.expectedVersion,
+          documentRevision: request.expectedRevision,
+          items: [{ label: "projectValue", text: "projectValue" }],
+          truncated: false,
+        });
+      }
       return decodeCodeLanguageReadResult(
         request.kind === "diagnostics"
           ? { status: "diagnostics", ...scope, diagnostics: [], truncated: false }
@@ -92,6 +105,10 @@ function fixture() {
                 references: state.support,
                 rename: state.support,
                 quickFixes: state.support,
+                intelligence:
+                  state.support === "supported"
+                    ? ["completion", "hover", "signature", "symbols", "formatting"]
+                    : [],
               }
             : request.kind === "references"
               ? {
@@ -194,6 +211,63 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("references in the actual Code editor pane", () => {
+  it("requests intelligence for acknowledged unsaved text and drops a reply after the draft changes", async () => {
+    const f = fixture();
+    render(
+      <MonacoEditorPane
+        client={f.client}
+        file={f.file}
+        loadRuntime={f.loadRuntime}
+        languageTiming={{ debounceMs: 10000 }}
+      />,
+    );
+    await waitFor(() =>
+      expect(f.requests.some((request) => request.kind === "diagnostics")).toBe(true),
+    );
+    act(() => f.options?.onChange("const unsaved = project"));
+    let result;
+    await act(async () => {
+      result = await f.options?.languageBridge?.intelligence?.(
+        { lineNumber: 1, column: 23 },
+        "completion",
+      );
+    });
+    expect(result).toMatchObject({
+      status: "intelligence",
+      feature: "completion",
+      items: [{ label: "projectValue" }],
+    });
+    expect(recordedSync(f.client)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change",
+        text: "const unsaved = project",
+        expectedRevision: expect.any(String),
+      }),
+      expect.any(AbortSignal),
+    );
+    let release: () => void = () => undefined;
+    f.state.beforeIntelligence = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    let pending: Promise<unknown> | undefined;
+    act(() => {
+      pending = f.options?.languageBridge?.intelligence?.(
+        { lineNumber: 1, column: 23 },
+        "completion",
+      );
+    });
+    await waitFor(() =>
+      expect(f.requests.filter((request) => request.kind === "intelligence")).toHaveLength(2),
+    );
+    act(() => f.options?.onChange("a newer draft"));
+    await act(async () => {
+      release();
+      expect(await pending).toBeUndefined();
+    });
+    expect(f.client.save).not.toHaveBeenCalled();
+  });
+
   it("reviews suggestions before saving and invalidates the preview when a draft changes", async () => {
     const f = fixture();
     const user = userEvent.setup();

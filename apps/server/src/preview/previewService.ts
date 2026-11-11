@@ -1,3 +1,5 @@
+import { editPreviewText } from "./previewTextEditor";
+import type { PreviewTextRequest, PreviewTextReply } from "@octant/contracts/previews";
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { Schema } from "effect";
@@ -195,6 +197,50 @@ export class PreviewService {
     this.#budget = options.budget;
     this.#textBudget = options.textBudget;
     this.#uuid = options.uuid ?? randomUUID;
+  }
+
+  async text(input: {
+    readonly authority: PreviewAuthorityContext;
+    readonly request: PreviewTextRequest;
+    readonly current: () => Promise<boolean>;
+  }): Promise<PreviewTextReply> {
+    const { authority, request } = input;
+    if (
+      authority.mode !== "work" ||
+      authority.posture === "plan" ||
+      request.target.kind !== "file" ||
+      authorizePreviewTarget(this.#authorityInput(authority, request.target)) === "deny"
+    )
+      return { kind: "unauthorized" };
+    const resolution = await this.#resolveTarget(request.target);
+    const root = await this.#projectRootResolver.resolve(request.target.projectId);
+    if (!resolution.ok || !root.ok) return { kind: "unavailable" };
+    const sourceRoot = resolution.folder ?? root.canonicalRoot;
+    const path = resolveConfinedPath(sourceRoot, resolution.relativePath);
+    if (!path.ok) return { kind: "unavailable" };
+    return editPreviewText({
+      path: path.absolutePath,
+      root: sourceRoot,
+      request,
+      current: async () => {
+        if (!(await input.current())) return false;
+        const latest = await this.#resolveTarget(request.target);
+        const latestRoot = await this.#projectRootResolver.resolve(request.target.projectId);
+        if (
+          !latest.ok ||
+          !latestRoot.ok ||
+          latestRoot.canonicalRoot !== root.canonicalRoot ||
+          latest.folder !== resolution.folder ||
+          latest.relativePath !== resolution.relativePath
+        )
+          return false;
+        const currentPath = resolveConfinedPath(
+          latest.folder ?? latestRoot.canonicalRoot,
+          latest.relativePath,
+        );
+        return currentPath.ok && currentPath.absolutePath === path.absolutePath;
+      },
+    });
   }
 
   async open(input: {
@@ -766,7 +812,16 @@ export class PreviewService {
       kind: manifest.kind,
       baseCapabilities: manifest.capabilities,
     });
-    return decodePreviewManifest({ ...manifest, capabilities });
+    return decodePreviewManifest({
+      ...manifest,
+      capabilities: {
+        ...capabilities,
+        canEditInMonaco:
+          capabilities.canEditInMonaco &&
+          authority.mode === "work" &&
+          manifest.target.kind === "file",
+      },
+    });
   }
 
   #unauthorizedChunks(targetId: PreviewTargetId): PreviewChunksReply {

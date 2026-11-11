@@ -522,8 +522,7 @@ Transcript offsets require the same first loaded row and viewport width. These
 presentation references share the endpoint/window/context boundary, retain at
 most 64 entries and 128 KiB, and write no document text, native process identity,
 approval or authority. They never take focus or perform a host operation during
-restore. Composer drafts retain their existing durable storage. Editor drafts
-remain in the thread draft store; approval requests keep their explicit controls.
+restore. Composer drafts retain their existing durable storage. Editor drafts use the local recovery store described under [File editing](#file-editing); approval requests keep their explicit controls.
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
@@ -651,6 +650,76 @@ mode with the selection prefilled as a Markdown block quote. It is a draft
 only: nothing is sent until the person sends it, and the new thread has exactly
 the authority a new thread in that Project has. A Project that is archived or
 unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
+
+## File editing
+
+Work's Files previews offer Edit for plain text and Source for Markdown. The
+person may switch Markdown between Preview, Source and Split; switching views
+keeps the editor model and its undo history. Wide layouts place source and
+preview beside each other, and narrow layouts stack independently usable
+regions. Code keeps its file editor and adds a file breadcrumb and a Problems
+list whose rows reveal the reported range in the current file.
+
+Work edits apply only to existing ordinary files, including files in an
+approved extra folder. Saved artifact versions, attachments, PDFs, office
+formats and images retain their viewers and external handoffs. Text source is
+loaded in full through an independently authorized source route; preview chunks
+may be normalized or truncated and are never editable source. A local window
+may manually save inside the current Work Project at its existing access level;
+this human action grants no agent write, shell or Code authority. Plan refuses
+editing. The source route is not admitted for paired-device principals.
+
+Work source editing accepts regular, single-link UTF-8 files up to 5 MiB,
+preserves BOM and line endings, and rejects binary or invalid text. The host
+resolves the opaque target inside the current main or extra folder on every
+request, opens through the existing confinement proof, and checks authority,
+root, physical file identity and source revision before writing through that
+same descriptor. The host serializes source reads and saves by physical file
+identity across windows and Project aliases, reading the baseline again after
+the preceding operation completes; concurrent stale saves return a conflict.
+It never creates a missing source. Saves flush the descriptor;
+an I/O failure can leave a partial write and its outcome is never retried
+implicitly. This is a human file save, not a new artifact version or a multi-file
+transaction. Code retains its existing file-helper save path.
+
+Both editors share Commands, Find, Replace, Format, Go to line and Editor
+settings. Preferences cover wrapping, indentation, spaces or tabs, visible
+whitespace, minimap and opt-in format on save. Settings stay on the person's
+client. A Code file additionally exposes the language-server outline and
+selection-to-agent review. Language capabilities and launch authority remain
+owned by [Language services](language-services.md).
+
+Unsaved text is kept locally on the client, separately from pane references,
+messages and the host journal. Code recovery keys include the endpoint, checkout
+and file identity; Work recovery uses the authorized host, Project and a stable
+opaque key for the physical root and file path, so temporary listing tokens do
+not lose a draft on host restart. A recovered draft retains its original source
+revision. A newer disk version requires comparison and an explicit choice to
+keep the draft against that version or discard it; Save never silently adopts
+a newer baseline. Failed local storage keeps edits in memory with a warning to
+save before closing. That warning stays visible while any draft remains
+unpersisted, even when its baseline or another draft was stored successfully.
+Saving or discarding removes that file's recovery copy.
+Opening source is authorized before a recovery copy is shown.
+
+Code's content search offers literal, case-insensitive replacement in its
+listed matching files. The person prepares and reviews before/after text for
+at most 16 files, 256 KiB per file and 1 MiB of combined preview text. Incomplete
+search results are explicitly labelled. Preparation refuses unsaved editor
+drafts; application checks them again before any save and before each file.
+Saves use the reviewed physical identity and digest and stop at the first
+conflict or failure. Earlier successful files remain. Plan may prepare a review
+but cannot save it. Nothing runs a language-server command or writes without the
+ordinary authoritative file-save route.
+
+Send selection to agent quotes the exact selected text, path and line range in
+the current conversation draft; only the person sends it. The editor retains
+that selection's complete draft baseline. The person may load the latest
+completed same-thread/same-checkout agent reply when it contains exactly one
+fenced code block, or paste a proposed replacement. Preview replacement shows a
+comparison. Apply replacement to draft is allowed only while the complete draft
+still equals the captured baseline and the editor is writable; it writes no
+file. Save remains the explicit disk write.
 
 ## Start-screen cards
 
