@@ -6,6 +6,7 @@ import {
   dockWidthCeiling,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
+  TILED_DOCK_WIDTH,
   WORKBENCH_DOCK_WIDTH,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
@@ -62,6 +63,19 @@ describe("how wide the right utility dock is", () => {
         tabSurfaces: ["browser"],
       }),
     ).toBe(420);
+  });
+
+  it("widens the dock to fit two columns of tools until the person sizes it", () => {
+    const tiled = { ...narrow, tabSurfaces: ["ios-simulator", "canvas"], tileColumns: 2 };
+    expect(resolveDockPresentationWidth(tiled)).toBe(TILED_DOCK_WIDTH);
+    expect(resolveDockPresentationWidth({ ...tiled, widthChosen: true })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...tiled, storedWidth: 900 })).toBe(900);
+  });
+
+  it("asks for no extra width for one column of tiles", () => {
+    expect(
+      resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["canvas"], tileColumns: 1 }),
+    ).toBe(360);
   });
 });
 

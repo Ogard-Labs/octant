@@ -3,13 +3,25 @@ import {
   addThreadUtilityTab,
   addUtilityTabState,
   closeThreadUtilityTab,
+  closeUtilityTabState,
+  hideUtilityTile,
   openThreadUtilityTab,
+  openUtilityTabState,
   readBottomPanelToolPresentation,
   readUtilityDockOpen,
   readUtilityDockPresentation,
   removeUtilityTabs,
+  resizeUtilityTileColumn,
+  resizeUtilityTileColumns,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
+  selectUtilityTabState,
+  shownUtilityTabIds,
+  showUtilityTabAlone,
+  showUtilityTabBelow,
+  showUtilityTabBeside,
+  withoutTileLayout,
+  type ThreadUtilityDockState,
   threadUtilityDockState,
   threadUtilityDockKey,
   writeBottomPanelToolPresentation,
@@ -311,6 +323,288 @@ describe("thread utility presentation persistence", () => {
       active: "terminal",
     });
     expect(readBottomPanelToolPresentation({ localStorage }, "window-b")).toEqual(new Map());
+  });
+});
+
+describe("dock tool tiles", () => {
+  const surfaces = ["ios-simulator", "browser", "canvas", "files", "plan"] as const;
+  function opened(...ids: ReadonlyArray<(typeof surfaces)[number] | "terminal">) {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    for (const id of ids) state = openUtilityTabState(state, id);
+    return state;
+  }
+  function columnsOf(state: ThreadUtilityDockState): ReadonlyArray<ReadonlyArray<string>> {
+    return (state.layout?.columns ?? []).map((column) => column.tiles.map((tile) => tile.tabId));
+  }
+  /** Plan on the left; Files above Canvas on the right; Canvas focused. */
+  function twoColumns() {
+    let state = opened("ios-simulator", "canvas", "files", "plan");
+    state = showUtilityTabBeside(state, "files");
+    state = selectUtilityTabState(state, "plan");
+    return showUtilityTabBeside(state, "canvas");
+  }
+  function sharesAddUp(state: ThreadUtilityDockState) {
+    const columns = state.layout?.columns ?? [];
+    expect(columns.reduce((sum, column) => sum + column.share, 0)).toBeCloseTo(1);
+    for (const column of columns) {
+      expect(column.tiles.reduce((sum, tile) => sum + tile.share, 0)).toBeCloseTo(1);
+    }
+  }
+
+  it("keeps the single-tool view when no tool is shown beside another", () => {
+    const state = opened("ios-simulator", "canvas");
+    expect(state.layout).toBeUndefined();
+    expect(shownUtilityTabIds(state)).toEqual(["canvas"]);
+    expect(shownUtilityTabIds({ tabs: [] })).toEqual([]);
+  });
+
+  it("shows a tab beside the focused tile and focuses it", () => {
+    const state = showUtilityTabBeside(opened("ios-simulator", "canvas"), "ios-simulator");
+    expect(columnsOf(state)).toEqual([["canvas"], ["ios-simulator"]]);
+    expect(state.active).toBe("ios-simulator");
+    expect(shownUtilityTabIds(state)).toEqual(["canvas", "ios-simulator"]);
+    sharesAddUp(state);
+  });
+
+  it("shows a tab below the focused tile in its column", () => {
+    const state = showUtilityTabBelow(opened("ios-simulator", "canvas"), "ios-simulator");
+    expect(columnsOf(state)).toEqual([["canvas", "ios-simulator"]]);
+    sharesAddUp(state);
+  });
+
+  it("puts a tab shown beside with two columns below in the last column", () => {
+    const state = twoColumns();
+    expect(columnsOf(state)).toEqual([["plan"], ["files", "canvas"]]);
+    expect(state.active).toBe("canvas");
+    sharesAddUp(state);
+  });
+
+  it("refuses a tile past the caps and returns the same state", () => {
+    let state = opened("ios-simulator", "canvas", "files", "plan", "terminal");
+    state = showUtilityTabBelow(state, "files");
+    state = showUtilityTabBelow(state, "plan");
+    expect(columnsOf(state)).toEqual([["terminal", "files", "plan"]]);
+    const before = state;
+    expect(showUtilityTabBelow(state, "canvas")).toBe(before);
+    expect(showUtilityTabBelow(state, "ios-simulator")).toBe(before);
+  });
+
+  it("moves a tab that is already shown rather than showing it twice", () => {
+    let state = showUtilityTabBeside(opened("ios-simulator", "canvas", "files"), "ios-simulator");
+    state = selectUtilityTabState(state, "files");
+    state = showUtilityTabBelow(state, "ios-simulator");
+    expect(columnsOf(state)).toEqual([["files", "ios-simulator"]]);
+    expect(state.active).toBe("ios-simulator");
+    sharesAddUp(state);
+  });
+
+  it("shows one Browser tile whose page is whichever Browser tab was chosen", () => {
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state = openUtilityTabState({ tabs: [] }, "ios-simulator");
+    state = openUtilityTabState(state, "browser");
+    state = showUtilityTabBeside(state, "ios-simulator");
+    state = addUtilityTabState(state, "browser", pageTwo);
+    expect(columnsOf(state).flat()).toEqual([pageTwo, "ios-simulator"]);
+    expect(state.active).toBe(pageTwo);
+    state = selectUtilityTabState(state, "ios-simulator");
+    state = selectUtilityTabState(state, "browser");
+    expect(columnsOf(state).flat()).toEqual(["browser", "ios-simulator"]);
+    expect(columnsOf(showUtilityTabBeside(state, pageTwo)).flat()).toEqual([
+      pageTwo,
+      "ios-simulator",
+    ]);
+  });
+
+  it("replaces only the focused tile when a hidden tab is chosen", () => {
+    let state = showUtilityTabBeside(
+      opened("ios-simulator", "canvas", "files", "plan"),
+      "ios-simulator",
+    );
+    expect(columnsOf(state)).toEqual([["plan"], ["ios-simulator"]]);
+    state = selectUtilityTabState(state, "canvas");
+    expect(columnsOf(state)).toEqual([["plan"], ["canvas"]]);
+    expect(state.active).toBe("canvas");
+    state = selectUtilityTabState(state, "plan");
+    expect(columnsOf(state)).toEqual([["plan"], ["canvas"]]);
+    expect(state.active).toBe("plan");
+  });
+
+  it("hides a tile without closing its tool and drops a layout left with one tile", () => {
+    const tiled = showUtilityTabBeside(opened("ios-simulator", "canvas"), "ios-simulator");
+    const hidden = hideUtilityTile(tiled, "ios-simulator");
+    expect(hidden.layout).toBeUndefined();
+    expect(hidden.tabs.map((tab) => tab.id)).toEqual(["ios-simulator", "canvas"]);
+    expect(hidden.active).toBe("canvas");
+  });
+
+  it("moves focus to a neighbouring tile when the focused tile is hidden", () => {
+    const hidden = hideUtilityTile(twoColumns(), "canvas");
+    expect(columnsOf(hidden)).toEqual([["plan"], ["files"]]);
+    expect(hidden.active).toBe("files");
+    expect(hidden.tabs).toHaveLength(4);
+    sharesAddUp(hidden);
+  });
+
+  it("shows one tool alone and keeps every other tab open", () => {
+    const tiled = showUtilityTabBeside(opened("ios-simulator", "canvas"), "ios-simulator");
+    const alone = showUtilityTabAlone(tiled, "canvas");
+    expect(alone.layout).toBeUndefined();
+    expect(alone.active).toBe("canvas");
+    expect(alone.tabs).toHaveLength(2);
+  });
+
+  it("removes a closed tool's tile and focuses its neighbour", () => {
+    const tiled = showUtilityTabBeside(opened("ios-simulator", "canvas"), "ios-simulator");
+    const closed = closeUtilityTabState(tiled, "ios-simulator");
+    expect(closed).toEqual({ tabs: [{ id: "canvas", surface: "canvas" }], active: "canvas" });
+  });
+
+  it("prunes tiles of tools another region took or that are no longer available", () => {
+    const tiled = showUtilityTabBeside(opened("ios-simulator", "canvas", "files"), "ios-simulator");
+    expect(removeUtilityTabs(tiled, new Set(["canvas"])).layout).toEqual(tiled.layout);
+    const moved = removeUtilityTabs(tiled, new Set(["files"]));
+    expect(moved.layout).toBeUndefined();
+    expect(moved.active).toBe("ios-simulator");
+    const retained = retainAvailableUtilityTabs(tiled, new Set(["canvas", "files"]));
+    expect(retained.layout).toBeUndefined();
+    expect(retained.active).toBe("files");
+  });
+
+  it("resizes columns and tiles with every share above the floor and adding up", () => {
+    const state = twoColumns();
+    const wide = resizeUtilityTileColumns(state, [9, 1]);
+    expect(wide.layout?.columns.map((column) => column.share)).toEqual([0.85, 0.15]);
+    const tall = resizeUtilityTileColumn(state, 1, [3, 1]);
+    expect(tall.layout?.columns[1]?.tiles.map((tile) => tile.share)).toEqual([0.75, 0.25]);
+    expect(resizeUtilityTileColumns(state, [1, Number.NaN])).toBe(state);
+    expect(resizeUtilityTileColumns(state, [1])).toBe(state);
+    sharesAddUp(wide);
+    sharesAddUp(tall);
+  });
+
+  it("never lets a layout reach the bottom panel", () => {
+    const tiled = showUtilityTabBeside(opened("ios-simulator", "canvas"), "ios-simulator");
+    expect(withoutTileLayout(tiled)).toEqual({ tabs: tiled.tabs, active: "ios-simulator" });
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    writeBottomPanelToolPresentation({ localStorage }, "window-a", new Map([[key, tiled]]));
+    const read = threadUtilityDockState(
+      readBottomPanelToolPresentation({ localStorage }, "window-a"),
+      key,
+    );
+    expect(read.layout).toBeUndefined();
+    expect(read.tabs).toHaveLength(2);
+  });
+
+  it("keeps the tile layout through a stored round trip", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    let state = showUtilityTabBeside(opened("ios-simulator", "canvas", "files"), "ios-simulator");
+    state = showUtilityTabBelow(state, "files");
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
+      open: true,
+      threads: new Map([[key, state]]),
+    });
+    const read = readUtilityDockPresentation({ localStorage }, "window-a").threads;
+    expect(threadUtilityDockState(read, key)).toEqual(state);
+  });
+
+  it("reads an old record without a layout exactly as before", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({
+        open: true,
+        threads: { [key]: { tabs: ["canvas", "files"], active: "canvas" } },
+      }),
+    );
+    expect(
+      threadUtilityDockState(
+        readUtilityDockPresentation({ localStorage }, "window-a").threads,
+        key,
+      ),
+    ).toEqual({
+      tabs: [
+        { id: "canvas", surface: "canvas" },
+        { id: "files", surface: "files" },
+      ],
+      active: "canvas",
+    });
+  });
+
+  function readStored(layout: unknown, active = "canvas") {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({
+        open: true,
+        threads: {
+          [key]: {
+            tabs: ["canvas", "files", "plan", "ios-simulator"].map((id) => ({ id, surface: id })),
+            active,
+            layout,
+          },
+        },
+      }),
+    );
+    return threadUtilityDockState(
+      readUtilityDockPresentation({ localStorage }, "window-a").threads,
+      key,
+    );
+  }
+
+  it("drops stored layout entries that are unknown, repeated or past the caps", () => {
+    const state = readStored({
+      columns: [
+        {
+          share: 1,
+          tiles: [
+            { tabId: "canvas", share: 1 },
+            { tabId: "canvas", share: 1 },
+            { tabId: "ghost", share: 1 },
+            { tabId: "files", share: 1 },
+            { tabId: "plan", share: 1 },
+            { tabId: "ios-simulator", share: 1 },
+          ],
+        },
+        { share: 1, tiles: [] },
+        { share: 1, tiles: [{ tabId: "plan", share: 1 }] },
+      ],
+    });
+    expect(columnsOf(state)).toEqual([["canvas", "files", "plan"]]);
+  });
+
+  it("normalises stored shares that are not positive numbers", () => {
+    const state = readStored({
+      columns: [
+        { share: -1, tiles: [{ tabId: "canvas", share: "wide" }] },
+        { share: Number.NaN, tiles: [{ tabId: "files", share: 0 }] },
+      ],
+    });
+    expect(state.layout?.columns.map((column) => column.share)).toEqual([0.5, 0.5]);
+    expect(state.layout?.columns.map((column) => column.tiles[0]?.share)).toEqual([1, 1]);
+  });
+
+  it("drops a stored layout that is left with fewer than two tiles", () => {
+    const state = readStored({ columns: [{ share: 1, tiles: [{ tabId: "canvas", share: 1 }] }] });
+    expect(state.layout).toBeUndefined();
+    expect(state.active).toBe("canvas");
+    expect(readStored("nonsense").layout).toBeUndefined();
+  });
+
+  it("focuses a shown tile when the stored active tab is not shown", () => {
+    const state = readStored(
+      {
+        columns: [
+          { share: 1, tiles: [{ tabId: "canvas", share: 1 }] },
+          { share: 1, tiles: [{ tabId: "files", share: 1 }] },
+        ],
+      },
+      "plan",
+    );
+    expect(state.active).toBe("canvas");
   });
 });
 

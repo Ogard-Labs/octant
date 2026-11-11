@@ -133,6 +133,14 @@ export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["brows
 export const WORKBENCH_DOCK_WIDTH = 640;
 
 /**
+ * Two columns of tools side by side need two usable widths. At 640px each got
+ * about 300px, too narrow for a simulator's device or a page's layout, so a
+ * dock showing two columns widens to this until the person sizes it. Not saved,
+ * for the reason the workbench width is not.
+ */
+export const TILED_DOCK_WIDTH = 840;
+
+/**
  * One width whatever the dock is showing, so a click inside it moves nothing.
  * The empty launcher used to take the 280px minimum while every tool took the
  * stored width, so opening Environment from it threw the dock from 280px to the
@@ -145,13 +153,18 @@ export function resolveDockPresentationWidth(input: {
   /** The person sized the dock since a Browser or Terminal last opened, so it stays as they left it. */
   readonly widthChosen: boolean;
   readonly tabSurfaces: ReadonlyArray<string>;
+  /** How many columns of tool tiles the dock shows; one when it shows a single tool. */
+  readonly tileColumns?: number;
 }): number {
+  if (input.widthChosen) return input.storedWidth;
   const holdsWorkbench = input.tabSurfaces.some(
     (surface) => surface === "browser" || surface === "terminal",
   );
-  return holdsWorkbench && !input.widthChosen
-    ? Math.max(input.storedWidth, WORKBENCH_DOCK_WIDTH)
-    : input.storedWidth;
+  const wanted = Math.max(
+    holdsWorkbench ? WORKBENCH_DOCK_WIDTH : 0,
+    (input.tileColumns ?? 1) >= 2 ? TILED_DOCK_WIDTH : 0,
+  );
+  return Math.max(input.storedWidth, wanted);
 }
 
 /**
