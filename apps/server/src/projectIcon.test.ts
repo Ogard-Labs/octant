@@ -75,14 +75,52 @@ describe("Project icon lookup", () => {
     expect(await findProjectIcon(root)).toEqual({ status: "none" });
   });
 
-  it("follows a link that stays inside the folder", async () => {
+  it("refuses an icon reached through a link even when the link stays inside the folder", async () => {
     const root = await folder();
     await mkdir(join(root, "brand"));
     await writeFile(join(root, "brand", "mark.svg"), SVG);
     await symlink(join(root, "brand", "mark.svg"), join(root, "favicon.svg"));
+    await symlink(join(root, "brand"), join(root, "static"));
+    await writeFile(join(root, "brand", "favicon.svg"), SVG);
 
-    expect((await findProjectIcon(root)).status).toBe("found");
+    expect(await findProjectIcon(root)).toEqual({ status: "none" });
   });
+
+  it("gives no icon on a platform without a no-follow open", async () => {
+    const root = await folder();
+    await writeFile(join(root, "favicon.svg"), SVG);
+
+    expect(await findProjectIcon(root, "win32")).toEqual({ status: "none" });
+  });
+
+  it.skipIf(process.platform !== "darwin")(
+    "refuses a link at any depth through the macOS no-follow-any open",
+    async () => {
+      const root = await folder();
+      await mkdir(join(root, "real"));
+      await writeFile(join(root, "real", "favicon.svg"), SVG);
+      await symlink(join(root, "real"), join(root, "public"));
+
+      expect(await findProjectIcon(root, "darwin")).toEqual({ status: "none" });
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "refuses a link at any depth when walking from the root by handle",
+    async () => {
+      const root = await folder();
+      const outside = await folder();
+      await writeFile(join(outside, "favicon.svg"), SVG);
+      await symlink(outside, join(root, "public"));
+      await writeFile(join(root, "icon.png"), PNG);
+      await symlink(join(root, "icon.png"), join(root, "favicon.png"));
+
+      const found = await findProjectIcon(root, "linux");
+
+      expect(found.status === "found" && found.mediaType).toBe("image/png");
+      expect(await findProjectIcon(await folder(), "linux")).toEqual({ status: "none" });
+    },
+  );
 
   it("refuses an icon larger than the cap and falls through to the next candidate", async () => {
     const root = await folder();

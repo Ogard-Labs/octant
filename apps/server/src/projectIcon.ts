@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { open, realpath, type FileHandle } from "node:fs/promises";
+import { join } from "node:path";
 import type { ProjectId, WindowId } from "@octant/contracts";
 import type { ProjectService } from "./projectService";
 
@@ -81,33 +81,94 @@ function bytesMatch(mediaType: ProjectIconMediaType, bytes: Uint8Array): boolean
   return SVG_PROLOGUE.test(text);
 }
 
-function insideRoot(root: string, path: string): boolean {
-  return path.startsWith(root.endsWith(sep) ? root : root + sep);
+/**
+ * macOS `O_NOFOLLOW_ANY` (`<sys/fcntl.h>`), absent from `fs.constants`. Unlike
+ * `O_NOFOLLOW`, which guards only the last path component, the kernel refuses
+ * the open with ELOOP when any component of the path is a symbolic link.
+ */
+export const O_NOFOLLOW_ANY_DARWIN = 0x20000000;
+
+export type OpenIconFile = (path: string, flags: number) => Promise<FileHandle>;
+
+/** The one-call strategy: the kernel itself refuses a link anywhere in the path. */
+export async function openCandidateDarwin(
+  root: string,
+  candidate: string,
+  openFile: OpenIconFile = open,
+): Promise<FileHandle> {
+  // Non-blocking so a FIFO named like an icon cannot hold the open.
+  return openFile(
+    join(root, candidate),
+    constants.O_RDONLY | constants.O_NONBLOCK | O_NOFOLLOW_ANY_DARWIN,
+  );
+}
+
+/** A component opened relative to a handle that is already held. */
+export function procFdPath(fd: number, name: string): string {
+  return `/proc/self/fd/${fd}/${name}`;
+}
+
+/**
+ * Linux has no whole-path no-follow flag in Node, so the path is walked through
+ * handles: the root is opened as a directory without following a link, and each
+ * next component is opened relative to the handle just obtained, again without
+ * following one. No step can be redirected, because each is anchored to a
+ * handle rather than to a name that may have been swapped. Every intermediate
+ * handle is closed, also on failure; the caller closes the returned one.
+ */
+export async function openCandidateLinux(
+  root: string,
+  candidate: string,
+  openFile: OpenIconFile = open,
+): Promise<FileHandle> {
+  const names = candidate.split("/");
+  const directoryFlags = constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0);
+  let current = await openFile(root, directoryFlags);
+  for (const [index, name] of names.entries()) {
+    const last = index === names.length - 1;
+    try {
+      const next = await openFile(
+        procFdPath(current.fd, name),
+        last
+          ? constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | constants.O_NONBLOCK
+          : directoryFlags,
+      );
+      await current.close();
+      current = next;
+    } catch (error) {
+      await current.close();
+      throw error;
+    }
+  }
+  return current;
+}
+
+async function openCandidate(
+  root: string,
+  candidate: string,
+  platform: NodeJS.Platform,
+  openFile: OpenIconFile,
+): Promise<FileHandle | undefined> {
+  if (platform === "darwin") return openCandidateDarwin(root, candidate, openFile);
+  if (platform === "linux") return openCandidateLinux(root, candidate, openFile);
+  // No other platform offers a no-follow open this code can rely on, and an
+  // icon is never worth reading through a path that might be redirected.
+  return undefined;
 }
 
 async function readCandidate(
   root: string,
   candidate: string,
+  platform: NodeJS.Platform,
+  openFile: OpenIconFile,
 ): Promise<Extract<ProjectIconLookup, { status: "found" }> | undefined> {
   const mediaType = mediaTypeFor(candidate);
   if (mediaType === undefined) return undefined;
   try {
-    // The real path decides containment: a link that stays inside the folder is
-    // the person's own arrangement, one that leaves it is never followed.
-    const real = await realpath(join(root, candidate));
-    if (!insideRoot(root, real)) return undefined;
-    const resolved = await lstat(real, { bigint: true });
-    // Non-blocking so a FIFO swapped in under the name cannot hold the open, and
-    // no-follow so a link swapped in after the check is refused by the open.
-    const handle = await open(
-      real,
-      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
-    );
+    const handle = await openCandidate(root, candidate, platform, openFile);
+    if (handle === undefined) return undefined;
     try {
       const details = await handle.stat();
-      // The handle must be the very file that was judged inside the folder.
-      const opened = await handle.stat({ bigint: true });
-      if (opened.dev !== resolved.dev || opened.ino !== resolved.ino) return undefined;
       if (!details.isFile() || details.size > MAX_PROJECT_ICON_BYTES || details.size === 0) {
         return undefined;
       }
@@ -127,13 +188,17 @@ async function readCandidate(
       await handle.close();
     }
   } catch {
-    // A missing, unreadable, or vanished file is simply not this Project's icon.
+    // A missing, unreadable, refused or vanished file is simply not this Project's icon.
     return undefined;
   }
 }
 
 /** Find the icon inside one Project folder. Reads only the folder it is given. */
-export async function findProjectIcon(canonicalRoot: string): Promise<ProjectIconLookup> {
+export async function findProjectIcon(
+  canonicalRoot: string,
+  platform: NodeJS.Platform = process.platform,
+  openFile: OpenIconFile = open,
+): Promise<ProjectIconLookup> {
   let root: string;
   try {
     root = await realpath(canonicalRoot);
@@ -141,7 +206,7 @@ export async function findProjectIcon(canonicalRoot: string): Promise<ProjectIco
     return { status: "none" };
   }
   for (const candidate of PROJECT_ICON_CANDIDATES) {
-    const found = await readCandidate(root, candidate);
+    const found = await readCandidate(root, candidate, platform, openFile);
     if (found !== undefined) return found;
   }
   return { status: "none" };

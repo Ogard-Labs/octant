@@ -171,8 +171,10 @@ renderer never reads disk: it tries a short fixed list of well-known relative
 paths (`favicon.*`, `public/`, `static/`, `app/`, `src/app/`, `assets/` and
 `docs/public/` variants, then `icon.*` and `logo.svg`) and the first valid file
 wins, with no directory walk and no pattern search. A file is used only when its
-real path stays inside the Project's folder (a link that leaves the folder is
-refused), it is a regular file of at most 256 KB, and its first bytes agree with
+no component of its path below the Project's folder is a symbolic link (the
+open is anchored to the folder and refuses a link at any depth, so an icon
+reached through a link, even one inside the folder, is not used; platforms
+without such an open find no icon), it is a regular file of at most 256 KB, and its first bytes agree with
 its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
