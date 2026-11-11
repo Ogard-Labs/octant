@@ -82,6 +82,80 @@ describe("ACP event normalization", () => {
     ).toMatchObject({ kind: "reasoning-delta", text: "Checking", sequence: 2 });
   });
 
+  // The text a turn's consumers would join: every text delta, in order.
+  function transcript(
+    ctx: AcpEventContext,
+    updates: ReadonlyArray<Readonly<Record<string, unknown>>>,
+  ): string {
+    let text = "";
+    for (const update of updates) {
+      const mapped = mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "acp-session-1", update },
+      } as Parameters<typeof mapAcpNotification>[1]);
+      for (const result of mapped) {
+        expect(result.kind).not.toBe("protocol-failure");
+        if (result.kind === "event" && result.event.kind === "text-delta") {
+          text += result.event.text;
+        }
+      }
+    }
+    return text;
+  }
+  const says = (text: string) => ({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text },
+  });
+  const startsTool = (toolCallId: string) => ({
+    sessionUpdate: "tool_call",
+    toolCallId,
+    title: "Read file",
+    status: "in_progress",
+  });
+  const finishesTool = (toolCallId: string) => ({
+    sessionUpdate: "tool_call_update",
+    toolCallId,
+    status: "completed",
+  });
+
+  it("keeps a paragraph break between an agent's note and the text that follows a tool step", () => {
+    expect(
+      transcript(context(), [
+        says("I'll inspect "),
+        says("the repository."),
+        startsTool("provider-tool-1"),
+        finishesTool("provider-tool-1"),
+        says("Let me"),
+        says(" read the entry point."),
+        startsTool("provider-tool-2"),
+        says("Done."),
+      ]),
+    ).toBe("I'll inspect the repository.\n\nLet me read the entry point.\n\nDone.");
+  });
+
+  it("adds no break where no agent message ended or the text already has one", () => {
+    expect(
+      transcript(context(), [
+        startsTool("provider-tool-1"),
+        finishesTool("provider-tool-1"),
+        says("Reading"),
+        { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Hm" } },
+        {
+          sessionUpdate: "plan",
+          entries: [{ content: "Read the entry point", status: "in_progress" }],
+        },
+        { sessionUpdate: "usage_update", used: 10, size: 100 },
+        says(" the file.\n"),
+        startsTool("provider-tool-2"),
+        finishesTool("provider-tool-2"),
+        says("It exports one function."),
+        startsTool("provider-tool-3"),
+        says("\nNothing else."),
+      ]),
+    ).toBe("Reading the file.\nIt exports one function.\nNothing else.");
+  });
+
   it("maps ordered tool lifecycle and rejects contradictory ordering", () => {
     const ctx = context();
     expect(

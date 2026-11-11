@@ -30,6 +30,13 @@ interface AcpToolState {
   childAgentId?: string;
 }
 
+/** Where the agent's own text stands in this turn, once it has written any. */
+interface AcpAgentTextState {
+  /** A tool call or tool call update arrived after the last text. */
+  toolStepSince: boolean;
+  endsWithNewline: boolean;
+}
+
 export interface AcpEventContext {
   readonly instanceId: ProviderInstanceId;
   readonly sessionId: ProviderSessionId;
@@ -45,6 +52,8 @@ export interface AcpEventContext {
   readonly makeRequestId: () => string;
   /** The profile's `childRunMetaKey`: where a call names the subagent it started. */
   readonly childRunMetaKey?: string;
+  /** Unset until the agent writes its first text of the turn. */
+  agentText?: AcpAgentTextState;
 }
 
 export type AcpMappedNotification =
@@ -144,6 +153,23 @@ function streamed(
     );
   }
   return results;
+}
+
+// ACP gives an agent message no ID and no end, and a turn's deltas are joined
+// into one transcript. A tool step is the one sign that a message ended: an
+// agent's note before a tool and its text after it otherwise read as one
+// sentence ("…the repository.Let me…"). Thought, plan, and usage updates
+// arrive inside a message, so they end nothing.
+function agentText(context: AcpEventContext, value: unknown): ReadonlyArray<AcpMappedNotification> {
+  const text = string(value);
+  if (text === undefined || text.length === 0) return [{ kind: "ignored" }];
+  const previous = context.agentText;
+  const separator =
+    previous?.toolStepSince === true && !previous.endsWithNewline && !text.startsWith("\n")
+      ? "\n\n"
+      : "";
+  context.agentText = { toolStepSince: false, endsWithNewline: text.endsWith("\n") };
+  return streamed(context, "text-delta", `${separator}${text}`);
 }
 
 function taskId(summary: string): string {
@@ -386,11 +412,12 @@ export function mapAcpNotification(
   const update = notification.params.update;
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
-      return streamed(context, "text-delta", record(update.content)?.text);
+      return agentText(context, record(update.content)?.text);
     case "agent_thought_chunk":
       return streamed(context, "reasoning-delta", record(update.content)?.text);
     case "tool_call":
     case "tool_call_update":
+      if (context.agentText !== undefined) context.agentText.toolStepSince = true;
       return mapTool(context, update);
     case "plan": {
       const entries = Array.isArray(update.entries) ? update.entries : undefined;
