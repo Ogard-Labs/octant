@@ -894,10 +894,120 @@ describe("CanvasWorkspaceTab", () => {
     await waitFor(() => expect(document.querySelector(".canvas-block__area")).toBeNull());
   });
 
-  it("keeps a finger's drag for the Area tool alone, so the page does not scroll under a box", () => {
-    expect(cssDeclarations('.canvas-tool-surface[data-tool="area"] *')["touch-action"]).toBe(
-      "none",
+  it("lands a comment on the line a person draws over a block with the Pen", async () => {
+    const comment = vi.fn(async () => ({
+      kind: "accepted" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 4,
+    }));
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient(comment)} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pen: draw on a block, then comment" }),
     );
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(block, { button: 0, clientX: 200, clientY: 250, pointerId: 1 });
+    fireEvent.pointerMove(block, { clientX: 300, clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(block, { clientX: 400, clientY: 250, pointerId: 1 });
+
+    const line = inDocument('section[data-block-id="chart-1"] > .canvas-block__stroke');
+    expect(line).toHaveAttribute("data-draft", "true");
+    expect(line.querySelector("polyline")).toHaveAttribute("points", "25,25 50,50 75,25");
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "New comment" }), {
+      target: { value: "Why does it peak here?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(comment).toHaveBeenCalledTimes(1));
+    expect(comment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "canvas-comment-add",
+        anchor: expect.objectContaining({
+          kind: "stroke",
+          blockId: "chart-1",
+          points: [
+            { x: 25, y: 25 },
+            { x: 50, y: 50 },
+            { x: 75, y: 25 },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("pins a note where a person clicks with the Text tool and draws its words there", async () => {
+    const author = readyVersion.version.createdBy;
+    const threads: Array<unknown> = [];
+    const comment = vi.fn(async (command: { anchor: unknown; body: string; commentId: string }) => {
+      threads.push({
+        comment: {
+          commentId: command.commentId,
+          anchor: command.anchor,
+          author,
+          origin: { kind: "host" as const },
+          body: command.body,
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        replies: [],
+      });
+      return { kind: "accepted" as const, canvasId: quarterlyCanvasId, sequence: 4 };
+    });
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments: vi.fn(async () => ({
+        kind: "ready" as const,
+        canvasId: quarterlyCanvasId,
+        sequence: 3,
+        threads: [...threads],
+      })),
+      comment,
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Text: click a spot to pin a note" }),
+    );
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.click(block, { detail: 1, clientX: 200, clientY: 300 });
+
+    const pin = inDocument('section[data-block-id="chart-1"] > .canvas-block__note');
+    expect(pin).toHaveAttribute("data-draft", "true");
+    expect(pin).toHaveStyle({ left: "25%", top: "50%" });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "New comment" }), {
+      target: { value: "Label this axis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(comment).toHaveBeenCalledTimes(1));
+    expect(comment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        anchor: expect.objectContaining({ kind: "region", x: 25, y: 50, width: 0, height: 0 }),
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        inDocument('section[data-block-id="chart-1"] > .canvas-block__note[data-draft="false"]'),
+      ).toHaveTextContent("Label this axis"),
+    );
+  });
+
+  it("keeps a finger's drag for the Area and Pen tools alone, so the page does not scroll under a mark", () => {
+    for (const tool of ["area", "pen"]) {
+      expect(cssDeclarations(`.canvas-tool-surface[data-tool="${tool}"] *`)["touch-action"]).toBe(
+        "none",
+      );
+    }
     expect(
       cssDeclarations('.canvas-tool-surface[data-tool="hand"] *')["touch-action"],
     ).toBeUndefined();

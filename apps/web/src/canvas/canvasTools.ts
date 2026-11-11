@@ -1,9 +1,11 @@
+import type { CanvasCommentAnchor } from "@octant/contracts/canvas-board";
+
 /**
  * What the pointer does on a Canvas in the workspace. `select` is the Canvas
  * as it always was; the others take the pointer from the blocks, so a control
  * inside one cannot fire while a person is panning or pointing.
  */
-export type CanvasTool = "select" | "hand" | "comment" | "area";
+export type CanvasTool = "select" | "hand" | "comment" | "area" | "pen" | "text";
 
 /** The part of a Canvas a person pointed at to comment on. */
 export interface CanvasCommentPick {
@@ -25,6 +27,25 @@ export interface CanvasCommentArea {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+/**
+ * What a person drew on one block and has not commented on yet: a box, a
+ * freehand line, or a point a note will be pinned to. Every coordinate is
+ * percent of the block's drawn box.
+ */
+export type CanvasCommentMark =
+  | ({ readonly kind: "area" } & CanvasCommentArea)
+  | {
+      readonly kind: "stroke";
+      readonly blockId: string;
+      readonly points: ReadonlyArray<CanvasMarkPoint>;
+    }
+  | ({ readonly kind: "note"; readonly blockId: string } & CanvasMarkPoint);
+
+export interface CanvasMarkPoint {
+  readonly x: number;
+  readonly y: number;
 }
 
 interface Box {
@@ -109,4 +130,106 @@ export function canvasAreaOfDrag(
     width: tenth(((right - left) / block.width) * 100),
     height: tenth(((bottom - top) / block.height) * 100),
   };
+}
+
+/** Where a click landed on a block, in percent of its box and kept inside it. */
+export function canvasPointInBlock(block: Box, at: Point): CanvasMarkPoint | undefined {
+  if (block.width <= 0 || block.height <= 0) return undefined;
+  return {
+    x: tenth(
+      ((clamp(at.x, block.left, block.left + block.width) - block.left) / block.width) * 100,
+    ),
+    y: tenth(((clamp(at.y, block.top, block.top + block.height) - block.top) / block.height) * 100),
+  };
+}
+
+/**
+ * The line a drag drew on a block: kept inside the block's box, without the
+ * repeats a slow pointer leaves, and thinned evenly to `maxPoints` with both
+ * ends kept, so a long scribble still fits the comment contract. Undefined
+ * for a drag that never left an 8px square, which is a click.
+ */
+export function canvasStrokeOfDrag(
+  block: Box,
+  path: ReadonlyArray<Point>,
+  maxPoints: number,
+): ReadonlyArray<CanvasMarkPoint> | undefined {
+  const first = path[0];
+  if (first === undefined || path.length < 2) return undefined;
+  // Folded rather than spread into Math.max: a long scribble is more points
+  // than a call takes arguments.
+  let [left, right, top, bottom] = [first.x, first.x, first.y, first.y];
+  for (const at of path) {
+    left = Math.min(left, at.x);
+    right = Math.max(right, at.x);
+    top = Math.min(top, at.y);
+    bottom = Math.max(bottom, at.y);
+  }
+  if (Math.max(right - left, bottom - top) < AREA_MIN_PIXELS) return undefined;
+  const points: CanvasMarkPoint[] = [];
+  for (const at of path) {
+    const point = canvasPointInBlock(block, at);
+    if (point === undefined) return undefined;
+    const last = points.at(-1);
+    if (last?.x !== point.x || last.y !== point.y) points.push(point);
+  }
+  if (points.length < 2) return undefined;
+  if (points.length <= maxPoints) return points;
+  const step = (points.length - 1) / (maxPoints - 1);
+  return Array.from({ length: maxPoints }, (_, index) => points[Math.round(index * step)]).filter(
+    (point): point is CanvasMarkPoint => point !== undefined,
+  );
+}
+
+/** The box a stroke stays inside, which is how an agent is told where it is. */
+export function canvasStrokeBounds(
+  points: ReadonlyArray<CanvasMarkPoint>,
+): Omit<CanvasCommentArea, "blockId"> {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: tenth(Math.max(...xs) - x), height: tenth(Math.max(...ys) - y) };
+}
+
+/**
+ * The mark a comment's anchor draws on its block, if it is a drawn one. A
+ * region of no size is a point, which is how a note is stored.
+ */
+export function canvasMarkOfAnchor(anchor: CanvasCommentAnchor): CanvasCommentMark | undefined {
+  const blockId = String(anchor.blockId);
+  if (anchor.kind === "stroke") return { kind: "stroke", blockId, points: anchor.points };
+  if (anchor.kind !== "region") return undefined;
+  return anchor.width === 0 && anchor.height === 0
+    ? { kind: "note", blockId, x: anchor.x, y: anchor.y }
+    : {
+        kind: "area",
+        blockId,
+        x: anchor.x,
+        y: anchor.y,
+        width: anchor.width,
+        height: anchor.height,
+      };
+}
+
+/** The anchor a comment on a mark is sent with, before the contract decodes it. */
+export function canvasAnchorInputOfMark(mark: CanvasCommentMark, id: string): unknown {
+  if (mark.kind === "stroke") {
+    return { kind: "stroke", blockId: mark.blockId, strokeId: id, points: mark.points };
+  }
+  return {
+    kind: "region",
+    blockId: mark.blockId,
+    regionId: id,
+    x: mark.x,
+    y: mark.y,
+    width: mark.kind === "area" ? mark.width : 0,
+    height: mark.kind === "area" ? mark.height : 0,
+  };
+}
+
+/** How the drawer names a mark: by what it is and the block it is on. */
+export function canvasMarkLabel(kind: CanvasCommentMark["kind"], blockLabel: string): string {
+  const name = kind === "area" ? "Area" : kind === "stroke" ? "Pen mark" : "Note";
+  return `${name} · ${blockLabel}`;
 }

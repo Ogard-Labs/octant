@@ -2,7 +2,9 @@ import {
   Hand,
   MessageSquarePlus,
   MousePointer2,
+  Pen,
   SquareDashed,
+  Type,
   type LucideIcon,
 } from "lucide-react";
 import { Fragment } from "react";
@@ -23,6 +25,8 @@ const TOOLS: ReadonlyArray<RailTool> = [
   { id: "hand", label: "Hand: drag to move the page", icon: Hand },
   { id: "comment", label: "Comment: click a part", icon: MessageSquarePlus, startsGroup: true },
   { id: "area", label: "Comment on an area: drag a box", icon: SquareDashed },
+  { id: "pen", label: "Pen: draw on a block, then comment", icon: Pen },
+  { id: "text", label: "Text: click a spot to pin a note", icon: Type },
 ];
 
 /**

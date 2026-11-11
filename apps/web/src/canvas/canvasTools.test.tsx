@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { canvasAreaOfDrag, canvasCommentPickAt } from "./canvasTools";
+import {
+  canvasAreaOfDrag,
+  canvasCommentPickAt,
+  canvasMarkOfAnchor,
+  canvasPointInBlock,
+  canvasStrokeBounds,
+  canvasStrokeOfDrag,
+} from "./canvasTools";
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -86,5 +93,85 @@ describe("canvasAreaOfDrag", () => {
 
   it("reads a drag too small to mean an area as none", () => {
     expect(canvasAreaOfDrag(block, { x: 200, y: 250 }, { x: 204, y: 350 })).toBeUndefined();
+  });
+});
+
+describe("canvasStrokeOfDrag", () => {
+  const block = { left: 100, top: 200, width: 400, height: 200 };
+
+  it("reads a drawn line as percent of the block, without the repeats a slow pointer leaves", () => {
+    const path = [
+      { x: 100, y: 200 },
+      { x: 100, y: 200 },
+      { x: 300, y: 300 },
+      { x: 500, y: 400 },
+    ];
+    expect(canvasStrokeOfDrag(block, path, 128)).toEqual([
+      { x: 0, y: 0 },
+      { x: 50, y: 50 },
+      { x: 100, y: 100 },
+    ]);
+  });
+
+  it("keeps a line that ran past the block inside it", () => {
+    const line = canvasStrokeOfDrag(
+      block,
+      [
+        { x: 300, y: 300 },
+        { x: 900, y: 100 },
+      ],
+      128,
+    );
+    expect(line).toEqual([
+      { x: 50, y: 50 },
+      { x: 100, y: 0 },
+    ]);
+  });
+
+  it("thins a long scribble to the contract's bound and keeps both ends", () => {
+    const path = Array.from({ length: 401 }, (_, index) => ({ x: 100 + index, y: 300 }));
+    const line = canvasStrokeOfDrag(block, path, 16) ?? [];
+    expect(line).toHaveLength(16);
+    expect(line[0]).toEqual({ x: 0, y: 50 });
+    expect(line.at(-1)).toEqual({ x: 100, y: 50 });
+  });
+
+  it("reads a press that never left a few pixels as no line", () => {
+    const press = [
+      { x: 200, y: 250 },
+      { x: 203, y: 252 },
+    ];
+    expect(canvasStrokeOfDrag(block, press, 128)).toBeUndefined();
+  });
+});
+
+describe("drawn marks and their anchors", () => {
+  it("places a click in percent of the block and inside it", () => {
+    const block = { left: 100, top: 200, width: 400, height: 200 };
+    expect(canvasPointInBlock(block, { x: 200, y: 250 })).toEqual({ x: 25, y: 25 });
+    expect(canvasPointInBlock(block, { x: 50, y: 900 })).toEqual({ x: 0, y: 100 });
+  });
+
+  it("reads a region of no size as a note and any other region as an area", () => {
+    const region = { kind: "region" as const, blockId: "b" as never, regionId: "r" as never };
+    expect(canvasMarkOfAnchor({ ...region, x: 10, y: 20, width: 0, height: 0 })).toEqual({
+      kind: "note",
+      blockId: "b",
+      x: 10,
+      y: 20,
+    });
+    expect(canvasMarkOfAnchor({ ...region, x: 10, y: 20, width: 30, height: 0 })?.kind).toBe(
+      "area",
+    );
+    expect(canvasMarkOfAnchor({ kind: "block", blockId: "b" as never })).toBeUndefined();
+  });
+
+  it("bounds a line by the box it stays inside", () => {
+    const points = [
+      { x: 20, y: 60 },
+      { x: 45.5, y: 30 },
+      { x: 30, y: 80 },
+    ];
+    expect(canvasStrokeBounds(points)).toEqual({ x: 20, y: 30, width: 25.5, height: 50 });
   });
 });

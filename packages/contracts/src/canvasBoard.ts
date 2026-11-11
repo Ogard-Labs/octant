@@ -36,7 +36,8 @@ export type CanvasCommentReplyId = typeof CanvasCommentReplyId.Type;
 // a renderer can place them, but they are never stored inside the block itself.
 // A region anchor is a freeform area of one block: x, y, width, and height
 // are percent of the block's drawn box from its top-left corner, so the area
-// stays on the same part of a block that scales with its pane.
+// stays on the same part of a block that scales with its pane. A region of no
+// width and no height is a point: a note pinned there.
 
 export const CanvasCommentBlockAnchor = Schema.Struct({
   kind: Schema.Literal("block"),
@@ -88,12 +89,34 @@ export const CanvasCommentRegionAnchor = Schema.Struct({
 }).annotations(strict);
 export type CanvasCommentRegionAnchor = typeof CanvasCommentRegionAnchor.Type;
 
+/** A stroke long enough to circle or underline a part, short enough to send to an agent whole. */
+export const CANVAS_COMMENT_STROKE_MAX_POINTS = 128;
+
+const Percent = FiniteNumber.pipe(Schema.between(0, 100));
+
+// A stroke anchor is a line a person drew over one block, in the same percent
+// of the block's drawn box a region uses. Unlike a region it is bounded to the
+// box here: no stroke existed before the bound did. A build older than this
+// anchor cannot decode a comment that carries one, so it skips that comment
+// when it replays its journal and cannot import it from artifact sync.
+export const CanvasCommentStrokeAnchor = Schema.Struct({
+  kind: Schema.Literal("stroke"),
+  blockId: CanvasBlockId,
+  strokeId: brandedUuid("CanvasCommentStrokeId"),
+  points: Schema.Array(Schema.Struct({ x: Percent, y: Percent }).annotations(strict)).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(CANVAS_COMMENT_STROKE_MAX_POINTS),
+  ),
+}).annotations(strict);
+export type CanvasCommentStrokeAnchor = typeof CanvasCommentStrokeAnchor.Type;
+
 export const CanvasCommentAnchor = Schema.Union(
   CanvasCommentBlockAnchor,
   CanvasCommentNodeAnchor,
   CanvasCommentEdgeAnchor,
   CanvasCommentRowAnchor,
   CanvasCommentRegionAnchor,
+  CanvasCommentStrokeAnchor,
 );
 export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;
 

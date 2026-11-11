@@ -10,6 +10,7 @@ import {
   type CanvasContextSelection,
 } from "@octant/contracts/canvasContext";
 import type { OctantMode } from "@octant/contracts/modes";
+import { canvasStrokeBounds } from "./canvasTools";
 import {
   decodeMentionableThreadId,
   decodeThreadMessageQueueCommand,
@@ -122,8 +123,17 @@ export function canvasCommentAnchorDescription(
     case "row":
       return `row "${String(anchor.rowId)}" in ${inBlock}`;
     case "region":
-      // Percent of the block's drawn box, which is what the person marked.
-      return `the area ${String(anchor.x)}% from the left and ${String(anchor.y)}% from the top, ${String(anchor.width)}% wide and ${String(anchor.height)}% tall, of ${inBlock} as drawn`;
+      // Percent of the block's drawn box, which is what the person marked. A
+      // region of no size is the point a note is pinned to.
+      return anchor.width === 0 && anchor.height === 0
+        ? `the point ${String(anchor.x)}% from the left and ${String(anchor.y)}% from the top of ${inBlock} as drawn`
+        : `the area ${String(anchor.x)}% from the left and ${String(anchor.y)}% from the top, ${String(anchor.width)}% wide and ${String(anchor.height)}% tall, of ${inBlock} as drawn`;
+    case "stroke": {
+      // The line itself rides along in the request's anchor; the prompt names
+      // the box it stays inside, which is what a reader would point at.
+      const box = canvasStrokeBounds(anchor.points);
+      return `what a freehand line marks inside the area ${String(box.x)}% from the left and ${String(box.y)}% from the top, ${String(box.width)}% wide and ${String(box.height)}% tall, of ${inBlock} as drawn`;
+    }
   }
 }
 

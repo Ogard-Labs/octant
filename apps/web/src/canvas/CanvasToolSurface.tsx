@@ -7,10 +7,13 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { CANVAS_COMMENT_STROKE_MAX_POINTS } from "@octant/contracts/canvas-board";
 import {
   canvasAreaOfDrag,
   canvasCommentPickAt,
-  type CanvasCommentArea,
+  canvasPointInBlock,
+  canvasStrokeOfDrag,
+  type CanvasCommentMark,
   type CanvasCommentPick,
   type CanvasTool,
 } from "./canvasTools";
@@ -20,7 +23,8 @@ export interface CanvasToolSurfaceProps {
   /** Whether the Canvas takes a comment on the anchor a choice id names. */
   readonly isAnchor: (choiceId: string) => boolean;
   readonly onPick: (pick: CanvasCommentPick) => void;
-  readonly onArea: (area: CanvasCommentArea) => void;
+  /** A box, a line, or a point a person marked on one block. */
+  readonly onMark: (mark: CanvasCommentMark) => void;
   readonly children: ReactNode;
 }
 
@@ -38,6 +42,13 @@ type Gesture =
       readonly section: Element;
       readonly x: number;
       readonly y: number;
+    }
+  | {
+      readonly kind: "pen";
+      readonly blockId: string;
+      readonly section: Element;
+      /** Every place the pointer has been, in client pixels. */
+      readonly path: Array<{ readonly x: number; readonly y: number }>;
     };
 
 interface Outline {
@@ -62,6 +73,8 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
   const hovered = useRef<Element | undefined>(undefined);
   const [target, setTarget] = useState<Outline>();
   const [band, setBand] = useState<Outline>();
+  // The line under the pen while it is down, in the document's own pixels.
+  const [ink, setInk] = useState<string>();
   const { tool } = props;
 
   // A tool change ends whatever the last tool was showing.
@@ -70,6 +83,7 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
     hovered.current = undefined;
     setTarget(undefined);
     setBand(undefined);
+    setInk(undefined);
   }, [tool]);
 
   const outlineOf = (rect: {
@@ -104,20 +118,15 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
       capturePointer(event);
       return;
     }
-    if (tool !== "area" || !(event.target instanceof Element)) return;
-    // A board's picture zooms and pans under its block, so a share of the
-    // block's box would not stay on what the person marked. Its nodes and
-    // edges take comments instead.
-    if (event.target.closest(".canvas-board") !== null) return;
-    const section = event.target.closest("section.canvas-block[data-block-id]");
-    if (section === null) return;
-    gesture.current = {
-      kind: "area",
-      blockId: section.getAttribute("data-block-id") ?? "",
-      section,
-      x: event.clientX,
-      y: event.clientY,
-    };
+    if (tool !== "area" && tool !== "pen") return;
+    const section = markableBlock(event.target);
+    if (section === undefined) return;
+    const blockId = section.getAttribute("data-block-id") ?? "";
+    const at = { x: event.clientX, y: event.clientY };
+    gesture.current =
+      tool === "area"
+        ? { kind: "area", blockId, section, ...at }
+        : { kind: "pen", blockId, section, path: [at] };
     capturePointer(event);
   };
 
@@ -128,6 +137,17 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
       if (scrolled === null) return;
       scrolled.scrollLeft = current.left - (event.clientX - current.x);
       scrolled.scrollTop = current.top - (event.clientY - current.y);
+      return;
+    }
+    if (current?.kind === "pen") {
+      current.path.push({ x: event.clientX, y: event.clientY });
+      const origin = content.current?.getBoundingClientRect();
+      if (origin === undefined) return;
+      setInk(
+        current.path
+          .map((at) => `${String(at.x - origin.left)},${String(at.y - origin.top)}`)
+          .join(" "),
+      );
       return;
     }
     if (current?.kind === "area") {
@@ -157,13 +177,24 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
     gesture.current = undefined;
     if (current === undefined) return;
     releasePointer(event);
-    if (current.kind !== "area") return;
-    setBand(undefined);
-    const area = canvasAreaOfDrag(current.section.getBoundingClientRect(), current, {
-      x: event.clientX,
-      y: event.clientY,
-    });
-    if (area !== undefined) props.onArea({ blockId: current.blockId, ...area });
+    if (current.kind === "hand") return;
+    const block = current.section.getBoundingClientRect();
+    const at = { x: event.clientX, y: event.clientY };
+    if (current.kind === "area") {
+      setBand(undefined);
+      const area = canvasAreaOfDrag(block, current, at);
+      if (area !== undefined) props.onMark({ kind: "area", blockId: current.blockId, ...area });
+    } else {
+      setInk(undefined);
+      const points = canvasStrokeOfDrag(
+        block,
+        [...current.path, at],
+        CANVAS_COMMENT_STROKE_MAX_POINTS,
+      );
+      if (points !== undefined) {
+        props.onMark({ kind: "stroke", blockId: current.blockId, points });
+      }
+    }
   };
 
   // A drag the browser took away (a pen or touch takeover, a system gesture)
@@ -174,6 +205,7 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
     gesture.current = undefined;
     releasePointer(event);
     setBand(undefined);
+    setInk(undefined);
   };
 
   // Also on scroll: the page moved under a still pointer, so the outlined
@@ -195,6 +227,24 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
     if (event.detail === 0) return;
     event.preventDefault();
     event.stopPropagation();
+    if (tool === "text") {
+      const section = markableBlock(event.target);
+      const point =
+        section === undefined
+          ? undefined
+          : canvasPointInBlock(section.getBoundingClientRect(), {
+              x: event.clientX,
+              y: event.clientY,
+            });
+      if (section !== undefined && point !== undefined) {
+        props.onMark({
+          kind: "note",
+          blockId: section.getAttribute("data-block-id") ?? "",
+          ...point,
+        });
+      }
+      return;
+    }
     if (tool !== "comment" || !(event.target instanceof Element)) return;
     const found = canvasCommentPickAt(event.target, props.isAnchor);
     if (found !== undefined) props.onPick(found.pick);
@@ -227,9 +277,24 @@ export function CanvasToolSurface(props: CanvasToolSurfaceProps) {
         {band === undefined ? null : (
           <div aria-hidden="true" className="canvas-tool-surface__band" style={placed(band)} />
         )}
+        {ink === undefined ? null : (
+          <svg aria-hidden="true" className="canvas-tool-surface__ink">
+            <polyline points={ink} />
+          </svg>
+        )}
       </div>
     </div>
   );
+}
+
+/**
+ * The block a drawn mark would sit on. A board's picture zooms and pans under
+ * its block, so a share of the block's box would not stay on what the person
+ * marked: it takes none, and its nodes and edges take comments instead.
+ */
+function markableBlock(target: EventTarget): Element | undefined {
+  if (!(target instanceof Element) || target.closest(".canvas-board") !== null) return undefined;
+  return target.closest("section.canvas-block[data-block-id]") ?? undefined;
 }
 
 function placed(outline: Outline): CSSProperties {
