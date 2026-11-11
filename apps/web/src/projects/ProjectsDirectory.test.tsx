@@ -1,7 +1,8 @@
 import type { ProjectSummary } from "@octant/contracts/projects";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ProjectIconContext, createProjectIconSource } from "./ProjectIcon";
 import { ProjectsDirectory } from "./ProjectsDirectory";
 
 describe("ProjectsDirectory", () => {
@@ -40,5 +41,53 @@ describe("ProjectsDirectory", () => {
 
     await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     expect(onBack).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ProjectsDirectory icons", () => {
+  const withIcon = {
+    id: "20000000-0000-4000-8000-000000000002",
+    name: "Harbor",
+    lifecycle: "active",
+    pinned: false,
+    rank: "0/2",
+    version: 1,
+    createdAt: "2026-07-21T12:00:00.000Z",
+    updatedAt: "2026-07-21T12:00:00.000Z",
+    type: "code",
+    binding: { canonicalRoot: "/opaque/harbor" },
+    codeAccessPersistence: "current-session",
+  } as unknown as ProjectSummary;
+  const without = {
+    ...withIcon,
+    id: "20000000-0000-4000-8000-000000000003",
+    name: "Plain",
+  } as unknown as ProjectSummary;
+
+  it("shows a Project's own icon when the host has one and the folder glyph when it does not", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:harbor-icon");
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => {
+      const hasIcon = String(input).includes(String(withIcon.id));
+      return {
+        ok: hasIcon,
+        blob: async () => new Blob(["<svg/>"], { type: "image/svg+xml" }),
+      };
+    }) as unknown as typeof fetch;
+    const source = createProjectIconSource({
+      serverUrl: "http://127.0.0.1:1/",
+      windowCapability: "capability",
+      fetcher,
+    });
+
+    const { container } = render(
+      <ProjectIconContext.Provider value={source}>
+        <ProjectsDirectory onOpenProject={vi.fn()} projects={[withIcon, without]} />
+      </ProjectIconContext.Provider>,
+    );
+
+    await waitFor(() => expect(container.querySelectorAll("img.project-icon")).toHaveLength(1));
+    expect(container.querySelector("img.project-icon")).toHaveAttribute("src", "blob:harbor-icon");
+    expect(container.querySelectorAll("svg.lucide-folder")).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

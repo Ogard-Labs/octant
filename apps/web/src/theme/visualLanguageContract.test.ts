@@ -187,7 +187,8 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    expect(input).toMatch(/padding:\s*18px var\(--oct-composer-gutter\) 12px/);
+    // One line and 12px above and under it: the 44px pill.
+    expect(input).toMatch(/padding:\s*12px var\(--oct-composer-gutter\);/);
   });
 
   it("draws no focus edge, border change, or lift on the composer frame", () => {
@@ -450,13 +451,10 @@ describe("the public-block visual language", () => {
     expect(strip).not.toMatch(/border-top/);
     // Every composer, start screen or thread, has one prompt. A start screen
     // redefining it made the same message change shape between the first send
-    // and the next. It is two lines before it grows; under a thread the empty
-    // box is one line, with the same insets and type, and nothing else differs.
-    expect(prompt).toMatch(/min-height:\s*calc\(2lh \+ 30px\)/);
-    const reply =
-      system.match(/\.composer--follow-up \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    expect(reply).toMatch(/min-height:\s*calc\(1lh \+ 30px\)/);
-    expect(reply).not.toMatch(/padding|font-size|line-height/);
+    // and the next. The empty prompt is one line on a start screen and under a
+    // thread alike, and no surface or presentation sizes it again.
+    expect(prompt).toMatch(/min-height:\s*calc\(1lh \+ 24px\)/);
+    expect(system).not.toMatch(/\.composer--follow-up \.composer-input \{/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {
       expect(source).toMatch(/className="composer-tray composer-tray--start"/);

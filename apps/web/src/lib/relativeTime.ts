@@ -12,6 +12,12 @@ export function relativeTimeLabel(at: string, now: number = Date.now()): string 
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** "5m", "2h", "5d": the compact age on a list row's meta line. */
+export function compactRelativeTimeLabel(at: string, now: number = Date.now()): string {
+  const label = relativeTimeLabel(at, now);
+  return label === "just now" ? "now" : label.replace(/ ago$/, "");
+}
+
 /**
  * How long something has been running: "<1m", "4m", "1h 5m", "2d". The same
  * minute resolution as {@link relativeTimeLabel}, since the screens that show

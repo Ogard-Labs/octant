@@ -515,13 +515,15 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
                   />
                   {props.poolControl}
-                  <ComposerVoiceButton
-                    disabled={props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
                 </>
+              ),
+              dictate: (
+                <ComposerVoiceButton
+                  disabled={props.creating === true}
+                  onTranscript={(transcript) =>
+                    setPrompt((current) => appendTranscript(current, transcript))
+                  }
+                />
               ),
               actions: {
                 kind: "send",

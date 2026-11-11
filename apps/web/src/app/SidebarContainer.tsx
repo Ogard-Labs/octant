@@ -1,4 +1,5 @@
 import type { WindowHistory } from "../shell/windowHistory";
+import type { WhatsNewController } from "../settings/useWhatsNewAfterUpdate";
 import type { ContextHealth } from "@octant/contracts/context";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -182,6 +183,8 @@ export interface SidebarContainerProps {
   readonly sidebarRailBeside: boolean;
   /** Plan usage rings for the icon rail. */
   readonly railUsage?: ReactNode;
+  /** The update card at the sidebar's foot; the rail never draws it. */
+  readonly whatsNew: WhatsNewController;
   readonly sidebarTileCounts: ReturnType<typeof countSidebarTiles>;
   readonly threadErrorMessage?: string;
   readonly threadExportClient: ReturnType<typeof resolveThreadExportClient>;
@@ -248,6 +251,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarRailBeside,
     homeActive,
     railUsage,
+    whatsNew,
     sidebarTileCounts,
     threadErrorMessage,
     threadExportClient,
@@ -688,6 +692,15 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
           : {})}
         {...(railUsage === undefined ? {} : { railUsage })}
+        {...(whatsNew.card === undefined
+          ? {}
+          : {
+              whatsNew: {
+                content: whatsNew.card,
+                onDismiss: whatsNew.dismiss,
+                onOpenNotes: whatsNew.openNotes,
+              },
+            })}
         {...(sidebarRail
           ? {
               rail: {

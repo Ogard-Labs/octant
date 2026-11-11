@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { DeviceRevokePanel } from "../approvals/DeviceRevokePanel";
+import { LargeTitle, ListRow, ListSection, NavBar } from "../ui/NativeChrome";
+import { TabBar, type MobileTabId } from "../ui/TabBar";
 import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
@@ -27,9 +29,8 @@ import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
 import { AppearanceBackgroundPanel } from "../appearance/AppearanceBackgroundPanel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { createMobileHostRemover } from "../session/mobileSessionLifecycle";
-import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
+import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
-import { IconButton } from "../ui/IconButton";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
 import { deepLinkRefusal, movesLinkOpening } from "./deepLinkNavigation";
@@ -137,81 +138,23 @@ function HostsBody(props: {
     () =>
       StyleSheet.create({
         hostsShell: { flex: 1 },
-        hostsTop: {
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: mobileSpacing.md,
-          paddingTop: mobileSpacing.sm,
-          paddingBottom: mobileSpacing.sm,
-        },
-        hostsTitle: {
-          flex: 1,
-          textAlign: "center",
-          color: colors.textPrimary,
-          fontSize: mobileTypography.title.fontSize,
-          fontWeight: mobileTypography.title.fontWeight,
-        },
-        hostsSpacer: { width: 36 },
         body: {
-          gap: mobileSpacing.md,
-          paddingHorizontal: mobileSpacing.md,
+          paddingTop: mobileSpacing.sm,
           paddingBottom: mobileSpacing.xl,
         },
         sectionBody: {
           color: colors.textSecondary,
-          fontSize: mobileTypography.body.fontSize,
-          lineHeight: 20,
+          fontSize: mobileTypography.detail.fontSize,
+          lineHeight: 18,
+          paddingHorizontal: mobileSpacing.md + mobileSpacing.md,
+          marginBottom: mobileSpacing.md,
         },
-        mockNotice: {
-          gap: mobileSpacing.xs,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.accent,
-          borderRadius: mobileRadii.md,
-          backgroundColor: colors.surface,
-          padding: mobileSpacing.md,
-        },
-        mockTitle: {
-          color: colors.textPrimary,
-          fontSize: mobileTypography.title.fontSize,
-          fontWeight: "500",
-        },
-        hostRow: {
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.border,
-          paddingVertical: mobileSpacing.sm,
-        },
-        hostLabel: {
-          color: colors.textPrimary,
-          fontWeight: "500",
-        },
-        hostOrigin: {
+        gutter: { gap: mobileSpacing.md, paddingHorizontal: mobileSpacing.md },
+        hostPanels: { gap: mobileSpacing.sm, paddingHorizontal: mobileSpacing.md },
+        hostPanelsTitle: {
           color: colors.textSecondary,
-          fontSize: mobileTypography.caption.fontSize,
-        },
-        hostHealthRow: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: mobileSpacing.xs,
-          marginTop: mobileSpacing.xs,
-        },
-        hostHealthDot: { width: 8, height: 8, borderRadius: 4 },
-        hostHealth: {
-          fontSize: mobileTypography.caption.fontSize,
-        },
-        placementChip: {
-          marginTop: mobileSpacing.sm,
-          alignSelf: "flex-start",
-          backgroundColor: colors.surface,
-          borderRadius: mobileRadii.pill,
-          paddingHorizontal: mobileSpacing.sm,
-          paddingVertical: mobileSpacing.xs,
-        },
-        placementChipActive: {
-          backgroundColor: colors.surfaceElevated,
-        },
-        chipLabel: {
-          color: colors.textPrimary,
-          fontSize: mobileTypography.caption.fontSize,
+          fontSize: mobileTypography.section.fontSize,
+          fontWeight: mobileTypography.section.fontWeight,
         },
       }),
     [colors],
@@ -219,30 +162,32 @@ function HostsBody(props: {
 
   return (
     <View style={styles.hostsShell}>
-      <View style={styles.hostsTop}>
-        <IconButton
-          accessibilityLabel="Back"
-          name="chevron-back"
-          onPress={props.onBack}
-          testID="mobile-hosts-back"
-          variant="ghost"
+      {props.entryMode === "manage" ? (
+        <LargeTitle title={MOBILE_TAB_LABELS.hosts} />
+      ) : (
+        <NavBar
+          backLabel={MOBILE_TAB_LABELS.home}
+          backTestID="mobile-hosts-back"
+          onBack={props.onBack}
+          title="Add computer"
         />
-        <Text style={styles.hostsTitle}>
-          {props.entryMode === "manage" ? MOBILE_TAB_LABELS.hosts : "Add computer"}
-        </Text>
-        <View style={styles.hostsSpacer} />
-      </View>
+      )}
       <ScrollView contentContainerStyle={styles.body}>
         {props.entryMode !== "manage" ? (
           environment.kind === "mock" ? (
-            <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-              <Text style={styles.mockTitle}>Pair a computer</Text>
-              <Text selectable style={styles.sectionBody}>
-                Pairing is off in this sample workspace. Leave it to connect a computer.
-              </Text>
-            </View>
+            <ListSection
+              footer="Pairing is off in this sample workspace. Leave it to connect a computer."
+              testID="mobile-hosts-mock-notice"
+            >
+              <ListRow
+                icon="qr-code-outline"
+                iconTone={colors.paletteBlue}
+                label="Pair a computer"
+                last
+              />
+            </ListSection>
           ) : (
-            <>
+            <View style={styles.gutter}>
               <PairingPanel
                 registry={registry}
                 deviceKeyStore={deviceKeyStore}
@@ -265,18 +210,23 @@ function HostsBody(props: {
                   }}
                 />
               ) : null}
-            </>
+            </View>
           )
         ) : (
           <>
             {environment.kind === "mock" ? (
-              <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-                <Text style={styles.mockTitle}>Sample workspace</Text>
-                <Text selectable style={styles.sectionBody}>
-                  {environment.label}. Hosts, credentials, and actions stay in memory and never
-                  connect to a real listener.
-                </Text>
-              </View>
+              <ListSection
+                footer="Hosts, credentials, and actions stay in memory and never connect to a real listener."
+                testID="mobile-hosts-mock-notice"
+              >
+                <ListRow
+                  detail={environment.label}
+                  icon="flask-outline"
+                  iconTone={colors.paletteTeal}
+                  label="Sample workspace"
+                  last
+                />
+              </ListSection>
             ) : null}
             {props.notice !== undefined ? (
               <Text style={styles.sectionBody}>{props.notice}</Text>
@@ -297,116 +247,124 @@ function HostsBody(props: {
                 {MOBILE_COPY.hostKeyNotDeleted}
               </Text>
             ) : null}
-            <GuestHubRefusals refused={notAccepted} />
-            {offlineDemo || unlockKey === undefined ? null : (
-              <OwnerMovesPanel
-                deviceKeyStore={deviceKeyStore}
-                guestHubStore={guestHubStore}
-                unlockKey={unlockKey}
-              />
-            )}
-            {offlineDemo || unlockKey === undefined ? null : (
-              <OwnerAlertsPanel
-                deviceKeyStore={deviceKeyStore}
-                guestHubStore={guestHubStore}
-                unlockKey={unlockKey}
-              />
-            )}
+            {/* These panels draw their own layout; the gutter keeps them off the
+                screen edge now that the page itself has none for grouped lists. */}
+            <View style={styles.gutter}>
+              <GuestHubRefusals refused={notAccepted} />
+              {offlineDemo || unlockKey === undefined ? null : (
+                <OwnerMovesPanel
+                  deviceKeyStore={deviceKeyStore}
+                  guestHubStore={guestHubStore}
+                  unlockKey={unlockKey}
+                />
+              )}
+              {offlineDemo || unlockKey === undefined ? null : (
+                <OwnerAlertsPanel
+                  deviceKeyStore={deviceKeyStore}
+                  guestHubStore={guestHubStore}
+                  unlockKey={unlockKey}
+                />
+              )}
+            </View>
             {hosts.length === 0 ? (
               <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
             ) : (
-              hosts.map((host) => {
-                const status = healthByHostId.get(host.hostId);
-                return (
-                  <View key={host.hostId} style={styles.hostRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={environment.kind === "mock"}
-                      onPress={() => resumeHost(host.origin)}
-                      testID={`mobile-host-${host.hostId}`}
-                    >
-                      <Text style={styles.hostLabel}>{host.label}</Text>
-                      <Text style={styles.hostOrigin}>{host.origin}</Text>
-                      <View style={styles.hostHealthRow}>
-                        <View
-                          style={[
-                            styles.hostHealthDot,
-                            { backgroundColor: healthTint[hostHealthTone(status?.kind ?? "idle")] },
-                          ]}
-                        />
-                        <Text
-                          style={[
-                            styles.hostHealth,
-                            { color: healthTint[hostHealthTone(status?.kind ?? "idle")] },
-                          ]}
-                          testID={`mobile-host-health-${host.hostId}`}
-                        >
-                          {mobileHostHealthLabel(status?.kind ?? "idle")}
-                          {status?.detail !== undefined ? ` · ${status.detail}` : ""}
-                        </Text>
-                      </View>
-                    </Pressable>
-                    <Pressable
+              <>
+                <ListSection title={MOBILE_COPY.workspaces}>
+                  {hosts.map((host, index) => {
+                    const status = healthByHostId.get(host.hostId);
+                    const tone = hostHealthTone(status?.kind ?? "idle");
+                    return (
+                      <ListRow
+                        detail={`${mobileHostHealthLabel(status?.kind ?? "idle")}${
+                          status?.detail !== undefined ? ` · ${status.detail}` : ""
+                        }`}
+                        detailTone={tone === "neutral" ? undefined : healthTint[tone]}
+                        icon="desktop-outline"
+                        iconTone={tone === "neutral" ? colors.paletteBlue : healthTint[tone]}
+                        key={host.hostId}
+                        label={host.label}
+                        last={index === hosts.length - 1}
+                        onPress={
+                          environment.kind === "mock" ? undefined : () => resumeHost(host.origin)
+                        }
+                        testID={`mobile-host-${host.hostId}`}
+                      />
+                    );
+                  })}
+                </ListSection>
+                <ListSection
+                  footer={MOBILE_COPY.placementHint}
+                  title={MOBILE_COPY.placementSection}
+                >
+                  {hosts.map((host, index) => (
+                    <ListRow
+                      accessory={placementHostId === host.hostId ? "check" : "none"}
+                      accessibilityLabel={`${host.label}${
+                        placementHostId === host.hostId ? `, ${MOBILE_COPY.placementHere}` : ""
+                      }`}
+                      key={host.hostId}
+                      label={host.label}
+                      last={index === hosts.length - 1}
                       onPress={() => setPlacementHostId(host.hostId)}
-                      style={[
-                        styles.placementChip,
-                        placementHostId === host.hostId ? styles.placementChipActive : null,
-                      ]}
                       testID={`mobile-placement-${host.hostId}`}
-                    >
-                      <Text style={styles.chipLabel}>
-                        {placementHostId === host.hostId
-                          ? MOBILE_COPY.placementHere
-                          : MOBILE_COPY.placementMakeHere}
-                      </Text>
-                    </Pressable>
-                    {environment.kind === "live" && status?.kind === "ready" ? (
-                      <>
-                        <PushNotificationsPanel
-                          hostKeyFingerprint={host.hostKeyFingerprint}
-                          permission={notificationPermission}
-                          transport={transportForHost(host.hostId)}
-                          book={pushRegistrations}
-                          resolveDeviceId={() =>
-                            deviceKeyStore
-                              .findByOrigin(host.origin)
-                              .then((found) =>
-                                found?.hostId === host.hostId ? found.deviceId : undefined,
-                              )
-                          }
-                        />
-                        <DeviceRevokePanel
-                          authenticator={authenticator}
-                          bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
-                          transport={transportForHost(host.hostId)}
-                          onRevoked={() => {
-                            removeHost(host.hostId);
-                          }}
-                        />
-                      </>
-                    ) : null}
-                    {environment.kind === "live" && status?.kind === "stale" ? (
-                      <DeviceRevokePanel
-                        authenticator={authenticator}
-                        bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
-                        transport={transportForHost(host.hostId)}
-                        onRevoked={() => {
-                          removeHost(host.hostId);
-                        }}
-                      />
-                    ) : null}
-                    {environment.kind === "live" ? (
-                      <RemoveHostPanel
-                        hostLabel={host.label}
-                        onRemove={() => removeHost(host.hostId)}
-                        testIdSuffix={host.hostId}
-                      />
-                    ) : null}
-                  </View>
-                );
-              })
+                    />
+                  ))}
+                </ListSection>
+                {environment.kind === "live"
+                  ? hosts.map((host) => {
+                      const status = healthByHostId.get(host.hostId);
+                      return (
+                        <View key={host.hostId} style={styles.hostPanels}>
+                          <Text style={styles.hostPanelsTitle}>{host.label}</Text>
+                          {environment.kind === "live" && status?.kind === "ready" ? (
+                            <>
+                              <PushNotificationsPanel
+                                hostKeyFingerprint={host.hostKeyFingerprint}
+                                permission={notificationPermission}
+                                transport={transportForHost(host.hostId)}
+                                book={pushRegistrations}
+                                resolveDeviceId={() =>
+                                  deviceKeyStore
+                                    .findByOrigin(host.origin)
+                                    .then((found) =>
+                                      found?.hostId === host.hostId ? found.deviceId : undefined,
+                                    )
+                                }
+                              />
+                              <DeviceRevokePanel
+                                authenticator={authenticator}
+                                bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
+                                transport={transportForHost(host.hostId)}
+                                onRevoked={() => {
+                                  removeHost(host.hostId);
+                                }}
+                              />
+                            </>
+                          ) : null}
+                          {environment.kind === "live" && status?.kind === "stale" ? (
+                            <DeviceRevokePanel
+                              authenticator={authenticator}
+                              bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
+                              transport={transportForHost(host.hostId)}
+                              onRevoked={() => {
+                                removeHost(host.hostId);
+                              }}
+                            />
+                          ) : null}
+                          {environment.kind === "live" ? (
+                            <RemoveHostPanel
+                              hostLabel={host.label}
+                              onRemove={() => removeHost(host.hostId)}
+                              testIdSuffix={host.hostId}
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    })
+                  : null}
+              </>
             )}
-            <Text style={styles.sectionBody}>{MOBILE_COPY.placementHint}</Text>
             {!offlineDemo ? (
               <>
                 <AppearanceBackgroundPanel />
@@ -526,12 +484,20 @@ export function RootNavigator(props: RootNavigatorProps) {
     hostsError,
   ]);
 
+  // The tab bar stands on each place's root screen and steps aside for a
+  // pushed screen (a list, a thread, pairing), as the system's own apps do.
+  const activeTab: MobileTabId | undefined =
+    props.activeRoute === "home"
+      ? homeMode
+      : props.activeRoute === "hosts" && hostEntryMode === "manage"
+        ? "settings"
+        : undefined;
+
   return (
     <View style={shellStyles.shell} testID="octant-mobile-shell">
       {props.activeRoute === "home" ? (
         <InboxHomeScreen
           homeMode={homeMode}
-          onSelectHomeMode={setHomeMode}
           onOpenAgents={(view) => {
             setAgentListView(view);
             props.onSelectRoute("agents");
@@ -542,10 +508,6 @@ export function RootNavigator(props: RootNavigatorProps) {
           }}
           onScanToPair={() => {
             setHostEntryMode("scan");
-            props.onSelectRoute("hosts");
-          }}
-          onOpenHosts={() => {
-            setHostEntryMode("manage");
             props.onSelectRoute("hosts");
           }}
           onOpenWorkspace={(hostId) => {
@@ -568,6 +530,7 @@ export function RootNavigator(props: RootNavigatorProps) {
             setThreadReturnRoute("agents");
             props.onSelectRoute("thread");
           }}
+          onSelectView={setAgentListView}
           view={agentListView}
         />
       ) : null}
@@ -586,6 +549,20 @@ export function RootNavigator(props: RootNavigatorProps) {
           notice={deepLinkNotice}
         />
       ) : null}
+      {activeTab === undefined ? null : (
+        <TabBar
+          active={activeTab}
+          onSelect={(tab) => {
+            if (tab === "settings") {
+              setHostEntryMode("manage");
+              props.onSelectRoute("hosts");
+              return;
+            }
+            setHomeMode(tab);
+            props.onSelectRoute("home");
+          }}
+        />
+      )}
     </View>
   );
 }

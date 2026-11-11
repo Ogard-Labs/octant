@@ -49,20 +49,33 @@ export function pixelBarCells(
 const PIXEL_WIDTH = PIXEL_COLUMNS * PIXEL_CELL + (PIXEL_COLUMNS - 1) * PIXEL_GAP;
 const PIXEL_HEIGHT = PIXEL_ROWS * PIXEL_CELL + (PIXEL_ROWS - 1) * PIXEL_GAP;
 
-/** "Week" and "Month" are too long for a meter beside a percent. */
-function meterLabel(short: string): string {
-  if (short === "Week") return "wk";
-  if (short === "Month") return "mo";
+/** A window's short name in words: "wk" read as a code to look up. */
+function meterName(short: string): string {
+  if (short === "Week") return "week";
+  if (short === "Month") return "month";
   return short;
 }
 
-function PlanUsageMeter(props: { readonly window: ComposerLimitWindow }) {
+/**
+ * One window: a bar and the share left. A meter standing alone carries no
+ * name: the bar with its figure already says what it is, and the tooltip and
+ * the accessible name say which window. Two meters side by side each lead
+ * with a quiet name, because two bare figures cannot be told apart.
+ */
+function PlanUsageMeter(props: { readonly window: ComposerLimitWindow; readonly named: boolean }) {
   const style = useUsageBarStyle();
   const { window } = props;
+  const label = `${window.name}, ${String(window.percent)}% left`;
   return (
-    <OctantTooltip label={`${window.name}, ${String(window.percent)}% left`} side="top">
-      <span className="plan-usage__meter" data-level={window.level} data-style={style}>
-        <span className="plan-usage__name">{meterLabel(window.short)}</span>
+    <OctantTooltip label={label} side="top">
+      <span
+        aria-label={label}
+        className="plan-usage__meter"
+        data-level={window.level}
+        data-style={style}
+        role="img"
+      >
+        {props.named ? <span className="plan-usage__name">{meterName(window.short)}</span> : null}
         {style === "pixelated" ? (
           <svg
             aria-hidden="true"
@@ -95,10 +108,11 @@ function PlanUsageMeter(props: { readonly window: ComposerLimitWindow }) {
 }
 
 /**
- * How much of the plan is left, above a composer: the shortest window the
- * provider reported (5h) and the longest (the week), each as a short name, a
- * thin bar and the share left. A provider that reported no window figure gets
- * nothing, because a bar without a figure would invent one.
+ * How much of the plan is left, beside a composer: the shortest window the
+ * provider reported (5h) and the longest (the week), in that order, each as a
+ * bar and the share left, named only when there are two. A provider that
+ * reported no window figure gets nothing, because a bar without a figure
+ * would invent one.
  */
 export function PlanUsageMeters(props: { readonly windows: ReadonlyArray<ComposerLimitWindow> }) {
   const span = windowSpan(props.windows);
@@ -107,7 +121,7 @@ export function PlanUsageMeters(props: { readonly windows: ReadonlyArray<Compose
   return (
     <span aria-label="Plan usage left" className="plan-usage" role="group">
       {shown.map((window) => (
-        <PlanUsageMeter key={window.window} window={window} />
+        <PlanUsageMeter key={window.window} named={shown.length > 1} window={window} />
       ))}
     </span>
   );

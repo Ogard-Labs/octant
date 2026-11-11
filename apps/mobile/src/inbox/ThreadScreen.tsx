@@ -15,16 +15,21 @@ import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
-import { MOBILE_COPY, mobileModelLabel, mobileThreadComposerCopy } from "../copy";
+import {
+  MOBILE_COPY,
+  MOBILE_TAB_LABELS,
+  mobileModelLabel,
+  mobileThreadComposerCopy,
+} from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
-import { mobileSpacing, mobileTypography } from "../theme/tokens";
+import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
-import { IconButton } from "../ui/IconButton";
+import { NavBar } from "../ui/NativeChrome";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
@@ -237,26 +242,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
     () =>
       StyleSheet.create({
         shell: { flex: 1, backgroundColor: "transparent" },
-        topBar: {
-          flexDirection: "row",
-          alignItems: "center",
-          paddingHorizontal: mobileSpacing.sm,
-          paddingTop: mobileSpacing.sm,
-          paddingBottom: mobileSpacing.sm,
-        },
-        titleBlock: { flex: 1, alignItems: "center", paddingHorizontal: mobileSpacing.sm },
-        topSpacer: { width: 36 },
-        navTitle: {
-          color: colors.textPrimary,
-          fontSize: mobileTypography.title.fontSize,
-          fontWeight: mobileTypography.title.fontWeight,
-          textAlign: "center",
-        },
-        navSubtitle: {
-          color: colors.textTertiary,
-          fontSize: 12,
-          marginTop: 2,
-        },
         scroll: { flex: 1 },
         content: {
           paddingHorizontal: mobileSpacing.md,
@@ -294,15 +279,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
   if (selected === undefined) {
     return (
       <View style={styles.shell}>
-        <View style={styles.topBar}>
-          <IconButton
-            accessibilityLabel="Back"
-            name="chevron-back"
-            onPress={props.onBack}
-            testID="mobile-thread-back"
-            variant="ghost"
-          />
-        </View>
+        <NavBar
+          backTestID="mobile-thread-back"
+          onBack={props.onBack}
+          title={MOBILE_TAB_LABELS.thread}
+        />
         <Text style={styles.help}>{MOBILE_COPY.threadEmpty}</Text>
       </View>
     );
@@ -318,26 +299,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
 
   return (
     <View style={styles.shell} testID="mobile-thread-screen">
-      <View style={styles.topBar}>
-        <IconButton
-          accessibilityLabel="Back"
-          name="chevron-back"
-          onPress={props.onBack}
-          testID="mobile-thread-back"
-          variant="ghost"
-        />
-        <View style={styles.titleBlock}>
-          <Text style={styles.navTitle} numberOfLines={1}>
-            {title}
-          </Text>
-          {hostLabel !== undefined ? (
-            <Text style={styles.navSubtitle} numberOfLines={1}>
-              {hostLabel}
-            </Text>
-          ) : null}
-        </View>
-        <View style={styles.topSpacer} />
-      </View>
+      <NavBar
+        backTestID="mobile-thread-back"
+        onBack={props.onBack}
+        subtitle={hostLabel}
+        title={title}
+      />
 
       {offlineDemo ? null : (
         <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { radii, space, useTheme } from "../../design-system";
+import { space, typography, useTheme } from "../../design-system";
 
 export interface MessageActionItem {
   readonly id: string;
@@ -26,25 +26,21 @@ export function MessageActions(props: {
         row: {
           flexDirection: "row",
           alignItems: "center",
-          gap: space.xs,
-          marginTop: space.xs,
+          gap: space.md,
+          marginTop: 2,
           marginBottom: space.sm,
-          paddingLeft: 2,
         },
+        // Plain glyph and word in the muted ink, as a system toolbar draws them;
+        // the slop keeps a 44pt target without boxing each one.
         chip: {
+          minHeight: 28,
           flexDirection: "row",
           alignItems: "center",
           gap: 4,
-          paddingVertical: 4,
-          paddingHorizontal: 8,
-          borderRadius: radii.sm,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.glassStroke,
-          backgroundColor: colors.glassFillThin,
         },
         label: {
-          color: colors.textSecondary,
-          fontSize: 12,
+          color: colors.textTertiary,
+          fontSize: typography.meta.fontSize,
           fontWeight: "500",
         },
         labelActive: {
@@ -72,13 +68,14 @@ export function MessageActions(props: {
                 setTimeout(() => setActiveId(undefined), 1200);
               })();
             }}
-            style={styles.chip}
+            hitSlop={8}
+            style={({ pressed }) => [styles.chip, pressed ? { opacity: 0.5 } : null]}
             testID={`mobile-message-action-${action.id}`}
           >
             <Ionicons
-              color={active ? colors.accent : colors.textSecondary}
+              color={active ? colors.accent : colors.textTertiary}
               name={active && action.id === "copy" ? "checkmark" : action.icon}
-              size={12}
+              size={14}
             />
             <Text style={[styles.label, active ? styles.labelActive : null]}>
               {active && action.id === "copy" ? "Copied" : action.label}

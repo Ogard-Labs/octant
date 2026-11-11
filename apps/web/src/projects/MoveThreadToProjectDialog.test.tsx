@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MoveThreadToProjectDialog } from "./MoveThreadToProjectDialog";
+import { ProjectIconContext } from "./ProjectIcon";
+import { iconSourceFor } from "./projectIcon.test-support";
 
 const project = (id: string, name: string, folder: string, type: "work" | "code" = "work") =>
   ({
@@ -37,6 +39,34 @@ function open(overrides: Partial<Parameters<typeof MoveThreadToProjectDialog>[0]
   );
   return { onMove, onClose };
 }
+
+describe("move dialog Project icons", () => {
+  it("draws a Project's own icon in its row and the folder glyph for one without", async () => {
+    const { source } = iconSourceFor(["p-other"]);
+    const onMove = vi.fn(async () => ({ status: "ok" }) as const);
+    const { container } = render(
+      <ProjectIconContext.Provider value={source}>
+        <MoveThreadToProjectDialog
+          currentProjectId="p-current"
+          mode="work"
+          onClose={vi.fn()}
+          onMove={onMove}
+          projects={projects}
+          threadTitle="Draft brief"
+        />
+      </ProjectIconContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(container.ownerDocument.querySelectorAll("img.project-icon")).toHaveLength(1),
+    );
+    expect(
+      screen.getByRole("button", { name: /Taxes/ }).querySelector("img.project-icon"),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: /All docs/ }).querySelector("svg.lucide-folder"),
+    ).not.toBeNull();
+  });
+});
 
 describe("moving a Work or Code thread to another Project", () => {
   it("offers the Projects of its own kind whose folder is the thread's folder or contains it", async () => {

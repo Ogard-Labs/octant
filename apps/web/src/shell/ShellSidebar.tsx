@@ -29,6 +29,7 @@ import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
+import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 import {
   layoutSidebarDestinations,
@@ -145,6 +146,8 @@ export interface ShellSidebarProps {
   readonly home?: { readonly onOpen: () => void; readonly active: boolean };
   /** Plan usage rings for the icon rail, in either placement. */
   readonly railUsage?: ReactNode;
+  /** Absent leaves the card out; the collapsed rail never draws it either way. */
+  readonly whatsNew?: SidebarWhatsNewProps;
   readonly railBeside?: {
     readonly onOpenActivity?: () => void;
   };
@@ -617,6 +620,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 )}
               </div>
             )}
+            {props.whatsNew === undefined ? null : <SidebarWhatsNew {...props.whatsNew} />}
             <SidebarProfile
               navigatorAvailable={props.navigatorAvailable === true}
               {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
