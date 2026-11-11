@@ -4606,7 +4606,7 @@ input.switch:checked::after {
    thread with no place to name keeps the order, since its row and its info
    still share a line. */
 @container composer-under (max-width: 440px) {
-  .thread-composer__context:not(:empty) ~ .composer-row {
+  .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
     order: 1;
   }
 }
@@ -4676,7 +4676,7 @@ input.switch:checked::after {
 /* An icon control in the row is a square tile with the control corner, as
    attach and send are in the card. */
 .composer-row button[data-size="icon"],
-.thread-info__trigger[data-size="icon"] {
+.thread-info > button[data-size="icon"] {
   width: 28px;
   min-width: 28px;
   height: 28px;
@@ -4860,7 +4860,10 @@ input.switch:checked::after {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
-.thread-composer__context:empty {
+/* A surface's context can be a wrapper with nothing in it yet (a Code thread
+   whose checkout has not been read): it then holds no place in the line. */
+.thread-composer__context:empty,
+.thread-composer__context:has(> :only-child:empty) {
   display: none;
 }
 /* The thread's info panel: a quiet icon button at the end of the row and one
@@ -4935,7 +4938,9 @@ input.switch:checked::after {
 .thread-info__panel > .task-access-details:not(:last-child) {
   border-bottom: 1px solid var(--oct-hairline);
 }
-.thread-info__panel summary {
+/* A row that opens in place reads as the action rows do while closed, and
+   takes the heading's ink once its content is under it. */
+.thread-info__panel details[open] > summary {
   color: var(--oct-fg);
   font-weight: var(--oct-weight-medium);
 }

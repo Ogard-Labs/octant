@@ -2153,8 +2153,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
       : folder;
   // A Project made from a folder carries that folder's name, so the line read
-  // "Downloads Downloads". The name is said once; its path stays on hover.
-  const folderRepeatsProject = path !== undefined && folderLabel === projectLabel;
+  // "Downloads Downloads". The name is said once; its path stays on hover. A
+  // subfolder that happens to share the Project's name is still named.
+  const folderRepeatsProject =
+    path !== undefined && (folder === undefined || folder === ".") && folderLabel === projectLabel;
   // The transcript draws the inline Canvases and the card list the rest.
   const threadCanvases = useThreadCanvasCards({
     client: props.canvasClient,
