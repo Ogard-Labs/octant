@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_AGGREGATE_TYPE,
+  CANVAS_CHOICE_SCHEMA_VERSION,
   CANVAS_CREATED,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
@@ -2558,5 +2559,78 @@ describe("chart titles and point callouts", () => {
     expect(() =>
       decodeCanvasBlock({ ...trend, series: [{ seriesId: "s", label: "S", points }] }),
     ).toThrow();
+  });
+});
+
+describe("choice block", () => {
+  const choice = {
+    blockId: "pick-plan",
+    schemaVersion: CANVAS_CHOICE_SCHEMA_VERSION,
+    kind: "choice",
+    prompt: "Which rollout should we take?",
+    questions: [
+      {
+        id: "rollout",
+        prompt: "Rollout",
+        selection: "single",
+        options: [
+          { id: "staged", label: "Staged", description: "Ten percent a day", recommended: true },
+          { id: "all", label: "All at once" },
+        ],
+      },
+      {
+        id: "regions",
+        prompt: "Regions first",
+        selection: "multiple",
+        options: [
+          { id: "eu", label: "Europe" },
+          { id: "us", label: "Americas" },
+        ],
+        allowCustom: false,
+      },
+    ],
+  } as const;
+  const document = {
+    schemaVersion: CANVAS_CHOICE_SCHEMA_VERSION,
+    title: "Rollout",
+    provenance,
+    sourceManifest: [],
+  } as const;
+
+  it("decodes a prompt with questions shaped like the inline questionnaire", () => {
+    expect(decodeCanvasDefinition({ ...document, blocks: [choice] }).blocks).toEqual([choice]);
+  });
+
+  it("refuses a document that declares a version before the choice block", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...document,
+        schemaVersion: CANVAS_CHOICE_SCHEMA_VERSION - 1,
+        blocks: [{ ...choice, schemaVersion: CANVAS_CHOICE_SCHEMA_VERSION - 1 }],
+      }),
+    ).toThrow(/choice block requires Canvas schema version 27/);
+  });
+
+  it("holds the questionnaire's bounds: one to four questions with distinct ids and valid limits", () => {
+    const [first, second] = choice.questions;
+    expect(() => decodeCanvasBlock({ ...choice, questions: [] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...choice,
+        questions: [1, 2, 3, 4, 5].map((n) => ({ ...first, id: `q${String(n)}` })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...choice, questions: [first, { ...second, id: "rollout" }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...choice, questions: [{ ...first, maxSelections: 2 }] }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...choice, prompt: "" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...choice, prompt: "x".repeat(1_025) })).toThrow();
+  });
+
+  it("refuses an answer or any field the block does not define", () => {
+    expect(() => decodeCanvasBlock({ ...choice, answer: ["staged"] })).toThrow();
   });
 });

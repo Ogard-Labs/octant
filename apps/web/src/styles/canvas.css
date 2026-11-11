@@ -5733,3 +5733,26 @@
     background: Canvas;
   }
 }
+
+.canvas-choice__question {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.canvas-choice__question-prompt {
+  margin: 0;
+}
+
+.canvas-choice__options {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding-inline-start: var(--oct-space-4);
+  list-style: disc;
+}
+
+.canvas-choice__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

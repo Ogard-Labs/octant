@@ -4,6 +4,41 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { codeLanguageReferencesFixture as fixture } from "./codeLanguageReferencesTestFixtures";
 describe("current document references through real companion and controlled stdio", () => {
+  it("serves project intelligence on the acknowledged draft and rejects changed document revisions", async () => {
+    const f = fixture({ intelligenceCapabilities: true });
+    const opened = await f.open();
+    if (
+      opened.status !== "synced" ||
+      opened.documentVersion === undefined ||
+      opened.documentRevision === undefined
+    )
+      throw Error("Missing acknowledgement");
+    f.state.controls.result = [{ label: "projectValue", insertText: "projectValue" }];
+    const request = {
+      kind: "intelligence" as const,
+      feature: "completion" as const,
+      threadId: f.state.thread.id,
+      checkoutId: f.state.thread.checkoutId,
+      fileId: f.fileId,
+      position: { line: 1, character: 13 },
+      expectedVersion: opened.documentVersion,
+      expectedRevision: opened.documentRevision,
+    };
+    expect(await f.service.read(f.caller, request)).toMatchObject({
+      status: "intelligence",
+      feature: "completion",
+      items: [{ label: "projectValue" }],
+    });
+    await f.service.syncDocument(f.caller, {
+      kind: "change",
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      fileId: f.fileId,
+      text: "changed",
+      expectedRevision: opened.documentRevision,
+    });
+    expect(await f.service.read(f.caller, request)).toEqual({ status: "stale" });
+  });
   it("prepares a bounded cross-file rename in Plan and only offers command-free quick fixes", async () => {
     const f = fixture({ editCapabilities: true });
     await f.open();

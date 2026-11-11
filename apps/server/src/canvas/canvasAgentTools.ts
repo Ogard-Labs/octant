@@ -491,6 +491,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "A deck presents the document's own blocks as one ordered set of slides: a design's frame (with its frameId), a mockup's screen (with its variantId when it declares variants), or a chart, table, metric, progress, or status block (a dashboard is not a slide; place its numbers as slides of their own). Each slide may carry presenter notes (never carried by a share). A block is placed once in the whole Canvas, so a slide is never also a dashboard cell or a flow screen; Present walks the set across blocks, and a plain design block keeps its own Present.",
     },
+    choice: {
+      use: "A question the person answers in the Canvas, such as picking an option the document compares.",
+      detail:
+        "A choice block asks the person to decide from inside the Canvas: a prompt and one to four questions shaped like the ask-user questionnaire (each with an id, a prompt, selection single or multiple, one to eight options with an id, a label, and an optional description and recommended flag, optional minSelections and maxSelections, and allowCustom false to withhold a written answer). It holds no answer. The person's choice reaches you as their own next message in this thread, naming the Canvas, the block id, and the chosen labels or written answer, so wait for it rather than assuming one. Use it when the decision belongs beside the material it is made from; to ask in the conversation, use the ask-user questionnaire instead. A share, a public link, and an export show the questions without a way to answer, and the thread shows a Canvas holding one as a card that opens in the sidebar, where it is answered.",
+    },
     flow: {
       use: "An app or site's screens connected by their transitions, on a board.",
       detail:

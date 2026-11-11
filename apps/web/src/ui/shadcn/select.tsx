@@ -2,6 +2,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { Check, ChevronDown } from "lucide-react";
 import type { ComponentProps } from "react";
 import { fieldPaint } from "./field-paint";
+import { menuGroupLabel, menuRow } from "./menu-row";
 import { cn } from "./utils";
 
 export function Select(props: ComponentProps<typeof SelectPrimitive.Root>) {
@@ -35,7 +36,7 @@ export function SelectPopup({ className, ...props }: ComponentProps<typeof Selec
   return (
     <SelectPrimitive.Popup
       className={cn(
-        "z-50 max-h-72 min-w-[var(--anchor-width)] overflow-auto rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "z-50 max-h-72 min-w-[var(--anchor-width)] overflow-auto rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="select-content"
@@ -54,7 +55,7 @@ export function SelectGroupLabel({
 }: ComponentProps<typeof SelectPrimitive.GroupLabel>) {
   return (
     <SelectPrimitive.GroupLabel
-      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", className)}
+      className={cn(menuGroupLabel, className)}
       data-slot="select-group-label"
       {...props}
     />
@@ -68,15 +69,13 @@ export function SelectItem({
 }: ComponentProps<typeof SelectPrimitive.Item>) {
   return (
     <SelectPrimitive.Item
-      className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-        className,
-      )}
+      // The trailing inset is the check mark's column.
+      className={cn(menuRow, "w-full pr-8", className)}
       data-slot="select-item"
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-2 flex size-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-3.5 items-center justify-center">
         <Check aria-hidden="true" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>

@@ -1,4 +1,8 @@
-import { decodeCanvasDefinition, decodeCanvasId } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,
+  decodeCanvasDefinition,
+  decodeCanvasId,
+} from "@octant/contracts/canvas";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -36,7 +40,7 @@ describe("a Canvas's design system", () => {
   it("draws its typed blocks in the design system's colours", () => {
     const definition = decodeCanvasDefinition({
       ...canvasFixture,
-      schemaVersion: 27,
+      schemaVersion: CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,
       designSystem: acme,
     });
     render(<CanvasDocument definition={definition} />);

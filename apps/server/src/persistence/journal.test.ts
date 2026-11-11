@@ -235,6 +235,7 @@ describe("Journal", () => {
         },
         environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         sidebarDestinations: { order: [], visibility: [] },
+        sidebarPinnedProjects: [],
         sidebarMoreEnabled: true,
         sidebarCountTiles: true,
         sidebarSearchPresentation: "icon",

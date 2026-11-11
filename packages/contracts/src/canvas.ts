@@ -24,6 +24,7 @@ import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ImageArtifactId } from "./imageGeneration";
 import { BrowserCaptureId } from "./browserAutomation";
+import { QuestionnaireQuestions } from "./questionnaire";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -277,9 +278,12 @@ export const CANVAS_FLOW_SCHEMA_VERSION = 23;
 export const CANVAS_DECK_SCHEMA_VERSION = 25;
 // Flow annotations: numbered callouts pinned to a flow's screens.
 export const CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION = 26;
-// Version 27 adds a document's design system: the tokens its typed blocks
+// The choice block, which asks the person a question whose answer they send
+// to the Canvas's own thread as their message.
+export const CANVAS_CHOICE_SCHEMA_VERSION = 27;
+// Version 28 adds a document's design system: the tokens its typed blocks
 // (charts, tables, metrics, diagrams) draw their colours from.
-export const CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION = 27;
+export const CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION = 28;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -582,6 +586,7 @@ export const CanvasBlockKind = Schema.Literal(
   "columns",
   "flow",
   "deck",
+  "choice",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -2665,6 +2670,24 @@ export const CanvasDeckBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasDeckBlock = typeof CanvasDeckBlock.Type;
 
+// ── Choice ────────────────────────────────────────────────────────────────────
+//
+// A question the person answers in the Canvas. The questions take the inline
+// questionnaire's shape and bounds, so an agent asks in a Canvas the way it
+// asks in a thread. The block holds no answer and no authority: the reader
+// sends the person's choice to the Canvas's own thread as an ordinary message
+// of theirs, and the host admits it like any other.
+
+export const CANVAS_MAX_CHOICE_PROMPT_LENGTH = 1_024;
+
+export const CanvasChoiceBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("choice"),
+  prompt: boundedNonEmptyText(CANVAS_MAX_CHOICE_PROMPT_LENGTH),
+  questions: QuestionnaireQuestions,
+}).annotations(strict);
+export type CanvasChoiceBlock = typeof CanvasChoiceBlock.Type;
+
 /**
  * Where the host serves a running design's page. A reader never names a
  * design here: the only query is a ticket the host issued for one Canvas
@@ -2961,6 +2984,7 @@ export const CanvasBlock = Schema.Union(
   CanvasColumnsBlock,
   CanvasFlowBlock,
   CanvasDeckBlock,
+  CanvasChoiceBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -3149,6 +3173,11 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
     since: CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
     carries: (definition) => definition.blocks.some(canvasFlowUsesAnnotations),
     requirement: `Flow callouts require Canvas schema version ${String(CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_CHOICE_SCHEMA_VERSION,
+    carries: ofKind("choice"),
+    requirement: `A choice block requires Canvas schema version ${String(CANVAS_CHOICE_SCHEMA_VERSION)}.`,
   },
   {
     since: CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,

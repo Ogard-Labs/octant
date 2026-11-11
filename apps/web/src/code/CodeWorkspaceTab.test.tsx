@@ -1,6 +1,6 @@
 import type { CodeFileChangeNotice } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { codeClient, ids } from "./CodeDeliveryPane.test-fixtures";
@@ -24,6 +24,19 @@ vi.mock("./monacoRuntime", () => ({
       focus: () => undefined,
       setReadOnly: () => undefined,
       setValue: (value: string) => void (element.textContent = value),
+    };
+  },
+  mountDiff: (
+    element: HTMLElement,
+    options: { readonly original: string; readonly modified: string },
+  ) => {
+    element.textContent = `${options.original}\n${options.modified}`;
+    return {
+      dispose: () => void (element.textContent = ""),
+      setRenderSideBySide: () => undefined,
+      setValues: (values: { readonly original: string; readonly modified: string }) => {
+        element.textContent = `${values.original}\n${values.modified}`;
+      },
     };
   },
 }));
@@ -371,16 +384,27 @@ describe("CodeWorkspaceTab code files", () => {
       "A new external revision is available.",
     );
 
-    // The draft still belongs to the revision the user opened, so the save
-    // carries that revision and the host refuses it. Adopting the external
-    // digest here would overwrite the change nobody has looked at yet.
-    await userEvent.setup().click(screen.getByRole("button", { name: "Save src/index.ts" }));
-    expect(client.save).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedDigest: "d".repeat(64), text: "my unsaved draft" }),
+    const user = userEvent.setup();
+    const save = screen.getByRole("button", { name: "Save src/index.ts" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(client.save).not.toHaveBeenCalled();
+
+    // Only an explicit choice after comparison adopts the newer disk revision.
+    expect(
+      await screen.findByRole("region", { name: "Disk and draft comparison" }),
+    ).toHaveTextContent("changed on disk");
+    await user.click(
+      await screen.findByRole("button", { name: "Keep draft against this version" }),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This file changed outside this editor.",
+    expect(save).toBeEnabled();
+    await user.click(save);
+    await waitFor(() =>
+      expect(client.save).toHaveBeenCalledWith(
+        expect.objectContaining({ expectedDigest: "e".repeat(64), text: "my unsaved draft" }),
+      ),
     );
+    expect(await screen.findByText("This file changed outside this editor.")).toBeVisible();
   });
 
   it("keeps the file honestly unavailable when the reload cannot re-open it", async () => {

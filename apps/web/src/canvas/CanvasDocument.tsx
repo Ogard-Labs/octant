@@ -18,6 +18,7 @@ import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 import type { DesignRunRuntime } from "./blocks/designRunningFrame";
+import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;
@@ -44,6 +45,11 @@ export interface CanvasDocumentProps {
    * script says it cannot run here.
    */
   readonly designRunRuntime?: DesignRunRuntime;
+  /**
+   * Sends a person's answer to a choice block to the Canvas's own thread, or
+   * says why this surface cannot. Without it a choice reads only.
+   */
+  readonly choiceRuntime?: CanvasChoiceRuntime;
   /**
    * Comment markers beside each block and on each table row that carries an
    * id. Offered only when the host journals comments; `openCounts` holds the
@@ -90,6 +96,7 @@ export function CanvasDocument({
   planRuntime,
   designAssetRuntime,
   designRunRuntime,
+  choiceRuntime,
   comments,
   placement = "document",
 }: CanvasDocumentProps) {
@@ -130,6 +137,7 @@ export function CanvasDocument({
         {...(actionRuntime === undefined ? {} : { actionRuntime })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
         {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+        {...(choiceRuntime === undefined ? {} : { choiceRuntime })}
         {...(comments === undefined || block.kind !== "table"
           ? {}
           : {

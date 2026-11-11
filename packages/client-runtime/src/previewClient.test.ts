@@ -66,6 +66,50 @@ function manifestBody() {
 }
 
 describe("PreviewClient", () => {
+  it("loads authorized source and saves the reviewed revision with a bounded request lifetime", async () => {
+    const fetch = makeFetch([
+      () =>
+        new Response(
+          JSON.stringify({
+            kind: "ready",
+            fileKey: "a".repeat(64),
+            text: "full source",
+            revision: "b".repeat(64),
+          }),
+        ),
+      () =>
+        new Response(
+          JSON.stringify({
+            kind: "saved",
+            fileKey: "a".repeat(64),
+            text: "edited",
+            revision: "c".repeat(64),
+          }),
+        ),
+    ]);
+    const client = createPreviewClient({
+      baseUrl: "http://127.0.0.1:9999",
+      fetch: fetch as never,
+      windowCapability: "cap",
+    });
+    expect(await client.text?.({ target: makeTarget() })).toMatchObject({
+      kind: "ready",
+      text: "full source",
+    });
+    expect(
+      await client.text?.({
+        target: makeTarget(),
+        change: { text: "edited", revision: "b".repeat(64) },
+      }),
+    ).toMatchObject({ kind: "saved", text: "edited" });
+    expect(fetch.mock.calls[1]?.[0]).toBe("http://127.0.0.1:9999/api/preview/text");
+    expect(fetch.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toEqual({
+      target: makeTarget(),
+      change: { text: "edited", revision: "b".repeat(64) },
+    });
+  });
+
   it("posts an open request and decodes a ready outcome", async () => {
     const fetch = makeFetch([
       () =>

@@ -133,8 +133,8 @@ describe("a Canvas's design system", () => {
 
   it("is refused under a schema version that predates it", () => {
     const current = version({ designSystem: acme });
-    expect(() => decodeCanvasDefinition({ ...current.definition, schemaVersion: 26 })).toThrow(
-      /design system requires Canvas schema version 27/,
+    expect(() => decodeCanvasDefinition({ ...current.definition, schemaVersion: 27 })).toThrow(
+      /design system requires Canvas schema version 28/,
     );
   });
 

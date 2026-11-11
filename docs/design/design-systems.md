@@ -88,7 +88,7 @@ this sense too.
   links, and exports draw them identically.
 - **Canvas typed blocks.** A Canvas may follow a design system
   (`designSystem` on its definition: a name, the path a person reads, and the
-  tokens; Canvas schema version 27). Its charts, tables, metrics, treemaps,
+  tokens; Canvas schema version 28). Its charts, tables, metrics, treemaps,
   and diagrams then draw their series colours from it: `color-chart-1` to
   `color-chart-6` when the file names a chart palette, else its primary colour
   as series 1 and its secondary as series 2, with the theme's own colours for
@@ -182,7 +182,7 @@ existing folder, and refuses to replace a file that exists.
   design system and guidance that names every design kind, and a Canvas the
   agent creates carries it.
 - `packages/domain/src/canvasDesignSystemPolicy.test.ts`: the series palette
-  and accent, unsafe values left out, the version-27 gate, and a switch that
+  and accent, unsafe values left out, the version-28 gate, and a switch that
   redraws brand designs, switches to none, and refuses a stale head.
 - `apps/server/src/canvasRoutes.test.ts`: the switch reads the file from the
   Canvas's Project, refuses one it cannot read, journals versions, and

@@ -127,7 +127,10 @@ export function resolvePreviewCapabilities(input: PreviewCapabilityInput): Previ
   const base = input.baseCapabilities;
   const plan = input.posture === "plan";
   const canEditInMonaco =
-    !plan && input.posture === "full" && input.kind === "text" && base.canEditInMonaco;
+    !plan &&
+    (input.posture === "full" || input.mode === "work") &&
+    (input.kind === "text" || (input.mode === "work" && input.kind === "markdown")) &&
+    base.canEditInMonaco;
   const canOpenExternally = !plan && base.canOpenExternally;
   const canRevealInFinder = !plan && base.canRevealInFinder;
   const canQuickLook = !plan && base.canQuickLook;
