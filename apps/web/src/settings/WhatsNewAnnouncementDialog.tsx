@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useRef, type RefObject } from "react";
 import type { BundledWhatsNewAnnouncement } from "../shell/hostBridge";
 import { ApertureArt } from "../shell/ApertureArt";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -9,6 +9,7 @@ export interface WhatsNewAnnouncementDialogProps {
   readonly announcement: BundledWhatsNewAnnouncement | undefined;
   readonly onNotNow: () => void;
   readonly onOpenNotes: () => void;
+  readonly restoreFocus?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -19,7 +20,12 @@ export interface WhatsNewAnnouncementDialogProps {
 export function WhatsNewAnnouncementDialog(props: WhatsNewAnnouncementDialogProps) {
   const titleId = useId();
   const bodyId = useId();
-  const announcement = props.announcement;
+  // The dialog fades out after it is answered, and the answer clears the
+  // announcement at once; keep the last one so the content does not empty
+  // while it is still on screen.
+  const last = useRef(props.announcement);
+  if (props.announcement !== undefined) last.current = props.announcement;
+  const announcement = props.announcement ?? last.current;
   return (
     <OctantDialog
       className="whats-new-announcement"
@@ -27,7 +33,8 @@ export function WhatsNewAnnouncementDialog(props: WhatsNewAnnouncementDialogProp
       label="What's new"
       labelledBy={titleId}
       onClose={props.onNotNow}
-      open={announcement !== undefined}
+      open={props.announcement !== undefined}
+      {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
     >
       {announcement?.picture === undefined ? (
         <ApertureArt className="whats-new-announcement__art" />

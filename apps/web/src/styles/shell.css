@@ -4307,6 +4307,18 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   box-shadow: var(--octant-shadow-sm);
 }
 
+/* The fill and shadow are the card's only edge, and forced colours drops both.
+   These are the shared card recipe's outline and increased-contrast ring. */
+@media (forced-colors: active) {
+  .whats-new-card {
+    outline: 1px solid;
+  }
+}
+
+html[data-octant-increased-contrast="true"] .whats-new-card {
+  box-shadow: 0 0 0 1px var(--octant-border-strong);
+}
+
 .whats-new-card + .sidebar-foot {
   margin-top: 0;
 }

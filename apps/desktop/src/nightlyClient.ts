@@ -50,6 +50,7 @@ import {
   resolveBundledWhatsNewPath,
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
+import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
@@ -287,7 +288,7 @@ export async function runNightlyClient(
         appPath: app.getAppPath(),
         moduleUrl: import.meta.url,
       }),
-      readBytes: (path: string) => readFile(path),
+      readBounded: readAtMost,
     },
   });
   register(DESKTOP_IPC_CHANNELS.appUpdateWhatsNew, () => loadBundledWhatsNew(notesOptions()));

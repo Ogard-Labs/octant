@@ -25,13 +25,16 @@ function Harness(props: {
   });
   return (
     <>
-      {controller.card === undefined ? null : (
-        <SidebarWhatsNew
-          content={controller.card}
-          onDismiss={controller.dismiss}
-          onOpenNotes={controller.openNotes}
-        />
-      )}
+      <aside data-octant-sidebar>
+        {controller.card === undefined ? null : (
+          <SidebarWhatsNew
+            content={controller.card}
+            onDismiss={controller.dismiss}
+            onOpenNotes={controller.openNotes}
+          />
+        )}
+        <button aria-label="Account menu, Test" type="button" />
+      </aside>
       <WhatsNewAfterUpdate controller={controller} />
     </>
   );
@@ -174,5 +177,41 @@ describe("What's new after an update", () => {
       version: "1.0.0",
       headline: "Only a headline",
     });
+  });
+
+  it("moves focus to the profile row when the card is dismissed", async () => {
+    const { hostBridge } = bridge(dueNotes());
+    render(<Harness hostBridge={hostBridge} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Account menu/ }));
+  });
+
+  it("returns focus to the profile row when the notes dialog opened from the card closes", async () => {
+    const { hostBridge } = bridge(dueNotes());
+    render(<Harness hostBridge={hostBridge} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Find out what's new" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Account menu/ })),
+    );
+  });
+
+  it("returns focus to the profile row when the announcement is answered", async () => {
+    const { hostBridge } = bridge(
+      dueNotes({ announcement: { title: "Comment on a Canvas", body: "Point at a block." } }),
+    );
+    render(<Harness hostBridge={hostBridge} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Account menu/ })),
+    );
   });
 });

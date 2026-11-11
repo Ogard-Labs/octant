@@ -14,11 +14,13 @@ export function WhatsNewAfterUpdate(props: { readonly controller: WhatsNewContro
         announcement={controller.announcement}
         onNotNow={controller.dismiss}
         onOpenNotes={controller.openNotes}
+        restoreFocus={controller.restoreFocus}
       />
       <WhatsNewDialog
         document={controller.document}
         onClose={controller.closeNotes}
         open={controller.notesOpen}
+        restoreFocus={controller.restoreFocus}
       />
     </>
   );

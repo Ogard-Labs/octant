@@ -85,6 +85,7 @@ function hostProps(): ShellDialogHostProps {
       card: undefined,
       document: undefined,
       notesOpen: false,
+      restoreFocus: { current: null },
       closeNotes: vi.fn(),
       dismiss: vi.fn(),
       openNotes: vi.fn(),

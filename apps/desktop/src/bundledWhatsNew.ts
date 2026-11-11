@@ -141,7 +141,7 @@ export async function loadBundledWhatsNew(options: {
   /** Without it a release carries notes only. */
   readonly announcement?: {
     readonly path: string;
-    readonly readBytes: (path: string) => Promise<Uint8Array>;
+    readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
   };
 }): Promise<BundledWhatsNew> {
   const document = await readDocument(options.notesPath, options.readFile);
@@ -168,8 +168,7 @@ export async function loadBundledWhatsNew(options: {
     decision.showAfterApply && options.announcement !== undefined
       ? await loadBundledAnnouncement({
           announcementPath: options.announcement.path,
-          readFile: options.readFile,
-          readBytes: options.announcement.readBytes,
+          readBounded: options.announcement.readBounded,
         })
       : undefined;
   return {

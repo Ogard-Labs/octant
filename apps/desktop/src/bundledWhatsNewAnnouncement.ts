@@ -1,4 +1,5 @@
 import type { BundledWhatsNewAnnouncement } from "@octant/contracts/desktop-bridge";
+import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 /**
@@ -94,14 +95,33 @@ export function pictureMediaType(name: string, bytes: Uint8Array): string | unde
   return undefined;
 }
 
+/**
+ * Reads at most `maxBytes` of a file and returns what it read plus one byte
+ * when the file is longer, so a caller can refuse an oversized file without
+ * ever loading it whole.
+ */
+export async function readAtMost(path: string, maxBytes: number): Promise<Uint8Array> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function loadBundledAnnouncement(options: {
   readonly announcementPath: string;
-  readonly readFile: (path: string) => Promise<string>;
-  readonly readBytes: (path: string) => Promise<Uint8Array>;
+  /** Must return at most `maxBytes + 1` bytes; see `readAtMost`. */
+  readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
 }): Promise<BundledWhatsNewAnnouncement | undefined> {
   let parsed: ParsedAnnouncement | undefined;
   try {
-    parsed = parseAnnouncementFile(await options.readFile(options.announcementPath));
+    // The cap is in bytes of the file; the parser's character cap still holds.
+    const bytes = await options.readBounded(options.announcementPath, MAX_ANNOUNCEMENT_FILE_CHARS);
+    if (bytes.byteLength > MAX_ANNOUNCEMENT_FILE_CHARS) return undefined;
+    parsed = parseAnnouncementFile(new TextDecoder().decode(bytes));
   } catch {
     return undefined;
   }
@@ -109,8 +129,9 @@ export async function loadBundledAnnouncement(options: {
   let picture: BundledWhatsNewAnnouncement["picture"];
   if (parsed.pictureName !== undefined) {
     try {
-      const bytes = await options.readBytes(
+      const bytes = await options.readBounded(
         join(dirname(options.announcementPath), parsed.pictureName),
+        MAX_ANNOUNCEMENT_PICTURE_BYTES,
       );
       const mediaType =
         bytes.byteLength === 0 || bytes.byteLength > MAX_ANNOUNCEMENT_PICTURE_BYTES

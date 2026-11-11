@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { SIDEBAR_ACCOUNT_TRIGGER_SELECTOR } from "../shell/SidebarProfile";
 import type {
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
@@ -24,6 +25,8 @@ export interface WhatsNewController {
   readonly card: WhatsNewCardContent | undefined;
   readonly document: BundledWhatsNew | undefined;
   readonly notesOpen: boolean;
+  /** Where a closing dialog returns focus: the sidebar profile row, when one is drawn. */
+  readonly restoreFocus: RefObject<HTMLElement | null>;
   readonly closeNotes: () => void;
   /** Acknowledges the update's notes without opening them. */
   readonly dismiss: () => void;
@@ -86,7 +89,14 @@ export function useWhatsNewAfterUpdate(options: {
     };
   }, [options.firstRunVisible, read]);
 
+  const restoreFocus = useRef<HTMLElement | null>(null);
+
   const dismiss = useCallback(() => {
+    // Resolved at answer time: the sidebar may have been collapsed or opened
+    // since the notes were read. Neither dialog has a trigger of its own.
+    restoreFocus.current = globalThis.document.querySelector<HTMLElement>(
+      SIDEBAR_ACCOUNT_TRIGGER_SELECTOR,
+    );
     setAnswered(true);
     // Hiding it for this session is right even if the write fails: the person
     // answered, and a failed write only means it may show once more.
@@ -108,6 +118,7 @@ export function useWhatsNewAfterUpdate(options: {
         : whatsNewCardContent(due.version, due.text),
     document,
     notesOpen,
+    restoreFocus,
     closeNotes,
     dismiss,
     openNotes,

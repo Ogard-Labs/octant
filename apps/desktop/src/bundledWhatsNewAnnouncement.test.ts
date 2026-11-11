@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { encodeLastShownVersion, loadBundledWhatsNew } from "./bundledWhatsNew";
 import {
+  MAX_ANNOUNCEMENT_FILE_CHARS,
   MAX_ANNOUNCEMENT_PICTURE_BYTES,
   loadBundledAnnouncement,
   parseAnnouncementFile,
+  readAtMost,
 } from "./bundledWhatsNewAnnouncement";
 
 const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -34,9 +39,11 @@ function memoryFiles(entries: Readonly<Record<string, string | Uint8Array>>) {
       const contents = read(path);
       return typeof contents === "string" ? contents : Buffer.from(contents).toString("utf8");
     },
-    readBytes: async (path: string) => {
+    // Like the real reader: never more than the cap plus one byte.
+    readBounded: async (path: string, maxBytes: number) => {
       const contents = read(path);
-      return typeof contents === "string" ? Buffer.from(contents) : contents;
+      const bytes = typeof contents === "string" ? Buffer.from(contents) : contents;
+      return bytes.subarray(0, maxBytes + 1);
     },
   };
 }
@@ -138,7 +145,7 @@ describe("bundled What's new announcement", () => {
         readFile: async (path) =>
           path === "/data/state.json" ? encodeLastShownVersion(lastShown) : io.readFile(path),
         writeFile: async () => undefined,
-        announcement: { path: "/app/whats-new-announcement.json", readBytes: io.readBytes },
+        announcement: { path: "/app/whats-new-announcement.json", readBounded: io.readBounded },
       });
 
     const due = await load("0.1.0");
@@ -159,7 +166,7 @@ describe("bundled What's new announcement", () => {
       readFile: async (path) =>
         path === "/data/state.json" ? encodeLastShownVersion("0.1.0") : io.readFile(path),
       writeFile: async () => undefined,
-      announcement: { path: "/app/whats-new-announcement.json", readBytes: io.readBytes },
+      announcement: { path: "/app/whats-new-announcement.json", readBounded: io.readBounded },
     });
 
     expect(answer).toEqual({
@@ -168,5 +175,42 @@ describe("bundled What's new announcement", () => {
       text: "Octant 0.2.0",
       showAfterApply: true,
     });
+  });
+
+  it("asks the reader for no more than the cap, so an oversized picture or file is never loaded whole", async () => {
+    const readBounded = vi.fn(async (path: string, maxBytes: number) => {
+      const big = path.endsWith(".json")
+        ? Buffer.from(announcementJson({ picture: "canvas.png" }))
+        : pngBytes(maxBytes + 1);
+      return big.subarray(0, maxBytes + 1);
+    });
+    expect(
+      await loadBundledAnnouncement({ announcementPath: "/app/a.json", readBounded }),
+    ).toBeUndefined();
+    expect(readBounded).toHaveBeenCalledWith("/app/a.json", MAX_ANNOUNCEMENT_FILE_CHARS);
+    expect(readBounded).toHaveBeenCalledWith("/app/canvas.png", MAX_ANNOUNCEMENT_PICTURE_BYTES);
+
+    const oversizedJson = vi.fn(async (_path: string, maxBytes: number) =>
+      new Uint8Array(maxBytes + 1).fill(0x20),
+    );
+    expect(
+      await loadBundledAnnouncement({
+        announcementPath: "/app/a.json",
+        readBounded: oversizedJson,
+      }),
+    ).toBeUndefined();
+    expect(oversizedJson).toHaveBeenCalledOnce();
+  });
+
+  it("reads only the cap plus one byte of a file far larger than the cap", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "whats-new-"));
+    try {
+      const path = join(directory, "huge.png");
+      await writeFile(path, Buffer.alloc(MAX_ANNOUNCEMENT_PICTURE_BYTES * 8, 1));
+      const bytes = await readAtMost(path, MAX_ANNOUNCEMENT_PICTURE_BYTES);
+      expect(bytes.byteLength).toBe(MAX_ANNOUNCEMENT_PICTURE_BYTES + 1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

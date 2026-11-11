@@ -164,6 +164,7 @@ import {
   resolveBundledWhatsNewPath,
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
+import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
@@ -4141,7 +4142,7 @@ function bundledWhatsNewOptions(): {
   readonly writeFile: (path: string, contents: string) => Promise<void>;
   readonly announcement: {
     readonly path: string;
-    readonly readBytes: (path: string) => Promise<Uint8Array>;
+    readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
   };
 } {
   const statePath = resolveWhatsNewStatePath(app.getPath("userData"));
@@ -4164,7 +4165,7 @@ function bundledWhatsNewOptions(): {
         appPath: app.getAppPath(),
         moduleUrl: import.meta.url,
       }),
-      readBytes: (path) => readFile(path),
+      readBounded: readAtMost,
     },
   };
 }
