@@ -308,6 +308,47 @@ describe("CodeTurnRunner", () => {
     },
   );
 
+  it("records the routine an app-managed call created on that call's tool event", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "routine-request",
+            toolName: "octant_propose_routine",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const routine = {
+      routineId: "20000000-0000-4000-8000-0000000000a1",
+      name: "Daily summary",
+      trigger: { kind: "once", scheduledAt: "2026-11-12T09:00:00.000Z" },
+      firstRunAt: "2026-11-12T09:00:00.000Z",
+      paused: true,
+    } as const;
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            appManagedTools: {
+              definitions: [{ name: "octant_propose_routine", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { status: "created" }, routine: routine as never }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "tool", status: "completed", routine }),
+    );
+  });
+
   it.each([undefined, "/private/approved/task"])(
     "subscribes before send and launches in the chosen folder %s with thread authority",
     async (providerRoot) => {

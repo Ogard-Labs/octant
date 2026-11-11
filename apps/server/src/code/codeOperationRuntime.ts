@@ -6188,6 +6188,9 @@ function normalizedOperationEvent(
       ...(event.status === "completed" && event.outsideContent !== undefined
         ? { outsideContent: event.outsideContent }
         : {}),
+      ...(event.status === "completed" && event.routine !== undefined
+        ? { routine: event.routine }
+        : {}),
     };
   }
   if (

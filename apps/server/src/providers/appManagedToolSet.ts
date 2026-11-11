@@ -2,6 +2,7 @@ import type {
   ProviderToolDefinition,
   ProviderToolImage,
   ShieldWatcherLabel,
+  ThreadRoutineReceipt,
 } from "@octant/contracts";
 
 export interface AppManagedToolSet {
@@ -20,6 +21,8 @@ export interface AppManagedToolSet {
      * Octant Shield's Watcher found in it; the tool row carries the mark.
      */
     readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
+    /** Set when the call created a routine; the tool row carries what was created. */
+    readonly routine?: ThreadRoutineReceipt;
   }>;
 }
 

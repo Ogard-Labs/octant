@@ -46,3 +46,29 @@ describe("a tool step Octant Shield answered", () => {
     ).toThrow();
   });
 });
+
+describe("the routine a tool step records", () => {
+  const routine = (name: string) => ({
+    routineId: "20000000-0000-4000-8000-0000000000a1",
+    name,
+    trigger: { kind: "once", scheduledAt: "2026-11-12T09:00:00.000Z" },
+    firstRunAt: "2026-11-12T09:00:00.000Z",
+    paused: true,
+  });
+  const step = (name: string) => ({
+    toolCallId: "r",
+    toolName: "octant_propose_routine",
+    state: "completed",
+    routine: routine(name),
+  });
+
+  it("keeps a routine name the routine itself accepts, however many bytes its characters take", () => {
+    // 255 Japanese characters is the routine's longest name and far over 256 bytes.
+    const name = "あ".repeat(255);
+    expect(decodeThreadToolStep(step(name)).routine?.name).toBe(name);
+  });
+
+  it("refuses a name longer than the routine's own limit", () => {
+    expect(() => decodeThreadToolStep(step("a".repeat(256)))).toThrow();
+  });
+});

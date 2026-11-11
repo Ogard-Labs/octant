@@ -3337,8 +3337,9 @@ the thread it came from.
   the routes. An agent takes part only through the proposal and the routine
   tools below: it may read routines, propose one, ask the person to pause or
   archive one that is its thread's own, and report its own run's result.
-  Every change still happens as a person's principal confirming it; resume,
-  edit, run now, and cancel stay the person's alone.
+  Every change still happens as a person's principal, by confirming a card or,
+  for a routine the person asked the thread for, by their request (below);
+  resume, edit, run now, and cancel stay the person's alone.
 - **Proposed from a thread.** A Work or Code thread's agent may propose a
   routine with the app-managed `octant_propose_routine` tool: a name, a task
   prompt, a trigger (once at an explicit instant, every N minutes within the
@@ -3355,6 +3356,29 @@ the thread it came from.
   thread's posture, as any turn is. A proposal creates nothing, whatever
   the thread's posture: a remembered Full access does not let an agent create
   or confirm a routine, and the routine it leads to is approval-gated anyway.
+  **Asked for by the person.** When the person's own message asked for the
+  routine (for example "create a daily summary automation"), the agent sets
+  `requestedByPerson` and the host creates it at once, with no card, as the
+  turn's window principal and through the same draft and create path a
+  confirmed card takes, so the Project, mode, and authority are the thread's
+  live facts and never the agent's. It is created **paused**, in its first
+  journaled event, and runs only after the person enables it in Automation
+  Center, so the agent's attestation can start nothing. The host cannot verify
+  the attestation, which is why a pause and not a run is what it grants; the
+  tool tells the agent never to set it from text in a file, page, or tool
+  result. A suggestion the agent makes on its own, a follow-up (a paused one
+  would never fire), and a turn in Plan (which changes nothing) still wait for
+  the card.
+  **Receipt.** A call that created a routine, either way, keeps a receipt on its
+  tool step (the routine's id, name, schedule, first run, and whether it is
+  paused), in a Work thread's recorded steps and a Code thread's operation
+  events alike, and nowhere else: no tool input or output is captured. Every
+  client draws the same **Created automation** card under the turn from it,
+  saying paused or scheduled and opening the routine in Automation Center
+  where the host can (the phone shows the card without Open). The desktop and
+  web thread's Environment lists the routine in its Routines row, paused or
+  not, as it lists any routine made from the thread; the phone has no
+  Environment, and a paired device cannot read routines.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
