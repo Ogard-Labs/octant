@@ -2036,16 +2036,16 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Proxy 
 
 ### Agents on other machines reach Octant through an agent grant
 
-An agent on another machine on the person's own network starts and follows work in Octant as a new remote principal, `outside-agent`, held to an agent grant the person creates. It is never a paired device and never the person.
+An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
 
 - A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
 - The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
 - It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
-- Reach from the public internet is undecided and needs the maintainer's own decision; nothing Octant operates is involved either way.
+- Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 
-Status: Designed, not built. Since: —. Detail: [Agent access from other machines](agent-access.md).
+Status: Designed, not built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md).
 
 ## Credentials and sign-in
 

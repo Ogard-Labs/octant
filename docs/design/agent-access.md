@@ -1,13 +1,11 @@
 # Agent access from other machines
 
-Status: Proposed (2026-11-11). Becomes approved when the maintainer merges it,
-except AA-11 (reach from the public internet), which stays open until the
-maintainer decides it on its own.
+Status: Approved (2026-11-11, maintainer). AA-11 decided: reach stays on the
+person's own network.
 Size: Full: a new remote principal, a credential, a listener surface, a
 server-hosted MCP endpoint, Settings, and a CLI enrollment step.
 Owner: maintainer · Started: 2026-11-11
-Build status: designed, not built. Nothing below is in force until a slice
-lands and moves its rule into its owner
+Build status: being built; each built slice moves its rule into its owner
 ([Architecture: Security and authority](../architecture.md#security-and-authority))
 and into [Decisions and requirements](decisions.md).
 
@@ -40,7 +38,7 @@ is a bot's permission ([Bots](bots.md)). This design uses:
 | SEC-1 | An outside agent never exceeds its grant, and the grant never exceeds what a paired device may do: no Full access, no remembered answers, no approvals, no administration, no terminals, no host Browser.                       |
 | SEC-2 | Every mutation is journaled with the outside-agent principal; no agent key or secret enters the journal.                                                                                                                        |
 | SEC-3 | Revocation takes effect on the next request and ends open sessions and in-flight requests, as device revocation does.                                                                                                           |
-| SEC-4 | Reach stays on the person's own network: LAN-private and Tailscale source classes only. Nothing is operated by Octant (AA-11 decides anything wider).                                                                           |
+| SEC-4 | Reach stays on the person's own network: LAN-private and Tailscale source classes only. Nothing is operated by Octant (AA-11).                                                                                                  |
 | SEC-5 | Prompts from an outside agent are outside content: the thread is marked from its first turn, as a thread that read outside content is.                                                                                          |
 | NFR-1 | Spend is bounded per grant: running turns at once, turns per day, and request rate.                                                                                                                                             |
 | CON-1 | No Octant-operated relay, account, or service (Principles; [Current Release Boundary](../architecture.md#current-release-boundary)).                                                                                            |
@@ -50,7 +48,7 @@ Out of scope: outside agents answering approvals, choosing Full access, adding
 or binding Projects, reading credentials, changing settings, administering the
 listener, pairing, or other grants; agent-to-agent work between hosts (that is
 [Hub and spokes](hub-and-spokes.md)); and any path over the public internet
-until AA-11 is decided.
+(AA-11).
 
 ## 3. Conceptual design
 
@@ -107,19 +105,28 @@ until AA-11 is decided.
    lapses.
 4. For direct access, the person turns it on for the grant and Octant shows the
    bearer key once (`oak_<grant>_<secret>`, 256 random bits). Only a salted hash
-   is kept. **Rotate** issues a new key and voids the old one at once.
+   is kept, in a host store beside the remote session store, never in the
+   journal. **Rotate** issues a new key and voids the old one at once.
 
 ## 4. Logical design
 
 ### The outside-agent principal
 
-`RemoteClientPrincipal` gains a third arm,
-`outside-agent {hostId, grantId, grantGeneration, credential: "bridge" | "direct", sourceClass, sessionId}`,
-and `AuditActingPrincipal` gains `outside-agent`. It is a remote principal: every
-rule a paired device lives under applies (`authorizePrincipalAction`, no local
-receipts, identity refused in the payload), and then the grant narrows it
-further. Its service scope is `decodeWindowId(grantId)`, as a device's is
-`decodeWindowId(deviceId)`; it registers no window and binds no workspace.
+An outside agent is its own principal to the agent-access layer: it is found by
+its grant, journaled under its grant, and never listed as a paired device. To
+the product routes it reaches, it is presented as a paired-device principal
+whose device id is the grant's own scope id (`remote-device`, origin
+`octant-agent-access`), dispatched through the same authenticated product
+dispatch the listener uses for paired devices.
+
+**Rationale.** Many services decide remote limits with
+`principal.kind === "remote-device"`. A new principal kind would pass any such
+check written as "is it a device" and fail it as "is it local" only where the
+code happens to say so; presenting the agent as a device makes every existing
+device clamp apply by construction, so the agent can never hold more than a
+paired device does. The agent-access layer then narrows it further to its
+grant before any request reaches a route. The grant's scope id is a fresh UUID
+that no device holds, so nothing addressed to a device reaches an agent.
 
 ### The grant
 
@@ -167,11 +174,11 @@ The tool definitions and argument schemas move to
 
 ### Credentials on each request
 
-- **Bridge:** header `x-octant-agent-proof` signed over method, path, body
-  digest, time, nonce, and the host id, with 30-second skew and a nonce table,
-  the pattern of `RemoteRequestProofV1` and `x-octant-hub-link`. A session
-  token from a challenge round avoids a signature check on every byte stream,
-  as device sessions do; idle 15 minutes, absolute 12 hours.
+- **Bridge:** every request carries `x-octant-agent-proof:
+v1.<grant>.<time>.<nonce>.<signature>`, a P-256 signature over the method,
+  path, body digest, time, nonce, and the host id, with 30-second skew and a
+  nonce table, the pattern of `x-octant-hub-link`. MCP requests are few and
+  small, so there is no session round.
 - **Direct:** `Authorization: Bearer oak_…` over TLS. The host compares the
   hash in constant time and answers every failure with the same
   `unauthorized`, whatever the reason.
@@ -179,7 +186,10 @@ The tool definitions and argument schemas move to
 ### What an outside agent sees
 
 `read_thread` returns the newest turns' prompts and replies, open questions,
-and what waits on the person, for threads in scope only. It never returns file
+and what waits on the person, for threads in scope only. The host's Needs you
+list answers local windows only, so for an outside agent "what waits" comes
+from the thread's harness session (its pending approvals) and is reported as
+incomplete, never as nothing waiting. It never returns file
 contents, diffs, terminal output, credentials, or other threads. `list_waiting`
 lists only rows on threads in scope. `list_threads` lists only threads in scope.
 
@@ -238,19 +248,19 @@ events an outside agent causes carry `actor: outside-agent:<grantId>`.
 
 | ID    | Decision                                                                                                                                                   | Status   |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| AA-1  | An outside agent is a new remote principal, `outside-agent`, never a paired device and never the person.                                                   | Proposed |
-| AA-2  | Its authority is an agent grant: named Projects, modes, highest level (never Full access), tools, models, limits, and expiry, inside paired-device clamps. | Proposed |
-| AA-3  | Grants are created and widened only from a local window or the loopback CLI; a paired device may view and revoke.                                          | Proposed |
-| AA-4  | The only route an outside agent reaches is `POST /api/agent-access/mcp` on a new listener surface; the tools run in process under the principal.           | Proposed |
-| AA-5  | The bridge (`octant agent mcp --connection`) is the recommended connection: a key pair made on the agent's machine, signed requests, pinned TLS.           | Proposed |
-| AA-6  | Direct Streamable HTTP with a bearer key is opt-in per grant and needs the listener's Tailscale certificate.                                               | Proposed |
-| AA-7  | No `add_project` and no approvals: binding folders and answering approvals stay with the person.                                                           | Proposed |
-| AA-8  | Prompts from an outside agent are outside content; its threads are marked from the first turn.                                                             | Proposed |
-| AA-9  | Revocation voids credentials at once and ends sessions and in-flight requests; running turns continue unless the person also stops them.                   | Proposed |
-| AA-10 | Spend limits per grant: running turns at once, turns per day, requests per minute.                                                                         | Proposed |
-| AA-11 | Reach from the public internet (hosted chat bots).                                                                                                         | Open     |
+| AA-1  | An outside agent is its own principal, found and journaled by its grant; product routes see it as a paired-device principal with the grant's scope id.     | Approved |
+| AA-2  | Its authority is an agent grant: named Projects, modes, highest level (never Full access), tools, models, limits, and expiry, inside paired-device clamps. | Approved |
+| AA-3  | Grants are created and widened only from a local window or the loopback CLI; a paired device may view and revoke.                                          | Approved |
+| AA-4  | The only route an outside agent reaches is `POST /api/agent-access/mcp` on a new listener surface; the tools run in process under the principal.           | Approved |
+| AA-5  | The bridge (`octant agent mcp --connection`) is the recommended connection: a key pair made on the agent's machine, signed requests, pinned TLS.           | Approved |
+| AA-6  | Direct Streamable HTTP with a bearer key is opt-in per grant and needs the listener's Tailscale certificate.                                               | Approved |
+| AA-7  | No `add_project` and no approvals: binding folders and answering approvals stay with the person.                                                           | Approved |
+| AA-8  | Prompts from an outside agent are outside content; its threads are marked from the first turn.                                                             | Approved |
+| AA-9  | Revocation voids credentials at once and ends sessions and in-flight requests; running turns continue unless the person also stops them.                   | Approved |
+| AA-10 | Spend limits per grant: running turns at once, turns per day, requests per minute.                                                                         | Approved |
+| AA-11 | Reach stays on the person's own network; hosted bots on the public internet are not supported.                                                             | Approved |
 
-### AA-11: reach from the public internet (open)
+### AA-11: reach from the public internet (decided: option 1)
 
 A bot hosted by someone else (a cloud chat assistant) cannot join the person's
 LAN or tailnet, so nothing above reaches it. Allowing it would change the
@@ -268,9 +278,8 @@ which needs the maintainer's explicit decision. The choices:
 3. **Octant-operated relay.** Out: it contradicts CON-1 and the canceled
    [Hosted relay](hosted-relay.md).
 
-Recommendation: decide 1 now and keep 2 as a later slice, built only after the
-private-network slices have been used and only on the maintainer's explicit
-go-ahead, with its own threat review.
+Decision (2026-11-11, maintainer): option 1. Option 2 would need a new
+maintainer decision and its own threat review.
 
 ## 7. Build plan
 
@@ -288,8 +297,7 @@ go-ahead, with its own threat review.
 4. **Direct:** bearer keys, rotate, and the Tailscale-certificate requirement.
 5. **Visibility:** "Started by" on threads and in Needs you, the paired-device
    view and revoke, push labels.
-6. **Only if AA-11 chooses option 2:** the `public-ingress` source class and
-   public grants.
+   Option 2 of AA-11 is not planned.
 
 ## 8. Verification (per slice)
 
