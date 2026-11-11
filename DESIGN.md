@@ -177,11 +177,16 @@ success. Purple's light-page text value had to be darkened until it read close
 to the plain ink, which loses the point of an accent.
 
 Appearance › Accent offers a one-click accent colour: Blue (the theme's own),
-Clay, Amber, Green, Purple, or Mono. Mono is the grey look: it sets Style to
-Mono, because the ink accent needs different values in light and dark, which a
-single override cannot hold. A colour swatch overrides the accent fill and
-puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
+Sky, Teal, Green, Lime, Amber, Orange, Clay, Rose, Pink, Purple, Indigo, the
+neutrals Steel, Slate, Silver, Graphite, Carbon and White, or Mono. Mono is the
+grey look: it sets Style to Mono and its ink accent. A swatch overrides the
+accent fill and the ink on it (`accent-foreground` and `primary-foreground`):
+dark ink on most, white on Slate, Graphite and light-mode Carbon, each clearing
+normal-text contrast on its fill (`accentSwatches.ts`). Accent text stays on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
+White would vanish on the light page and Carbon on the dark one, so each takes a
+silver in that mode, written as a mode-only override: an override's optional
+`mode` limits it to the light or the dark theme.
 The accent colours switches, the send button, selected states, and sliders;
 status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See

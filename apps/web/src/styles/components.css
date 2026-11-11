@@ -945,9 +945,12 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   content: "";
 }
 
+/* A done mark draws the accent ink, so it sits on the accent fill that ink is
+   paired with: on accent text, a swatch with white ink (Slate, Graphite) left
+   white checks on the preset blue at 2.8:1 in dark mode. */
 .thread-task-viewer__steps > li[data-step-status="done"] .thread-task-viewer__mark {
-  border-color: var(--octant-accent-text);
-  background: var(--octant-accent-text);
+  border-color: var(--octant-accent);
+  background: var(--octant-accent);
 }
 
 .thread-task-viewer__steps > li[data-step-status="dropped"] .thread-task-viewer__mark::after {

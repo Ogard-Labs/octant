@@ -11,7 +11,12 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
-import { ACCENT_SWATCHES, currentAccentSwatch, overridesForAccent } from "./accentSwatches";
+import {
+  ACCENT_SWATCHES,
+  currentAccentSwatch,
+  overridesForAccent,
+  swatchDotColor,
+} from "./accentSwatches";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isAppearancePresetAvailable,
@@ -54,6 +59,7 @@ export function ThemeAppearanceEditor(props: {
       </>
     );
   }
+  const shownAccent = currentAccentSwatch(draft);
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
     void theme.applyPatch({
       typography: {
@@ -188,7 +194,7 @@ export function ThemeAppearanceEditor(props: {
               role="radiogroup"
             >
               {ACCENT_SWATCHES.map((swatch) => {
-                const checked = currentAccentSwatch(draft) === swatch.id;
+                const checked = shownAccent === swatch.id;
                 return (
                   <OctantButton
                     aria-checked={checked}
@@ -208,7 +214,8 @@ export function ThemeAppearanceEditor(props: {
                     role="radio"
                     style={
                       {
-                        "--settings-accent-swatch": swatch.color ?? "var(--octant-text-primary)",
+                        "--settings-accent-swatch":
+                          swatchDotColor(swatch) ?? "var(--octant-text-primary)",
                       } as CSSProperties
                     }
                     title={swatch.label}
