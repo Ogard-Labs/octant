@@ -45,7 +45,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
-import type { ComposerNoticeItem } from "../composer/ComposerNotice";
+import type { ComposerNoticeItem, ComposerProgress } from "../composer/ComposerNotice";
 import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
@@ -923,15 +923,9 @@ export function ChatComposer(props: ChatComposerProps) {
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
       {...(props.threadDropKey === undefined ? {} : { threadDropKey: props.threadDropKey })}
       notices={[...(props.notices ?? []), ...status.notices]}
-      description={
-        <div
-          className="chat-composer__status chat-composer__status--quiet"
-          id={statusId}
-          {...(status.loud ? {} : { "aria-live": "polite", role: "status" })}
-        >
-          {status.text}
-        </div>
-      }
+      description={status.text}
+      progress={status.progress}
+      statusId={statusId}
       input={input}
       label={{
         className: "chat-composer__message-field",
@@ -983,18 +977,15 @@ function composeStatus(input: {
   readonly stopDisabledReason?: string | undefined;
 }): {
   readonly text: string;
-  readonly loud: boolean;
   readonly notices: ReadonlyArray<ComposerNoticeItem>;
+  readonly progress: ComposerProgress | undefined;
 } {
-  // Quiet messages inform assistive technology without persistent visual
-  // noise; loud messages (failures, streaming state) are cards above the pill.
+  // Quiet messages are the prompt's description for assistive technology and
+  // are never drawn. A refusal, a failure or a fact that stays until it is
+  // resolved is a card above the pill. What comes and goes by itself (sending,
+  // a response streaming) is progress: one quiet line, never a card.
   const quiet: string[] = [];
-  const loud: string[] = [];
   const notices: ComposerNoticeItem[] = [];
-  const say = (notice: ComposerNoticeItem & { readonly text: string }) => {
-    loud.push(notice.text);
-    notices.push(notice);
-  };
   if (input.attachment.kind === "unavailable") quiet.push(input.attachment.reason);
   // The image notice is only worth saying when attachments are otherwise
   // available; a provider that takes no attachments at all already said so.
@@ -1002,13 +993,12 @@ function composeStatus(input: {
     quiet.push(input.imageAttachment.reason);
   }
   if (input.mentionMessage !== undefined) {
-    say({ key: "mention", tone: "warning", role: "alert", text: input.mentionMessage });
+    notices.push({ key: "mention", tone: "warning", text: input.mentionMessage });
   }
   if (input.research.kind === "unavailable") {
-    say({
+    notices.push({
       key: "research",
       tone: "warning",
-      role: "status",
       text: `Research unavailable: ${input.research.reason}`,
     });
   } else if (input.research.kind === "selected") {
@@ -1017,31 +1007,34 @@ function composeStatus(input: {
     );
   }
   if (input.statusMessage !== undefined) {
-    say({ key: "status", tone: "warning", role: "alert", text: input.statusMessage });
+    notices.push({ key: "status", tone: "warning", text: input.statusMessage });
   }
   if (input.sendError !== undefined) {
-    say({ key: "send-error", tone: "danger", role: "alert", text: input.sendError });
+    notices.push({ key: "send-error", tone: "danger", text: input.sendError });
   }
+  let progress: ComposerProgress | undefined;
   if (input.sendPending) {
-    say({ key: "sending", tone: "neutral", role: "status", text: "Sending message…" });
+    progress = { text: "Sending message…" };
   } else if (input.isSending && input.stopDisabledReason !== undefined) {
-    say({ key: "stop", tone: "warning", role: "status", text: input.stopDisabledReason });
+    progress = { text: input.stopDisabledReason };
   } else if (input.isSending) {
-    say({
-      key: "streaming",
-      tone: "neutral",
-      role: "status",
+    // The Stop control already says a response is running.
+    progress = {
       text: "Response is streaming. Submit to add a message to the host queue.",
-    });
+      quiet: true,
+    };
   } else if (input.sendDisabledReason !== undefined) {
     quiet.push(input.sendDisabledReason);
   }
-  // What is loud is a card above the pill and is not repeated in the
-  // description, so a reader never meets the same sentence twice.
   const messages = [...new Set(quiet)];
   return {
-    text: messages.length > 0 ? messages.join(" ") : loud.length > 0 ? "" : "Ready to send.",
-    loud: loud.length > 0,
+    text:
+      messages.length > 0
+        ? messages.join(" ")
+        : notices.length > 0 || progress !== undefined
+          ? ""
+          : "Ready to send.",
     notices,
+    progress,
   };
 }

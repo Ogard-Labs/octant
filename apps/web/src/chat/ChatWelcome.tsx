@@ -166,14 +166,24 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            // Connecting and reloading settle by themselves: progress. A
+            // disconnect, a refusal and an attachment refusal stay until
+            // resolved: cards.
+            progress={
+              props.errorMessage === undefined &&
+              (props.status === "loading" || props.status === "conflict-reload")
+                ? { text: statusMessage ?? "" }
+                : undefined
+            }
             notices={
-              visibleStatusMessage === undefined
+              visibleStatusMessage === undefined ||
+              (props.errorMessage === undefined &&
+                (props.status === "loading" || props.status === "conflict-reload"))
                 ? []
                 : [
                     {
                       key: "status",
-                      tone: props.errorMessage === undefined ? "neutral" : "danger",
-                      role: props.errorMessage === undefined ? "status" : "alert",
+                      tone: props.errorMessage === undefined ? "warning" : "danger",
                       text: visibleStatusMessage,
                       ...(!ready && props.status === "disconnected" && props.onRetry !== undefined
                         ? {

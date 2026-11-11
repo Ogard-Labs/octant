@@ -248,30 +248,32 @@ describe("ChatComposer", () => {
     expect(onForceStop).toHaveBeenCalledOnce();
   });
 
-  it("marks a running turn on the composer so the streaming state is visible", () => {
-    renderComposer({ isSending: true });
+  it("marks a running turn without drawing a card: the streaming state is the status region's, and Stop says it", () => {
+    renderComposer({ isSending: true, onStop: vi.fn() });
 
-    // The streaming status is a card above the pill; the pill holds no text of it.
-    const cards = document.querySelector(".composer-notices");
-    expect(cards).not.toBeEmptyDOMElement();
-    expect(document.querySelector(".thread-composer__surface")).not.toContainElement(
-      cards as HTMLElement,
+    // Passing progress is never a card, so the transcript above does not move.
+    expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
+    // The Stop control already says a response runs, so no line is drawn,
+    // but the persistent polite region carries the words.
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
+    expect(document.querySelector(".composer-progress__line")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Response is streaming. Submit to add a message to the host queue.",
     );
     expect(document.querySelector(".chat-composer--running")).not.toBeNull();
   });
 
-  it("keeps the composer quiet when no turn is running", () => {
+  it("says why Send is held in the prompt's description when no turn is running", () => {
     renderComposer({ isSending: false });
 
-    // Nothing to say: no card, and the pill's description stays for assistive technology.
     expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
-    expect(
-      document.querySelector(
-        "#" +
-          CSS.escape(document.querySelector("textarea")?.getAttribute("aria-describedby") ?? ""),
-      ),
-    ).not.toBeNull();
     expect(document.querySelector(".chat-composer--running")).toBeNull();
+    const prompt = screen.getByLabelText("Message");
+    expect(prompt).toHaveAccessibleDescription(
+      "Research uses SearXNG. Enter a message before sending.",
+    );
+    // The region the prompt names is the one polite status region.
+    expect(screen.getByRole("status")).toHaveTextContent("Enter a message before sending.");
   });
 
   it("keeps a newer draft editable beside the queue while the response runs", async () => {
@@ -385,7 +387,7 @@ describe("ChatComposer", () => {
     expect(onModelChange).toHaveBeenCalledWith("model-b");
     expect(onResearchEnabledChange).toHaveBeenCalledWith(false);
     expect(onResearchRoutingChange).toHaveBeenCalledWith("provider-native");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "Research unavailable: SearXNG is not configured.",
     );
   });

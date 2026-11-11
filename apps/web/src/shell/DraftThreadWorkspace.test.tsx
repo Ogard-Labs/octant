@@ -878,7 +878,10 @@ describe("DraftThreadWorkspace", () => {
       );
 
       // The first turn's status is a card above the pill, with its Cancel.
-      const status = screen.getByText("Checking the authoritative receipt…");
+      // It is shown for the whole first turn (one mount, one unmount per
+      // creation) and carries an action, so it stays a named card.
+      const status = screen.getByRole("status", { name: "First-turn status" });
+      expect(status).toHaveTextContent("Checking the authoritative receipt");
       const card = status.closest(".composer-notices");
       expect(card).not.toBeNull();
       expect(card).toContainElement(screen.getByRole("button", { name: "Cancel first turn" }));

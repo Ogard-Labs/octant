@@ -869,17 +869,18 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 : [
                     {
                       key: "create-disabled",
-                      tone: "neutral" as const,
+                      tone: "warning" as const,
                       text: props.createDisabledReason,
                     },
                   ]),
               ...(serverRefusal !== undefined && props.errorMessage === undefined
-                ? [{ key: "server-refusal", tone: "neutral" as const, text: serverRefusal }]
+                ? [{ key: "server-refusal", tone: "warning" as const, text: serverRefusal }]
                 : []),
               ...(props.creating
                 ? [
                     {
                       key: "first-turn",
+                      label: "First-turn status",
                       tone: "neutral" as const,
                       role: "status" as const,
                       text: props.pendingMessage ?? "Starting the first turn…",

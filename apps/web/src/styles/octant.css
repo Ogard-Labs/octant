@@ -4886,6 +4886,36 @@ input.switch:checked::after {
    a step down from the pill's, and each notice is a card of its own, most
    severe first, so three notices stay three short rows. The frame's gap and
    this margin make the 8px between the last card and the pill. */
+/* Passing progress (sending, a response streaming, a provider check) is one
+   quiet line of meta ink, never a card. It is placed in the transcript's
+   bottom padding directly above the notice group and takes no layout room, so
+   nothing moves when it appears or goes. The region itself stays mounted: it
+   is the prompt's description and where status is announced. */
+.composer-frame {
+  position: relative;
+}
+.composer-progress {
+  position: absolute;
+  inset-inline: var(--oct-space-2);
+  bottom: 100%;
+  min-width: 0;
+  pointer-events: none;
+}
+.composer-progress__line {
+  display: block;
+  overflow: hidden;
+  padding-bottom: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The subagents tray stands directly above the frame; the line would sit on
+   it, so it is announced only. */
+.composer:has(> .composer-subagents) .composer-progress__line {
+  display: none;
+}
 .composer-notices {
   display: grid;
   gap: var(--oct-space-1);
@@ -4901,8 +4931,8 @@ input.switch:checked::after {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-space-4);
-  font-size: var(--oct-text-detail);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  font-size: var(--oct-text-xs);
 }
 /* The mark sits on the first line's axis, however many lines follow. */
 .callout.composer-notice > svg {

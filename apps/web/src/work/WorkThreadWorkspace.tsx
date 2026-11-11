@@ -3096,6 +3096,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               },
             },
           }}
+          progress={
+            // A keyboard hint, or what Submit does while a turn runs: said in
+            // the quiet line, never in a card.
+            completionLocked
+              ? undefined
+              : turnRunning
+                ? { text: "Submit adds this message to the host queue" }
+                : props.turnClient === undefined
+                  ? { text: "Enter saves a Markdown artifact · Shift+Enter for a new line" }
+                  : undefined
+          }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
             ...(images.message === undefined
@@ -3155,16 +3166,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ...(handoffNotice === undefined || completionLocked || turnRunning
               ? []
               : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
-            ...(completionLocked || turnRunning || props.turnClient === undefined
+            // A locked task is a fact the person acts on: it stays until
+            // they reactivate it.
+            ...(completionLocked
               ? [
                   {
-                    key: "hint",
+                    key: "locked",
                     tone: "neutral" as const,
-                    text: completionLocked
-                      ? "Reactivate this task before creating another file or changing its provider."
-                      : turnRunning
-                        ? "Submit adds this message to the host queue"
-                        : "Enter saves a Markdown artifact · Shift+Enter for a new line",
+                    text: "Reactivate this task before creating another file or changing its provider.",
                   },
                 ]
               : []),

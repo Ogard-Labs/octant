@@ -184,13 +184,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
         {
-          id: settingId("thread-stats"),
-          label: "Stats line under the composer",
-          scope: "app",
-          keywords:
-            "thread stats line tokens cache hit speed tok/s first token latency cost usage composer show hide",
-        },
-        {
           id: settingId("usage-bars"),
           label: "Usage bars",
           scope: "app",

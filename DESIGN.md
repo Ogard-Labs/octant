@@ -469,8 +469,8 @@ sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility, and Reading: transcript text size and width, Reply detail,
-the stats line and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
+text, accessibility, and Reading: transcript text size and width, Reply detail
+and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
@@ -693,21 +693,23 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits under the follow-up composer, on the page rather than
-in the box, where a person reads the last turn's figures after sending. Above the
-box, one strip holds where the thread runs (Project and branch) on the left and
-the plan meters described below on the right, so the box holds only the message
-and its controls. The stats are one row of figures at the 12px meta step in the
-meta ink, separated by middle dots, with no hue on any number and no fill on the
-row: the thread's turns, input and output tokens, thinking tokens when the
-provider reported them (part of the output), the cache hit, speed, first token,
-and cost. The turn count never stands alone. Where the plan meters have no strip
-of their own, they lead the row. It wraps at narrow widths rather than scrolling,
-and a trailing quiet icon button hides it. A figure
-that is approximate carries a leading tilde and a dotted underline that explains it on
-hover; a figure the provider did not report is absent, never zero. The whole line is one
-button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
-and cost with Previous and Next turn controls.
+A thread's turn figures sit at the top of its Thread info panel, not under the
+composer: with the row of controls and the line of figures under the pill, plus a
+card, the composer read as four stacked layers. Above the box, one strip holds
+where the thread runs (Project and branch) on the left and the plan meters
+described below on the right, so the box holds only the message and its
+controls. The figures are one compact block of the 12px meta step in the meta
+ink, separated by middle dots, with no hue on any number and no fill: the
+thread's turns, input and output tokens, thinking tokens when the provider
+reported them (part of the output), the cache hit, speed, first token, and cost.
+The turn count never stands alone. The block wraps rather than scrolling, and a
+figure that is approximate carries a leading tilde and a dotted underline that
+explains it on hover; a figure the provider did not report is absent, never
+zero. Its Turn details link, like Turn details in the context meter's popover,
+opens the per-turn detail dialog, a plain definition list of tokens, timing, and
+cost with Previous and Next turn controls. There is no hide control and no
+setting: the panel is closed until asked for, so the figures cost the page
+nothing.
 
 **Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
 the same row as where the work runs: the row under a thread's box, and on a
@@ -785,7 +787,7 @@ Project terminal and browser Zen uses, which no agent can see or reach;
 start screen) stops its shell, since nothing else could reopen it. The
 composer never remounts when the Project is chosen, so the draft stays. Send
 on a Code start screen with no Project chosen stays live and answers with one
-line directly under the composer, "Choose a Project first. A Code task works in a
+card directly above the pill, "Choose a Project first. A Code task works in a
 folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
@@ -837,8 +839,7 @@ loudest thing on the page under an empty prompt. The microphone is in the
 pill because it writes into the prompt; in the line under it, it read as a
 fact about the thread. A notice is never in the pill. What the composer has to
 say about its thread or about sending (a refusal, a failure, a status, a hint,
-the mark that the thread read outside content with its Review action, the
-Project offer, a failed dictation) is the system's callout in a card directly
+the Project offer, a failed dictation) is the system's callout in a card directly
 above the pill, in the pill's width, and in its tone: the callout's own corner
 (12px, not the pill's 22px), 8px between the last card and the pill, the
 words wrapping and the action at the trailing edge, dropping under the words
@@ -849,7 +850,32 @@ chips, the notice cards, the pill, the line under it. A card is shown for as
 long as its notice applies, so what an agent may do and what a thread read are
 never less visible than they were in the pill; it takes no focus when it
 appears, and in tab order it comes before the prompt. A refusal is an alert and
-a status is a status. Over an application ground or under Window glass the card
+a status is a status. A card is for something the person must read or act on
+and that stays until it is resolved: a refusal, a failure, or an offer with an
+action. It is the callout's compact form (the 12px meta step, tight padding,
+one line where the text fits, its tone tint, the callout's own hairline) so
+the pill stays the one strong shape. With nothing of that pending, nothing
+stands above the pill. The composer is the pill and one quiet row under it. A
+standing fact about access is not a card: that a thread has read outside content
+is a chip in that row, directly after the access control, a globe and the words
+"Outside content" in the warning ink with no fill or edge at rest, shown for as
+long as the fact applies. Pressing it opens a popover with the full sentence and
+the Review action; in a narrow row (under 560px) the chip keeps the globe and
+drops the words, and its name and tooltip keep them. A plain note with no action
+is progress, below. A card as heavy as the pill, plus two rows under it, read as
+four stacked layers for a note that was not an error. Progress that comes and goes by itself
+(sending, a response streaming, a provider check, a switch that settles, a
+session compacting, a keyboard hint) is never a card and never changes the
+composer's height: it is one quiet line of meta ink in the transcript's bottom
+padding directly above the notice group, leading-aligned with the pill, one
+message at a time with the newest winning, and no line at all where a control
+already says it (the Stop control during a response). A card for each passing
+status made the transcript jump about 48px twice a message. The line lives in
+one persistent polite status region that stays mounted, is the prompt's
+description (why Send is held), and also receives the words of every plain-fact
+card when it appears, because a card that mounts already filled may not be
+announced; a pending refusal's card is part of the prompt's description too, so
+it is heard again when the prompt takes focus. Over an application ground or under Window glass the card
 is the same glass as the pill with its tone laid over it, not the callout's
 opaque ground beside a translucent pill. A tinted bar inside the pill fought the
 pill's corners (a rounded bar in a rounded pill, with thin uneven gaps), made the
@@ -2158,7 +2184,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line under the composer: cache, speed, and first token are columns,
+as the figures in Thread info: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay

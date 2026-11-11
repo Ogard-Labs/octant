@@ -220,6 +220,10 @@ describe("the public-block visual language", () => {
     expect(css).toMatch(/\.composer-notices:empty\s*\{\s*display:\s*none/);
     // The words wrap, and the action wraps under them in a narrow composer.
     expect(card).toMatch(/flex-wrap:\s*wrap/);
+    // The compact form: the 12px meta step and tight padding, so the card is
+    // visibly lighter than the pill.
+    expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(body).toMatch(/flex:\s*1 1 200px/);
     expect(actions).toMatch(/margin-inline-start:\s*auto/);
     // The corner is the callout's own (12px), not the pill's 22px: no radius is
@@ -237,6 +241,18 @@ describe("the public-block visual language", () => {
     // Nothing the pill held for a notice survives: no feedback strip in it.
     expect(css).not.toMatch(/\.thread-composer__feedback/);
     expect(css).not.toMatch(/\.composer-status\b/);
+  });
+
+  it("keeps the outside-content chip in the row, and drops its words but not its globe in a narrow row", () => {
+    const css = readFileSync(join(webRoot, "composer/outside-content-notice.css"), "utf8");
+    const trigger =
+      /\.composer-row \.outside-content-chip__trigger\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(trigger).toMatch(/color:\s*var\(--oct-warn-fg\)/);
+    // No fill or edge at rest: the row's quiet treatment supplies none.
+    expect(trigger).not.toMatch(/background|border/);
+    expect(css).toMatch(
+      /@container composer-under \(max-width: 560px\)\s*\{\s*\.outside-content-chip__label\s*\{\s*display:\s*none/,
+    );
   });
 
   it("lets a Project overview's actions drop below the name so a half-width pane never draws the name field over its kind chip", () => {

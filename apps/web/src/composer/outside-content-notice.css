@@ -1,3 +1,50 @@
+/*
+ * The mark that a thread read outside content is a chip in the row under the
+ * pill, after the access control it is a fact about: a globe and the words in
+ * the warning ink, with no fill or edge at rest like the row's other chips. It
+ * is shown for as long as the fact applies; pressing it opens the full
+ * sentence and Review. In a narrow row it keeps the globe and drops the words
+ * (the name and the tooltip keep them).
+ */
+.outside-content-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.composer-row .outside-content-chip__trigger {
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-warn-fg);
+}
+
+.outside-content-chip__label {
+  white-space: nowrap;
+}
+
+@container composer-under (max-width: 560px) {
+  .outside-content-chip__label {
+    display: none;
+  }
+  .composer-row .outside-content-chip__trigger {
+    padding-inline: var(--oct-space-1);
+  }
+}
+
+.outside-content-popover {
+  display: grid;
+  max-width: 280px;
+  gap: var(--oct-space-2);
+  justify-items: start;
+  padding: var(--oct-space-3);
+}
+
+.outside-content-popover__text {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+
 /* The review dialog's message stays compact: its mark, sentence, and action
    share one line while they fit, and the action drops under the sentence on
    a narrow screen instead of leaving the mark alone on a line of its own. */

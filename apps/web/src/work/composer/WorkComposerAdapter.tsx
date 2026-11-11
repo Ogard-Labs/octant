@@ -385,6 +385,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 ? [
                     {
                       key: "first-turn",
+                      label: "First-turn status",
                       tone: "neutral" as const,
                       role: "status" as const,
                       text: props.pendingMessage ?? "Starting the first turn…",

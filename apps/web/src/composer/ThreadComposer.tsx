@@ -1,18 +1,28 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import {
   ComposerNoticeSinkProvider,
+  noticeRole,
   useComposerNotice,
   type ComposerNoticeItem,
+  type ComposerProgress,
 } from "./ComposerNotice";
-import { ComposerNoticeCard } from "./ComposerNoticeCard";
+import { ComposerNoticeCard, noticeCardId } from "./ComposerNoticeCard";
 import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
-import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { ComposerOutsideContentChip } from "./OutsideContentNotice";
+import {
+  Fragment,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ThreadPlanWindows, ThreadStats } from "../threadStats/ThreadStats";
+import { ThreadPlanWindows } from "../threadStats/ThreadStats";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
@@ -174,10 +184,18 @@ export interface ThreadComposerProps {
    */
   readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   /**
-   * Text the prompt names as its description for assistive technology. It is
-   * visually hidden by the surface and adds nothing to the pill's height.
+   * The one passing message (sending, a response streaming, a provider
+   * check): a quiet line above the notice group that takes no layout room,
+   * never a card. The newest wins; the surface picks it.
+   */
+  readonly progress?: ComposerProgress | undefined;
+  /**
+   * Text for the persistent status region that is the prompt's description
+   * (why Send is held). Visually hidden and never in the pill's height.
    */
   readonly description?: ReactNode;
+  /** The region's element id, when the surface's prompt already names it. */
+  readonly statusId?: string | undefined;
   /**
    * When set, a sidebar thread dropped on this frame attaches a mention
    * instead of opening a pane. The key matches the registered composer.
@@ -224,9 +242,10 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   // says why under the row.
   const compacting = useComposerCompacting();
   const compactingNoteId = useId();
-  const compactingNotice: ComposerNoticeItem | undefined = compacting
-    ? { key: "compacting", tone: "neutral", id: compactingNoteId, text: "Compacting session" }
-    : undefined;
+  const regionFallbackId = useId();
+  const regionId = props.statusId ?? regionFallbackId;
+  const noticeIdPrefix = useId();
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const activeDropKey = useActiveComposerThreadDropKey();
   const dropKey = props.threadDropKey;
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
@@ -258,16 +277,48 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   // One group of cards directly above the pill, under the start row: what the
   // thread did or what sending refused, then the Project offer and the
   // outside-content mark.
+  const all = [...(props.notices ?? []), ...published.values()];
+  // A card is for something to read or act on: a refusal, a failure, or an
+  // offer with an action. A plain fact with no action (a receipt, a note) is
+  // a quiet line like any other passing message.
+  const cards = all.filter((card) => card.tone !== "neutral" || card.action !== undefined);
+  const noted = all.filter((card) => card.tone === "neutral" && card.action === undefined);
+  // A session that compacts holds Send; that is progress, and it outranks the
+  // surface's own passing message.
+  const lastNote = noted.at(-1);
+  const progress: ComposerProgress | undefined = compacting
+    ? { text: "Compacting session" }
+    : (props.progress ??
+      (lastNote === undefined || typeof lastNote.text !== "string"
+        ? undefined
+        : { text: lastNote.text }));
+  // Cards that are plain facts are written into the persistent region too: a
+  // card mounts already filled and a status may not be announced by that
+  // alone.
+  // Every note is said in the region even when only the newest is drawn.
+  const facts = noted.filter(
+    (card) => card !== lastNote || props.progress !== undefined || compacting,
+  );
+  const alertIds = cards
+    .filter((card) => noticeRole(card) === "alert")
+    .map((card) => noticeCardId(noticeIdPrefix, card));
+  // The prompt is described by the status region and by every refusal card
+  // that is showing, so a pending refusal is heard again when it takes focus.
+  // The prompt belongs to the surface, so the ids are merged into its own.
+  useLayoutEffect(() => {
+    const prompt = surfaceRef.current?.querySelector<HTMLElement>(".composer-input");
+    if (prompt === null || prompt === undefined) return;
+    const managed = new Set((prompt.dataset["composerDescribed"] ?? "").split(" "));
+    const own = (prompt.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .filter((token) => token !== "" && !managed.has(token));
+    const added = [regionId, ...alertIds].filter((id) => !own.includes(id));
+    prompt.setAttribute("aria-describedby", [...own, ...added].join(" "));
+    prompt.dataset["composerDescribed"] = added.join(" ");
+  });
   const noticeCard = (
-    <ComposerNoticeCard
-      notices={[
-        ...(props.notices ?? []),
-        ...(compactingNotice === undefined ? [] : [compactingNotice]),
-        ...published.values(),
-      ]}
-    >
+    <ComposerNoticeCard idPrefix={noticeIdPrefix} notices={cards}>
       {notice}
-      {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
     </ComposerNoticeCard>
   );
   // The pill holds what acts on the message being written and nothing else:
@@ -303,7 +354,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         />
       </div>
       {props.typeahead}
-      {props.description}
     </>
   );
   // Every child keeps its place whether or not the thread is held: only what
@@ -337,6 +387,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
         >
           {props.row.leading}
+          {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
             {props.row.trailing}
             <ComposerContextMeter />
@@ -361,16 +412,34 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {held ? null : <ComposerFollowUpSuggestions />}
       <div className={held ? "composer-frame composer-frame--held" : "composer-frame"}>
         {held ? null : startRow}
+        {held ? null : (
+          <div aria-live="polite" className="composer-progress" id={regionId} role="status">
+            {progress === undefined ? null : (
+              <span
+                className={progress.quiet === true ? "sr-only" : "composer-progress__line"}
+                {...(compacting ? { id: compactingNoteId } : {})}
+                title={progress.text}
+              >
+                {progress.text}
+              </span>
+            )}
+            <span className="sr-only">
+              {props.description}
+              {facts.map((card) => (
+                <Fragment key={card.key}> {card.text}</Fragment>
+              ))}
+            </span>
+          </div>
+        )}
         {held ? null : noticeCard}
         {held ? null : (
-          <div className="thread-composer__surface">
+          <div className="thread-composer__surface" ref={surfaceRef}>
             {dropActive ? <ComposerThreadDropCue /> : null}
             {message}
           </div>
         )}
         {under}
       </div>
-      {held ? null : followUp ? <ThreadStats windows={false} /> : <ThreadStats />}
     </>
   );
   const frame =

@@ -1293,7 +1293,7 @@ describe("CodeComposerAdapter interactions", () => {
 
       await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
       expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
-      expect(screen.getByRole("status")).toHaveTextContent(
+      expect(screen.getByRole("alert")).toHaveTextContent(
         "Runs on this computer's files; a Project on a server runs on the Octant Harness only.",
       );
       await user.click(screen.getByRole("button", { name: "Provider and model" }));

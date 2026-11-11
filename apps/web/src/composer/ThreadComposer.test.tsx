@@ -2,7 +2,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { decodeThreadExternalContentState } from "@octant/contracts/content-provenance";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OutsideContentContext } from "./OutsideContentNotice";
@@ -140,7 +140,7 @@ describe("ThreadComposer", () => {
         context={context}
         input={input}
         row={row}
-        notices={[{ key: "usage", tone: "neutral", text: "Usage notice" }]}
+        notices={[{ key: "usage", tone: "warning", text: "Usage notice" }]}
       />,
     );
     const field = screen.getByRole("textbox", { name: "Message" });
@@ -150,13 +150,10 @@ describe("ThreadComposer", () => {
     expect(surface).toContainElement(field);
     // The pill holds the message and nothing said about it: the notice is a
     // card of its own, directly above the pill.
-    expect(surface).not.toContainElement(screen.getByText("Usage notice"));
-    expect(cards).toContainElement(screen.getByText("Usage notice"));
+    const card = within(cards as HTMLElement).getByText("Usage notice");
+    expect(surface).not.toContainElement(card);
     expect(cards?.nextElementSibling).toBe(surface);
-    expect(screen.getByText("Usage notice").closest(".callout")).toHaveAttribute(
-      "data-tone",
-      "neutral",
-    );
+    expect(card.closest(".callout")).toHaveAttribute("data-tone", "warning");
     // The line under the pill holds the checkout context.
     expect(surface?.nextElementSibling).toBe(under);
     expect(under).toContainElement(container.querySelector(".thread-composer__context"));
@@ -178,28 +175,95 @@ describe("ThreadComposer", () => {
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
         notices={[
-          { key: "hint", tone: "neutral", text: "A hint" },
+          {
+            key: "hint",
+            tone: "neutral",
+            text: "A hint",
+            action: <button type="button">Do it</button>,
+          },
+          { key: "note", tone: "neutral", text: "A plain note" },
           { key: "warn", tone: "warning", text: "A warning" },
           { key: "fail", tone: "danger", role: "alert", text: "A refusal" },
         ]}
       />,
     );
     const cards = [...(container.querySelector(".composer-notices")?.children ?? [])];
-    expect(cards.map((card) => card.textContent)).toEqual(["A refusal", "A warning", "A hint"]);
     expect(cards.map((card) => card.getAttribute("data-tone"))).toEqual([
       "danger",
       "warning",
       "neutral",
     ]);
-    // A refusal and a warning are alerts, a plain fact is a status.
-    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual([
-      "A refusal",
-      "A warning",
-    ]);
-    expect(screen.getByRole("status")).toHaveTextContent("A hint");
+    // A refusal, a warning and an offer with an action are alerts, in this order.
+    expect(
+      screen.getAllByRole("alert").map((alert) => alert.textContent?.replace("Do it", "")),
+    ).toEqual(["A refusal", "A warning", "A hint"]);
+    // A plain note with no action is never a card: it is the quiet line.
+    expect(container.querySelector(".composer-progress__line")).toHaveTextContent("A plain note");
     expect(
       container.querySelector(".thread-composer__surface")?.querySelector(".callout"),
     ).toBeNull();
+  });
+
+  it("says passing progress in one quiet line that takes no room and never mounts a card", () => {
+    const base = {
+      input: <textarea aria-label="Message" className="composer-input" />,
+      row: { actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } } },
+    };
+    const { container, rerender } = render(<ThreadComposer {...base} />);
+    // The region is always mounted, so its first announcement is never lost.
+    const region = container.querySelector(".composer-progress") as HTMLElement;
+    expect(region).toHaveAttribute("role", "status");
+    expect(region.querySelector(".composer-progress__line")).toBeNull();
+
+    rerender(<ThreadComposer {...base} progress={{ text: "Sending message…" }} />);
+    expect(container.querySelector(".composer-progress")).toBe(region);
+    expect(region.querySelector(".composer-progress__line")).toHaveTextContent("Sending message…");
+    // Progress is never a card: the notice group stays empty and the pill is
+    // the same element in the same place.
+    expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
+
+    // A control that already says it leaves no visible line, only the region.
+    rerender(
+      <ThreadComposer {...base} progress={{ text: "Response is streaming.", quiet: true }} />,
+    );
+    expect(region.querySelector(".composer-progress__line")).toBeNull();
+    expect(region).toHaveTextContent("Response is streaming.");
+  });
+
+  it("describes the prompt by the status region and by a pending refusal, and announces a refusal once", () => {
+    const base = {
+      input: <textarea aria-label="Message" className="composer-input" aria-describedby="own" />,
+      row: { actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } } },
+    };
+    const refusal = { key: "refusal", tone: "danger" as const, text: "Nothing was sent." };
+    const fact = { key: "fact", tone: "neutral" as const, text: "Files were restored." };
+    const { container, rerender } = render(
+      <ThreadComposer {...base} description="Enter a message first." notices={[refusal, fact]} />,
+    );
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    const alert = screen.getByRole("alert");
+    const region = container.querySelector(".composer-progress") as HTMLElement;
+    expect(alert).toHaveTextContent("Nothing was sent.");
+    // Its own description stays, then the region, then the refusal card.
+    expect(prompt.getAttribute("aria-describedby")?.split(" ")).toEqual([
+      "own",
+      region.id,
+      alert.id,
+    ]);
+    expect(prompt).toHaveAccessibleDescription(/Enter a message first\..*Nothing was sent\./);
+    // A plain note is said in the region, where it is announced, and never in
+    // a card.
+    expect(region).toHaveTextContent("Files were restored.");
+    expect(container.querySelector(".composer-notices")?.children).toHaveLength(1);
+    // A re-render keeps the same alert element: it is announced once.
+    rerender(
+      <ThreadComposer {...base} description="Enter a message first." notices={[refusal, fact]} />,
+    );
+    expect(screen.getByRole("alert")).toBe(alert);
+    // Once resolved, the refusal leaves the description.
+    rerender(<ThreadComposer {...base} notices={[fact]} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(prompt.getAttribute("aria-describedby")?.split(" ")).toEqual(["own", region.id]);
   });
 
   it("draws a notice's action at the card's trailing edge, after its words, and keeps the pill clear", async () => {
@@ -227,7 +291,7 @@ describe("ThreadComposer", () => {
     );
   });
 
-  it("offers the outside-content review in a card above a marked thread's pill and holds the clear while the thread is busy", async () => {
+  it("offers the outside-content review from a chip in the row under a marked thread's pill and holds the clear while the thread is busy", async () => {
     const threadId = "40000000-0000-4000-8000-000000000001";
     const marked = decodeThreadExternalContentState({
       threadId,
@@ -247,19 +311,29 @@ describe("ThreadComposer", () => {
           presentation="follow-up"
           threadBusy
           input={<textarea aria-label="Message" className="composer-input" />}
-          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+          row={{
+            leading: <button type="button">Ask first</button>,
+            actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+          }}
         />
       </OutsideContentContext>,
     );
 
-    const review = await screen.findByRole("button", { name: "Review" });
-    // The mark is a card above the pill, ahead of it in tab order, and the
-    // pill stays one line tall: nothing of it is inside.
+    const chip = await screen.findByRole("button", { name: "Outside content" });
+    // The chip stands in the row under the pill, right after the access
+    // control; no card stands above the pill and nothing of it is in the pill.
     const surface = container.querySelector(".thread-composer__surface");
-    expect(surface).not.toContainElement(review);
-    expect(container.querySelector(".composer-notices")).toContainElement(review);
-    expect(container.querySelector(".composer-notices")?.nextElementSibling).toBe(surface);
-    await userEvent.setup().click(review);
+    const row = container.querySelector(".composer-row");
+    expect(surface).not.toContainElement(chip);
+    expect(row).toContainElement(chip);
+    expect(row?.firstElementChild).toBe(screen.getByRole("button", { name: "Ask first" }));
+    expect(screen.getByRole("button", { name: "Ask first" }).nextElementSibling).toContainElement(
+      chip,
+    );
+    expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
+    const user = userEvent.setup();
+    await user.click(chip);
+    await user.click(await screen.findByRole("button", { name: "Review" }));
     expect(await screen.findByRole("button", { name: "Clear the mark" })).toBeDisabled();
     await waitFor(() => expect(client.readExternalContent).toHaveBeenCalled());
   });
@@ -284,14 +358,16 @@ describe("ThreadComposer", () => {
     expect(frame?.children).toHaveLength(1);
     const inner = frame?.children[0];
     expect(inner).toHaveClass("composer-frame");
-    expect(inner?.children).toHaveLength(3);
-    expect(inner?.children[0]).toBe(container.querySelector(".composer-notices"));
-    expect(inner?.children[0]).toBeEmptyDOMElement();
-    expect(inner?.children[1]).toBe(container.querySelector(".thread-composer__surface"));
-    expect(inner?.children[1]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
-    expect(inner?.children[2]).toBe(container.querySelector(".composer-under"));
-    expect(inner?.children[2]?.children).toHaveLength(1);
-    expect(inner?.children[2]?.children[0]).toBe(container.querySelector(".composer-row"));
+    // The always-mounted status region comes first; it takes no layout room.
+    expect(inner?.children).toHaveLength(4);
+    expect(inner?.children[0]).toBe(container.querySelector(".composer-progress"));
+    expect(inner?.children[1]).toBe(container.querySelector(".composer-notices"));
+    expect(inner?.children[1]).toBeEmptyDOMElement();
+    expect(inner?.children[2]).toBe(container.querySelector(".thread-composer__surface"));
+    expect(inner?.children[2]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
+    expect(inner?.children[3]).toBe(container.querySelector(".composer-under"));
+    expect(inner?.children[3]?.children).toHaveLength(1);
+    expect(inner?.children[3]?.children[0]).toBe(container.querySelector(".composer-row"));
   });
 
   it("keeps the message label a direct child of the prompt cell so the input stays full width", () => {

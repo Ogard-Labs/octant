@@ -2725,6 +2725,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               },
             },
           }}
+          progress={
+            // Passing messages: a provider check, or a switch that settles by
+            // itself. The newest wins and neither is a card.
+            providerChanging
+              ? { text: "Checking the selected provider…" }
+              : pendingSwitchNotice === undefined
+                ? undefined
+                : { text: pendingSwitchNotice }
+          }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
             ...(attachments.message === undefined
@@ -2780,18 +2789,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     text: props.controller.draftPersistError,
                   },
                 ]),
-            ...(providerChanging
-              ? [
-                  {
-                    key: "provider-changing",
-                    tone: "neutral" as const,
-                    text: "Checking the selected provider…",
-                  },
-                ]
-              : []),
-            ...(pendingSwitchNotice === undefined || providerChanging
-              ? []
-              : [{ key: "switch", tone: "neutral" as const, text: pendingSwitchNotice }]),
             ...(props.controller.accessNotice === undefined
               ? []
               : [

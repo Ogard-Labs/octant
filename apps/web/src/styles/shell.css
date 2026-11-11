@@ -2764,8 +2764,7 @@ form > .work-composer-adapter__attachments {
   background: transparent;
 }
 
-.draft-thread__error,
-.work-composer-adapter__error {
+.draft-thread__error {
   margin: 0;
   color: var(--octant-destructive);
   font-size: var(--oct-text-detail);
@@ -3130,20 +3129,6 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
   margin-inline-start: 0;
-}
-
-.code-composer-adapter__error {
-  margin: 0;
-  color: var(--oct-danger-fg);
-  font-size: var(--oct-text-sm);
-}
-
-/* Why a thread in a server Project cannot start with this model: a fact, not a failure. */
-.code-composer-adapter__notice {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
-  text-align: center;
 }
 
 /* Quiet worktree-source status line below the context strip. */

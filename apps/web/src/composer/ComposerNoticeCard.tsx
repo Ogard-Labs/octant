@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { bySeverity, type ComposerNoticeItem } from "./ComposerNotice";
+import { bySeverity, noticeRole, type ComposerNoticeItem } from "./ComposerNotice";
 
 /**
  * Everything a composer has to say about its thread or about sending, as one
@@ -15,6 +15,8 @@ import { bySeverity, type ComposerNoticeItem } from "./ComposerNotice";
  */
 export function ComposerNoticeCard(props: {
   readonly notices: ReadonlyArray<ComposerNoticeItem>;
+  /** Makes the id of an alert card, so the prompt can name it in its description. */
+  readonly idPrefix: string;
   readonly children?: ReactNode;
 }) {
   return (
@@ -23,9 +25,10 @@ export function ComposerNoticeCard(props: {
         <OctantAlert
           {...(notice.action === undefined ? {} : { action: notice.action })}
           className="composer-notice"
-          {...(notice.id === undefined ? {} : { id: notice.id })}
+          id={noticeCardId(props.idPrefix, notice)}
+          {...(notice.label === undefined ? {} : { label: notice.label })}
           key={notice.key}
-          {...(notice.role === undefined ? {} : { role: notice.role })}
+          role={noticeRole(notice)}
           tone={notice.tone}
         >
           {notice.text}
@@ -34,4 +37,9 @@ export function ComposerNoticeCard(props: {
       {props.children}
     </div>
   );
+}
+
+/** A card's element id: its own, or one derived from the composer and its key. */
+export function noticeCardId(prefix: string, notice: ComposerNoticeItem): string {
+  return notice.id ?? `${prefix}-${notice.key}`;
 }

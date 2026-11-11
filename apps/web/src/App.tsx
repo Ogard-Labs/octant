@@ -2568,10 +2568,6 @@ function LaunchedShell(
           ? machineChanges.workNavigation
           : machineChanges.codeNavigation,
   });
-  const setThreadStatsVisible = useCallback(
-    (visible: boolean) => void controller.updateSettings({ showThreadStats: visible }),
-    [controller.updateSettings],
-  );
   const projectController = useProjectController({
     activeMode: controller.workspace?.activeMode ?? "chat",
     changeRevision: machineChanges.projects,
@@ -5109,7 +5105,6 @@ function LaunchedShell(
       setReviewOpen,
       setSelectedProjectPullRequest,
       setThreadExportNotice,
-      setThreadStatsVisible,
       setUsageOpen,
       setWorkBoardOpen,
       setWorkComposerSelection,

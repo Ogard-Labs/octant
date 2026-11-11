@@ -10,6 +10,8 @@ export interface OctantAlertProps {
   readonly role?: "alert" | "status";
   readonly className?: string;
   readonly id?: string;
+  /** Names the alert for assistive technology when its words alone do not. */
+  readonly label?: string;
   readonly testId?: string;
 }
 
@@ -21,6 +23,7 @@ export function OctantAlert({
   role = tone === "warning" || tone === "danger" ? "alert" : "status",
   className,
   id,
+  label,
   testId,
 }: OctantAlertProps) {
   const Icon =
@@ -36,6 +39,7 @@ export function OctantAlert({
       className={cn("callout", className)}
       data-tone={tone}
       {...(id === undefined ? {} : { id })}
+      {...(label === undefined ? {} : { "aria-label": label })}
       {...(testId === undefined ? {} : { "data-testid": testId })}
       role={role}
     >

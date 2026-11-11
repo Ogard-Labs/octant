@@ -204,6 +204,6 @@ export function useDroppedFolderMentions(options: {
     notice:
       notice === undefined
         ? undefined
-        : ({ key: "folder-drop", tone: "neutral", text: notice } satisfies ComposerNoticeItem),
+        : ({ key: "folder-drop", tone: "warning", text: notice } satisfies ComposerNoticeItem),
   };
 }

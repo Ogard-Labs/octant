@@ -57,7 +57,31 @@ export interface ComposerNoticeItem {
   /** The element id, for a control that names this notice as its description. */
   readonly id?: string;
   readonly text: ReactNode;
+  /** Names the card for assistive technology (a status that carries an action). */
+  readonly label?: string;
   readonly action?: ReactNode;
+}
+
+/**
+ * What the card is announced as: the tone's own default, as the callout draws
+ * it. A refusal or failure is an alert, a plain fact a status.
+ */
+export function noticeRole(notice: ComposerNoticeItem): "alert" | "status" {
+  // An offer the person must act on is announced when it appears, like a refusal.
+  return (
+    notice.role ?? (notice.tone === "neutral" && notice.action === undefined ? "status" : "alert")
+  );
+}
+
+/**
+ * The one passing message a composer is saying now (sending, a response
+ * streaming, a provider check). It is progress, not a card: it comes and goes
+ * by itself, so it is a quiet line that takes no layout room, and `quiet`
+ * keeps it to assistive technology where a control already says it.
+ */
+export interface ComposerProgress {
+  readonly text: string;
+  readonly quiet?: boolean;
 }
 
 const SEVERITY: Record<ComposerNoticeItem["tone"], number> = { danger: 0, warning: 1, neutral: 2 };

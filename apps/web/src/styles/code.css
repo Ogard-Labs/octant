@@ -2309,12 +2309,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-width: 0;
 }
 
-/* A quiet line in the thread: a receipt or a hint in meta ink. */
-.code-thread-workspace__hint {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
 /* What a provider switch handed over, under the divider that marks it. */
 .code-thread-workspace__handoff {
   margin: 0 0 var(--oct-space-2);
