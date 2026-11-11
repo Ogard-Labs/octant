@@ -56,7 +56,10 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState<number>();
-  const ceiling = dockWidthCeiling(workspaceWidth);
+  const ceiling = dockWidthCeiling(workspaceWidth, {
+    tileColumns: props.isNarrow ? 1 : (props.tiles?.layout?.columns.length ?? 1),
+    viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+  });
 
   useLayoutEffect(() => {
     const workspace = dock.current?.parentElement;

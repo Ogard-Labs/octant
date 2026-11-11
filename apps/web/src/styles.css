@@ -1236,6 +1236,17 @@ h6 {
   grid-row: 1 / -1;
 }
 
+/* Two columns of tools drop the half-of-the-workspace term: the thread keeps
+   only its own minimum, as dockWidthCeiling does for the handle. */
+.workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
+  grid-template-columns:
+    minmax(var(--octant-wide-primary-min), 1fr)
+    minmax(
+      var(--octant-context-sidebar-min),
+      min(var(--octant-context-sidebar-width, 360px), calc(100% - var(--octant-wide-primary-min)))
+    );
+}
+
 .workspace-layer > .bottom-utility-panel {
   grid-column: 1;
   grid-row: 2;

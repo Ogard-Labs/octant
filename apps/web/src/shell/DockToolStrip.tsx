@@ -197,10 +197,26 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
               }
               aria-selected={tool.id === props.active}
               className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
+              data-dock-tab={tool.id}
               data-shown={props.shown?.has(tool.id) === true ? "true" : undefined}
               draggable={props.onTabDragStart === undefined ? undefined : true}
               onClick={() => props.onSelect(tool.id)}
               onDragEnd={() => props.onTabDragEnd?.()}
+              onKeyDown={(event) => {
+                // The menu key is the only keyboard route the browser turns into
+                // a context menu, and a Mac has none: Shift+F10 asks for it too.
+                if (event.key !== "F10" || !event.shiftKey) return;
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: bounds.left,
+                    clientY: bounds.bottom,
+                  }),
+                );
+              }}
               onDragStart={(event) => {
                 // Some engines refuse to start a drag that carries no data.
                 event.dataTransfer.setData("text/plain", tool.label);
@@ -225,11 +241,10 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             />
           </>
         );
-        return items.length === 0 ? (
-          <span className="dock-tool-strip__tab content-tab" key={tool.id}>
-            {tab}
-          </span>
-        ) : (
+        // One wrapper whatever the menu holds: swapping it when a tab gained
+        // or lost its items remounted the button, which dropped keyboard focus
+        // and the source of a drag in flight.
+        return (
           <OctantContextMenu
             items={items}
             key={tool.id}

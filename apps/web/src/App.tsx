@@ -392,9 +392,11 @@ import {
   addThreadUtilityTab,
   addUtilityTabState,
   closeThreadUtilityTab,
+  changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
   openThreadUtilityTab,
+  openUtilityTabBesideState,
   openUtilityTabState,
   removeUtilityTabs,
   resizeUtilityTileColumn,
@@ -402,6 +404,7 @@ import {
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
+  shownTileColumns,
   shownUtilityTabIds,
   showUtilityTabAlone,
   showUtilityTabBelow,
@@ -3184,14 +3187,11 @@ function LaunchedShell(
         presentationAvailability: "available",
         savedSurface: surface,
       });
-    const retainedDockState = retainAvailableUtilityTabs(
-      dockState,
-      new Set(
-        RIGHT_UTILITY_DOCK_SURFACES.filter((surface) => {
-          if (resolveDockSurface(surface.id).kind !== "surface") return false;
-          return isDockToolStillOpenable(surface.id, dockToolCapabilities);
-        }).map((surface) => surface.id),
-      ),
+    const openableDockSurfaces = new Set(
+      RIGHT_UTILITY_DOCK_SURFACES.filter((surface) => {
+        if (resolveDockSurface(surface.id).kind !== "surface") return false;
+        return isDockToolStillOpenable(surface.id, dockToolCapabilities);
+      }).map((surface) => surface.id),
     );
     const bottomPanelSurfaceOrder: ReadonlyArray<RightUtilityDockSurfaceId> = [
       "review",
@@ -3249,12 +3249,19 @@ function LaunchedShell(
       dockThreadKey === undefined || bottomPanelStatesByThread.has(dockThreadKey);
     const bottomPanelOpen =
       bottomPanelPresentation.open && bottomPanelOpenedHere && bottomPanelAvailable && !isNarrow;
-    const displayedDockState = bottomPanelOpen
-      ? removeUtilityTabs(
-          retainedDockState,
-          new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
-        )
-      : retainedDockState;
+    // What the dock draws of a stored state: tools the panel holds and tools
+    // that cannot open are left out. Tile changes are made on this view, so a
+    // divider's shares and the caps always address the tiles on screen.
+    const displayDockState = (stored: ThreadUtilityDockState) => {
+      const retained = retainAvailableUtilityTabs(stored, openableDockSurfaces);
+      return bottomPanelOpen
+        ? removeUtilityTabs(
+            retained,
+            new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
+          )
+        : retained;
+    };
+    const displayedDockState = displayDockState(dockState);
     const dockSurface = displayedDockState.tabs.find(
       (tab) => tab.id === displayedDockState.active,
     )?.surface;
@@ -3301,6 +3308,7 @@ function LaunchedShell(
       bottomPanelSurfaces,
       bottomPanelTabs,
       defaultBottomSurface,
+      displayDockState,
       displayedDockState,
       dockResolution,
       dockResolveSurface: resolveDockSurface,
@@ -3333,6 +3341,7 @@ function LaunchedShell(
     bottomPanelSurfaces,
     bottomPanelTabs,
     defaultBottomSurface,
+    displayDockState,
     displayedDockState,
     dockResolution,
     dockResolveSurface,
@@ -4180,18 +4189,31 @@ function LaunchedShell(
       setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, tabId));
     }
   }
-  /** Applies a tile change to the dock state the pane's thread keeps, or the thread-less one. */
+  /**
+   * Applies a tile change to the dock the pane's thread keeps, or the
+   * thread-less one, as the person sees it: `changeDisplayedUtilityState`.
+   */
   function changeDockTiles(change: (state: ThreadUtilityDockState) => ThreadUtilityDockState) {
+    const apply = (stored: ThreadUtilityDockState) =>
+      changeDisplayedUtilityState(stored, displayDockState(stored), change);
     if (dockThreadKey === undefined) {
-      setFallbackDockState(change);
+      setFallbackDockState((current) => apply(current));
     } else {
       setDockStatesByThread((current) => {
         const state = threadUtilityDockState(current, dockThreadKey);
-        const next = change(state);
+        const next = apply(state);
         if (next === state) return current;
         return new Map(current).set(dockThreadKey, next);
       });
     }
+  }
+  /**
+   * A second column asks for width the way a Browser or Terminal does: it
+   * clears the person's own sizing so the dock widens, and a drag afterwards
+   * holds as before. A tile below or in a column that exists asks for nothing.
+   */
+  function widenDockForColumns(next: ThreadUtilityDockState) {
+    if (shownTileColumns(next) > shownTileColumns(displayedDockState)) setDockWidthChosen(false);
   }
   function noteTerminalShown(tabId: string) {
     if (dockState.tabs.some((tab) => tab.id === tabId && tab.surface === "terminal")) {
@@ -4200,7 +4222,21 @@ function LaunchedShell(
   }
   function showDockTabBeside(tabId: string) {
     noteTerminalShown(tabId);
+    widenDockForColumns(showUtilityTabBeside(displayedDockState, tabId));
     changeDockTiles((state) => showUtilityTabBeside(state, tabId));
+  }
+  function openDockTabBeside(surface: RightUtilityDockSurfaceId) {
+    const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
+    if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
+    closeBottomPanelHolding(surface);
+    const instanceId = crypto.randomUUID();
+    if (surface === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
+    }
+    widenDockForColumns(openUtilityTabBesideState(displayedDockState, surface, instanceId));
+    setActivePaneDockVisible(true);
+    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId));
   }
   function showDockTabBelow(tabId: string) {
     noteTerminalShown(tabId);
@@ -5125,6 +5161,7 @@ function LaunchedShell(
       selectCodeThread,
       selectDockTab,
       hideDockTile,
+      openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
       showDockTabAlone,
@@ -7534,6 +7571,7 @@ function LaunchedShell(
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
+        dockTileColumns={dockPresentedOpen ? dockTileColumns : 1}
         workspace={
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <StartQuickToolsContext.Provider value={startQuickToolsServices}>

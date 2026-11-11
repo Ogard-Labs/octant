@@ -3,10 +3,13 @@ import {
   addThreadUtilityTab,
   addUtilityTabState,
   closeThreadUtilityTab,
+  changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
   openThreadUtilityTab,
+  openUtilityTabBesideState,
   openUtilityTabState,
+  shownTileColumns,
   readBottomPanelToolPresentation,
   readUtilityDockOpen,
   readUtilityDockPresentation,
@@ -605,6 +608,67 @@ describe("dock tool tiles", () => {
       "plan",
     );
     expect(state.active).toBe("canvas");
+  });
+
+  it("keeps one Browser tile when a Browser page is shown beside another with no layout yet", () => {
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = selectUtilityTabState(state, pageOne);
+    const beside = showUtilityTabBeside(state, pageTwo);
+    expect(beside.layout).toBeUndefined();
+    expect(beside.active).toBe(pageTwo);
+  });
+
+  it("opens a tool and shows it beside the focused tile in one state", () => {
+    const state = openUtilityTabBesideState(opened("files"), "canvas", "unused");
+    expect(columnsOf(state)).toEqual([["files"], ["canvas"]]);
+    expect(state.active).toBe("canvas");
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["files", "canvas"]);
+    const terminal = openUtilityTabBesideState(
+      state,
+      "terminal",
+      "10000000-0000-4000-8000-000000000003",
+    );
+    expect(terminal.tabs.at(-1)).toEqual({
+      id: "10000000-0000-4000-8000-000000000003",
+      surface: "terminal",
+    });
+    expect(columnsOf(terminal)).toEqual([
+      ["files"],
+      ["canvas", "10000000-0000-4000-8000-000000000003"],
+    ]);
+  });
+
+  it("counts the columns a state shows", () => {
+    expect(shownTileColumns(opened("files"))).toBe(1);
+    expect(shownTileColumns(showUtilityTabBeside(opened("files", "canvas"), "files"))).toBe(2);
+  });
+
+  it("applies tile changes to the tiles on screen when the bottom panel holds one of them", () => {
+    // Plan, Terminal and Files in one column; the panel holds Terminal.
+    let stored = showUtilityTabBelow(opened("plan", "terminal", "files"), "plan");
+    stored = showUtilityTabBelow(selectUtilityTabState(stored, "files"), "terminal");
+    expect(columnsOf(stored)).toEqual([["files", "terminal", "plan"]]);
+    const displayed = removeUtilityTabs(stored, new Set(["terminal"]));
+    expect(columnsOf(displayed)).toEqual([["files", "plan"]]);
+
+    const resized = changeDisplayedUtilityState(stored, displayed, (state) =>
+      resizeUtilityTileColumn(state, 0, [3, 1]),
+    );
+    expect(resized.layout?.columns[0]?.tiles.map((tile) => tile.share)).toEqual([0.75, 0.25]);
+    expect(resized.tabs.map((tab) => tab.id)).toEqual(stored.tabs.map((tab) => tab.id));
+
+    // The hidden tile no longer takes a slot: a third displayed tile fits.
+    const added = changeDisplayedUtilityState(
+      opened("plan", "terminal", "files", "canvas"),
+      removeUtilityTabs(opened("plan", "terminal", "files", "canvas"), new Set(["terminal"])),
+      (state) => showUtilityTabBelow(state, "plan"),
+    );
+    expect(columnsOf(added).flat()).toContain("plan");
+    expect(changeDisplayedUtilityState(stored, displayed, (state) => state)).toBe(stored);
   });
 });
 

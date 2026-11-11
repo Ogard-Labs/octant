@@ -314,6 +314,51 @@ export function resizeUtilityTileColumn(
   };
 }
 
+/**
+ * Opens a tool and shows it beside the focused tile in one step, so the tool
+ * never takes the focused tile's place first. A repeatable tool always gets a
+ * new tab; a singleton reuses its tab if one is open.
+ */
+export function openUtilityTabBesideState(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+  instanceId: string,
+): ThreadUtilityDockState {
+  const repeatable = surface === "browser" || surface === "terminal";
+  const existing = repeatable ? undefined : state.tabs.find((tab) => tab.id === surface);
+  const tab: ThreadUtilityDockTab =
+    existing ?? (repeatable ? { id: instanceId, surface } : singletonUtilityTab(surface));
+  const tabs = existing === undefined ? [...state.tabs, tab] : state.tabs;
+  // A cap refusing the tile leaves the tool open in the strip, not shown.
+  return place({ ...state, tabs }, tab.id, "beside");
+}
+
+/** Columns of tiles a state shows: one for the single-tool view. */
+export function shownTileColumns(state: ThreadUtilityDockState): number {
+  return state.layout?.columns.length ?? 1;
+}
+
+/**
+ * Applies a tile change to the layout the person can see and keeps the stored
+ * tabs. A tool the bottom panel holds is dropped from the displayed dock, and
+ * a divider or a cap that counted its hidden tile would disagree with what is
+ * drawn: shares would no longer match the tiles, and a hidden tile would use a
+ * slot.
+ */
+export function changeDisplayedUtilityState(
+  stored: ThreadUtilityDockState,
+  displayed: ThreadUtilityDockState,
+  change: (state: ThreadUtilityDockState) => ThreadUtilityDockState,
+): ThreadUtilityDockState {
+  const next = change(displayed);
+  if (next === displayed) return stored;
+  const known = new Set(stored.tabs.map((tab) => tab.id));
+  return {
+    ...next,
+    tabs: [...stored.tabs, ...next.tabs.filter((tab) => !known.has(tab.id))],
+  };
+}
+
 /** The bottom panel shows one tool at a time, so a layout never belongs to it. */
 export function withoutTileLayout(state: ThreadUtilityDockState): ThreadUtilityDockState {
   if (state.layout === undefined) return state;
@@ -457,9 +502,13 @@ function place(
   if (tab === undefined) return state;
   if (state.active === undefined) return { ...state, active: tabId };
   if (state.active === tabId) return state;
-  if (tab.surface === "browser" && browserTileTabId(state) !== undefined) {
-    return focusTab(state, tabId);
-  }
+  // The Browser rule is read from what is on screen, which is the active tab
+  // alone while no layout exists: two Browser tiles would show one tool twice.
+  const browserShown =
+    state.layout === undefined
+      ? state.tabs.find((candidate) => candidate.id === state.active)?.surface === "browser"
+      : browserTileTabId(state) !== undefined;
+  if (tab.surface === "browser" && browserShown) return focusTab(state, tabId);
   const base: DockTileLayout = state.layout ?? {
     columns: [{ share: 1, tiles: [{ tabId: state.active, share: 1 }] }],
   };

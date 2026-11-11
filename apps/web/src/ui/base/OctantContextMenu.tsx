@@ -46,41 +46,47 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
       >
         {props.children}
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        {props.items.map((item, index) => (
-          <ContextMenuItem
-            aria-labelledby={labelId(index)}
-            {...(item.description === undefined
-              ? {}
-              : { "aria-describedby": descriptionId(index) })}
-            className="gap-2"
-            closeOnClick
-            key={item.value}
-            label={item.label}
-            {...(item.disabled === true ? { disabled: true } : {})}
-            onClick={() => {
-              if (item.disabled === true) return;
-              props.onValueChange(item.value);
-            }}
-          >
-            {item.icon === undefined ? null : (
-              <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                {item.icon}
-              </span>
-            )}
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium" id={labelId(index)}>
-                {item.label}
-              </span>
-              {item.description === undefined ? null : (
-                <span className="truncate text-xs text-muted-foreground" id={descriptionId(index)}>
-                  {item.description}
+      {/* No items, no popup: a caller keeps one trigger whatever its menu holds. */}
+      {props.items.length === 0 ? null : (
+        <ContextMenuContent>
+          {props.items.map((item, index) => (
+            <ContextMenuItem
+              aria-labelledby={labelId(index)}
+              {...(item.description === undefined
+                ? {}
+                : { "aria-describedby": descriptionId(index) })}
+              className="gap-2"
+              closeOnClick
+              key={item.value}
+              label={item.label}
+              {...(item.disabled === true ? { disabled: true } : {})}
+              onClick={() => {
+                if (item.disabled === true) return;
+                props.onValueChange(item.value);
+              }}
+            >
+              {item.icon === undefined ? null : (
+                <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                  {item.icon}
                 </span>
               )}
-            </span>
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium" id={labelId(index)}>
+                  {item.label}
+                </span>
+                {item.description === undefined ? null : (
+                  <span
+                    className="truncate text-xs text-muted-foreground"
+                    id={descriptionId(index)}
+                  >
+                    {item.description}
+                  </span>
+                )}
+              </span>
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      )}
     </ContextMenu>
   );
 }

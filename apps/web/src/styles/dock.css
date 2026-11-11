@@ -697,44 +697,27 @@
    its name, not by an outline: the focused one reads in the full ink and the
    rest a step back, with no ring and no fill. */
 .dock-tiles {
+  position: relative;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  container-type: inline-size;
+  overflow: hidden;
 }
 
-.dock-tiles__columns {
-  display: flex;
-  height: 100%;
-  min-height: 0;
-}
-
-.dock-tiles__column {
-  display: flex;
-  min-width: 240px;
-  min-height: 0;
-  flex: 1 1 0;
-}
-
-.dock-tiles__stack {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-}
-
+/* Every tile is a child of this one element, placed by percentages from its
+   shares, so no tool is ever moved to a new parent when its neighbours change.
+   A single tool is a tile with no caption that fills it. */
 .dock-tile {
+  position: absolute;
   display: flex;
   min-width: 0;
-  min-height: 140px;
-  flex: 1 1 0;
+  min-height: 0;
   flex-direction: column;
 }
 
 .dock-tile > .right-utility-dock__tool {
   height: auto;
+  min-height: 0;
   flex: 1 1 0;
 }
 
@@ -786,8 +769,8 @@
 /* The hit area is the dock's own 7px edge; the line inside it is a hairline
    that takes the accent ink while grabbed, as the dock's edge does. */
 .dock-tiles__divider {
-  position: relative;
-  flex: 0 0 7px;
+  position: absolute;
+  z-index: 1;
   background: transparent;
 }
 
@@ -822,21 +805,6 @@
 .dock-tiles__divider:hover::before,
 .dock-tiles__divider:focus-visible::before {
   background: var(--oct-accent-fg);
-}
-
-/* Below two column floors the columns stack rather than shrink under them. */
-@container (max-width: 479px) {
-  .dock-tiles__columns {
-    flex-direction: column;
-  }
-
-  .dock-tiles__column {
-    min-width: 0;
-  }
-
-  .dock-tiles__divider[data-orientation="vertical"] {
-    display: none;
-  }
 }
 
 /* Covers the dock body while a divider or a tab is being dragged: it keeps a

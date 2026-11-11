@@ -70,6 +70,7 @@ export interface DockContainerProps {
     | "closeDock"
     | "closeDockTab"
     | "hideDockTile"
+    | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
     | "openBottomTool"
@@ -724,6 +725,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),
           narrow: isNarrow,
           onHideTile: actions.hideDockTile,
+          onOpenBeside: actions.openDockTabBeside,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,
           onShowAlone: actions.showDockTabAlone,

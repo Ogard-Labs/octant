@@ -259,4 +259,37 @@ describe("the dock tool strip", () => {
     expect(screen.getByRole("tab", { name: "Canvas" })).not.toHaveAttribute("aria-description");
     expect(screen.getByRole("tab", { name: "Terminal" })).not.toHaveAttribute("aria-description");
   });
+
+  it("keeps a tab's button when its menu gains items, so focus and a drag in flight survive", () => {
+    const props = {
+      active: "files",
+      capacity: 2,
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      tabs: [files, canvas],
+    };
+    const { rerender } = render(<DockToolStrip {...props} menuFor={() => []} />);
+    const before = screen.getByRole("tab", { name: "Canvas" });
+    before.focus();
+    rerender(
+      <DockToolStrip {...props} menuFor={() => [{ label: "Show beside", value: "beside" }]} />,
+    );
+    expect(screen.getByRole("tab", { name: "Canvas" })).toBe(before);
+    expect(before).toHaveFocus();
+  });
+
+  it("opens a tab's menu from Shift+F10 as well as the menu key", async () => {
+    render(
+      <DockToolStrip
+        active="files"
+        capacity={2}
+        menuFor={() => [{ label: "Show beside", value: "beside" }]}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        tabs={[files, canvas]}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Canvas" }), { key: "F10", shiftKey: true });
+    expect(await screen.findByRole("menuitem", { name: "Show beside" })).toBeVisible();
+  });
 });

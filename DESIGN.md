@@ -2143,7 +2143,9 @@ region that was only stepped aside.
 On wide windows it may use at most half of the workspace beside the sidebar
 (`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
 keeps the thread readable beside any tool, and the resize handle stops there
-too; the bottom panel may use at most 38 percent of the
+too; with two columns of tool tiles shown it may take all the thread's own
+minimum leaves (560px from 1100px up, 360px below, the same minimum the
+stylesheet's grid uses); the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
@@ -2214,29 +2216,44 @@ focused tile (the one whose tab is selected) is told apart by its caption
 reading in the full ink, with no ring and no fill, so a see-through theme shows
 through every tile; the dock's own surface is the tiles' ground. Dividers
 between columns and between a column's tiles are hairline separators with a 7px
-hit area that resize by pointer drag or arrow keys; no tile is shorter than 140px
-or column narrower than 240px while the dock has the room, and the columns stack
-when the tile area is narrower than two columns. Choosing a tab that is shown
+hit area that resize by pointer drag or arrow keys (Home and End go to the ends
+of the range the floors allow), each named for the two tools it sits between
+("Resize Environment and Vitals") and reporting the range it can really reach; no tile
+is shorter than 140px or column narrower than 280px (the dock's own minimum
+width) while the dock has the room, and the columns stack when the tile area
+cannot give two columns 280px each. Choosing a tab that is shown
 focuses its tile; choosing one that is not replaces the focused tile's tool.
 All Browser tabs are pages of one Browser tool, so there is at most one Browser
 tile and choosing another page changes that tile's page. A tile resolves its own
 tool: one that cannot be described for the active pane says so inside its tile,
-and never shows another pane's content. Every state mark a tool carries (a
-running spinner, a warning dot) stays on its caption and strip tab.
+never shows another pane's content, and leaves the other tiles on screen. The
+single-tool view is the same tile area with one caption-less tile, and tiles are
+positioned children of one element, so a tool is never remounted when a
+neighbour joins or leaves, when it moves between columns, or when focus or a
+divider moves; only choosing another tool for a tile replaces it.
 
 In the strip, tabs that are shown in a tile read in the full ink and a shown tab
 that is not selected says "Shown" to assistive technology. A tab's context menu
 (right click or the menu key) offers **Show beside** and **Show below** for a
 tool that is not the focused tile, and **Show alone** and **Hide from view** for
-a tool that is shown while tiles exist. Dragging a tab onto the dock body does
-the same: the right third shows it beside, the lower third below, and anywhere
+a tool that is shown while tiles exist; Shift+F10 opens the menu as the menu key
+does. A **Show a tool beside** button in the dock head, before Close, opens a
+menu ("Show beside") that lists first the open tools that are not on screen and,
+after a separator, the other tools the thread can launch; it shows the choice
+beside the focused tile in one step (opening it first when needed), leaves Browser
+out while a Browser is on screen, and is absent in the narrow dock and when the
+tile caps are full. It exists because a strip with four tools open fits two tabs
+at a usual dock width, and a tool in the overflow list has neither a menu nor a
+drop target. Dragging a tab onto the dock body does the same: the right third shows it beside, the lower third below, and anywhere
 else replaces the focused tile. With two columns shown and no width the person
-has chosen, the dock widens to 840px (not saved), under the ceiling above. The
+has chosen, the dock widens to 840px (not saved), under the ceiling above;
+showing a tool beside, which makes the second column, clears the person's
+sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
 narrow modal presentation has room for one tool and draws only the focused tile;
 the layout stays stored. The layout is window-local presentation, stored with
-each thread's open tools, and the bottom panel never has one. Moving a tile
-between columns, or hiding the first tile of a two-column layout, remounts the
-tools in the columns that moved; focusing, resizing and adding a tile do not.
+each thread's open tools, and the bottom panel never has one. Tile changes are
+made on the tools on screen, so a tool the bottom panel holds never counts
+toward a cap or a divider's shares.
 
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 

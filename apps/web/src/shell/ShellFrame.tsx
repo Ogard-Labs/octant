@@ -46,6 +46,8 @@ export interface ShellFrameProps {
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
   readonly wideContextOpen: boolean;
+  /** Columns of tool tiles the dock shows; two lets it take all the thread's own minimum leaves. */
+  readonly dockTileColumns?: number;
   readonly bottomPanelOpen?: boolean;
   readonly bottomPanelHeight?: number;
   readonly workspace: ReactNode;
@@ -146,6 +148,7 @@ export function ShellFrame(props: ShellFrameProps) {
               className={`workspace-layer${
                 props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
               }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
+              data-dock-tile-columns={props.dockTileColumns === 2 ? "2" : undefined}
             >
               {props.workspace}
             </div>

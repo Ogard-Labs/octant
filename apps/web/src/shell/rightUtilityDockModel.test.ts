@@ -374,3 +374,21 @@ describe("multi-instance dock surfaces", () => {
     }
   });
 });
+
+describe("how wide the dock may get with two columns of tools", () => {
+  it("keeps half of the workspace for one column", () => {
+    expect(dockWidthCeiling(1000, { viewportWidth: 1440 })).toBe(500);
+    expect(dockWidthCeiling(1000, { tileColumns: 1, viewportWidth: 1440 })).toBe(500);
+  });
+
+  it("leaves a thread only its own minimum for two columns", () => {
+    // 1440px with the sidebar open leaves a 1180px workspace: half gave two
+    // columns of 243px; the thread's 560px minimum leaves 620px.
+    expect(dockWidthCeiling(1180, { tileColumns: 2, viewportWidth: 1440 })).toBe(620);
+    expect(dockWidthCeiling(1180, { tileColumns: 1, viewportWidth: 1440 })).toBe(590);
+  });
+
+  it("uses the smaller thread minimum below 1100px, as the stylesheet does", () => {
+    expect(dockWidthCeiling(900, { tileColumns: 2, viewportWidth: 1000 })).toBe(540);
+  });
+});

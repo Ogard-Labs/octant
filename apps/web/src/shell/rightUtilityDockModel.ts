@@ -174,13 +174,33 @@ export function resolveDockPresentationWidth(input: {
  * dock. The resize handle stops here too, so a drag never moves a stored width
  * that the screen would not show.
  */
-export function dockWidthCeiling(workspaceWidth: number | undefined): number {
+export function dockWidthCeiling(
+  workspaceWidth: number | undefined,
+  options: {
+    readonly tileColumns?: number;
+    readonly viewportWidth?: number | undefined;
+  } = {},
+): number {
   if (workspaceWidth === undefined) return MAX_CONTEXT_SIDEBAR_WIDTH;
-  return Math.min(
-    MAX_CONTEXT_SIDEBAR_WIDTH,
-    Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(workspaceWidth / 2)),
-  );
+  // Two columns of tools need what the thread's own minimum leaves, not half:
+  // at 1440px with the sidebar open, half gave two columns of 243px, under
+  // what a tool is built for. The primary minimum is the one the stylesheet's
+  // grid uses (560px from 1100px up, 360px below), so the handle stops where
+  // the layout would.
+  const room =
+    (options.tileColumns ?? 1) >= 2
+      ? workspaceWidth -
+        ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+          ? WIDE_PRIMARY_MIN
+          : NARROW_PRIMARY_MIN)
+      : workspaceWidth / 2;
+  return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
 }
+
+/** The thread column's minimum beside an open dock, as `--octant-wide-primary-min` sets it. */
+const WIDE_PRIMARY_MIN = 560;
+const NARROW_PRIMARY_MIN = 360;
+const WIDE_VIEWPORT = 1100;
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
