@@ -178,6 +178,10 @@ export const MOBILE_COPY = {
   turnRunning: "Working on your computer…",
   routineReceiptLabel: "Created automation",
   routineReceiptPaused: "created paused",
+  threadRoutineLabel: "Scheduled",
+  threadRoutineFollowUp: "Scheduled follow-up",
+  threadRoutinePaused: "paused",
+  threadRoutineResumeAtWindow: "Resume it at a window on this computer.",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   approvalAllow: "Allow",
