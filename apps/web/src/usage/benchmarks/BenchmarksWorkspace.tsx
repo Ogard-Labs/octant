@@ -24,6 +24,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../../surface/SurfaceHeader";
 import { BenchmarkCaseCompare } from "./BenchmarkCaseCompare";
@@ -787,20 +788,22 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
         </>
       )}
 
-      {pending === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel={pending.kind === "delete-suite" ? "Delete suite" : "Purge run"}
-          destructive
-          onCancel={() => setPending(undefined)}
-          onConfirm={() => void confirmPending()}
-          pending={working}
-          title={pending.kind === "delete-suite" ? "Delete this suite?" : "Purge this run?"}
-        >
-          {pending.kind === "delete-suite"
-            ? `"${pending.suite.name}" is removed. Its finished runs stay until you purge them.`
-            : "Purging erases the run's threads and any worktrees it made, and cannot be undone. The run's figures go with them."}
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {pending === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel={pending.kind === "delete-suite" ? "Delete suite" : "Purge run"}
+            destructive
+            onCancel={() => setPending(undefined)}
+            onConfirm={() => void confirmPending()}
+            pending={working}
+            title={pending.kind === "delete-suite" ? "Delete this suite?" : "Purge this run?"}
+          >
+            {pending.kind === "delete-suite"
+              ? `"${pending.suite.name}" is removed. Its finished runs stay until you purge them.`
+              : "Purging erases the run's threads and any worktrees it made, and cannot be undone. The run's figures go with them."}
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </>
   );
 

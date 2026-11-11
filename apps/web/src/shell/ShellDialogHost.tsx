@@ -26,6 +26,7 @@ import type {
   ThreadSearchProject,
   ThreadSearchThread,
 } from "./threadSearchViewModel";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface ShellDialogHostCodeThreadView {
   readonly checkout: { readonly id: CodeCheckoutId };
@@ -92,54 +93,58 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
   }, [capabilities, props.firstRun.controller.pending]);
   return (
     <>
-      {props.createOpen ? (
-        <ProjectCreateDialog
-          folderBrowseClient={props.folderBrowseClient}
-          {...(props.github === undefined ? {} : { github: props.github })}
-          hostId={props.hostId}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          mode={props.mode}
-          onClose={props.onCloseCreate}
-          onCreate={props.onCreateProject}
-          onCreated={props.onCreatedProject}
-        />
-      ) : null}
-      {props.searchOpen ? (
-        <ThreadSearchOverlay
-          initialQuery={props.searchQuery}
-          mode={props.mode}
-          threads={props.searchThreads}
-          projects={props.searchProjects}
-          unfiledLabel="No Project"
-          listing={props.searchListing}
-          {...(props.mode === "chat"
-            ? {
-                archivedListing: props.searchArchivedListing,
-                onQueryChange: props.onSearchQueryChange,
-                ...(props.searchContentHits === undefined
-                  ? {}
-                  : { contentHits: props.searchContentHits }),
-                ...(props.searchContentListing === undefined
-                  ? {}
-                  : { contentListing: props.searchContentListing }),
-                ...(props.searchContentTruncated === undefined
-                  ? {}
-                  : { contentTruncated: props.searchContentTruncated }),
-              }
-            : {})}
-          onClose={props.onCloseSearch}
-          {...(props.onNewSearchThread === undefined
-            ? {}
-            : { onNewThread: props.onNewSearchThread })}
-          {...(props.onNewSearchProject === undefined
-            ? {}
-            : { onNewProject: props.onNewSearchProject })}
-          {...(props.onOpenSearchSettings === undefined
-            ? {}
-            : { onOpenSettings: props.onOpenSearchSettings })}
-          onOpenThread={props.onOpenSearchHit}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {props.createOpen ? (
+          <ProjectCreateDialog
+            folderBrowseClient={props.folderBrowseClient}
+            {...(props.github === undefined ? {} : { github: props.github })}
+            hostId={props.hostId}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            mode={props.mode}
+            onClose={props.onCloseCreate}
+            onCreate={props.onCreateProject}
+            onCreated={props.onCreatedProject}
+          />
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {props.searchOpen ? (
+          <ThreadSearchOverlay
+            initialQuery={props.searchQuery}
+            mode={props.mode}
+            threads={props.searchThreads}
+            projects={props.searchProjects}
+            unfiledLabel="No Project"
+            listing={props.searchListing}
+            {...(props.mode === "chat"
+              ? {
+                  archivedListing: props.searchArchivedListing,
+                  onQueryChange: props.onSearchQueryChange,
+                  ...(props.searchContentHits === undefined
+                    ? {}
+                    : { contentHits: props.searchContentHits }),
+                  ...(props.searchContentListing === undefined
+                    ? {}
+                    : { contentListing: props.searchContentListing }),
+                  ...(props.searchContentTruncated === undefined
+                    ? {}
+                    : { contentTruncated: props.searchContentTruncated }),
+                }
+              : {})}
+            onClose={props.onCloseSearch}
+            {...(props.onNewSearchThread === undefined
+              ? {}
+              : { onNewThread: props.onNewSearchThread })}
+            {...(props.onNewSearchProject === undefined
+              ? {}
+              : { onNewProject: props.onNewSearchProject })}
+            {...(props.onOpenSearchSettings === undefined
+              ? {}
+              : { onOpenSettings: props.onOpenSearchSettings })}
+            onOpenThread={props.onOpenSearchHit}
+          />
+        ) : null}
+      </OctantDialogPresence>
       {/* One palette for the window. Zen is a deliberate full-surface focus
           mode, so the chord stays inert while it is active. */}
       {props.zenActive ? null : <CommandPalette />}
@@ -163,11 +168,13 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           It is not asked about visibility: the wizard hides itself while
           Project create or Settings covers it, and has to stay mounted through
           that to come back on the step it was left on. */}
-      {props.firstRun.controller.pending ? (
-        <Suspense fallback={null}>
-          <FirstRunOnboarding {...props.firstRun} />
-        </Suspense>
-      ) : null}
+      <OctantDialogPresence>
+        {props.firstRun.controller.pending ? (
+          <Suspense fallback={null}>
+            <FirstRunOnboarding {...props.firstRun} />
+          </Suspense>
+        ) : null}
+      </OctantDialogPresence>
       <WhatsNewAfterUpdate
         firstRunVisible={props.firstRun.controller.visible}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

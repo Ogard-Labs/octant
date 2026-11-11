@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useRemoteSession } from "./useRemoteSession";
 
 export interface RemoteDeviceSelfPanelProps {
@@ -175,30 +176,32 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
           Revoke this device
         </OctantButton>
       </div>
-      {confirmingRotate && ready ? (
-        <OctantConfirmDialog
-          cancelLabel="Keep current key"
-          confirmLabel="Rotate key"
-          destructive
-          onCancel={() => setConfirmingRotate(false)}
-          onConfirm={() => {
-            setConfirmingRotate(false);
-            void runAction(
-              ROTATE_LABEL,
-              () => remoteRotateDeviceKey({ bridge: props.bridge }),
-              () => setMetadata(undefined),
-              ROTATE_SUCCESS,
-              rotateButtonRef,
-            );
-          }}
-          restoreFocus={rotateButtonRef}
-          title="Confirm device key rotation"
-        >
-          Replace this browser&apos;s device key? The current key stops working immediately and
-          cannot be restored. Use this if the current key may be compromised. Only this browser is
-          affected. It stays paired, but this session ends and you must reconnect.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirmingRotate && ready ? (
+          <OctantConfirmDialog
+            cancelLabel="Keep current key"
+            confirmLabel="Rotate key"
+            destructive
+            onCancel={() => setConfirmingRotate(false)}
+            onConfirm={() => {
+              setConfirmingRotate(false);
+              void runAction(
+                ROTATE_LABEL,
+                () => remoteRotateDeviceKey({ bridge: props.bridge }),
+                () => setMetadata(undefined),
+                ROTATE_SUCCESS,
+                rotateButtonRef,
+              );
+            }}
+            restoreFocus={rotateButtonRef}
+            title="Confirm device key rotation"
+          >
+            Replace this browser&apos;s device key? The current key stops working immediately and
+            cannot be restored. Use this if the current key may be compromised. Only this browser is
+            affected. It stays paired, but this session ends and you must reconnect.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
       {status === "" ? null : (
         <OctantAlert tone={statusAssertive ? "warning" : "success"}>{status}</OctantAlert>
       )}

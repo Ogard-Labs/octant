@@ -14,6 +14,7 @@ import { isApplePlatform } from "../platform";
 import { failureMessage } from "../lib/failureMessage";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 
 const RESULTS_ID = "code-search-results";
@@ -168,8 +169,6 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
     };
   }, [checkoutId, client, scope, threadId, trimmed]);
 
-  if (scope === undefined) return null;
-
   const active = matches.length === 0 ? -1 : Math.min(activeIndex, matches.length - 1);
   const statusMessage =
     errorMessage !== undefined
@@ -241,79 +240,88 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
 
   const label = scope === "path" ? "Go to file" : "Find in repository";
   return (
-    <OctantDialog
-      className="command-palette"
-      initialFocus={inputRef}
-      label={label}
-      onClose={close}
-      open
-      popupId="code-search-dialog"
-      restoreFocus={restoreFocusRef}
-    >
-      <div className="command-palette__field">
-        <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-        <OctantInput
-          {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
-          aria-controls={RESULTS_ID}
-          aria-expanded={matches.length > 0}
-          aria-label={label}
-          autoComplete="off"
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={scope === "path" ? "Go to file" : "Find in repository"}
-          ref={inputRef}
-          role="combobox"
-          value={query}
-        />
-      </div>
-      <p className="command-palette__scope" role="note">
-        {scope === "path"
-          ? "File names in the repository bound to this thread."
-          : "Text inside the files of the repository bound to this thread."}
-      </p>
-      <p aria-atomic="true" aria-live="polite" className="command-palette__status" role="status">
-        {statusMessage}
-      </p>
-      <div
-        aria-label="Search results"
-        className="command-palette__results"
-        id={RESULTS_ID}
-        role="listbox"
-      >
-        {matches.map((match, index) => (
-          <div
-            aria-selected={index === active}
-            className="command-palette__result"
-            data-active={index === active}
-            id={optionId(index)}
-            key={`${String(match.path)}:${match.scope === "content" ? match.line : 0}:${index}`}
-            onClick={() => open(match)}
-            onMouseMove={() => setActiveIndex(index)}
-            role="option"
-          >
-            <span className="command-palette__result-title">
-              <FileText aria-hidden="true" size={12} strokeWidth={1.8} />
-              {match.folder === undefined ? "" : `${folderName(match.folder)}/`}
-              {match.scope === "content"
-                ? `${String(match.path)}:${match.line}`
-                : String(match.path)}
-            </span>
-            {match.scope === "content" ? (
-              <span className="command-palette__result-detail">{match.preview}</span>
-            ) : null}
-            {index === active ? (
-              <span className="command-palette__result-hint">
-                <CornerDownLeft aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>Enter</span>
-              </span>
-            ) : null}
+    <OctantDialogPresence>
+      {scope === undefined ? null : (
+        <OctantDialog
+          className="command-palette"
+          initialFocus={inputRef}
+          label={label}
+          onClose={close}
+          open
+          popupId="code-search-dialog"
+          restoreFocus={restoreFocusRef}
+        >
+          <div className="command-palette__field">
+            <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+            <OctantInput
+              {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
+              aria-controls={RESULTS_ID}
+              aria-expanded={matches.length > 0}
+              aria-label={label}
+              autoComplete="off"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(0);
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={scope === "path" ? "Go to file" : "Find in repository"}
+              ref={inputRef}
+              role="combobox"
+              value={query}
+            />
           </div>
-        ))}
-      </div>
-    </OctantDialog>
+          <p className="command-palette__scope" role="note">
+            {scope === "path"
+              ? "File names in the repository bound to this thread."
+              : "Text inside the files of the repository bound to this thread."}
+          </p>
+          <p
+            aria-atomic="true"
+            aria-live="polite"
+            className="command-palette__status"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+          <div
+            aria-label="Search results"
+            className="command-palette__results"
+            id={RESULTS_ID}
+            role="listbox"
+          >
+            {matches.map((match, index) => (
+              <div
+                aria-selected={index === active}
+                className="command-palette__result"
+                data-active={index === active}
+                id={optionId(index)}
+                key={`${String(match.path)}:${match.scope === "content" ? match.line : 0}:${index}`}
+                onClick={() => open(match)}
+                onMouseMove={() => setActiveIndex(index)}
+                role="option"
+              >
+                <span className="command-palette__result-title">
+                  <FileText aria-hidden="true" size={12} strokeWidth={1.8} />
+                  {match.folder === undefined ? "" : `${folderName(match.folder)}/`}
+                  {match.scope === "content"
+                    ? `${String(match.path)}:${match.line}`
+                    : String(match.path)}
+                </span>
+                {match.scope === "content" ? (
+                  <span className="command-palette__result-detail">{match.preview}</span>
+                ) : null}
+                {index === active ? (
+                  <span className="command-palette__result-hint">
+                    <CornerDownLeft aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <span>Enter</span>
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </OctantDialog>
+      )}
+    </OctantDialogPresence>
   );
 }
 

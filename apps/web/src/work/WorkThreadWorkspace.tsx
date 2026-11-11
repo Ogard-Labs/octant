@@ -91,6 +91,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
@@ -2230,26 +2231,30 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
-        {confirmArtifacts ? (
-          <ThreadArtifactsConfirm
-            onCancel={() => setConfirmArtifacts(false)}
-            onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-            pending={deliveryChanging}
-          />
-        ) : null}
+        <OctantDialogPresence>
+          {confirmArtifacts ? (
+            <ThreadArtifactsConfirm
+              onCancel={() => setConfirmArtifacts(false)}
+              onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+              pending={deliveryChanging}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
-        {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-          <OctantConfirmDialog
-            confirmLabel="Mark done"
-            onCancel={() => setCompletionFormOpen(false)}
-            onConfirm={() => void confirmCompletion()}
-            pending={completing}
-            title="Mark this task Done?"
-          >
-            {thread.title} moves to Done on the board. Its composer and provider lock until you
-            archive and reactivate it.
-          </OctantConfirmDialog>
-        ) : null}
+        <OctantDialogPresence>
+          {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
+            <OctantConfirmDialog
+              confirmLabel="Mark done"
+              onCancel={() => setCompletionFormOpen(false)}
+              onConfirm={() => void confirmCompletion()}
+              pending={completing}
+              title="Mark this task Done?"
+            >
+              {thread.title} moves to Done on the board. Its composer and provider lock until you
+              archive and reactivate it.
+            </OctantConfirmDialog>
+          ) : null}
+        </OctantDialogPresence>
 
         <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
           <TranscriptWindow

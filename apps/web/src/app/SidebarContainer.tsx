@@ -50,6 +50,7 @@ import {
 } from "../thread/threadHandOff";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { ShellActions } from "./shellActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
@@ -921,16 +922,18 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           </>
         }
       />
-      {moveRequest === undefined ? null : (
-        <MoveThreadToProjectDialog
-          currentProjectId={moveRequest.projectId}
-          mode={moveRequest.mode}
-          onClose={() => setMoveRequest(undefined)}
-          onMove={moveThread(moveRequest)}
-          projects={allProjects}
-          threadTitle={moveRequest.title}
-        />
-      )}
+      <OctantDialogPresence>
+        {moveRequest === undefined ? null : (
+          <MoveThreadToProjectDialog
+            currentProjectId={moveRequest.projectId}
+            mode={moveRequest.mode}
+            onClose={() => setMoveRequest(undefined)}
+            onMove={moveThread(moveRequest)}
+            projects={allProjects}
+            threadTitle={moveRequest.title}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 });

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import { MockupFrame } from "./MockupBlock";
@@ -86,18 +87,20 @@ export function DeckBlock(props: {
           </li>
         ))}
       </ol>
-      {presenting && slides.length > 0 ? (
-        <DeckPlayer
-          block={props.block}
-          slides={slides}
-          {...(props.designAssetRuntime === undefined
-            ? {}
-            : { designAssetRuntime: props.designAssetRuntime })}
-          hasNotes={notes}
-          onClose={() => setPresenting(false)}
-          restoreFocus={presentButton}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {presenting && slides.length > 0 ? (
+          <DeckPlayer
+            block={props.block}
+            slides={slides}
+            {...(props.designAssetRuntime === undefined
+              ? {}
+              : { designAssetRuntime: props.designAssetRuntime })}
+            hasNotes={notes}
+            onClose={() => setPresenting(false)}
+            restoreFocus={presentButton}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }

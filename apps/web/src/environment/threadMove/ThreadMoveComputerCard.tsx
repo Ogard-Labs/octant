@@ -18,6 +18,7 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
@@ -228,50 +229,54 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
           }
         />
       )}
-      {handoverOpen ? (
-        <HandoverSheet
-          {...(member === undefined || !eligible(member)
-            ? {}
-            : { destination: { memberId: String(member.memberId), name: member.name } })}
-          client={props.client}
-          onClose={() => setHandoverOpen(false)}
-          onHandedOver={() => {
-            setHandoverOpen(false);
-            move.refresh();
-          }}
-          thread={props.thread}
-          threadTitle={props.threadTitle}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {handoverOpen ? (
+          <HandoverSheet
+            {...(member === undefined || !eligible(member)
+              ? {}
+              : { destination: { memberId: String(member.memberId), name: member.name } })}
+            client={props.client}
+            onClose={() => setHandoverOpen(false)}
+            onHandedOver={() => {
+              setHandoverOpen(false);
+              move.refresh();
+            }}
+            thread={props.thread}
+            threadTitle={props.threadTitle}
+          />
+        ) : null}
+      </OctantDialogPresence>
       <p aria-live="polite" className="visually-hidden">
         {live}
       </p>
-      {member === undefined || !sheetOpen ? null : (
-        <ThreadMoveSheet
-          busy={move.destinations?.busy === true}
-          client={props.client}
-          hostName={props.hostName}
-          member={member}
-          onClose={() => setSheetOpen(false)}
-          onStarted={() => {
-            setSheetOpen(false);
-            move.refresh();
-          }}
-          {...(canHandOver
-            ? {
-                onHandOver: () => {
-                  setSheetOpen(false);
-                  setHandoverOpen(true);
-                },
-              }
-            : {})}
-          projectTitle={projectChoices.find((choice) => choice.id === project)?.label}
-          projectId={project === NO_PROJECT ? undefined : project}
-          thread={props.thread}
-          threadTitle={props.threadTitle}
-          unlock={props.unlock}
-        />
-      )}
+      <OctantDialogPresence>
+        {member === undefined || !sheetOpen ? null : (
+          <ThreadMoveSheet
+            busy={move.destinations?.busy === true}
+            client={props.client}
+            hostName={props.hostName}
+            member={member}
+            onClose={() => setSheetOpen(false)}
+            onStarted={() => {
+              setSheetOpen(false);
+              move.refresh();
+            }}
+            {...(canHandOver
+              ? {
+                  onHandOver: () => {
+                    setSheetOpen(false);
+                    setHandoverOpen(true);
+                  },
+                }
+              : {})}
+            projectTitle={projectChoices.find((choice) => choice.id === project)?.label}
+            projectId={project === NO_PROJECT ? undefined : project}
+            thread={props.thread}
+            threadTitle={props.threadTitle}
+            unlock={props.unlock}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

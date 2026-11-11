@@ -22,6 +22,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -398,41 +399,43 @@ export function LibraryView(props: LibraryViewProps) {
           </>
         )}
       </div>
-      {open === undefined ? null : (
-        <LibraryDetail
-          busy={
-            props.busyExtensionId !== undefined &&
-            props.busyExtensionId === open.packageRef?.extensionId
-          }
-          canConnect={canConnect}
-          connecting={connectingId !== undefined}
-          connectClient={props.connectClient}
-          connectFailure={failure}
-          disabled={props.disabled}
-          fresh={open.connectorId === undefined ? undefined : fresh[open.connectorId]}
-          inspection={props.inspection?.itemId === open.id ? props.inspection : undefined}
-          installing={props.installing === true}
-          item={open}
-          localHost={props.localHost === true}
-          marketplaceFetchesEnabled={props.marketplaceFetchesEnabled}
-          onClose={() => {
-            setOpenId(undefined);
-            setFailure(undefined);
-            // A sign-in starts on its own only right after the person pressed Connect.
-            setFresh({});
-          }}
-          onConnect={(secret) => connect(open, secret)}
-          onInspect={() => props.onInspect?.(open)}
-          onInstall={() => props.onInstall?.(open)}
-          onOpen={(target) => {
-            setOpenId(undefined);
-            props.onOpen(target, open);
-          }}
-          onPluginDesired={(desired) => props.onPluginDesired(open, desired)}
-          onTrust={(trusted) => props.onTrust(open, trusted)}
-          restoreFocus={opener}
-        />
-      )}
+      <OctantDialogPresence>
+        {open === undefined ? null : (
+          <LibraryDetail
+            busy={
+              props.busyExtensionId !== undefined &&
+              props.busyExtensionId === open.packageRef?.extensionId
+            }
+            canConnect={canConnect}
+            connecting={connectingId !== undefined}
+            connectClient={props.connectClient}
+            connectFailure={failure}
+            disabled={props.disabled}
+            fresh={open.connectorId === undefined ? undefined : fresh[open.connectorId]}
+            inspection={props.inspection?.itemId === open.id ? props.inspection : undefined}
+            installing={props.installing === true}
+            item={open}
+            localHost={props.localHost === true}
+            marketplaceFetchesEnabled={props.marketplaceFetchesEnabled}
+            onClose={() => {
+              setOpenId(undefined);
+              setFailure(undefined);
+              // A sign-in starts on its own only right after the person pressed Connect.
+              setFresh({});
+            }}
+            onConnect={(secret) => connect(open, secret)}
+            onInspect={() => props.onInspect?.(open)}
+            onInstall={() => props.onInstall?.(open)}
+            onOpen={(target) => {
+              setOpenId(undefined);
+              props.onOpen(target, open);
+            }}
+            onPluginDesired={(desired) => props.onPluginDesired(open, desired)}
+            onTrust={(trusted) => props.onTrust(open, trusted)}
+            restoreFocus={opener}
+          />
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

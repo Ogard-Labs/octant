@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { SettingRow, SettingsFactList, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 
 /** An owner as this host lists it: names and fingerprints, never keys. */
@@ -142,49 +143,53 @@ export function OwnerDevices(props: {
           </ul>
         </>
       )}
-      {reviewing === undefined ? null : (
-        <OctantConfirmDialog
-          cancelLabel="Not now"
-          confirmLabel={`Add ${reviewing.name}`}
-          details={
-            <SettingsFactList
-              facts={[
-                { label: "Device", value: reviewing.name },
-                { label: "Device key", value: fingerprint(reviewing.identityKeyFingerprint) },
-                { label: "Unlock key", value: fingerprint(reviewing.unlockKeyFingerprint) },
-              ]}
-            />
-          }
-          onCancel={() => setReviewing(undefined)}
-          onConfirm={() => {
-            const candidate = reviewing;
-            setReviewing(undefined);
-            void props.onAdd(candidate);
-          }}
-          restoreFocus={reviewOpener}
-          title={`Add ${reviewing.name} as an owner of this computer?`}
-        >
-          With a fresh unlock, an owner device can do here what you could do at this window. Add it
-          only if both fingerprints match the ones on the device.
-        </OctantConfirmDialog>
-      )}
-      {removing === undefined ? null : (
-        <OctantConfirmDialog
-          cancelLabel="Keep it"
-          confirmLabel={`Remove ${removing.name}`}
-          destructive
-          onCancel={() => setRemoving(undefined)}
-          onConfirm={() => {
-            const owner = removing;
-            setRemoving(undefined);
-            void props.onRemove(owner);
-          }}
-          restoreFocus={removeOpener}
-          title={`Remove ${removing.name} as an owner of this computer?`}
-        >
-          It stays a member of the hub but can no longer act here with an unlock.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {reviewing === undefined ? null : (
+          <OctantConfirmDialog
+            cancelLabel="Not now"
+            confirmLabel={`Add ${reviewing.name}`}
+            details={
+              <SettingsFactList
+                facts={[
+                  { label: "Device", value: reviewing.name },
+                  { label: "Device key", value: fingerprint(reviewing.identityKeyFingerprint) },
+                  { label: "Unlock key", value: fingerprint(reviewing.unlockKeyFingerprint) },
+                ]}
+              />
+            }
+            onCancel={() => setReviewing(undefined)}
+            onConfirm={() => {
+              const candidate = reviewing;
+              setReviewing(undefined);
+              void props.onAdd(candidate);
+            }}
+            restoreFocus={reviewOpener}
+            title={`Add ${reviewing.name} as an owner of this computer?`}
+          >
+            With a fresh unlock, an owner device can do here what you could do at this window. Add
+            it only if both fingerprints match the ones on the device.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {removing === undefined ? null : (
+          <OctantConfirmDialog
+            cancelLabel="Keep it"
+            confirmLabel={`Remove ${removing.name}`}
+            destructive
+            onCancel={() => setRemoving(undefined)}
+            onConfirm={() => {
+              const owner = removing;
+              setRemoving(undefined);
+              void props.onRemove(owner);
+            }}
+            restoreFocus={removeOpener}
+            title={`Remove ${removing.name} as an owner of this computer?`}
+          >
+            It stays a member of the hub but can no longer act here with an unlock.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </div>
   );
 }

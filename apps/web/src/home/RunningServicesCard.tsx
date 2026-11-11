@@ -5,6 +5,7 @@ import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 import {
   capRunningServices,
@@ -129,24 +130,26 @@ function RunningServiceRows(props: {
       {hidden <= 0 ? null : (
         <p className="oct-meta running-services__more">{`+${String(hidden)} more listening`}</p>
       )}
-      {confirming === undefined ? null : (
-        <OctantConfirmDialog
-          cancelLabel="Keep it running"
-          confirmLabel="Stop this server"
-          destructive
-          onCancel={() => setConfirming(undefined)}
-          onConfirm={() => {
-            const service = confirming;
-            setConfirming(undefined);
-            void controller.stop(service, true);
-          }}
-          title="Confirm stop"
-        >
-          Stop {confirming.processName} on port {String(confirming.port)}
-          {confirming.workingDirectory === undefined ? "" : ` in ${confirming.workingDirectory}`}?
-          Octant does not own this server and cannot tell who started it.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {confirming === undefined ? null : (
+          <OctantConfirmDialog
+            cancelLabel="Keep it running"
+            confirmLabel="Stop this server"
+            destructive
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => {
+              const service = confirming;
+              setConfirming(undefined);
+              void controller.stop(service, true);
+            }}
+            title="Confirm stop"
+          >
+            Stop {confirming.processName} on port {String(confirming.port)}
+            {confirming.workingDirectory === undefined ? "" : ` in ${confirming.workingDirectory}`}?
+            Octant does not own this server and cannot tell who started it.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

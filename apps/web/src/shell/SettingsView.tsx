@@ -48,6 +48,7 @@ import { ProviderSettingsList } from "../providers/ProviderSettingsList";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
@@ -878,29 +879,31 @@ export function SettingsView(props: SettingsViewProps) {
           </div>
         </main>
       </div>
-      {narrow && navigationOpen ? (
-        <OctantDialog
-          className="settings-view__drawer"
-          initialFocus={navigationClose}
-          label="Settings sections"
-          onClose={() => setNavigationOpen(false)}
-          open
-          restoreFocus={navigationTrigger}
-        >
-          <header className="settings-view__drawer-header">
-            <h2>Settings sections</h2>
-            <OctantIconButton
-              label="Close Settings sections"
-              onClick={() => setNavigationOpen(false)}
-              ref={navigationClose}
-              type="button"
-            >
-              <X aria-hidden="true" size={16} strokeWidth={1.5} />
-            </OctantIconButton>
-          </header>
-          <div className="settings-view__drawer-body">{navigation}</div>
-        </OctantDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {narrow && navigationOpen ? (
+          <OctantDialog
+            className="settings-view__drawer"
+            initialFocus={navigationClose}
+            label="Settings sections"
+            onClose={() => setNavigationOpen(false)}
+            open
+            restoreFocus={navigationTrigger}
+          >
+            <header className="settings-view__drawer-header">
+              <h2>Settings sections</h2>
+              <OctantIconButton
+                label="Close Settings sections"
+                onClick={() => setNavigationOpen(false)}
+                ref={navigationClose}
+                type="button"
+              >
+                <X aria-hidden="true" size={16} strokeWidth={1.5} />
+              </OctantIconButton>
+            </header>
+            <div className="settings-view__drawer-body">{navigation}</div>
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }

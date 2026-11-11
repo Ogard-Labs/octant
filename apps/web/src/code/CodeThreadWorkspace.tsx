@@ -68,6 +68,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -2671,13 +2672,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {plan == null || plan.status === "withdrawn" ? (
                   <ThreadPlanProposal key={String(thread.id)} />
                 ) : null}
-                {confirmArtifacts ? (
-                  <ThreadArtifactsConfirm
-                    onCancel={() => setConfirmArtifacts(false)}
-                    onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-                    pending={deliveryChanging}
-                  />
-                ) : null}
+                <OctantDialogPresence>
+                  {confirmArtifacts ? (
+                    <ThreadArtifactsConfirm
+                      onCancel={() => setConfirmArtifacts(false)}
+                      onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+                      pending={deliveryChanging}
+                    />
+                  ) : null}
+                </OctantDialogPresence>
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}

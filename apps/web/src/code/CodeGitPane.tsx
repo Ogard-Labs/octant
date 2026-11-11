@@ -6,6 +6,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useState } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -263,29 +264,31 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           >
             Discard {selectedTracked.length} {selectedTracked.length === 1 ? "file" : "files"}
           </OctantButton>
-          {confirmingDiscard ? (
-            <OctantConfirmDialog
-              title="Discard changes?"
-              confirmLabel="Discard changes"
-              cancelLabel="Keep changes"
-              destructive
-              onCancel={() => setConfirmingDiscard(false)}
-              onConfirm={() => {
-                setConfirmingDiscard(false);
-                void execute("discard", selectedTracked, {
-                  kind: "discard-git-changes",
-                  operationId: props.createOperationId(),
-                  gitOperationId: props.createGitOperationId(),
-                  paths: selectedTracked as never,
-                  expectedStateToken: props.observation.stateToken,
-                  ...props.scope,
-                });
-              }}
-            >
-              Discard uncommitted changes to {selectedTracked.length}{" "}
-              {selectedTracked.length === 1 ? "file" : "files"}? This cannot be undone.
-            </OctantConfirmDialog>
-          ) : null}
+          <OctantDialogPresence>
+            {confirmingDiscard ? (
+              <OctantConfirmDialog
+                title="Discard changes?"
+                confirmLabel="Discard changes"
+                cancelLabel="Keep changes"
+                destructive
+                onCancel={() => setConfirmingDiscard(false)}
+                onConfirm={() => {
+                  setConfirmingDiscard(false);
+                  void execute("discard", selectedTracked, {
+                    kind: "discard-git-changes",
+                    operationId: props.createOperationId(),
+                    gitOperationId: props.createGitOperationId(),
+                    paths: selectedTracked as never,
+                    expectedStateToken: props.observation.stateToken,
+                    ...props.scope,
+                  });
+                }}
+              >
+                Discard uncommitted changes to {selectedTracked.length}{" "}
+                {selectedTracked.length === 1 ? "file" : "files"}? This cannot be undone.
+              </OctantConfirmDialog>
+            ) : null}
+          </OctantDialogPresence>
           <label className="code-delivery-pane__field">
             Commit message
             <OctantTextarea
