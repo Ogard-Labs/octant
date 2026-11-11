@@ -336,23 +336,7 @@ export class GitObservationPort {
           ),
         ),
       ].sort();
-      const contentObjects = [];
-      for (const path of changedPaths) {
-        const object = await run(["hash-object", "--no-filters", "--", path]);
-        const indexObject = await run(["rev-parse", "--verify", `:${path}`]);
-        contentObjects.push({
-          path,
-          objectId:
-            object.exitCode === 0 && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(object.stdout.trim())
-              ? object.stdout.trim()
-              : null,
-          indexObjectId:
-            indexObject.exitCode === 0 &&
-            /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(indexObject.stdout.trim())
-              ? indexObject.stdout.trim()
-              : null,
-        });
-      }
+      const contentObjects = await readContentObjects(run, changedPaths);
       const stagedSummary = statusEntries.filter(
         (entry) => entry.index !== " " && entry.index !== "?",
       );
@@ -743,6 +727,82 @@ export class GitObservationPort {
       parentSignal?.removeEventListener("abort", abort);
     }
   }
+}
+
+const OBJECT_ID_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const OBJECT_ID_CHUNK_SIZE = 200;
+
+/**
+ * Worktree and index object ids for each path, a fixed number of Git processes
+ * per chunk rather than two per path. A batched call that fails or answers
+ * unevenly falls back to the per-path call for that chunk alone, so one deleted
+ * or unreadable path never costs the others their id.
+ */
+async function readContentObjects(
+  run: (args: readonly string[]) => Promise<CommandResult>,
+  paths: ReadonlyArray<string>,
+): Promise<Array<{ path: string; objectId: string | null; indexObjectId: string | null }>> {
+  const objects: Array<{ path: string; objectId: string | null; indexObjectId: string | null }> =
+    [];
+  for (let offset = 0; offset < paths.length; offset += OBJECT_ID_CHUNK_SIZE) {
+    const chunk = paths.slice(offset, offset + OBJECT_ID_CHUNK_SIZE);
+    const worktreeIds = await readWorktreeObjectIds(run, chunk);
+    const indexIds = await readIndexObjectIds(run, chunk);
+    chunk.forEach((path, index) => {
+      objects.push({
+        path,
+        objectId: worktreeIds[index] ?? null,
+        indexObjectId: indexIds[index] ?? null,
+      });
+    });
+  }
+  return objects;
+}
+
+async function readWorktreeObjectIds(
+  run: (args: readonly string[]) => Promise<CommandResult>,
+  paths: ReadonlyArray<string>,
+): Promise<Array<string | null>> {
+  const batch = await run(["hash-object", "--no-filters", "--", ...paths]);
+  if (batch.exitCode === 0) {
+    const ids = batch.stdout.split("\n").filter((line) => line !== "");
+    if (ids.length === paths.length && ids.every((id) => OBJECT_ID_PATTERN.test(id))) return ids;
+  }
+  const ids: Array<string | null> = [];
+  for (const path of paths) {
+    const one = await run(["hash-object", "--no-filters", "--", path]);
+    ids.push(
+      one.exitCode === 0 && OBJECT_ID_PATTERN.test(one.stdout.trim()) ? one.stdout.trim() : null,
+    );
+  }
+  return ids;
+}
+
+async function readIndexObjectIds(
+  run: (args: readonly string[]) => Promise<CommandResult>,
+  paths: ReadonlyArray<string>,
+): Promise<Array<string | null>> {
+  const listing = await run(["--literal-pathspecs", "ls-files", "--stage", "-z", "--", ...paths]);
+  if (listing.exitCode === 0) {
+    // `<mode> <oid> <stage>\t<path>`: stage 0 is what `rev-parse :<path>` reads.
+    const byPath = new Map<string, string>();
+    for (const record of listing.stdout.split("\0")) {
+      const tab = record.indexOf("\t");
+      if (tab < 0) continue;
+      const [, id, stage] = record.slice(0, tab).split(" ");
+      if (stage === "0" && id !== undefined && OBJECT_ID_PATTERN.test(id))
+        byPath.set(record.slice(tab + 1), id);
+    }
+    return paths.map((path) => byPath.get(path) ?? null);
+  }
+  const ids: Array<string | null> = [];
+  for (const path of paths) {
+    const one = await run(["rev-parse", "--verify", `:${path}`]);
+    ids.push(
+      one.exitCode === 0 && OBJECT_ID_PATTERN.test(one.stdout.trim()) ? one.stdout.trim() : null,
+    );
+  }
+  return ids;
 }
 
 async function readRemotes(
