@@ -106,6 +106,29 @@ describe("code client", () => {
     });
   });
 
+  it("reads a bootstrap that names the Projects' planner threads", async () => {
+    const answer = { settings, threads: [thread], checkouts: [] };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ...answer, plannerThreadIds: [ids.thread] }))
+      // A host with no planner still sends the list, empty.
+      .mockResolvedValueOnce(Response.json({ ...answer, plannerThreadIds: [] }))
+      .mockResolvedValueOnce(Response.json(answer))
+      .mockResolvedValueOnce(Response.json({ ...answer, plannerThreadIds: "all" }));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.bootstrap()).resolves.toMatchObject({
+      threads: [thread],
+      plannerThreadIds: [ids.thread],
+    });
+    await expect(client.bootstrap()).resolves.toMatchObject({ plannerThreadIds: [] });
+    // An older host omits the list; the reader then knows of no planner.
+    expect(await client.bootstrap()).not.toHaveProperty("plannerThreadIds");
+    await expect(client.bootstrap()).rejects.toMatchObject({
+      message: "Code service returned an invalid response.",
+    });
+  });
+
   it("authenticates strict bootstrap and command requests, rejecting invalid commands before send", async () => {
     const fetch = vi
       .fn()
