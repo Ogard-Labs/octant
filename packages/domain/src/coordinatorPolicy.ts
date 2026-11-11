@@ -67,6 +67,23 @@ export function decideCoordinatorRole(input: {
   return { status: "allowed" };
 }
 
+/**
+ * Whether a Code thread reads as a coordinator now. A thread holds the role
+ * either on its own record or by being its Project's designated planner: the
+ * planner reads as a coordinator whose starts always need approval, derived
+ * from the designation so no journaled thread changes. A worker never
+ * coordinates, and an archived thread directs nothing.
+ */
+export function readsAsCoordinator(thread: {
+  readonly lifecycle: string;
+  readonly coordinator: boolean;
+  readonly startedByCoordinator: boolean;
+  readonly designatedPlanner: boolean;
+}): boolean {
+  if (thread.lifecycle === "archived" || thread.startedByCoordinator) return false;
+  return thread.coordinator || thread.designatedPlanner;
+}
+
 /** The Starting workers choice that applies in a Project: its override, else Settings. */
 export function coordinatorStartingFor(input: {
   readonly settings: CoordinatorStartingChoice | undefined;
@@ -104,6 +121,12 @@ export function decideCoordinatorStart(input: {
         readonly lifecycle: string;
         readonly level: ProviderExecutionPolicy;
         readonly marked: boolean;
+        /**
+         * The caller is its Project's designated planner: it reads as a
+         * coordinator, and its starts always become proposals whatever the
+         * start setting, as the planner's always did.
+         */
+        readonly designatedPlanner?: boolean;
       }
     | undefined;
   readonly profileAllowsStart: boolean;
@@ -114,7 +137,11 @@ export function decideCoordinatorStart(input: {
   readonly requestedLevel: WorkerLevel | undefined;
 }): CoordinatorStartDecision {
   const caller = input.caller;
-  if (caller === undefined || caller.lifecycle === "archived" || !caller.coordinator) {
+  if (
+    caller === undefined ||
+    caller.lifecycle === "archived" ||
+    !(caller.coordinator || caller.designatedPlanner === true)
+  ) {
     return {
       status: "refused",
       reason: "unauthorized",
@@ -171,7 +198,10 @@ export function decideCoordinatorStart(input: {
   const level: WorkerLevel =
     caller.marked && chosen === "full-access" ? "auto-accept-edits" : chosen;
   return {
-    status: input.starting === "propose-for-approval" ? "propose" : "start",
+    status:
+      input.starting === "propose-for-approval" || caller.designatedPlanner === true
+        ? "propose"
+        : "start",
     level,
   };
 }

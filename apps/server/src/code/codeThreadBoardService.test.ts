@@ -788,6 +788,26 @@ describe("CodeThreadBoardService filters", () => {
     const excluded = await board.query(decodeCodeBoardQuery({ version: 1, followUp: "excluded" }));
     expect(excluded.cards.map((card) => card.threadId)).toEqual([ids.ready]);
   });
+
+  it("names each worker's coordinator and filters to one coordinator's workers", async () => {
+    const worker = decodeCodeThread({
+      ...thread({ id: ids.ready }),
+      coordinatorThreadId: ids.done,
+    });
+    const board = service({
+      threads: [
+        boardThread({ thread: worker }),
+        boardThread({ thread: thread({ id: ids.executing }) }),
+      ],
+    });
+    const all = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(all.cards, ids.ready).coordinatorThreadId).toBe(ids.done);
+    expect(cardFor(all.cards, ids.executing).coordinatorThreadId).toBeUndefined();
+    const workers = await board.query(
+      decodeCodeBoardQuery({ version: 1, coordinatorThreadId: ids.done }),
+    );
+    expect(workers.cards.map((card) => card.threadId)).toEqual([ids.ready]);
+  });
 });
 
 describe("boardRuntimeActivityFromWorks", () => {

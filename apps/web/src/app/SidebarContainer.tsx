@@ -18,6 +18,7 @@ import type {
 import { deliverComposerThreadDrop } from "../chat/composerThreadDrop";
 import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewModel";
 import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
+import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { MoveThreadToProjectDialog } from "../projects/MoveThreadToProjectDialog";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
@@ -80,6 +81,7 @@ export interface SidebarContainerProps {
     | "openAutomationCenter"
     | "openDraftInActiveProject"
     | "openDraftInProject"
+    | "openCoordinatorDraftInProject"
     | "openGithubIssues"
     | "openImageLibrary"
     | "openHome"
@@ -116,6 +118,9 @@ export interface SidebarContainerProps {
     | "selectWorkThread"
     | "setProjectArchived"
     | "setProjectColor"
+    | "setCodeThreadCoordinator"
+    | "setCodeThreadCoordinatorWake"
+    | "setCodeThreadMessageWake"
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"
@@ -423,6 +428,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       },
       onPinThread: (threadId, pinned) =>
         void actions.pinCodeThread(decodeCodeThreadId(threadId), pinned),
+      ...codeThreadCoordinatorActions(actions),
       onOpenPullRequest: actions.selectProjectPullRequestIdentity,
       onOpenPullRequestOnGithub: (identity) => {
         const url = githubPullRequestUrl(identity);
@@ -792,6 +798,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                       ? {
                           newThreadVerb: "thread" as const,
                           onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
+                          onNewCoordinatorInProject: (projectId) =>
+                            void actions.openCoordinatorDraftInProject(projectId),
                         }
                       : activeMode === "work"
                         ? {

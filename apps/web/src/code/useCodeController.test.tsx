@@ -3381,6 +3381,25 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("shows the Project's designated planner as a coordinator once a navigation read names it", async () => {
+    const bootstrapRead = vi.fn(async () => bootstrap(1, 4));
+    const navigationRead = vi.fn(async () => ({
+      threads: bootstrap(1, 4).threads,
+      activity: bootstrap(1, 4).activity ?? [],
+      runtime: [],
+      plannerThreadIds: [ids.thread],
+    }));
+    const client = fakeClient({ bootstrap: bootstrapRead, navigation: navigationRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, navigationRefreshMs: 10 }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() =>
+      expect(result.current.navigation[0]).toMatchObject({ coordinator: true, planner: true }),
+    );
+    unmount();
+  });
+
   it("does not let a navigation refresh replace a checkout recovered by bootstrap", async () => {
     const waitingCheckout = { ...checkout(), availability: "waiting" as const };
     const navigationRead = vi.fn(async () => ({

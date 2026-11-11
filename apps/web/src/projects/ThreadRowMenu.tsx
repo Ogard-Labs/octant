@@ -17,6 +17,7 @@ import {
   Hash,
   Mail,
   MailOpen,
+  Network,
   Pencil,
   Pin,
   PinOff,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
+  OctantContextMenuCheckboxItem,
   OctantContextMenuContent,
   OctantContextMenuGroup,
   OctantContextMenuItem,
@@ -124,6 +126,16 @@ export interface ThreadRowActions {
    * a row of a kind with no move never offers an item that would do nothing.
    */
   readonly canMoveToProject?: (threadId: string) => boolean;
+  /**
+   * Make coordinator and Stop coordinating (docs/design/coordinator-threads.md).
+   * Never offered on a worker, which the host refuses as a coordinator. Absent
+   * where the host has no coordinators, such as Chat and Work rows.
+   */
+  readonly onSetCoordinator?: (threadId: string, coordinator: boolean) => void;
+  /** The thread's Wake when a message arrives switch. Absent outside Code. */
+  readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
+  /** A worker's Wake for coordinator switch, offered only on a worker. */
+  readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
 }
 
 export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boolean {
@@ -147,7 +159,10 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onOpenPullRequest === undefined &&
     actions.onOpenPullRequestOnGithub === undefined &&
     actions.onStartRenameThread === undefined &&
-    actions.onMoveToProject === undefined
+    actions.onMoveToProject === undefined &&
+    actions.onSetCoordinator === undefined &&
+    actions.onSetMessageWake === undefined &&
+    actions.onSetCoordinatorWake === undefined
   );
 }
 
@@ -173,6 +188,7 @@ export function ThreadRowMenu(props: {
     props.actions.onMarkThreadUnread !== undefined ||
     props.actions.onCompleteFollowUp !== undefined ||
     props.actions.onMarkFollowUp !== undefined;
+  const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
   const hasLifecycleActions =
     (props.thread.completedAt === undefined
       ? props.actions.onCompleteThread
@@ -266,6 +282,12 @@ export function ThreadRowMenu(props: {
               </OctantContextMenuItem>
             )}
           </OctantContextMenuGroup>
+        </>
+      ) : null}
+      {hasCoordinatorActions ? (
+        <>
+          {hasThreadActions ? <OctantContextMenuSeparator /> : null}
+          <ThreadCoordinatorMenuItems actions={props.actions} thread={props.thread} />
         </>
       ) : null}
       {hasLifecycleActions ? (
@@ -442,6 +464,90 @@ export function ThreadRowMenu(props: {
         </>
       )}
     </OctantContextMenuContent>
+  );
+}
+
+export type ThreadCoordinatorActions = Pick<
+  ThreadRowActions,
+  "onSetCoordinator" | "onSetMessageWake" | "onSetCoordinatorWake"
+>;
+
+/**
+ * The coordinator items a Code thread's menu offers, in the row menu and the
+ * thread pane's header menu alike (docs/design/workspace.md#coordinators).
+ * A worker belongs to the coordinator that started it and never becomes one,
+ * so it offers the worker's own switch in place of the role. The designated
+ * planner coordinates because of its designation, which a person removes
+ * from the Project overview, so the role item would do nothing there.
+ */
+function coordinatorMenuChoices(
+  thread: ChatThreadNavigationItem,
+  actions: ThreadCoordinatorActions,
+) {
+  const worker = thread.coordinatorThreadId !== undefined;
+  return {
+    role: worker || thread.planner === true ? undefined : actions.onSetCoordinator,
+    messageWake: actions.onSetMessageWake,
+    coordinatorWake: worker ? actions.onSetCoordinatorWake : undefined,
+  };
+}
+
+export function threadCoordinatorMenuOffers(
+  thread: ChatThreadNavigationItem,
+  actions: ThreadCoordinatorActions,
+): boolean {
+  const choices = coordinatorMenuChoices(thread, actions);
+  return (
+    choices.role !== undefined ||
+    choices.messageWake !== undefined ||
+    choices.coordinatorWake !== undefined
+  );
+}
+
+export function ThreadCoordinatorMenuItems(props: {
+  readonly thread: ChatThreadNavigationItem;
+  readonly actions: ThreadCoordinatorActions;
+}) {
+  const threadId = props.thread.navigationId ?? props.thread.threadId;
+  const { role, messageWake, coordinatorWake } = coordinatorMenuChoices(
+    props.thread,
+    props.actions,
+  );
+  const coordinator = props.thread.coordinator === true;
+  return (
+    <OctantContextMenuGroup>
+      {role === undefined ? null : (
+        <OctantContextMenuItem
+          className="thread-row-context-menu__item"
+          label={coordinator ? "Stop coordinating" : "Make coordinator"}
+          onClick={() => role(threadId, !coordinator)}
+        >
+          <MenuContent icon={Network}>
+            {coordinator ? "Stop coordinating" : "Make coordinator"}
+          </MenuContent>
+        </OctantContextMenuItem>
+      )}
+      {messageWake === undefined ? null : (
+        <OctantContextMenuCheckboxItem
+          checked={props.thread.messageWake === true}
+          className="thread-row-context-menu__item"
+          label="Wake when a message arrives"
+          onCheckedChange={(checked) => messageWake(threadId, checked)}
+        >
+          <MenuContent icon={BellRing}>Wake when a message arrives</MenuContent>
+        </OctantContextMenuCheckboxItem>
+      )}
+      {coordinatorWake === undefined ? null : (
+        <OctantContextMenuCheckboxItem
+          checked={props.thread.coordinatorWakeOff !== true}
+          className="thread-row-context-menu__item"
+          label="Wake for coordinator"
+          onCheckedChange={(checked) => coordinatorWake(threadId, checked)}
+        >
+          <MenuContent icon={BellRing}>Wake for coordinator</MenuContent>
+        </OctantContextMenuCheckboxItem>
+      )}
+    </OctantContextMenuGroup>
   );
 }
 
