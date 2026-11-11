@@ -12,6 +12,11 @@ import type {
 import { installNativeEditorMenu } from "./nativeEditorMenu";
 import { installMonacoEnvironment } from "./monacoEnvironment";
 import {
+  SCROLLBAR_LANE_WIDTH,
+  SCROLLBAR_THUMB_WIDTH,
+  systemFloatsScrollbars,
+} from "./scrollbarTreatment";
+import {
   DEFAULT_EDITOR_TYPOGRAPHY,
   type EditorTypographyProjection,
 } from "@octant/theme/typography";
@@ -49,6 +54,7 @@ export const mount: MonacoAdapterRuntime["mount"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
+    ...editorScrollbarOptions(),
     glyphMargin: options.onToggleBreakpoint !== undefined,
     theme: OCTANT_EDITOR_THEME,
   });
@@ -491,6 +497,11 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
     lineHeight: typography.lineHeight,
     fontLigatures: typography.fontLigatures,
     minimap: { enabled: false },
+    ...editorScrollbarOptions(),
+    // The comparison kept a 30px strip down its right edge for a map of the
+    // changes, painted whether or not anything scrolled. No pane keeps a
+    // strip there; the changes stay marked on their lines and in the gutter.
+    renderOverviewRuler: false,
     theme: OCTANT_EDITOR_THEME,
   });
   editor.setModel({ original, modified });
@@ -543,6 +554,43 @@ export const mountDiff: MonacoDiffRuntime["mountDiff"] = (element, options) => {
 };
 
 /**
+ * Monaco draws its scrollbars itself, so the one scrollbar rule in styles.css
+ * cannot reach them. These options ask it for the picture that rule draws in a
+ * pane: the same thumb in the same lane, and nothing else painted at the edge.
+ * Its colours travel with the theme below, and the thumb's round ends are in
+ * styles/code.css, because Monaco has no option for them.
+ */
+function editorScrollbarOptions(): Pick<
+  monaco.editor.IEditorOptions,
+  "scrollbar" | "overviewRulerBorder" | "hideCursorInOverviewRuler"
+> {
+  // "auto" hides the thumb until the editor scrolls or the pointer is over
+  // it, as a floating system thumb hides at rest. "visible" keeps it there
+  // for as long as the text overflows, as a pane's stays in a system strip.
+  // Read once per editor: one already open keeps what it was mounted with if
+  // the system setting changes under it.
+  const shown = systemFloatsScrollbars() ? "auto" : "visible";
+  return {
+    scrollbar: {
+      vertical: shown,
+      horizontal: shown,
+      verticalScrollbarSize: SCROLLBAR_LANE_WIDTH,
+      horizontalScrollbarSize: SCROLLBAR_LANE_WIDTH,
+      verticalSliderSize: SCROLLBAR_THUMB_WIDTH,
+      horizontalSliderSize: SCROLLBAR_THUMB_WIDTH,
+      // Monaco shades the top edge once the text has scrolled. No pane does.
+      useShadows: false,
+    },
+    // The ruler under the thumb still marks errors and search matches where
+    // they are. Its outline was a hairline down the whole pane, 14px in from
+    // the edge, and its cursor mark a dash beside it, both there at rest
+    // (measured in a rendered editor).
+    overviewRulerBorder: false,
+    hideCursorInOverviewRuler: true,
+  };
+}
+
+/**
  * Monaco keeps one theme for the whole page, so every editor and diff wears
  * the same one, and redefining it repaints all of them at once: that is how a
  * theme switched while files are open reaches them without a remount.
@@ -579,6 +627,10 @@ function applyEditorColors(colors: EditorColorProjection): void {
       "editorSuggestWidget.border": colors.widgetBorder,
       "peekViewEditor.background": colors.widgetBackground,
       "peekViewResult.background": colors.widgetBackground,
+      // Every scrollbar Monaco draws, its popups' included, takes the thumb.
+      "scrollbarSlider.background": colors.scrollbarThumb,
+      "scrollbarSlider.hoverBackground": colors.scrollbarThumbHover,
+      "scrollbarSlider.activeBackground": colors.scrollbarThumbHover,
       focusBorder: colors.focusBorder,
       "editorError.foreground": colors.error,
       // A fifth of the role, not the role itself: diff text is read on it.

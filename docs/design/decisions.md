@@ -2111,11 +2111,12 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below.
 - Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
+- The code editor and the terminal draw their own scrollbars to the measure of every other pane's: a thin thumb with round ends in the same theme role, no painted track, no shadow at the scroll edge, and no strip beside a comparison. Their thumb cannot widen under the pointer and changes colour there instead, and the terminal's hides at rest even where the system keeps scrollbars on screen.
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character) and [Voice](../../DESIGN.md#voice).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice) and [Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
 
 ### One theme authority and shared controls
 
