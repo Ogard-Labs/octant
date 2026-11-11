@@ -787,24 +787,17 @@ const timer = setInterval(() => {
       "canvas-tab",
       (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
     );
+    // The tab's actions menu is opened by its own name. The route used to
+    // focus whatever control came before the Canvas's first text and press
+    // Enter; since the tab gained a tool rail that control is a tool, so the
+    // menu never opened.
     await runBoundedCommand(
       nativeControllerPath,
       [
-        "focus-before-text",
-        String(ownPid),
-        join(artifacts, "canvas-actions-focus-target.png"),
-        "Signups this week",
-      ],
-      process.env,
-      8000,
-    );
-    await runBoundedCommand(
-      nativeControllerPath,
-      [
-        "enter",
+        "click-described",
         String(ownPid),
         join(artifacts, "canvas-actions-menu-target.png"),
-        "Signups this week",
+        "More Canvas actions",
       ],
       process.env,
       8000,
