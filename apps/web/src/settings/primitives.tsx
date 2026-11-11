@@ -233,6 +233,12 @@ export interface SettingsCompactRowProps {
   readonly detail?: ReactNode;
   /** Lets the meta run onto a second line, for a list whose meta names a source that must not be cut. */
   readonly metaWraps?: boolean;
+  /**
+   * Lets the name run onto further lines. For a row whose name is the fact
+   * itself (a path a person added) and that has no detail to open: cut with
+   * an ellipsis, two long paths under one folder could not be told apart.
+   */
+  readonly labelWraps?: boolean;
   /** The row needs a decision; it is drawn above the rest by its caller and marked here. */
   readonly attention?: boolean;
   /** Deep links and search land on the row's first control by this id. */
@@ -258,6 +264,7 @@ export function SettingsCompactRow(props: SettingsCompactRowProps) {
       aria-label={`${props.label} setting`}
       className="crow"
       data-attention={props.attention === true ? "true" : undefined}
+      data-label={props.labelWraps === true ? "wrap" : undefined}
       data-meta={props.metaWraps === true ? "wrap" : undefined}
       data-open={open ? "true" : "false"}
       {...(props.settingId === undefined ? {} : { "data-setting-id": props.settingId })}

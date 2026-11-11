@@ -4017,6 +4017,15 @@ html[data-octant-increased-contrast="true"]
   white-space: nowrap;
 }
 
+/* A row whose name is the fact itself, with no detail to open, shows all of
+   it: a long path breaks onto further lines and is never cut. */
+.crow[data-label="wrap"] .crow__name {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 /* A list whose meta names a source (a plugin, a server) lets it wrap rather
    than cut the name off. */
 .crow[data-meta="wrap"] .crow__meta {

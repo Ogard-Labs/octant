@@ -476,9 +476,13 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
 
   const focused = props.focusedSetting?.startsWith("shield-servers") === true;
+  // The panel is drawn only once the registry has been read. A link followed
+  // before that found nothing to open, and nothing ran it again afterwards, so
+  // the add form stayed folded.
+  const loaded = view !== undefined;
   useEffect(() => {
     const panel = root.current;
-    if (!focused || panel === null) return;
+    if (!focused || !loaded || panel === null) return;
     // The add form is folded under its own disclosure; a link to it opens it.
     const form = panel.querySelector<HTMLElement>('[data-setting-id="shield-servers-add"]');
     const opened =
@@ -495,7 +499,7 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     }
     const frame = requestAnimationFrame(land);
     return () => cancelAnimationFrame(frame);
-  }, [focused, props.focusedSetting]);
+  }, [focused, loaded, props.focusedSetting]);
 
   const load = useCallback(
     async (chosen: string) => {

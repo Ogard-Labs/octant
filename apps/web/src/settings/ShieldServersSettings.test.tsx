@@ -4,7 +4,7 @@ import type {
   ShieldServersCommandResult,
   ShieldServersView,
 } from "@octant/contracts/shield-servers";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -96,6 +96,42 @@ describe("ShieldServersSettings", () => {
     expect(within(list).getByText("/Users/me/notes/web-1.md")).toBeVisible();
     expect(screen.getByText(SHIELD_SERVERS_ALWAYS_ASK_NOTE)).toBeVisible();
     expect(screen.queryByText(SHIELD_SSH_AGENT_MISSING_NOTE)).toBeNull();
+  });
+
+  it("opens the folded add form for a link followed before the registry had loaded", async () => {
+    const initial = view();
+    let answer: (loaded: ShieldServersView) => void = () => undefined;
+    const read = vi.fn(
+      () =>
+        new Promise<ShieldServersView>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const command = vi.fn(
+      async (): Promise<ShieldServersCommandResult> => ({
+        kind: "shield-servers-updated",
+        view: initial,
+      }),
+    );
+    const { container } = render(
+      <ShieldServersSettings
+        client={{ read, command }}
+        focusedSetting="shield-servers-add"
+        projectNames={PROJECTS}
+      />,
+    );
+    // Nothing is drawn yet: the link arrived first.
+    expect(container.querySelector('[data-setting-id="shield-servers-add"]')).toBeNull();
+    await act(async () => {
+      answer(initial);
+    });
+
+    const form = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>('[data-setting-id="shield-servers-add"]');
+      expect(found).not.toBeNull();
+      return found;
+    });
+    await waitFor(() => expect(form?.closest("details")).toHaveAttribute("open"));
   });
 
   it("says when no SSH agent is running", async () => {

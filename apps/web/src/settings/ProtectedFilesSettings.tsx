@@ -167,6 +167,7 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
             <SettingsCompactRow
               key={path}
               label={path}
+              labelWraps
               meta="Added by you"
               settingId="protected-files"
             >
