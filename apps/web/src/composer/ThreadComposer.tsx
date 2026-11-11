@@ -83,7 +83,12 @@ export interface ThreadComposerRow {
   readonly className?: string | undefined;
   /** Chat announces its bar as a toolbar; other rows stay plain groups. */
   readonly toolbar?: boolean | undefined;
-  /** Surface-specific controls: pickers, access policy, attachments, profile. */
+  /**
+   * The attach control, at the leading edge of the card beside the prompt. It
+   * is the one control besides send that acts on the message being written.
+   */
+  readonly attach?: ReactNode;
+  /** Surface-specific controls: pickers, access policy, profile. */
   readonly leading?: ReactNode;
   /**
    * The model, then the microphone, right of the context ring and before
@@ -95,8 +100,9 @@ export interface ThreadComposerRow {
 
 /**
  * The one composer frame Chat, Work, and Code share. It owns the anatomy —
- * `.composer` frame, chips row, block message label, `.composer-row` with
- * leading controls and trailing send/stop — while every capability (chips,
+ * the `.composer` frame, and inside it the card (chips, then attach, the
+ * block message label and send/stop on one line) with the `.composer-row` of
+ * the surface's controls on the page under it — while every capability (chips,
  * typeaheads, pickers, status) is passed in by the surface and rendered only
  * when given. State, wiring, and the message control itself stay with the
  * surface: the component takes over markup, not behavior.
@@ -196,12 +202,12 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
+  const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
   // Where a new thread runs and how much of the plan is left stand on the
-  // page above the card, as a thread's strip does, so the card holds only the
-  // prompt and its toolbar. Inside the card the row sat between the person
-  // and the prompt, and a control with more than a label (a folder form) grew
-  // the card instead of opening over the page.
+  // page above the card, so the card holds only the prompt. Inside the card
+  // the row sat between the person and the prompt, and a control with more
+  // than a label (a folder form) grew the card instead of opening over the
+  // page.
   const startRow =
     props.startContext === undefined ? null : (
       <div className="composer-start">
@@ -219,80 +225,92 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
       </div>
     );
+  // The card holds what acts on the message being written and nothing else:
+  // attach, the prompt, and send. With the model, the access level and the
+  // context ring in a toolbar inside it, the card was a third taller than its
+  // prompt and read as a form; those describe the thread, so they stand on the
+  // page under the card with the thread's other facts.
   const message = (
     <>
       {props.queue}
       {props.chips}
-      {props.label === undefined ? (
-        props.input
-      ) : (
-        <label
-          className={props.label.className}
-          {...(props.label.htmlFor === undefined ? {} : { htmlFor: props.label.htmlFor })}
-        >
-          <span className={props.label.textClassName}>{props.label.text}</span>
-          {props.input}
-        </label>
-      )}
+      <div className="composer-field">
+        {props.row.attach === undefined ? null : (
+          <div className="composer-field__attach">{props.row.attach}</div>
+        )}
+        <div className="composer-field__prompt">
+          {props.label === undefined ? (
+            props.input
+          ) : (
+            <label
+              className={props.label.className}
+              {...(props.label.htmlFor === undefined ? {} : { htmlFor: props.label.htmlFor })}
+            >
+              <span className={props.label.textClassName}>{props.label.text}</span>
+              {props.input}
+            </label>
+          )}
+        </div>
+        <ComposerSendCell
+          actions={props.row.actions}
+          compactingNoteId={compacting ? compactingNoteId : undefined}
+        />
+      </div>
       {props.typeahead}
     </>
   );
-  const controls = (
+  // Every child keeps its place whether or not the thread is held: only what
+  // is drawn in each place changes, so the info panel is never remounted.
+  const { held } = props;
+  const trailingClassName =
+    props.row.actions.kind === "send-or-stop"
+      ? `composer-actions ${props.row.actions.cellClassName}`
+      : "composer-actions";
+  // One row under the card: what the thread may do on the leading side, where
+  // it runs beside that, and the model, the plan, the context ring and the
+  // thread's info at the trailing edge.
+  const under = (
     <div
       {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
       className={
-        props.row.className === undefined ? "composer-row" : `composer-row ${props.row.className}`
+        props.row.className === undefined
+          ? "composer-row composer-row--under"
+          : `composer-row composer-row--under ${props.row.className}`
       }
       {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
     >
-      {props.row.leading}
-      <ThreadComposerTrailing
-        actions={props.row.actions}
-        compactingNoteId={compacting ? compactingNoteId : undefined}
-        controls={props.row.trailing}
-      />
+      {held ? null : props.row.leading}
+      {held || !followUp || props.context === undefined ? null : (
+        <div className="thread-composer__context">{props.context}</div>
+      )}
+      <div className={trailingClassName}>
+        {held || !followUp ? null : <ThreadPlanWindows />}
+        {held ? null : <ComposerContextMeter />}
+        {held ? null : props.row.trailing}
+        {followUp ? props.info : null}
+      </div>
     </div>
   );
   // Suggested tasks stand above the composer, as the last thing in the
   // thread; inside the surface they made the box read as one tall composer.
-  // Where the thread runs and how much of the plan is left share one strip
-  // above the box, so the box itself holds only the message and its controls.
-  // The stats line stands under the box, where a person reads the last turn's
+  // The stats line stands under the row, where a person reads the last turn's
   // figures after sending.
-  // Every child keeps its place whether or not the thread is held: only what
-  // is drawn in each place changes, so the info panel is never remounted.
-  const { held } = props;
-  const body = followUp ? (
+  const body = (
     <>
       {held ? null : <ComposerFollowUpSuggestions />}
-      <div className="thread-composer__strip">
-        {held || props.context === undefined ? null : (
-          <div className="thread-composer__context">{props.context}</div>
-        )}
-        {held ? null : <ThreadPlanWindows />}
-        {props.info}
-      </div>
       {held ? null : (
         <div className="thread-composer__surface">
-          <ComposerOutsideContentNotice busy={props.threadBusy === true} />
+          {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
+          {dropActive ? <ComposerThreadDropCue /> : null}
           {message}
           <div className="thread-composer__feedback">
             {compactingNote}
             {props.footer}
           </div>
-          {controls}
         </div>
       )}
-      {held ? null : <ThreadStats windows={false} />}
-    </>
-  ) : (
-    <>
-      <ComposerFollowUpSuggestions />
-      {message}
-      {controls}
-      {compactingNote}
-      {props.footer}
-      <ThreadStats />
+      {under}
+      {held ? null : followUp ? <ThreadStats windows={false} /> : <ThreadStats />}
     </>
   );
   const frame =
@@ -306,7 +324,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
         {held || startRow !== null ? null : notice}
-        {dropActive && !held ? <ComposerThreadDropCue /> : null}
         {held ? null : <ComposerSubagents />}
         {body}
       </div>
@@ -321,7 +338,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
         {held || startRow !== null ? null : notice}
-        {dropActive && !held ? <ComposerThreadDropCue /> : null}
         {held ? null : <ComposerSubagents />}
         {body}
       </section>
@@ -349,44 +365,49 @@ function ComposerThreadDropCue() {
   );
 }
 
+/**
+ * Send is a quiet tile until there is something to send, then the card's one
+ * solid control. Filled with the accent at every moment, it was the loudest
+ * thing on the page under an empty prompt.
+ */
+function sendVariant(refused: boolean): "secondary" | "solid" {
+  return refused ? "secondary" : "solid";
+}
+
 function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
   return (
     compactingNoteId !== undefined || send.disabled === true || send.disabledReason !== undefined
   );
 }
 
-function ThreadComposerTrailing(props: {
+/** Send, and Stop while a response streams: the card's trailing edge. */
+function ComposerSendCell(props: {
   readonly actions: ThreadComposerActions;
   /** Set while the session compacts: send is held, and this note says why. */
   readonly compactingNoteId: string | undefined;
-  readonly controls?: ReactNode;
 }) {
-  const meter = <ComposerContextMeter />;
+  const refused = sendRefused(props.actions.send, props.compactingNoteId);
   if (props.actions.kind === "send") {
     const { send } = props.actions;
     return (
-      <div className="composer-actions">
-        {meter}
-        {props.controls}
+      <div className="composer-field__actions">
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
-          disabled={sendRefused(send, props.compactingNoteId)}
+          disabled={refused}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
-          variant="default"
+          variant={sendVariant(refused)}
         >
           <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
         </OctantButton>
       </div>
     );
   }
-  const { cellClassName, sending, send, stop } = props.actions;
+  const { sending, send, stop } = props.actions;
   return (
-    <div className={cellClassName}>
-      {meter}
-      {props.controls}
+    <div className="composer-field__actions">
       {sending && stop.forceStop !== undefined ? (
         <OctantButton
           onClick={stop.forceStop.onForceStop}
@@ -413,11 +434,11 @@ function ThreadComposerTrailing(props: {
       <OctantButton
         aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
-        disabled={sendRefused(send, props.compactingNoteId)}
+        disabled={refused}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"
-        variant="default"
+        variant={sendVariant(refused)}
       >
         <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
       </OctantButton>

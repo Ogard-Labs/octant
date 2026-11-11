@@ -824,14 +824,14 @@ describe("WindowChrome", () => {
       .replace(/\s+/g, " ");
     const glass =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--follow-up\)\) \{([^}]*)\}/,
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // A follow-up composer's strip sits on the page: its wrapper takes no
+    // A composer's row sits on the page: the frame around the card takes no
     // glass, and the surface where the person types takes the whole material.
     const surface =
       systemStyles.match(

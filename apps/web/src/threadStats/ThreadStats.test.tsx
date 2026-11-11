@@ -305,26 +305,26 @@ describe("the stats line in a thread's composer", () => {
     { window: "seven_day", status: "allowed", utilization: 0.62 },
   ];
 
-  it("states the figures under the box and the plan windows in the strip above it", () => {
+  it("states the figures under the composer's row and the plan windows in that row", () => {
     const { container } = render(
       <Harness limits={limits} summary={summaryOf([turn()])}>
         <FollowUpComposer />
       </Harness>,
     );
 
-    const surface = container.querySelector(".thread-composer__surface");
+    const row = container.querySelector(".composer-row");
     const line = screen.getByTestId("thread-stats-line");
-    expect(surface?.nextElementSibling).toBe(line);
+    expect(container.querySelector(".thread-composer__surface")?.nextElementSibling).toBe(row);
+    expect(row?.nextElementSibling).toBe(line);
     expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(within(line).queryByText("5h")).not.toBeInTheDocument();
-    const strip = container.querySelector(".thread-composer__strip");
-    expect(strip).toHaveTextContent("Project · branch");
+    expect(row).toHaveTextContent("Project · branch");
     expect(
-      within(strip as HTMLElement).getByRole("group", { name: "Plan usage left" }),
+      within(row as HTMLElement).getByRole("group", { name: "Plan usage left" }),
     ).toHaveTextContent("5h88%wk38%");
   });
 
-  it("keeps the plan windows above the box when the stats line is hidden", () => {
+  it("keeps the plan windows in the composer's row when the stats line is hidden", () => {
     const { container } = render(
       <Harness initiallyVisible={false} limits={limits} summary={summaryOf([turn()])}>
         <FollowUpComposer />
@@ -332,7 +332,7 @@ describe("the stats line in a thread's composer", () => {
     );
 
     expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-    expect(container.querySelector(".thread-composer__strip")).toHaveTextContent("5h88%wk38%");
+    expect(container.querySelector(".composer-row")).toHaveTextContent("5h88%wk38%");
   });
 });
 

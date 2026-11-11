@@ -4445,7 +4445,7 @@ input.switch:checked::after {
     inset 0 0 0 1px var(--oct-border);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
-.composer[data-drop-target="true"] {
+.composer[data-drop-target="true"] > .thread-composer__surface {
   position: relative;
   box-shadow:
     var(--octant-shadow-md),
@@ -4529,17 +4529,65 @@ input.switch:checked::after {
 .composer--follow-up .composer-input {
   min-height: calc(1lh + 30px);
 }
-/* The toolbar belongs to the composer, so it shares its ground. A divider
-   above it split one object into two stacked boxes. */
+/* The card's one line: attach, the prompt, send. The two controls ride the
+   prompt's last line, so they stay put as the prompt grows upward. */
+.composer-field {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding-inline: var(--oct-space-2);
+}
+.composer-field__prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.composer-field__prompt > label {
+  display: block;
+}
+.composer-field__attach,
+.composer-field__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  /* Centres a 28px control on a one-line prompt (one line and 30px of inset). */
+  margin-bottom: calc((1lh + 2px) / 2);
+}
+/* The controls stand where the prompt's gutter was, so the prompt keeps only
+   a small inset beside them. */
+.composer-field__attach + .composer-field__prompt .composer-input {
+  padding-inline-start: var(--oct-space-1);
+}
+.composer-field__prompt .composer-input {
+  padding-inline-end: var(--oct-space-1);
+}
+.composer-field__attach :is(button, [role="button"]),
+.composer-field__actions :is(button, [role="button"]) {
+  min-height: 28px;
+  height: 28px;
+  border-color: transparent;
+  box-shadow: none;
+}
+/* Attach and send are square tiles with the control corner, the shape every
+   other control on the page has; a circle was the one round thing on it. */
+.composer-field__attach button[data-size="icon"],
+.composer-field__actions button[data-size="icon"] {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  border-radius: var(--oct-radius-sm);
+}
+/* The thread's controls stand on the page under the card, as one quiet row
+   with no fill or edge of its own: what the thread may do and where it runs
+   on the leading side, the model, the plan and the context ring trailing. */
 .composer-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  min-height: 36px;
+  min-height: 28px;
   gap: var(--oct-space-1);
-  /* A text trigger carries 8px of its own inset, so it lands on the gutter;
-     the send circle's right edge lands on it too. */
-  padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
+  padding: 0 var(--oct-space-1);
   border-top: 0;
 }
 .composer-actions {
@@ -4649,13 +4697,16 @@ input.switch:checked::after {
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label
    shrink-wraps it to the typed text). */
-.composer > label {
+.composer > label,
+.thread-composer__surface > label {
   display: block;
 }
 /* A typeahead sits between the input and the row so the open list never
    covers the message; the frameless child carries the frame's gutter. */
 .composer > .thread-mention__typeahead,
-.composer > .chat-composer__command-typeahead {
+.composer > .chat-composer__command-typeahead,
+.thread-composer__surface > .thread-mention__typeahead,
+.thread-composer__surface > .chat-composer__command-typeahead {
   margin: var(--oct-space-2) var(--oct-space-3) 0;
 }
 /* The frame at the foot of an open thread, in every mode: it takes the
@@ -4686,12 +4737,11 @@ input.switch:checked::after {
   );
 }
 
-/* Existing conversations keep the message surface distinct from its binding:
-   the strip above it (context and stats) sits on the page, and only the
-   surface where the person types is raised, with the same corner, lift, and
-   insets as a start screen's composer. Feedback appears only when there is
-   something to act on. */
-.composer.composer--follow-up {
+/* Every composer keeps the message surface distinct from the thread's facts:
+   the row under it (controls, context and stats) sits on the page, and only
+   the surface where the person types is raised. Feedback appears only when
+   there is something to act on. */
+.composer.composer--carded {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
@@ -4706,9 +4756,6 @@ input.switch:checked::after {
   box-shadow:
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);
-}
-.thread-composer__surface > label {
-  display: block;
 }
 /* While the empty composer shows the reply's suggested next message, a quiet
    key cap at its top-right says that Tab takes it. The prompt keeps clear of
@@ -4761,38 +4808,20 @@ input.switch:checked::after {
 .thread-composer__context {
   display: flex;
   align-items: center;
-  height: 32px;
+  height: 28px;
   min-width: 0;
-  padding-inline: 12px;
+  padding-inline: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
 .thread-composer__context:empty {
   display: none;
 }
-/* The strip above a thread's composer: where it runs on the left, the plan's
-   windows on the right. It reads as part of the page, not the box, so it has
-   no fill or edge of its own. */
-.thread-composer__strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0 var(--oct-space-3);
-  min-width: 0;
-}
-.thread-composer__strip:empty {
-  display: none;
-}
-.thread-composer__strip > .thread-composer__context {
-  flex: 0 1 auto;
-}
-.thread-composer__strip > .thread-plan-windows {
-  flex: 0 1 auto;
-  margin-left: auto;
+/* The plan's windows lead the row's trailing group, before the context ring. */
+.composer-row > .composer-actions > .thread-plan-windows {
   padding: 0 var(--oct-space-2);
 }
-/* The thread's info panel: a quiet button at the end of the strip and one
+/* The thread's info panel: a quiet button at the end of the row and one
    floating card above it. What it holds (access level, credential commands,
    provider cloud sessions, continuing elsewhere) used to sit at four places
    on the thread page, two of them outside the reading column. */
@@ -4800,12 +4829,6 @@ input.switch:checked::after {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
-}
-.thread-composer__strip > .thread-plan-windows + .thread-info {
-  margin-left: 0;
-}
-.thread-composer__strip > .thread-info {
-  margin-left: auto;
 }
 .thread-info__attention {
   color: var(--oct-warn-fg);
@@ -6351,7 +6374,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   @media (prefers-reduced-transparency: no-preference) {
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
-      :is(.turn-user .bubble, .composer:not(.composer--follow-up)) {
+      :is(.turn-user .bubble, .composer:not(.composer--carded)) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
@@ -6363,7 +6386,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
        ring inside the rounded corners and out of layout. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
-      .composer:not(.composer--follow-up) {
+      .composer:not(.composer--carded) {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);

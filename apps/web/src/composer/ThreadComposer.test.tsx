@@ -11,21 +11,62 @@ import { FrozenBarScope } from "./frozenBarScope";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
-  it("keeps access controls with send when the composer has to wrap", () => {
+  it("keeps attach, the prompt and send in the card and the thread's controls in the row under it", () => {
     const { container } = render(
       <ThreadComposer
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{
-          leading: <span>Model</span>,
-          trailing: <span>Ask</span>,
+          attach: <button type="button">Attach</button>,
+          leading: <span>Access</span>,
+          trailing: <span>Model</span>,
           actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
         }}
       />,
     );
+    const card = container.querySelector(".thread-composer__surface");
+    const row = container.querySelector(".composer-row");
+    // The card holds what acts on the message being written, in reading
+    // order: attach, the prompt, send.
+    const field = container.querySelector(".composer-field");
+    expect(card).toContainElement(field as HTMLElement);
+    expect([...(field?.children ?? [])].map((child) => child.className)).toEqual([
+      "composer-field__attach",
+      "composer-field__prompt",
+      "composer-field__actions",
+    ]);
+    expect(field?.children[0]).toContainElement(screen.getByRole("button", { name: "Attach" }));
+    expect(field?.children[1]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
+    expect(field?.children[2]).toContainElement(screen.getByRole("button", { name: "Send" }));
+    // How the thread runs stands on the page under the card, access leading
+    // and the model trailing.
+    expect(card?.nextElementSibling).toBe(row);
+    expect(row).toContainElement(screen.getByText("Access"));
+    expect(row).not.toContainElement(screen.getByRole("button", { name: "Send" }));
     const trailing = container.querySelector(".composer-actions");
-    expect(trailing).toContainElement(screen.getByText("Ask"));
-    expect(trailing).toContainElement(screen.getByRole("button", { name: "Send" }));
-    expect(trailing).not.toContainElement(screen.getByText("Model"));
+    expect(trailing).toContainElement(screen.getByText("Model"));
+    expect(trailing).not.toContainElement(screen.getByText("Access"));
+  });
+
+  it("draws send as a quiet tile until there is something to send, then as the card's one solid control", () => {
+    const { rerender } = render(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{
+          actions: { kind: "send", send: { ariaLabel: "Send", disabled: true, onSend: vi.fn() } },
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    rerender(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute("data-variant", "solid");
   });
 
   it("puts the plan meters at the right of the start screen's context row", async () => {
@@ -84,7 +125,7 @@ describe("ThreadComposer", () => {
     expect(meters).toHaveTextContent("5h85%wk43%");
   });
 
-  it("keeps follow-up feedback and checkout context separate from the message toolbar", () => {
+  it("keeps follow-up feedback in the card and checkout context in the row under it", () => {
     const row = {
       actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
     };
@@ -104,15 +145,13 @@ describe("ThreadComposer", () => {
     const field = screen.getByRole("textbox", { name: "Message" });
     const surface = container.querySelector(".thread-composer__surface");
     const feedback = container.querySelector(".thread-composer__feedback");
-    const toolbar = container.querySelector(".composer-row");
+    const under = container.querySelector(".composer-row");
     expect(surface).toContainElement(field);
-    expect(feedback?.nextElementSibling).toBe(toolbar);
-    // The strip above the box holds the checkout context; the box itself holds
-    // only the message and its controls.
-    expect(surface?.previousElementSibling).toHaveClass("thread-composer__strip");
-    expect(surface?.previousElementSibling).toContainElement(
-      container.querySelector(".thread-composer__context"),
-    );
+    expect(surface).toContainElement(feedback as HTMLElement);
+    // The row under the box holds the checkout context; the box itself holds
+    // only the message and what is said about sending it.
+    expect(surface?.nextElementSibling).toBe(under);
+    expect(under).toContainElement(container.querySelector(".thread-composer__context"));
     rerender(<ThreadComposer presentation="follow-up" context={context} input={input} row={row} />);
     expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);
@@ -164,12 +203,14 @@ describe("ThreadComposer", () => {
     // A surface that offers no chips, typeahead, label, or status gets none of
     // their markup — no empty rows or labels for capabilities it lacks.
     expect(container.querySelector("label")).toBeNull();
+    expect(container.querySelector(".composer-field__attach")).toBeNull();
     expect(frame?.children).toHaveLength(2);
-    expect(frame?.children[0]).toBe(screen.getByRole("textbox", { name: "Message" }));
+    expect(frame?.children[0]).toBe(container.querySelector(".thread-composer__surface"));
+    expect(frame?.children[0]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
     expect(frame?.children[1]).toBe(container.querySelector(".composer-row"));
   });
 
-  it("keeps the message label a direct child of the frame so the input stays full width", () => {
+  it("keeps the message label a direct child of the prompt cell so the input stays full width", () => {
     const { container } = render(
       <ThreadComposer
         label={{
@@ -182,13 +223,14 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    // `.composer > label { display: block }` is what gives the content-sized
-    // textarea a full-width box; an inline label once shrink-wrapped the input
-    // to the typed text. The rule only applies while the label stays a direct
-    // child of the frame, so that structure is the contract.
+    // `.composer-field__prompt > label { display: block }` is what gives the
+    // content-sized textarea a full-width box; an inline label once
+    // shrink-wrapped the input to the typed text. The rule only applies while
+    // the label stays a direct child of the prompt cell, so that structure is
+    // the contract.
     const label = container.querySelector("label.surface__message-field");
     expect(label).not.toBeNull();
-    expect(label?.parentElement).toBe(container.querySelector(".composer"));
+    expect(label?.parentElement).toBe(container.querySelector(".composer-field__prompt"));
     expect(label?.querySelector("textarea.composer-input")).not.toBeNull();
   });
 

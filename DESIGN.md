@@ -182,7 +182,7 @@ Mono, because the ink accent needs different values in light and dark, which a
 single override cannot hold. A colour swatch overrides the accent fill and
 puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
-The accent colours switches, the send button, selected states, and sliders;
+The accent colours switches, selected states, and sliders;
 status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
@@ -580,8 +580,8 @@ hover; a figure the provider did not report is absent, never zero. The whole lin
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
 and cost with Previous and Next turn controls.
 
-**Plan meters.** Remaining plan usage stands above the composer, right-aligned on
-the same row as where the work runs: the strip above a thread's box, and on a
+**Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
+the same row as where the work runs: the row under a thread's box, and on a
 start screen the end of the context-chip row above the card (it drops to its
 own right-aligned line when the chips leave no room). Two compact meters read
 `5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
@@ -674,17 +674,31 @@ composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
 split; a start screen's card is the same box, with its row of where-it-runs
-chips on the page above it. Nothing about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
-on the left; the context ring, model and microphone on the right, next to send).
+chips on the page above it. Nothing about the box changes while a turn runs.
+The card holds what acts on the message being written and nothing else: attach
+at its leading edge, the prompt, and send (with Stop while a response streams)
+at its trailing edge, the two controls riding the prompt's last line. Both are
+28px square tiles with the control corner. Send is a quiet tile in the control
+fill until there is something to send, then the card's one solid control: the
+primary text colour as its fill, with the page colour on it. It is not the
+accent: a filled accent circle was the loudest thing on the page under an
+empty prompt, and the one round control on it. How the
+thread runs is one quiet row on the page under the card, with no fill or edge
+of its own: image and access on the leading side with a thread's own context
+(Project, branch, checkout) beside them, and the plan meters, the context
+ring, the model, the microphone and Thread info trailing. With that row inside
+it the card was a third taller than its prompt and read as a form; an empty
+reply box now stands 51px tall, where it stood 114px before the prompt went to
+one line and 93px after.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
 one row on the page just above the card, as quiet chips set together from the
 left: meta ink and no fill at rest, a fill only under the pointer or while the
 chip's menu is open, the same as the access and model controls under the
-prompt. Plan meters keep the right end of that row. The card itself holds only
-the prompt and its toolbar, so a start screen's composer and a thread's are
-the same object with the same strip above it. Inside the card the row stood
+card. Plan meters keep the right end of that row. The card itself holds only
+attach, the prompt and send, so a start screen's composer and a thread's are
+the same object with the same row under it. Inside the card the row stood
 between the person and the prompt, and a control that was more than a label
 grew the card: a Project with extra folders drew a select, a labelled field
 and a paragraph there. That choice is one chip now ("Main folder", or "Main

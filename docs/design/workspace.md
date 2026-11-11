@@ -68,15 +68,15 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the strip above the follow-up
-composer, after the plan meters. It opens one floating card above the strip,
+a quiet **Thread info** button at the end of the row under the follow-up
+composer, after the plan meters and the model. It opens one floating card above the row,
 at most 440px wide, whose rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
-here, not in the composer's toolbar: the toolbar holds what a person changes
+here, not in the composer's row: the row holds what a person changes
 from one message to the next (attach, access, model) and had grown to eleven
 controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
@@ -1290,7 +1290,7 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: its turns, input and output tokens,
 thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the strip above the box, right of
+cost. The provider's account limit windows stand in the row under the box, right of
 the thread's context, one bar per window showing the share left; the stats line's
 switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
