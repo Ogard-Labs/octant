@@ -518,8 +518,11 @@ function TileDivider(props: {
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const current = drag.current;
     if (current === undefined || current.pointerId !== event.pointerId || current.size <= 0) return;
+    // `size` is the whole column (or the whole row of columns), so the pointer's
+    // travel over it is already a share of the whole. Scaled by the pair again,
+    // a divider in a column of three moved 60px under a 90px drag.
     const delta = ((vertical ? event.clientX : event.clientY) - current.start) / current.size;
-    const next = resized(current.first + delta * pair, current.size);
+    const next = resized(current.first + delta, current.size);
     current.last = next;
     props.onPreview(next);
   }

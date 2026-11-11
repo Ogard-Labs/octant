@@ -1056,6 +1056,46 @@ describe("tool tiles in the right sidebar", () => {
     }
   });
 
+  it("moves a divider in a column of three as far as the pointer moved", () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 1000, height: 900 }));
+    try {
+      const third = 1 / 3;
+      render(
+        <TiledDock
+          initial={tileState(
+            [
+              [
+                ["files", third],
+                ["canvas", third],
+                ["plan", third],
+              ],
+              [["ios-simulator", 1]],
+            ],
+            [0.5, 0.5],
+            "plan",
+          )}
+        />,
+      );
+      const name = "Resize Files and Canvas";
+      const divider = screen.getByRole("separator", { name });
+      expect(divider).toHaveAttribute("aria-valuenow", "33");
+      const at = (kind: "pointerDown" | "pointerMove" | "pointerUp", clientY: number) => {
+        const event = createEvent[kind](divider, { button: 0 });
+        Object.defineProperties(event, { clientY: { value: clientY }, pointerId: { value: 1 } });
+        fireEvent(divider, event);
+      };
+      at("pointerDown", 300);
+      // 90px of a 900px column is a tenth of the column.
+      at("pointerMove", 390);
+      at("pointerUp", 390);
+      expect(screen.getByRole("separator", { name })).toHaveAttribute("aria-valuenow", "43");
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
   it("keeps keyboard focus on a tab when a header choice leaves the control nothing to offer", async () => {
     const user = userEvent.setup();
     render(<TiledDock initial={opened("files")} launchable={[surface("terminal")]} />);
