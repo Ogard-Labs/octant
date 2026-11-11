@@ -230,7 +230,7 @@
   --oct-menu-row-h: 28px;
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
-  --oct-disabled-opacity: 0.45;
+  --oct-disabled-opacity: 0.75;
 
   --oct-icon-sm: 14px;
   --oct-icon-md: 16px;

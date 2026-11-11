@@ -1380,7 +1380,7 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
 | Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                        |
 | Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                             |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
+| Strong divider         | `--octant-divider-strong`                           | `#8a8a8a` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
 | Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                                      |
 | Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                            |
 | Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill         |
@@ -1400,7 +1400,11 @@ from the workspace. Every hairline registers on the surface it separates
 so an edge is never guessed. An off switch and an unchecked checkbox are the
 exception: they must be found at a glance on a card, so they take the strong
 divider (4.4:1 on a card and 4.9:1 on the page in light; the strong border
-measured 1.65:1 and 1.85:1 there).
+measured 1.65:1 and 1.85:1 there). In dark the role is lifted so the edge
+stays at 3:1 or more on the lifted card the Settings sheet draws (`#3d3d3d`,
+3.15:1; it was 2.76:1) and 5.3:1 on the page; every dark preset keeps the same
+floor. The same role draws a scrollbar thumb on hover and rare dividers, which
+become one step lighter in dark.
 The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
@@ -2895,7 +2899,10 @@ in the meantime.
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
 control. Words in the chrome do not select when the pointer drags across them,
 controls keep the arrow cursor, a disabled control keeps it too, and the hand
-is for a real link. Pictures and links do not lift off as drag ghosts. Reading
+is for a real link. A disabled control is drawn at one shared opacity,
+`--oct-disabled-opacity` (0.75), so its label stays at 3:1 or more in both
+modes while it still reads as unavailable: no hover fill, no pointer events.
+A select's chevron is not dimmed while the select is enabled. Pictures and links do not lift off as drag ghosts. Reading
 matter opts back in, so a message, a diff, a value, and an error can still be
 copied. The keyboard focus edge shows only while a person is moving focus by
 keyboard (`data-octant-input`): a dialog handing focus back to its trigger paints
