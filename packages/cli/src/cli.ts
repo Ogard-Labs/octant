@@ -38,7 +38,7 @@ import {
   runPluginCliCommand,
 } from "./pluginCommand";
 import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
-import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import { isAgentFlag, resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
   readAllStdin,
@@ -68,7 +68,7 @@ interface ParsedArgs {
   readonly positional: readonly string[];
 }
 
-export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
+export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs | undefined {
   const [command, ...rest] = argv;
   if (command === undefined) return undefined;
   const flags: Record<string, string | boolean> = {};
@@ -92,6 +92,26 @@ export function parseArgs(argv: readonly string[]): ParsedArgs | undefined {
   return { command, flags, positional };
 }
 
+/**
+ * `octant` alone at a terminal opens the agent in this folder, and a run that
+ * starts with one of the agent's flags (`octant --last`) or with a quoted
+ * prompt (`octant "fix the tests"`) is the agent too, so a coding session
+ * needs no subcommand. Without a terminal a bare `octant`
+ * still prints the usage, so a script that forgets its command is not left
+ * waiting on an agent.
+ */
+export function agentShorthand(
+  argv: ReadonlyArray<string>,
+  interactive: boolean,
+): ReadonlyArray<string> {
+  const [first] = argv;
+  if (first === undefined) return interactive ? ["agent"] : argv;
+  if (first.startsWith("--") && isAgentFlag(first.slice(2))) return ["agent", ...argv];
+  // No command name has a space in it, so a quoted sentence is a prompt.
+  if (/\s/.test(first.trim())) return ["agent", ...argv];
+  return argv;
+}
+
 /** What every command of one run reads instead of the process's own identity and environment. */
 interface CliContext {
   readonly identity: DesktopIdentity;
@@ -112,7 +132,9 @@ export async function runCli(
   argv: ReadonlyArray<string>,
   identity: DesktopIdentity,
 ): Promise<number> {
-  const args = parseArgs(argv);
+  const args = parseArgs(
+    agentShorthand(argv, process.stdin.isTTY === true && process.stdout.isTTY === true),
+  );
   if (args === undefined) {
     printUsage(identity);
     return 1;
@@ -729,7 +751,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   {
     octant:
-      "agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
   { octant: "harness slots [--json]" },
   { octant: "harness session <thread-id> [--json]" },
@@ -810,6 +832,7 @@ function printUsage(identity: DesktopIdentity): void {
       `${identity.productName} CLI`,
       "",
       "Usage:",
+      `  ${identity.commandName} [<prompt>] [agent flags]  (at a terminal: the agent in this folder)`,
       ...lines,
       `  ${identity.commandName} --version`,
       "",

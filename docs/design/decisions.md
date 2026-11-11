@@ -1402,6 +1402,7 @@ One journaled session per thread is the only state, and every surface reads and 
 - A person sets, raises or clears a goal's turn, time and token budgets when revising it; a revision's budget replaces the whole budget. A loop refuses to start on a goal with none. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
 - Harness parity with the first-class runtimes is claimed only while every checklist item holds in Chat, Work and Code.
+- Built: the terminal starts like a coding CLI. `octant` alone at a terminal, `octant --<agent flag>`, or `octant "<prompt>"` opens `octant agent` on the folder's thread, a bare prompt being the first message of a session that stays open (`--prompt` still runs one turn and exits). Inside a Git checkout no Project holds, a person at the terminal is asked whether to add its root as a Code Project, through the same bind-and-create as `octant project add`; nothing is asked without a terminal or with `--json`, and a no adds nothing.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 

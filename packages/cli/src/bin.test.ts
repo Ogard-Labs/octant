@@ -4,6 +4,21 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hasInvalidLifecyclePositionals, parseArgs } from "./bin";
+import { agentShorthand } from "./cli";
+
+describe("starting the agent without a subcommand", () => {
+  it("opens the agent for a bare command at a terminal and prints the usage without one", () => {
+    expect(agentShorthand([], true)).toEqual(["agent"]);
+    expect(agentShorthand([], false)).toEqual([]);
+  });
+
+  it("treats a leading agent flag or a quoted prompt as the agent, and leaves commands alone", () => {
+    expect(agentShorthand(["--last"], false)).toEqual(["agent", "--last"]);
+    expect(agentShorthand(["fix the tests"], false)).toEqual(["agent", "fix the tests"]);
+    expect(agentShorthand(["status"], true)).toEqual(["status"]);
+    expect(agentShorthand(["--version"], true)).toEqual(["--version"]);
+  });
+});
 
 describe("server lifecycle CLI positionals", () => {
   it("rejects an extra lifecycle positional before dispatch", () => {
