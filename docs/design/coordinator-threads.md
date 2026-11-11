@@ -269,6 +269,44 @@ reaches the person through the coordinator they are already talking to.
   one request at a time with a choice between them. A finished turn's decision
   stays in Needs you and the worker, since it is not the worker waiting.
 
+## Seeing workers' subagents
+
+A coordinator's Agents dock lists its workers and, in Graph, draws each
+worker's subagents under it ([Workspace: Coordinators](workspace.md#coordinators)).
+
+- **The workers come from the window.** The rows are the workers in the
+  window's own thread list, with the state that list shows, so the dock names no
+  thread the sidebar does not.
+- **Their subagents come from one host read.** `GET
+/api/agent-runs/coordinator-graph` answers for one coordinator: per worker,
+  that worker's child runs as facts (task, role, state, the route that ran it,
+  effort, the runs it waits for, the run that started it, and the times it was
+  requested and last changed), at most 24 runs per worker with the newest kept
+  and truncation stated, for the roster's workers that are recorded in the
+  coordinator's own Project, under the roster's bound. A worker with no runs is
+  left out.
+- **Who may read it.** A window that holds the coordinator on its Project, by
+  the rule every read of a thread's child runs takes, and only while that thread
+  reads as a coordinator. A window that does not hold it, a thread that is not a
+  coordinator, and a thread that stopped coordinating are refused alike, with
+  one message and before any worker's run is read.
+- **What it never carries.** A run's reply, its result packets, its recovery
+  text, its live conversation, and the version a control needs. Those stay with
+  the worker thread's own reads, which a window gets only by holding that
+  worker, so a card opens the worker and offers no control. The host does not
+  load a reply to build the answer.
+- **The agent sees none of it.** The read serves a person's window. It is not a
+  tool, it is not offered to the coordinator agent, and it adds nothing to a
+  turn, so it cannot mark the coordinator.
+
+Rationale: a child run's summary carries its full reply, which is why a window
+may read one only for a thread it holds. Workers are almost never open beside
+their coordinator, so that rule alone leaves the coordinator's picture empty
+below the workers. The task of a run is text its worker's agent wrote, as a
+worker's title is, and the window already lists that; what the worker found
+stays behind the worker. Reading facts through the coordinator is the smallest
+widening that shows the orchestration (maintainer request, 2026-11-11).
+
 ## Not in this design
 
 - A coordinator cannot stop, steer mid-turn, complete, put away, archive, or
@@ -289,5 +327,9 @@ device; a marked coordinator's worker starting marked, and a mark that cannot be
 journaled refusing the start; the open-worker and hourly bounds; state notices
 not marking the coordinator; the hop count stopping a coordinator and worker
 after three rounds; and a coordinator's own write, shell, and Git actions
-refused by the read-only gate. Rendered checks cover the sidebar section, the
-folded workers, and the composer's worker requests.
+refused by the read-only gate. For the workers' subagents: the graph read
+refused for a window that does not hold the coordinator and for a thread that is
+not a coordinator, before any run is read; and its answer carrying no reply,
+result, recovery text or version. Rendered checks cover the sidebar section, the
+folded workers, the composer's worker requests, and the dock's worker rows and
+graphs.

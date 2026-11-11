@@ -13,6 +13,7 @@ import {
   AgentRunResultDeliverySettled,
   AgentRunStatusChanged,
   decodeAgentRunControlRequest,
+  decodeAgentRunCoordinatorGraph,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
@@ -189,6 +190,7 @@ function createHandler(
     readonly workspace?: AgentRunControlAdmissionDependencies["workspace"];
     readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
     readonly resolveCenterContext?: AgentRunRouteDependencies["resolveCenterContext"];
+    readonly coordinatorWorkers?: AgentRunRouteDependencies["coordinatorWorkers"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -377,6 +379,9 @@ function createHandler(
         parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
       })),
     ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
+    ...(options.coordinatorWorkers === undefined
+      ? {}
+      : { coordinatorWorkers: options.coordinatorWorkers }),
     now: () => 0,
   });
   /**
@@ -1079,6 +1084,170 @@ describe("agentRunRoutes", () => {
       }
     },
   );
+
+  describe("the coordinator graph", () => {
+    const coordinator = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+    const idleWorker = "efefefef-efef-4fef-8fef-efefefefefef";
+    const graphUrl = `http://127.0.0.1/api/agent-runs/coordinator-graph?coordinatorThreadId=${coordinator}`;
+    const graphRefusal = "The coordinator graph is not authorized for this thread.";
+
+    /** A worker thread (`ids.thread`) with one finished run and one held for it. */
+    function workerWithRuns(persistence: ReturnType<typeof createHandler>["persistence"]) {
+      const request = (requestId: string, task: string, dependsOn?: ReadonlyArray<string>) => {
+        const accepted = persistence.requestRun({
+          command: {
+            kind: "request-agent-run",
+            requestId,
+            parentThreadId: ids.thread,
+            ...(dependsOn === undefined ? {} : { dependsOn }),
+            role: "research",
+            task,
+            creationPosture: "automatic",
+            requestedAuthority: authority,
+            routingReceipt: routing,
+            workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+          } as never,
+          parentAuthority: { ...authority, subagents: true },
+          confirmed: true,
+        });
+        if (accepted.kind !== "run-accepted") throw new Error("Admission failed");
+        return accepted.run;
+      };
+      const first = request(ids.request, "Gather the facts");
+      for (const kind of [
+        "start-agent-run",
+        "mark-agent-run-running",
+        "complete-agent-run",
+      ] as const) {
+        const current = persistence.getById(first.id);
+        if (current === undefined) throw new Error("Missing run");
+        const result = persistence.applyCommand(
+          kind === "complete-agent-run"
+            ? {
+                kind,
+                runId: first.id,
+                expectedVersion: current.version,
+                result: { reference: `octant://agent-run/${first.id}/result`, truncated: false },
+                resultText: "The worker's private findings",
+              }
+            : { kind, runId: first.id, expectedVersion: current.version },
+        );
+        if (result.kind !== "run-updated") throw new Error("transition failed");
+      }
+      const second = request("bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc", "Check the facts", [first.id]);
+      return { first, second };
+    }
+
+    it("shows a coordinator's window its workers' runs as facts, without a reply or anything to act with", async () => {
+      const { handler, persistence, token } = createHandler({
+        coordinatorWorkers: (threadId) =>
+          threadId === coordinator
+            ? { workers: [ids.thread, idleWorker] as never, truncated: false }
+            : undefined,
+      });
+      const { first, second } = workerWithRuns(persistence);
+      const readReplies = vi.spyOn(persistence, "resultText");
+
+      const response = await handler(
+        new Request(graphUrl, { headers: { "x-octant-window-capability": token } }),
+      );
+
+      expect(response?.status).toBe(200);
+      const text = await response!.text();
+      expect(text).not.toContain("The worker's private findings");
+      const body = JSON.parse(text) as {
+        workers: Array<{ threadId: string; runs: Array<Record<string, unknown>> }>;
+      };
+      // Decodes against the wire contract, which refuses any field beyond the facts.
+      const graph = decodeAgentRunCoordinatorGraph(body);
+      expect(graph.workersTruncated).toBe(false);
+      // A worker with no runs adds nothing to the picture and is left out.
+      expect(graph.workers.map((worker) => String(worker.threadId))).toEqual([String(ids.thread)]);
+      const runs = graph.workers[0]?.runs ?? [];
+      const gathered = runs.find((run) => String(run.runId) === String(first.id));
+      const checked = runs.find((run) => String(run.runId) === String(second.id));
+      expect(runs).toHaveLength(2);
+      expect(gathered).toMatchObject({ task: "Gather the facts", lifecycleStatus: "completed" });
+      expect(checked).toMatchObject({ task: "Check the facts", dependsOn: [first.id] });
+      for (const run of body.workers[0]?.runs ?? []) {
+        expect(run).not.toHaveProperty("result");
+        expect(run).not.toHaveProperty("resultPackets");
+        expect(run).not.toHaveProperty("recoveryReason");
+        expect(run).not.toHaveProperty("version");
+        expect(run).not.toHaveProperty("requestId");
+      }
+      expect(readReplies).not.toHaveBeenCalled();
+    });
+
+    it("refuses a window that does not hold the coordinator before asking who its workers are", async () => {
+      const coordinatorWorkers = vi.fn(() => ({
+        workers: [ids.thread] as never,
+        truncated: false,
+      }));
+      const authorizeParentThread = vi.fn(() => false);
+      const { handler, persistence, token } = createHandler({
+        authorizeParentThread,
+        coordinatorWorkers,
+      });
+      workerWithRuns(persistence);
+      const readRuns = vi.spyOn(persistence, "parentRunFacts");
+
+      const response = await handler(
+        new Request(graphUrl, { headers: { "x-octant-window-capability": token } }),
+      );
+
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ error: graphRefusal });
+      expect(authorizeParentThread).toHaveBeenCalledWith({
+        parentThreadId: coordinator,
+        windowId: String(windowId),
+      });
+      expect(coordinatorWorkers).not.toHaveBeenCalled();
+      expect(readRuns).not.toHaveBeenCalled();
+    });
+
+    it.each(["a thread that is not a coordinator", "a host without coordinators"])(
+      "refuses %s the same way, reading no runs",
+      async (scenario) => {
+        const { handler, persistence, token } = createHandler(
+          scenario === "a host without coordinators" ? {} : { coordinatorWorkers: () => undefined },
+        );
+        workerWithRuns(persistence);
+        const readRuns = vi.spyOn(persistence, "parentRunFacts");
+
+        // Asking about the worker itself: holding a thread does not make its
+        // runs readable through this route.
+        const response = await handler(
+          new Request(
+            `http://127.0.0.1/api/agent-runs/coordinator-graph?coordinatorThreadId=${ids.thread}`,
+            { headers: { "x-octant-window-capability": token } },
+          ),
+        );
+
+        // The same answer a window that does not hold the thread gets, so
+        // the refusal does not say which of the two it was.
+        expect(response?.status).toBe(403);
+        expect(await response?.json()).toMatchObject({ error: graphRefusal });
+        expect(readRuns).not.toHaveBeenCalled();
+      },
+    );
+
+    it("refuses a caller without a window capability, and an id that is not a thread id", async () => {
+      const { handler, token } = createHandler({
+        coordinatorWorkers: () => ({ workers: [], truncated: false }),
+      });
+
+      const anonymous = await handler(new Request(graphUrl));
+      expect(anonymous?.status).not.toBe(200);
+      const malformed = await handler(
+        new Request(
+          "http://127.0.0.1/api/agent-runs/coordinator-graph?coordinatorThreadId=not-an-id",
+          { headers: { "x-octant-window-capability": token } },
+        ),
+      );
+      expect(malformed?.status).toBe(400);
+    });
+  });
 
   it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {
     const { handler, persistence, token, liveConversations } = createHandler({

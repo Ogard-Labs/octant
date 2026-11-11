@@ -104,6 +104,58 @@ describe("agentRunClient", () => {
     expect(response.items[0]?.parentThreadTitle).toBe("Design chat");
   });
 
+  it("reads a coordinator's workers' runs and refuses an answer about another coordinator", async () => {
+    const graph = (coordinatorThreadId: string) => ({
+      coordinatorThreadId,
+      workers: [
+        {
+          threadId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          runs: [
+            {
+              runId,
+              role: "research",
+              task: "Summarize",
+              lifecycleStatus: "running",
+              executionKind: "octant-managed",
+              route: {
+                requestedProviderInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                requestedModelId: "gpt-4o",
+                executionProviderInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                executionModelId: "gpt-4o",
+                poolDerived: false,
+              },
+              createdAt: "2026-08-01T10:00:00.000Z",
+              updatedAt: "2026-08-01T10:00:00.000Z",
+            },
+          ],
+          runsTruncated: false,
+        },
+      ],
+      workersTruncated: false,
+    });
+    let answered = parentThreadId;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      expect(url).toContain("/api/agent-runs/coordinator-graph");
+      expect(url).toContain(`coordinatorThreadId=${parentThreadId}`);
+      expect(new Headers(init?.headers).get("x-octant-window-capability")).toBe("cap");
+      return new Response(JSON.stringify(graph(answered)), { status: 200 });
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+
+    const read = await client.coordinatorGraph?.(parentThreadId);
+    expect(read?.workers[0]?.runs[0]?.task).toBe("Summarize");
+
+    answered = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    await expect(client.coordinatorGraph?.(parentThreadId)).rejects.toBeInstanceOf(
+      AgentRunClientFailure,
+    );
+  });
+
   it("loads parent summary through the authenticated route", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

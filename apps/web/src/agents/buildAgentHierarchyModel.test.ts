@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentHierarchyModel } from "./buildAgentHierarchyModel";
+import type { AgentRunGraphFact } from "@octant/contracts";
+import { buildAgentHierarchyModel, buildWorkerRunGraphRows } from "./buildAgentHierarchyModel";
 
 const entries = [
   {
@@ -102,6 +103,60 @@ describe("buildAgentHierarchyModel", () => {
     const styles = model.working.find((row) => row.runId === "styles");
     expect(styles?.runsAfter).toHaveLength(1);
     expect(styles).not.toHaveProperty("waitingOn");
+  });
+
+  it("draws a worker's runs from the host's facts: what ran them, what each waits for, never a review", () => {
+    const fact = (runId: string, more: Record<string, unknown> = {}) =>
+      ({
+        runId,
+        role: "implementation",
+        task: `Task ${runId}`,
+        lifecycleStatus: "completed",
+        executionKind: "octant-managed",
+        route: {
+          requestedProviderInstanceId: "provider-a",
+          requestedModelId: "requested-model",
+          executionProviderInstanceId: "provider-b",
+          executionModelId: "ran-model",
+          poolDerived: false,
+        },
+        createdAt: "2026-08-01T15:00:00.000Z",
+        updatedAt: "2026-08-01T15:01:00.000Z",
+        ...more,
+      }) as unknown as AgentRunGraphFact;
+
+    const rows = buildWorkerRunGraphRows([
+      fact("first"),
+      fact("second", {
+        lifecycleStatus: "waiting",
+        dependsOn: ["first", "not-listed"],
+        heldForDependencies: true,
+        normalizedReasoning: "high",
+        parentRunId: "first",
+      }),
+      fact("third", {
+        lifecycleStatus: "waiting",
+        dependsOn: ["second"],
+        heldForDependencies: true,
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      runId: "first",
+      model: "ran-model",
+      providerInstanceId: "provider-b",
+      needsReview: false,
+      runsAfter: [],
+    });
+    expect(rows[0]).not.toHaveProperty("waitingOn");
+    expect(rows[1]).toMatchObject({
+      effort: "high",
+      parentRunId: "first",
+      runsAfter: [{ runId: "first", task: "Task first" }],
+      // Its one listed dependency finished, so nothing listed still holds it.
+      waitingOn: 0,
+    });
+    expect(rows[2]?.waitingOn).toBe(1);
   });
 
   it("explains an empty thread when posture is Off", () => {
