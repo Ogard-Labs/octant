@@ -1,4 +1,5 @@
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
@@ -725,6 +726,7 @@ export function wireWork(deps: WorkDependencies) {
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
       projectStatusFiles: workProjectStatusFiles,
+      designSystemFiles: new DesignSystemFiles(),
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,
       consumeIssueContextFramed: consumeCreateFromIssueFramed,

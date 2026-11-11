@@ -58,6 +58,7 @@ import {
   changeProjectProviderPolicy,
   changeProjectNativeProviders,
   changeProjectBrandKit,
+  changeProjectDesignSystem,
   changeWorkProjectStatusFile,
   createMemoryEntry,
   createProject,
@@ -942,6 +943,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";
           eventName = "project.brand-kit-changed@1";
+        } else if (command.kind === "change-project-design-system") {
+          project = changeProjectDesignSystem(current, command.designSystem, timestamp);
+          kind = "project-design-system-changed";
+          eventName = "project.design-system-changed@1";
         } else if (command.kind === "change-code-project-desktop-recipe") {
           const offered = this.#offeredDesktopProviders();
           const saved = current.type === "code" ? current.desktopRecipe : undefined;

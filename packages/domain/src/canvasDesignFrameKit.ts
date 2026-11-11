@@ -535,6 +535,11 @@ const BRAND_FONT_FAMILIES: ReadonlySet<string> = new Set([
   "inter",
 ]);
 
+/** Whether a brand font stack may name this family: a system face or a generic family. */
+export function designBrandFontFamilyIsSafe(family: string): boolean {
+  return BRAND_FONT_FAMILIES.has(family.trim().toLowerCase());
+}
+
 const BRAND_COLOR_FUNCTION = /^(?:rgb|rgba|hsl|hsla|oklch|oklab)\(\s*[0-9a-z.,%/\s+-]{1,96}\)$/i;
 const BRAND_HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const BRAND_LENGTH = /^(?:0|(?:\d{1,3}(?:\.\d{1,3})?)(?:px|rem|em|%))$/;

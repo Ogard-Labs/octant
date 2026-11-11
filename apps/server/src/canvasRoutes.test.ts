@@ -109,6 +109,7 @@ function createRevisionRoute(
     /** Each reader's active Project and mode; every reader shares the window's by default. */
     readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
     readonly threadReadAuthority?: ThreadReadAuthority;
+    readonly resolveDesignSystem?: CanvasRouteDependencies["resolveDesignSystem"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -263,6 +264,9 @@ function createRevisionRoute(
     ...(options.findPublishedSnapshot === undefined
       ? {}
       : { findPublishedSnapshot: options.findPublishedSnapshot }),
+    ...(options.resolveDesignSystem === undefined
+      ? {}
+      : { resolveDesignSystem: options.resolveDesignSystem }),
     canvasShareService,
     canvasPublicShareService: new CanvasPublicShareService({
       journal,
@@ -1321,6 +1325,77 @@ describe("canvas routes", () => {
     );
     expect(board.layout).toBe("manual");
     expect(board.nodes[1]).toMatchObject({ nodeId: "db", x: 320, y: 40, positioned: true });
+  });
+
+  it("switches a Canvas to a design system the host reads from its Project, and back to none", async () => {
+    const site = {
+      name: "Site",
+      source: "apps/site/DESIGN.md",
+      brand: { "color-primary": "#7c3aed" },
+    };
+    const resolveDesignSystem = vi.fn(async (_projectId: string, location: unknown) =>
+      (location as { path?: string }).path === "apps/site/DESIGN.md" ? site : undefined,
+    );
+    const route = createRevisionRoute(new CanvasProjection(), { resolveDesignSystem });
+    const command = (overrides: Record<string, unknown> = {}) => ({
+      kind: "canvas-design-system-apply",
+      canvasId,
+      versionId: "44444444-4444-4444-8444-444444444444",
+      actor: { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      expectedSequence: 1,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      issuedAt: now,
+      designSystem: { folder: "/tmp/project", path: "apps/site/DESIGN.md" },
+      ...overrides,
+    });
+    const apply = (body: unknown, capability: string | null = windowCapability) =>
+      route(
+        new Request("http://127.0.0.1/api/canvas/design-system-apply", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(capability === null ? {} : { "x-octant-window-capability": capability }),
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    const read = async () =>
+      JSON.parse(
+        await (await route(
+          new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+            method: "GET",
+            headers: { "x-octant-window-capability": windowCapability },
+          }),
+        ))!.text(),
+      );
+
+    expect((await apply(command(), null))?.status).toBe(401);
+    // A file the Project does not hold is refused before anything is journaled.
+    const missing = await apply(
+      command({ designSystem: { folder: "/tmp/project", path: "DESIGN.md" } }),
+    );
+    expect(JSON.parse(await missing!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "unavailable",
+    });
+
+    const accepted = await apply(command());
+    expect(JSON.parse(await accepted!.text())).toMatchObject({ kind: "accepted", sequence: 2 });
+    expect((await read()).version.definition.designSystem).toEqual(site);
+    expect(resolveDesignSystem).toHaveBeenLastCalledWith(String(projectId), {
+      folder: "/tmp/project",
+      path: "apps/site/DESIGN.md",
+    });
+
+    const off = await apply(
+      command({
+        versionId: "55555555-5555-4555-8555-555555555555",
+        expectedSequence: 2,
+        designSystem: null,
+      }),
+    );
+    expect(JSON.parse(await off!.text())).toMatchObject({ kind: "accepted", sequence: 3 });
+    expect((await read()).version.definition).not.toHaveProperty("designSystem");
   });
 
   it("journals a proposed deck for the host window and refuses it without a window, on a stale head, or with too little to present", async () => {

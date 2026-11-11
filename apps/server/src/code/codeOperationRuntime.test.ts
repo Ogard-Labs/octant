@@ -8936,6 +8936,7 @@ function runtimeFixture(options: {
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
+  designSystemContext?: Parameters<typeof createCodeOperationRuntime>[0]["designSystemContext"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["confirmAgentMessagesDelivered"];
@@ -9326,6 +9327,9 @@ function runtimeFixture(options: {
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.designSystemContext === undefined
+      ? {}
+      : { designSystemContext: options.designSystemContext }),
     ...(options.projectMemoryEntries === undefined
       ? {}
       : { projectMemoryEntries: options.projectMemoryEntries }),
@@ -10969,6 +10973,47 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
       }),
     );
     expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("tells a Code turn to follow the design system read from the folder it works in", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const designSystemContext = vi.fn(async () => ({
+    instructions: "Follow DESIGN.md.",
+    system: { key: "project-design-system", text: "Contents of DESIGN.md:\n\n# Acme" },
+  }));
+  const fixture = runtimeFixture({ provider: providerDriver(connection), designSystemContext });
+  try {
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(88),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([
+          expect.objectContaining({ kind: "instructions", text: "Follow DESIGN.md." }),
+          {
+            kind: "project-memory",
+            key: "project-design-system",
+            text: "Contents of DESIGN.md:\n\n# Acme",
+          },
+        ]),
+      }),
+    );
+    expect(designSystemContext).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ id: threadId }) }),
+    );
   } finally {
     await fixture.runtime.close();
     fixture.close();

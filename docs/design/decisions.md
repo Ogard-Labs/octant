@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **232**   | **195** | **33**       | **4**               |
+| **All areas**                                                                         | **235**   | **198** | **33**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2586,6 +2586,20 @@ Charts, tables, mockups, designs and flow boards share one visual system.
 - A flow board's hotspot is the only live control, and a list reaches every screen without the board.
 
 Status: Built. Since: —. Detail: [Canvas visuals: Data visualisation](canvas-visuals.md#data-visualisation), [Mockups and designs](canvas-visuals.md#mockups-and-designs) and [Flow boards](canvas-visuals.md#flow-boards).
+
+### Project design systems
+
+A Work or Code Project's design system is a `DESIGN.md` in its folder. Octant lists, draws, edits, and creates these files, every Work and Code turn follows the governing one, Canvas designs draw with its tokens, typed Canvas blocks take its colours, and a person can swap the design system a Project or a single Canvas follows (maintainer requests, 2026-11-10 and 2026-11-11).
+
+- The file is the source of its content, never copied onto the Project record or journaled. Which file is the Project's own is the person's choice (any `DESIGN.md`, or none), journaled as `project.design-system-changed@1`; without one, the top-level file, else the only one. A chosen file that is gone leaves the Project with none. The nearest `DESIGN.md` above a file governs it.
+- Front-matter colours, typography, radii, and spacing become Canvas brand tokens under the design brand rule; each is reported carried, adjusted (a font stack without web faces), or refused with its reason. At most 32 are carried.
+- Every Work and Code turn carries the rule to follow it and the Project's own file as keyed standing context, read from the folder each turn (a Code turn from its worktree). Nothing is added for a server Project's remote folder.
+- Canvas `describe` returns the design system's tokens for every design kind (documents, decks, sites, screens, UI kits, flows); a running design copies the values into its own stylesheet. Tokens from `DESIGN.md` take the place of the brand kit.
+- A Canvas may follow a design system (Canvas schema version 28): its charts, tables, metrics, treemaps, and diagrams take their series colours (the `chart-1` to `chart-6` palette, else primary and secondary) and accent from it on screen, in Present, and in the HTML export; tones and text keep the reader's theme. A Canvas an agent creates in the Project follows it.
+- A person switches a Canvas to another of its Project's design systems, or none, from its More menu; the host reads the file under the Canvas's own Project and journals the switch as a version that also redraws brand designs. Not admitted for a paired device.
+- Only a window on this host may list, read, create, or save one; a save replaces only the revision it opened; no read or write follows a link; files over 256 KiB are left to the editor.
+
+Status: Built. Since: 2026-11-10. Detail: [Project design systems](design-systems.md).
 
 ### Public links
 

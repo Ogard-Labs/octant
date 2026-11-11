@@ -1,4 +1,5 @@
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";
 import {
   decodeBindingReceiptId,
@@ -428,6 +429,31 @@ export function useProjectController(options: ProjectControllerOptions) {
         brandKit,
       },
       Object.keys(brandKit).length === 0 ? "Brand kit cleared." : "Brand kit saved.",
+    );
+  }
+
+  /**
+   * Choose which design system a Work or Code Project follows, turn design
+   * systems off for it, or (with `null`) return it to the automatic rule.
+   */
+  async function setDesignSystem(
+    projectId: ProjectId,
+    designSystem: DesignSystemChoice | null,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") return false;
+    return execute(
+      {
+        kind: "change-project-design-system",
+        projectId,
+        expectedVersion: project.version,
+        designSystem,
+      },
+      designSystem === null
+        ? "This Project follows its top-level DESIGN.md again."
+        : designSystem.kind === "none"
+          ? "Design systems are off for this Project."
+          : `This Project now follows ${designSystem.path}.`,
     );
   }
 
@@ -940,6 +966,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setProviderPolicy,
     setNativeProviders,
     setBrandKit,
+    setDesignSystem,
     setDesktopRecipe,
     setActions,
     setWorkStatusFile,
