@@ -37,7 +37,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 15        | 13      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -614,6 +614,17 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Project icons
+
+A Project shows the favicon or app icon found inside its own folder wherever Projects are listed, and keeps its letter tile or folder glyph when there is none.
+
+- The host owns the read, over a short fixed list of well-known relative paths with the first valid file winning; there is no directory walk, no pattern search and no network fetch. The renderer never reads disk.
+- A file counts only when no component of its path below the Project's folder is a symbolic link (the host opens it anchored to the folder with a no-follow open on macOS and Linux, and finds no icon on other platforms, so a link swapped in during the lookup cannot lead outside; an icon reached through any link, even inside the folder, is not used), it is a regular file of at most 256 KB, and its first bytes match its extension; a Chat Project, which has no folder, has no icon.
+- It is served on the authenticated Project API (a window capability, or a paired device's read of the host) with `nosniff`, a script-forbidding content security policy and an ETag; a missing icon is a plain 404, not a logged error.
+- The renderer draws it as an `<img>` at the icon scale, fetched once per Project per session, so the polled navigation model never causes a request.
+
+Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Code starting posture and Plan
 

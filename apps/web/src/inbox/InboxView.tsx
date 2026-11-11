@@ -33,6 +33,7 @@ import {
   type InboxAttentionItem,
   type InboxFilter,
 } from "./inboxModel";
+import { ProjectIcon } from "../projects/ProjectIcon";
 import { markInboxKeySeen, readSeenInboxKeys } from "./inboxSeen";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -297,7 +298,17 @@ export function InboxView(props: InboxViewProps) {
               key={group.projectKey === "" ? "no-project" : group.projectKey}
             >
               <h3 className="inbox-group__head">
-                <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                {group.projectKey === "" ? (
+                  <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                ) : (
+                  <ProjectIcon
+                    fallback={
+                      <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                    }
+                    projectId={group.projectKey}
+                    size={14}
+                  />
+                )}
                 <span className="oct-row-label">{group.name}</span>
                 <span className="oct-meta">{group.items.length}</span>
                 {group.urgentCount === 0 ? null : (

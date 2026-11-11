@@ -14,6 +14,8 @@ import {
 } from "../palette/pendingRequests.test-fixtures";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { decodePendingRequest } from "@octant/contracts/pending-requests";
+import { ProjectIconContext } from "../projects/ProjectIcon";
+import { iconSourceFor } from "../projects/projectIcon.test-support";
 import { InboxView, type InboxDecisionSource } from "./InboxView";
 
 const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
@@ -122,6 +124,36 @@ describe("InboxView decisions", () => {
     await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
     expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
     expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView Project icon", () => {
+  function inbox(source: ReturnType<typeof iconSourceFor>["source"]) {
+    return render(
+      <ProjectIconContext.Provider value={source}>
+        <InboxView
+          attentionItems={[]}
+          decisions={decisionSource(decisionClients(), [codeDecision()])}
+          onClose={vi.fn()}
+          onOpenThread={vi.fn()}
+        />
+      </ProjectIconContext.Provider>,
+    );
+  }
+
+  it("draws the Project's image in its group heading when the host has an icon", async () => {
+    const { container } = inbox(iconSourceFor([pendingIds.project]).source);
+    await waitFor(() =>
+      expect(container.querySelector(".inbox-group__head img.project-icon")).not.toBeNull(),
+    );
+  });
+
+  it("keeps the folder glyph when the host has no icon", async () => {
+    const { fetcher, source } = iconSourceFor([]);
+    const { container } = inbox(source);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".inbox-group__head img.project-icon")).toBeNull();
+    expect(container.querySelector(".inbox-group__head svg.lucide-folder")).not.toBeNull();
   });
 });
 
