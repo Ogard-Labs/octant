@@ -33,6 +33,7 @@ export interface AgentsListScreenProps {
   readonly onBack: () => void;
   readonly onOpenThread: (row: MobileInboxRow) => void;
   readonly view: AgentListView;
+  readonly onSelectView: (view: AgentListView) => void;
 }
 
 function statusTone(status: string, colors: ThemeColors): string {
@@ -66,8 +67,9 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // The filter switches in place, so moving between views never leaves the list.
-  const [view, setView] = useState<AgentListView>(props.view);
+  // The filter switches in place, and the navigator holds the choice, so the
+  // list comes back on the same view after a thread is opened and closed.
+  const view = props.view;
 
   const requestGuard = useRef(createRequestGuard()).current;
   const {
@@ -327,7 +329,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
           </View>
         ) : null}
         <SegmentedControl
-          onSelect={setView}
+          onSelect={props.onSelectView}
           optionTestID={(id) => `mobile-agents-view-${id}`}
           options={viewOptions}
           selected={view}

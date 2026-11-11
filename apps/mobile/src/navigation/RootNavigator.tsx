@@ -530,6 +530,7 @@ export function RootNavigator(props: RootNavigatorProps) {
             setThreadReturnRoute("agents");
             props.onSelectRoute("thread");
           }}
+          onSelectView={setAgentListView}
           view={agentListView}
         />
       ) : null}
