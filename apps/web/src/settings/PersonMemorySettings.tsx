@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -387,22 +388,24 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
             </OctantButton>
           </SettingRow>
         </div>
-        {confirmingForget ? (
-          <OctantConfirmDialog
-            confirmLabel="Forget everything"
-            destructive
-            onCancel={() => setConfirmingForget(false)}
-            onConfirm={() => {
-              setConfirmingForget(false);
-              void send({ kind: "forget-person-memory", confirmed: true });
-            }}
-            pending={busy}
-            title="Forget everything Octant remembers?"
-          >
-            Every entry and every remembered thread is erased from this computer. New threads start
-            without them. This cannot be undone.
-          </OctantConfirmDialog>
-        ) : null}
+        <OctantDialogPresence>
+          {confirmingForget ? (
+            <OctantConfirmDialog
+              confirmLabel="Forget everything"
+              destructive
+              onCancel={() => setConfirmingForget(false)}
+              onConfirm={() => {
+                setConfirmingForget(false);
+                void send({ kind: "forget-person-memory", confirmed: true });
+              }}
+              pending={busy}
+              title="Forget everything Octant remembers?"
+            >
+              Every entry and every remembered thread is erased from this computer. New threads
+              start without them. This cannot be undone.
+            </OctantConfirmDialog>
+          ) : null}
+        </OctantDialogPresence>
       </SettingsSection>
     </>
   );

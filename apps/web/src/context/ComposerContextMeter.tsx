@@ -42,6 +42,7 @@ import { resetCountdownLabel } from "../lib/relativeTime";
 import { ThreadStatsMenu } from "../threadStats/ThreadStatsMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import "./context.css";
 
@@ -240,49 +241,53 @@ export function ComposerContextMeter() {
         {limitAlertText}
         {compactionAnnouncement(compaction)}
       </span>
-      {inspecting && snapshot !== undefined ? (
-        <OctantDialog
-          className="context-inspector-dialog"
-          label="Context inspector"
-          onClose={() => setInspecting(false)}
-          open
-        >
-          <ContextInspector
-            busy={scope.busy}
-            {...(compaction === undefined
-              ? {}
-              : {
-                  compaction: {
-                    offer,
-                    onRequest: requestCompaction,
-                    starting: compaction.controller.starting,
-                    status: (
-                      <CompactionStatusLine
-                        className="context-inspector__compaction oct-meta"
-                        compaction={compaction}
-                      />
-                    ),
-                  },
-                })}
+      <OctantDialogPresence>
+        {inspecting && snapshot !== undefined ? (
+          <OctantDialog
+            className="context-inspector-dialog"
+            label="Context inspector"
             onClose={() => setInspecting(false)}
-            onRebuild={scope.rebuild}
-            onSetExcluded={scope.setExcluded}
-            onSetPinned={scope.setPinned}
-            snapshot={snapshot}
+            open
+          >
+            <ContextInspector
+              busy={scope.busy}
+              {...(compaction === undefined
+                ? {}
+                : {
+                    compaction: {
+                      offer,
+                      onRequest: requestCompaction,
+                      starting: compaction.controller.starting,
+                      status: (
+                        <CompactionStatusLine
+                          className="context-inspector__compaction oct-meta"
+                          compaction={compaction}
+                        />
+                      ),
+                    },
+                  })}
+              onClose={() => setInspecting(false)}
+              onRebuild={scope.rebuild}
+              onSetExcluded={scope.setExcluded}
+              onSetPinned={scope.setPinned}
+              snapshot={snapshot}
+            />
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {confirming === undefined || compaction === undefined ? null : (
+          <CompactSessionConfirm
+            executor={confirming}
+            names={compaction.names}
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => {
+              void compaction.controller.compact().finally(() => setConfirming(undefined));
+            }}
+            pending={compaction.controller.starting}
           />
-        </OctantDialog>
-      ) : null}
-      {confirming === undefined || compaction === undefined ? null : (
-        <CompactSessionConfirm
-          executor={confirming}
-          names={compaction.names}
-          onCancel={() => setConfirming(undefined)}
-          onConfirm={() => {
-            void compaction.controller.compact().finally(() => setConfirming(undefined));
-          }}
-          pending={compaction.controller.starting}
-        />
-      )}
+        )}
+      </OctantDialogPresence>
     </div>
   );
 }

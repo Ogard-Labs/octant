@@ -22,6 +22,7 @@ import { ChevronLeft, Play, RotateCcw, X } from "lucide-react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
@@ -485,18 +486,20 @@ export function FlowBoard(props: FlowBoardProps) {
           {message}
         </OctantAlert>
       )}
-      {playing === undefined ? null : (
-        <FlowPlayer
-          block={props.block}
-          blocks={props.blocks}
-          {...(props.designAssetRuntime === undefined
-            ? {}
-            : { designAssetRuntime: props.designAssetRuntime })}
-          onClose={() => setPlaying(undefined)}
-          restoreFocus={playButton}
-          startScreenId={playing}
-        />
-      )}
+      <OctantDialogPresence>
+        {playing === undefined ? null : (
+          <FlowPlayer
+            block={props.block}
+            blocks={props.blocks}
+            {...(props.designAssetRuntime === undefined
+              ? {}
+              : { designAssetRuntime: props.designAssetRuntime })}
+            onClose={() => setPlaying(undefined)}
+            restoreFocus={playButton}
+            startScreenId={playing}
+          />
+        )}
+      </OctantDialogPresence>
     </div>
   );
 }

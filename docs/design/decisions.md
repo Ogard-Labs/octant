@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
+| **All areas**                                                                         | **234**   | **198** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2152,7 +2152,7 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below.
 - Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
-- Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open arrives this way and leaves at once.
+- Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open is held through its exit with the last content it showed (`OctantDialogPresence`): every confirmation, the command palette, the Code file search, the Navigator, the narrow dock, first run and the other dialogs mounted on demand. A dialog that is leaving takes no press and no key, focus returns to the opener as the exit starts, and focus the person has moved since is left alone. A dialog with an `open` of its own keeps that apart from its words; one whose words come from the state closing clears is rendered only while that state exists. A dialog removed together with its owner still leaves at once, and so does one closed in a window nobody can see.
 - A list a person picks from draws one row from shared tokens: 28px for one line, its words 8px in, the rows 4px in from the popup's edge. Menus, context menus, selects, comboboxes, the command palette, typeaheads and picker rows all take it; a described row grows to two lines.
 - There is one scrollbar, declared once: a thin thumb and no painted track, in a pane, a menu, a popup and a sheet alike. A feature may reserve its strip or hide it on a named sideways strip, and never recolours or widens it.
 - The code editor and the terminal draw their own scrollbars to the measure of every other pane's: a thin thumb with round ends in the same theme role, no painted track, no shadow at the scroll edge, and no strip beside a comparison. Their thumb cannot widen under the pointer and changes colour there instead, and the terminal's hides at rest even where the system keeps scrollbars on screen.
@@ -2574,6 +2574,20 @@ Charts, tables, mockups, designs and flow boards share one visual system.
 - A flow board's hotspot is the only live control, and a list reaches every screen without the board.
 
 Status: Built. Since: —. Detail: [Canvas visuals: Data visualisation](canvas-visuals.md#data-visualisation), [Mockups and designs](canvas-visuals.md#mockups-and-designs) and [Flow boards](canvas-visuals.md#flow-boards).
+
+### Project design systems
+
+A Work or Code Project's design system is a `DESIGN.md` in its folder. Octant lists, draws, edits, and creates these files, every Work and Code turn follows the governing one, Canvas designs draw with its tokens, typed Canvas blocks take its colours, and a person can swap the design system a Project or a single Canvas follows (maintainer requests, 2026-11-10 and 2026-11-11).
+
+- The file is the source of its content, never copied onto the Project record or journaled. Which file is the Project's own is the person's choice (any `DESIGN.md`, or none), journaled as `project.design-system-changed@1`; without one, the top-level file, else the only one. A chosen file that is gone leaves the Project with none. The nearest `DESIGN.md` above a file governs it.
+- Front-matter colours, typography, radii, and spacing become Canvas brand tokens under the design brand rule; each is reported carried, adjusted (a font stack without web faces), or refused with its reason. At most 32 are carried.
+- Every Work and Code turn carries the rule to follow it and the Project's own file as keyed standing context, read from the folder each turn (a Code turn from its worktree). Nothing is added for a server Project's remote folder.
+- Canvas `describe` returns the design system's tokens for every design kind (documents, decks, sites, screens, UI kits, flows); a running design copies the values into its own stylesheet. Tokens from `DESIGN.md` take the place of the brand kit.
+- A Canvas may follow a design system (Canvas schema version 28): its charts, tables, metrics, treemaps, and diagrams take their series colours (the `chart-1` to `chart-6` palette, else primary and secondary) and accent from it on screen, in Present, and in the HTML export; tones and text keep the reader's theme. A Canvas an agent creates in the Project follows it.
+- A person switches a Canvas to another of its Project's design systems, or none, from its More menu; the host reads the file under the Canvas's own Project and journals the switch as a version that also redraws brand designs. Not admitted for a paired device.
+- Only a window on this host may list, read, create, or save one; a save replaces only the revision it opened; no read or write follows a link; files over 256 KiB are left to the editor.
+
+Status: Built. Since: 2026-11-10. Detail: [Project design systems](design-systems.md).
 
 ### Public links
 

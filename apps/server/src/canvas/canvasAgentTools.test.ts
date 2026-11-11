@@ -397,7 +397,10 @@ describe("createCanvasAgentTools", () => {
 
   it("hands the Project's brand kit to describe and tells the agent to use the brand theme", async () => {
     const brandKit = { "color-primary": "#0a7d5a", "font-heading": "georgia, serif" };
-    const brandKitFor = vi.fn((_projectId: string) => brandKit);
+    const brandKitFor = vi.fn((_projectId: string) => ({
+      source: "brand-kit" as const,
+      brand: brandKit,
+    }));
     const { set } = tools({ brandKit: brandKitFor });
     const design = (
       await set.execute({
@@ -419,6 +422,57 @@ describe("createCanvasAgentTools", () => {
     expect(overview.brandKitGuidance).toContain("brand kit");
     // The kit is the one of the Project the thread is bound to, never one the model names.
     expect(brandKitFor).toHaveBeenCalledWith(projectId);
+  });
+
+  it("hands describe the Project's design system so every design follows DESIGN.md", async () => {
+    const brand = { "color-primary": "#123456", "font-body": "system-ui, sans-serif" };
+    const { create, set } = tools({
+      brandKit: async () => ({
+        source: "design-system" as const,
+        brand,
+        path: "DESIGN.md",
+        name: "Acme",
+      }),
+    });
+    const design = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+      })
+    ).result as { brandKit?: unknown; designSystem?: unknown; guidance?: Record<string, string> };
+    expect(design.designSystem).toEqual({ path: "DESIGN.md", name: "Acme", brand });
+    expect(design).not.toHaveProperty("brandKit");
+    for (const item of ["document", "slide deck", "website", "UI kit", "runs script"]) {
+      expect(design.guidance?.design).toContain(item);
+    }
+    const overview = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe" }),
+      })
+    ).result as { designSystem?: unknown; designSystemGuidance?: string };
+    expect(overview.designSystem).toEqual({ path: "DESIGN.md", name: "Acme", brand });
+    expect(overview.designSystemGuidance).toContain("design system");
+
+    // A Canvas the agent creates follows the design system, so its typed
+    // blocks draw in its colours; the model never names it.
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Report",
+        blocks: [
+          {
+            blockId: "summary",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "rich-text",
+            text: "Numbers.",
+          },
+        ],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create.mock.calls[0]?.[6]).toEqual({ name: "Acme", source: "DESIGN.md", brand });
   });
 
   it("says nothing about a brand kit when the Project has none", async () => {

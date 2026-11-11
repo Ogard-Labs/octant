@@ -16,6 +16,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { FolderPicker } from "../projects/FolderPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -388,54 +389,58 @@ function SyncStoreSections(
         </div>
       </SettingsSection>
 
-      {confirmingNone ? (
-        <OctantConfirmDialog
-          confirmLabel="Stop syncing"
-          destructive
-          onCancel={() => setConfirmingNone(false)}
-          onConfirm={() => {
-            setConfirmingNone(false);
-            const current = view.store.kind;
-            setDraftKind("none");
-            void run({
-              schemaVersion: 1,
-              kind: "clear-store",
-              expectedVersion: view.version,
-            }).then((outcome) => {
-              if (outcome.status === "refused") setDraftKind(current);
-            });
-          }}
-          pending={busy}
-          title="Choose no store?"
-        >
-          {view.store.kind === "s3"
-            ? "Sync stops, and this bucket's saved access key and secret are removed from this computer. Nothing in the bucket is deleted."
-            : "Sync stops, and Octant stops using this folder. Nothing in the folder is deleted."}
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirmingNone ? (
+          <OctantConfirmDialog
+            confirmLabel="Stop syncing"
+            destructive
+            onCancel={() => setConfirmingNone(false)}
+            onConfirm={() => {
+              setConfirmingNone(false);
+              const current = view.store.kind;
+              setDraftKind("none");
+              void run({
+                schemaVersion: 1,
+                kind: "clear-store",
+                expectedVersion: view.version,
+              }).then((outcome) => {
+                if (outcome.status === "refused") setDraftKind(current);
+              });
+            }}
+            pending={busy}
+            title="Choose no store?"
+          >
+            {view.store.kind === "s3"
+              ? "Sync stops, and this bucket's saved access key and secret are removed from this computer. Nothing in the bucket is deleted."
+              : "Sync stops, and Octant stops using this folder. Nothing in the folder is deleted."}
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
 
-      {pickingFolder && props.folderBrowse !== undefined ? (
-        <FolderPicker
-          client={props.folderBrowse}
-          hint="Pick a folder your sync client watches. Octant writes inside an Octant Sync folder there."
-          hostId={view.hostId}
-          mode={view.mode}
-          onCancel={() => setPickingFolder(false)}
-          onSelectCandidate={(candidate) => {
-            setPickingFolder(false);
-            void run({
-              schemaVersion: 1,
-              kind: "choose-synced-folder",
-              mode: view.mode,
-              candidateId: candidate.candidateId,
-              expectedVersion: view.version,
-            });
-          }}
-          showGitInit={false}
-          showMode={false}
-          title="Sync folder"
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {pickingFolder && props.folderBrowse !== undefined ? (
+          <FolderPicker
+            client={props.folderBrowse}
+            hint="Pick a folder your sync client watches. Octant writes inside an Octant Sync folder there."
+            hostId={view.hostId}
+            mode={view.mode}
+            onCancel={() => setPickingFolder(false)}
+            onSelectCandidate={(candidate) => {
+              setPickingFolder(false);
+              void run({
+                schemaVersion: 1,
+                kind: "choose-synced-folder",
+                mode: view.mode,
+                candidateId: candidate.candidateId,
+                expectedVersion: view.version,
+              });
+            }}
+            showGitInit={false}
+            showMode={false}
+            title="Sync folder"
+          />
+        ) : null}
+      </OctantDialogPresence>
     </>
   );
 }

@@ -14,6 +14,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { MemoryEntryDialog } from "./MemoryEntryDialog";
 import { MemoryTransferDialog } from "./MemoryTransferDialog";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 type InspectorDialog =
   | { readonly kind: "create" }
@@ -205,28 +206,30 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
           </MemorySection>
         </div>
       ) : null}
-      {dialog?.kind === "transfer" ? (
-        <MemoryTransferDialog
-          busy={props.busy}
-          destinations={destinations}
-          entry={dialog.entry}
-          onClose={closeDialog}
-          onTransfer={props.onTransfer}
-        />
-      ) : dialog === undefined ? null : (
-        <MemoryEntryDialog
-          busy={props.busy}
-          mode={
-            dialog.kind === "create"
-              ? dialog
-              : { kind: dialog.kind, entryId: dialog.entry.id, content: dialog.entry.content }
-          }
-          onClose={closeDialog}
-          onCreate={props.onCreate}
-          onRetract={props.onRetract}
-          onSupersede={props.onSupersede}
-        />
-      )}
+      <OctantDialogPresence>
+        {dialog?.kind === "transfer" ? (
+          <MemoryTransferDialog
+            busy={props.busy}
+            destinations={destinations}
+            entry={dialog.entry}
+            onClose={closeDialog}
+            onTransfer={props.onTransfer}
+          />
+        ) : dialog === undefined ? null : (
+          <MemoryEntryDialog
+            busy={props.busy}
+            mode={
+              dialog.kind === "create"
+                ? dialog
+                : { kind: dialog.kind, entryId: dialog.entry.id, content: dialog.entry.content }
+            }
+            onClose={closeDialog}
+            onCreate={props.onCreate}
+            onRetract={props.onRetract}
+            onSupersede={props.onSupersede}
+          />
+        )}
+      </OctantDialogPresence>
     </InspectorRoot>
   );
 }

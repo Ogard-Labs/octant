@@ -661,7 +661,7 @@
 .project-overview__name {
   color: var(--oct-fg);
   background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   font: inherit;
   font-size: var(--oct-text-sm);
@@ -1250,6 +1250,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-overview-inspector__content > .project-provider-policy,
 .project-overview-inspector__content > .project-brand-kit,
+.project-overview-inspector__content > .project-design-system,
 .project-overview-inspector__content > .project-desktop-recipe,
 .project-overview-inspector__content > .project-actions,
 .project-overview-inspector__content > .project-overview__memory {
@@ -1258,6 +1259,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-overview-inspector__content > .project-provider-policy,
 .project-overview-inspector__content > .project-brand-kit,
+.project-overview-inspector__content > .project-design-system,
 .project-overview-inspector__content > .project-desktop-recipe,
 .project-overview-inspector__content > .project-actions {
   padding-top: 0;
@@ -1935,4 +1937,89 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   .project-coordinator__fold svg {
     transition: none;
   }
+}
+
+/* Design system: the list of DESIGN.md files, then one drawn as samples. */
+.project-design-system__list,
+.project-design-system__tokens,
+.project-design-system__refused {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-design-system__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.project-design-system__view,
+.project-design-system__follows,
+.project-design-system__editor,
+.project-design-system__create,
+.project-design-system__group {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.project-design-system__title h3,
+.project-design-system__group h4 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.project-design-system__tokens li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 140px) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.project-design-system__tokens li > .project-provider-policy__hint {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+
+.project-design-system__token-name {
+  color: var(--octant-text-primary);
+}
+
+.project-design-system__swatch,
+.project-design-system__radius {
+  width: 40px;
+  height: 24px;
+  border: 1px solid var(--oct-border);
+}
+
+.project-design-system__swatch {
+  border-radius: var(--oct-radius-sm);
+}
+
+.project-design-system__radius {
+  background: var(--octant-control);
+}
+
+.project-design-system__type {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-lg);
+}
+
+.project-design-system__space {
+  height: 8px;
+  background: var(--oct-accent);
+  border-radius: var(--oct-radius-sm);
+}
+
+.project-design-system__editor textarea {
+  min-height: 360px;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }

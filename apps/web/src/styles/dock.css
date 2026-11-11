@@ -80,6 +80,20 @@
   gap: 2px;
 }
 
+/* A lone labelled tool wider than the band cannot wrap away, so the row's
+   clip cut "Environment" mid-glyph. It gives way and its name ellipsizes. */
+.dock-quick-tools > .dock-quick-tools__tool[data-labelled="true"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dock-quick-tools__tool[data-labelled="true"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dock-quick-tools__tool > svg {
   width: var(--oct-icon-sm);
   height: var(--oct-icon-sm);

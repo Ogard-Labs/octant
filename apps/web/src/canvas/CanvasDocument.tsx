@@ -1,4 +1,5 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
+import { canvasDesignSystemStyle } from "./canvasDesignSystemStyle";
 import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
@@ -106,6 +107,7 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
+  const designSystemStyle = canvasDesignSystemStyle(definition.designSystem);
   // What comments add to a block: its marker in the margin and the marks
   // people drew on it.
   const commentMarks = (block: CanvasDefinition["blocks"][number]) =>
@@ -203,6 +205,7 @@ export function CanvasDocument({
       <DeckBlock
         block={item.deck}
         blocks={definition.blocks}
+        {...(designSystemStyle === undefined ? {} : { designSystemStyle })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
       />
       {commentMarks(item.deck)}
@@ -248,6 +251,8 @@ export function CanvasDocument({
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
       aria-label={definition.title}
+      data-design-system={definition.designSystem?.name}
+      style={designSystemStyle}
     >
       {placement === "thread" ? null : (
         <header className="canvas-view__header">

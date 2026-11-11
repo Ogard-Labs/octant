@@ -91,6 +91,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
@@ -2230,26 +2231,30 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
-        {confirmArtifacts ? (
-          <ThreadArtifactsConfirm
-            onCancel={() => setConfirmArtifacts(false)}
-            onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-            pending={deliveryChanging}
-          />
-        ) : null}
+        <OctantDialogPresence>
+          {confirmArtifacts ? (
+            <ThreadArtifactsConfirm
+              onCancel={() => setConfirmArtifacts(false)}
+              onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+              pending={deliveryChanging}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
-        {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-          <OctantConfirmDialog
-            confirmLabel="Mark done"
-            onCancel={() => setCompletionFormOpen(false)}
-            onConfirm={() => void confirmCompletion()}
-            pending={completing}
-            title="Mark this task Done?"
-          >
-            {thread.title} moves to Done on the board. Its composer and provider lock until you
-            archive and reactivate it.
-          </OctantConfirmDialog>
-        ) : null}
+        <OctantDialogPresence>
+          {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
+            <OctantConfirmDialog
+              confirmLabel="Mark done"
+              onCancel={() => setCompletionFormOpen(false)}
+              onConfirm={() => void confirmCompletion()}
+              pending={completing}
+              title="Mark this task Done?"
+            >
+              {thread.title} moves to Done on the board. Its composer and provider lock until you
+              archive and reactivate it.
+            </OctantConfirmDialog>
+          ) : null}
+        </OctantDialogPresence>
 
         <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
           <TranscriptWindow
@@ -2613,21 +2618,25 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             }
           />
         </SelectionThreadScope>
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={{
-            kind: "unavailable",
-            reason:
-              "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
-          }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={() => void runRewind()}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={{
+                kind: "unavailable",
+                reason:
+                  "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+              }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={() => void runRewind()}
+              open
+              removedTurns={rewind?.removedTurns}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined ? null : (
           <div className="thread-column">
@@ -3031,7 +3040,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <ComposerModelPicker
                       threadId={String(thread.id)}
                       ariaLabel="Provider and model"
-                      disabled={providerChanging || creating || completionLocked}
+                      disabled={providerChanging || creating}
+                      locked={completionLocked}
                       // Once any turn ran, the host checks the latest one
                       // whatever its status, so the thread's history lives with
                       // its provider kind; offering a move the host refuses led

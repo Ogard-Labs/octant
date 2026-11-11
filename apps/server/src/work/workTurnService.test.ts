@@ -2654,6 +2654,56 @@ describe("WorkTurnService", () => {
     expect(JSON.stringify(sent)).not.toContain("AGENTS.md");
   });
 
+  it("carries the Project's DESIGN.md into every turn so user-facing work follows it", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const primary = vi.fn(async () => ({
+      document: {
+        folder: "/private/tmp/knowledge",
+        path: "DESIGN.md",
+        text: "# Acme\n\nButtons are pill-shaped.",
+        revision: "r1",
+        reading: {
+          name: "Acme",
+          frontMatter: "absent" as const,
+          tokens: [],
+          brand: {},
+          ignoredKeys: [],
+          sections: [],
+          body: "",
+        },
+      },
+      others: [{ folder: "/private/tmp/knowledge", path: "site/DESIGN.md" }],
+    }));
+    const fixture = serviceFixture({
+      designSystemFiles: { primary },
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    await fixture.waitForIdle();
+
+    const sent = contexts.flat();
+    expect(sent).toContainEqual({
+      kind: "project-memory",
+      key: "project-design-system",
+      text: expect.stringContaining("Buttons are pill-shaped."),
+    });
+    const rule = sent.find(
+      (block) => block.kind === "instructions" && block.text.includes("design system"),
+    );
+    expect(rule?.text).toContain("site/DESIGN.md");
+    expect(primary).toHaveBeenCalledWith(
+      expect.objectContaining({ main: "/private/tmp/knowledge" }),
+    );
+  });
+
   it("takes stock only when a task opens, so later turns keep the same standing context", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const disk = new Map<string, string>([
@@ -5601,6 +5651,7 @@ function serviceFixture(
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
     readonly projectStatusFiles?: WorkProjectStatusFiles;
+    readonly designSystemFiles?: WorkTurnServiceDependencies["designSystemFiles"];
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
@@ -5815,6 +5866,9 @@ function serviceFixture(
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+    ...(options.designSystemFiles === undefined
+      ? {}
+      : { designSystemFiles: options.designSystemFiles }),
     ...(options.projectStatusFiles === undefined
       ? {}
       : { projectStatusFiles: options.projectStatusFiles }),

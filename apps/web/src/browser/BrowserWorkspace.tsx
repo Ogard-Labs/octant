@@ -49,6 +49,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
@@ -986,19 +987,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       aria-label="Browser automation"
       className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback ? " browser-workspace--feedback" : ""}`}
     >
-      {pendingTaskProfile === undefined ? null : (
-        <OctantConfirmDialog
-          title="Change this task’s default Browser profile?"
-          confirmLabel="Change profile"
-          pending={selectingTaskProfile}
-          onCancel={() => setPendingTaskProfile(undefined)}
-          onConfirm={() => void selectTaskProfile(pendingTaskProfile)}
-        >
-          The current address opens in a fresh page in the chosen profile. Unsaved form entries on
-          this page will be lost. Your task, conversation, and message draft stay open. The original
-          page stays open if the switch fails.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {pendingTaskProfile === undefined ? null : (
+          <OctantConfirmDialog
+            title="Change this task’s default Browser profile?"
+            confirmLabel="Change profile"
+            pending={selectingTaskProfile}
+            onCancel={() => setPendingTaskProfile(undefined)}
+            onConfirm={() => void selectTaskProfile(pendingTaskProfile)}
+          >
+            The current address opens in a fresh page in the chosen profile. Unsaved form entries on
+            this page will be lost. Your task, conversation, and message draft stay open. The
+            original page stays open if the switch fails.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
           <OctantButton

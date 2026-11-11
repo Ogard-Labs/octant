@@ -844,6 +844,10 @@ html[data-octant-native-host="true"]
    the window controls' centreline across the sidebar's edge. */
 .sidebar__chrome {
   display: flex;
+  /* The content column scrolls, so a long thread list would otherwise shrink
+     the row to its min-height while a wrapped second row of actions
+     overflowed it and sat under the list. */
+  flex: 0 0 auto;
   min-height: var(--oct-title-rail-h);
   flex-wrap: wrap;
   align-items: center;
@@ -1443,7 +1447,6 @@ html[data-octant-native-host="true"]
   padding: 0 var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  opacity: 0.78;
 }
 
 .project-threads__more:hover,
@@ -2797,7 +2800,6 @@ form > .work-composer-adapter__attachments {
   padding: 0 2px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-  opacity: 0.7;
 }
 
 @media (prefers-reduced-motion: reduce) {

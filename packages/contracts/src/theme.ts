@@ -179,17 +179,19 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
 });
 
 // The application ground: a first-party built-in image, a photo from the
-// shared background image store, a field of pulsing characters, or the plain
-// page. A photo reuses the sidebar background id because both point at one
-// image library on the host; the ground does not keep a second copy. The
-// tuning fields travel with every kind so switching away and back keeps what a
-// person dialled in; each is optional on the wire so old rows still decode.
+// shared background image store, a field of pulsing characters, dithered
+// pixels, a flowing colour field, or the plain page. A photo reuses the
+// sidebar background id because both point at one image library on the host;
+// the ground does not keep a second copy. The tuning fields travel with every
+// kind so switching away and back keeps what a person dialled in; each is
+// optional on the wire so old rows still decode.
 export const AppBackgroundKind = Schema.Literal(
   "theme",
   "builtin",
   "photo",
   "characters",
   "pixels",
+  "flowing",
   "none",
 );
 export type AppBackgroundKind = typeof AppBackgroundKind.Type;
@@ -285,6 +287,17 @@ const PixelsAppBackground = Schema.Struct({
   ...AppBackgroundTuning,
 }).annotations(strict);
 
+/**
+ * A field of large, soft colour that drifts like ink in water. Its stops are
+ * taken from the theme's accent, it carries no picture, and it does not
+ * answer clicks. Motion Still holds one frame; absent or Wave lets it keep
+ * moving.
+ */
+const FlowingAppBackground = Schema.Struct({
+  kind: Schema.Literal("flowing"),
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
 const NoneAppBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   ...AppBackgroundTuning,
@@ -296,6 +309,7 @@ export const AppBackground = Schema.Union(
   PhotoAppBackground,
   CharactersAppBackground,
   PixelsAppBackground,
+  FlowingAppBackground,
   NoneAppBackground,
 );
 export type AppBackground = typeof AppBackground.Type;

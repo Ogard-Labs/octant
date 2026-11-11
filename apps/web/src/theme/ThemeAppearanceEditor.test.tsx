@@ -36,9 +36,12 @@ describe("ThemeAppearanceEditor", () => {
     await user.click(screen.getByRole("radio", { name: "Clay" }));
     expect(applyPatch).toHaveBeenLastCalledWith({
       semanticOverrides: [
-        { role: "accent", color: "#d97757" },
-        { role: "accent-foreground", color: "#141414" },
-        { role: "primary-foreground", color: "#141414" },
+        { role: "accent", color: "#d06f4f", mode: "light" },
+        { role: "accent-foreground", color: "#141414", mode: "light" },
+        { role: "primary-foreground", color: "#141414", mode: "light" },
+        { role: "accent", color: "#d97757", mode: "dark" },
+        { role: "accent-foreground", color: "#141414", mode: "dark" },
+        { role: "primary-foreground", color: "#141414", mode: "dark" },
       ],
     });
 
