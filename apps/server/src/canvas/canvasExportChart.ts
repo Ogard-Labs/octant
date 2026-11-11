@@ -1,4 +1,5 @@
 import type { CanvasBlock } from "@octant/contracts/canvas";
+import { canvasDesignSystemSeries } from "@octant/domain/canvas-design-system-policy";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { layoutCanvasSankey } from "@octant/domain/canvas-sankey-layout";
 import {
@@ -75,8 +76,25 @@ const GUTTER_TOP = 10;
 const GUTTER_BOTTOM = 26;
 const FONT = 12;
 
-export function seriesColor(index: number): string {
-  return EXPORT_SERIES_COLORS[index % EXPORT_SERIES_COLORS.length] ?? EXPORT_INK;
+/** The six series colours an export draws with, in series order. */
+export type ExportPalette = ReadonlyArray<string>;
+
+/**
+ * The palette for a Canvas that follows a design system: each series colour
+ * it names, and the theme's own where it names none, so a chart never draws a
+ * series without a colour.
+ */
+export function exportSeriesPalette(
+  designSystem: { readonly brand: Readonly<Record<string, string>> } | undefined,
+): ExportPalette {
+  if (designSystem === undefined) return EXPORT_SERIES_COLORS;
+  return canvasDesignSystemSeries(designSystem.brand).map(
+    (value, index) => value ?? EXPORT_SERIES_COLORS[index] ?? EXPORT_INK,
+  );
+}
+
+export function seriesColor(index: number, palette: ExportPalette = EXPORT_SERIES_COLORS): string {
+  return palette[index % palette.length] ?? EXPORT_INK;
 }
 
 function seriesDash(index: number): string | undefined {
@@ -156,17 +174,18 @@ function categoryText(x: number | string, block: ChartBlock, label: Label): stri
 export function drawCanvasExportChart(
   block: ChartBlock,
   label: Label,
+  palette: ExportPalette = EXPORT_SERIES_COLORS,
 ): CanvasExportDrawing | undefined {
   switch (block.chartType) {
     case "pie":
     case "donut":
-      return partToWhole(block, label);
+      return partToWhole(block, label, palette);
     case "funnel":
-      return funnel(block, label);
+      return funnel(block, label, palette);
     case "radar":
-      return radar(block, label);
+      return radar(block, label, palette);
     case "sankey":
-      return sankey(block, label);
+      return sankey(block, label, palette);
     case "line":
     case "area":
     case "bar":
@@ -175,7 +194,7 @@ export function drawCanvasExportChart(
     case "stacked-bar":
     case "grouped-bar":
     case "bar-line":
-      return cartesian(block, label);
+      return cartesian(block, label, palette);
     default: {
       const unhandled: never = block.chartType;
       return unhandled;
@@ -183,7 +202,11 @@ export function drawCanvasExportChart(
   }
 }
 
-function legendFor(block: ChartBlock, label: Label): ReadonlyArray<CanvasExportLegendEntry> {
+function legendFor(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): ReadonlyArray<CanvasExportLegendEntry> {
   // One series is named by the Canvas around it, as on screen.
   if (block.series.length < 2) return [];
   return block.series.map((series, index) => {
@@ -194,13 +217,17 @@ function legendFor(block: ChartBlock, label: Label): ReadonlyArray<CanvasExportL
       (block.chartType === "bar-line" && series.mark === "line");
     return {
       label: label(series.label),
-      color: seriesColor(index),
+      color: seriesColor(index, palette),
       ...(line ? { line: seriesDash(index) === undefined ? "solid" : "dashed" } : {}),
     };
   });
 }
 
-function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undefined {
+function cartesian(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): CanvasExportDrawing | undefined {
   const first = block.series[0];
   if (first === undefined) return undefined;
   const stacked = block.chartType === "stacked-bar";
@@ -320,7 +347,7 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
           series.points.some((point) => point.emphasis === true) &&
           series.points[index]?.emphasis !== true;
         parts.push(
-          `<rect x="${round(x)}" y="${round(from)}" width="${round(width)}" height="${round(height)}" rx="${String(Math.min(CHART_BAR_RADIUS, width / 2))}" fill="${muted ? AXIS : seriesColor(seriesIndex)}"/>`,
+          `<rect x="${round(x)}" y="${round(from)}" width="${round(width)}" height="${round(height)}" rx="${String(Math.min(CHART_BAR_RADIUS, width / 2))}" fill="${muted ? AXIS : seriesColor(seriesIndex, palette)}"/>`,
         );
       });
     }
@@ -334,7 +361,7 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
     const path = points
       .map((point, position) => `${position === 0 ? "M" : "L"}${round(point.x)} ${round(point.y)}`)
       .join(" ");
-    const color = seriesColor(index);
+    const color = seriesColor(index, palette);
     if (block.chartType === "area") {
       const baseline = y(Math.max(axis.min, 0));
       const last = points.at(-1);
@@ -360,7 +387,7 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
     block.series.forEach((series, index) => {
       series.points.forEach((point, position) => {
         parts.push(
-          `<circle cx="${round(xAt(position, point.x))}" cy="${round(y(point.y))}" r="${String(CHART_DOT_RADIUS + 1)}" fill="${seriesColor(index)}" fill-opacity="0.85"/>`,
+          `<circle cx="${round(xAt(position, point.x))}" cy="${round(y(point.y))}" r="${String(CHART_DOT_RADIUS + 1)}" fill="${seriesColor(index, palette)}" fill-opacity="0.85"/>`,
         );
       });
     });
@@ -392,7 +419,7 @@ function cartesian(block: ChartBlock, label: Label): CanvasExportDrawing | undef
     }
   }
 
-  const legend = legendFor(block, label);
+  const legend = legendFor(block, label, palette);
   return {
     label: chartLabel(block, label),
     width: WIDTH,
@@ -408,7 +435,11 @@ function chartLabel(block: ChartBlock, label: Label): string {
   return names.length === 0 ? `${kind} chart` : `${kind} chart of ${names.join(", ")}`;
 }
 
-function partToWhole(block: ChartBlock, label: Label): CanvasExportDrawing | undefined {
+function partToWhole(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): CanvasExportDrawing | undefined {
   const series = block.series[0];
   if (series === undefined) return undefined;
   const total = series.points.reduce((sum, point) => sum + Math.max(0, point.y), 0);
@@ -427,7 +458,7 @@ function partToWhole(block: ChartBlock, label: Label): CanvasExportDrawing | und
     const path = ringPath(cx, cy, outer, inner, start, end);
     if (path !== "") {
       parts.push(
-        `<path d="${path}" fill="${seriesColor(index)}" stroke="#ffffff" stroke-width="1.5" fill-rule="evenodd"/>`,
+        `<path d="${path}" fill="${seriesColor(index, palette)}" stroke="#ffffff" stroke-width="1.5" fill-rule="evenodd"/>`,
       );
     }
   });
@@ -438,7 +469,7 @@ function partToWhole(block: ChartBlock, label: Label): CanvasExportDrawing | und
     markup: parts.join(""),
     legend: series.points.map((point, index) => ({
       label: `${categoryText(point.x, block, label)} ${formatCanvasNumber(point.y, block.format)}${total > 0 ? ` (${String(Math.round((Math.max(0, point.y) / total) * 100))}%)` : ""}`,
-      color: seriesColor(index),
+      color: seriesColor(index, palette),
     })),
   };
 }
@@ -467,7 +498,11 @@ function ringPath(
   return `M${at(outer, start)} A${round(outer)} ${round(outer)} 0 ${String(large)} 1 ${at(outer, end)} L${at(inner, end)} A${round(inner)} ${round(inner)} 0 ${String(large)} 0 ${at(inner, start)} Z`;
 }
 
-function funnel(block: ChartBlock, label: Label): CanvasExportDrawing | undefined {
+function funnel(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): CanvasExportDrawing | undefined {
   const series = block.series[0];
   if (series === undefined) return undefined;
   const top = Math.max(...series.points.map((point) => Math.max(0, point.y)), 0);
@@ -485,7 +520,7 @@ function funnel(block: ChartBlock, label: Label): CanvasExportDrawing | undefine
       svgText(0, y + row / 2 + 4, fit(categoryText(point.x, block, label), 22), {
         fill: EXPORT_INK,
       }),
-      `<rect x="${round(labelWidth + (barRoom - width) / 2)}" y="${round(y + 4)}" width="${round(Math.max(1, width))}" height="${String(row - 8)}" rx="${String(CHART_BAR_RADIUS)}" fill="${seriesColor(0)}"/>`,
+      `<rect x="${round(labelWidth + (barRoom - width) / 2)}" y="${round(y + 4)}" width="${round(Math.max(1, width))}" height="${String(row - 8)}" rx="${String(CHART_BAR_RADIUS)}" fill="${seriesColor(0, palette)}"/>`,
       svgText(
         WIDTH,
         y + row / 2 + 4,
@@ -502,7 +537,11 @@ function funnel(block: ChartBlock, label: Label): CanvasExportDrawing | undefine
   };
 }
 
-function radar(block: ChartBlock, label: Label): CanvasExportDrawing | undefined {
+function radar(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): CanvasExportDrawing | undefined {
   const axes = block.series[0]?.points ?? [];
   if (axes.length < 3) return undefined;
   const width = 420;
@@ -539,13 +578,13 @@ function radar(block: ChartBlock, label: Label): CanvasExportDrawing | undefined
   });
   block.series.forEach((series, index) => {
     const shape = series.points.map((entry, position) => point(position, entry.y));
-    const color = seriesColor(index);
+    const color = seriesColor(index, palette);
     const dash = seriesDash(index);
     parts.push(
       `<polygon points="${shape.map((p) => `${round(p.x)},${round(p.y)}`).join(" ")}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="${String(CHART_LINE_WIDTH)}" stroke-linejoin="round"${dash === undefined ? "" : ` stroke-dasharray="${dash}"`}/>`,
     );
   });
-  const legend = legendFor(block, label);
+  const legend = legendFor(block, label, palette);
   return {
     label: chartLabel(block, label),
     width,
@@ -555,7 +594,11 @@ function radar(block: ChartBlock, label: Label): CanvasExportDrawing | undefined
   };
 }
 
-function sankey(block: ChartBlock, label: Label): CanvasExportDrawing | undefined {
+function sankey(
+  block: ChartBlock,
+  label: Label,
+  palette: ExportPalette,
+): CanvasExportDrawing | undefined {
   const links = block.links ?? [];
   if (links.length === 0) return undefined;
   const labelRoom = 96;
@@ -567,13 +610,13 @@ function sankey(block: ChartBlock, label: Label): CanvasExportDrawing | undefine
   const parts: string[] = [];
   for (const link of layout.links) {
     parts.push(
-      `<path d="${link.path}" transform="translate(${String(labelRoom)} 0)" fill="${seriesColor(link.sourceIndex)}" fill-opacity="0.3"/>`,
+      `<path d="${link.path}" transform="translate(${String(labelRoom)} 0)" fill="${seriesColor(link.sourceIndex, palette)}" fill-opacity="0.3"/>`,
     );
   }
   for (const node of layout.nodes) {
     const x = labelRoom + node.x;
     parts.push(
-      `<rect x="${round(x)}" y="${round(node.y)}" width="${round(node.width)}" height="${round(node.height)}" fill="${seriesColor(node.index)}"/>`,
+      `<rect x="${round(x)}" y="${round(node.y)}" width="${round(node.width)}" height="${round(node.height)}" fill="${seriesColor(node.index, palette)}"/>`,
     );
     const atLeft = node.column === 0;
     const text = `${fit(label(node.label), 12)} ${formatCanvasNumber(Math.max(node.inflow, node.outflow), block.format)}`;

@@ -34,6 +34,7 @@ import {
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
   changeProjectColor,
+  changeProjectDesignSystem,
   changeProjectLifecycle,
   changeProjectNativeProviders,
   changeWorkProjectStatusFile,
@@ -337,6 +338,42 @@ describe("Project creation and lifecycle", () => {
     ]) {
       expect(() => changeProjectBrandKit(project, kit, updatedAt)).toThrow(ProjectPolicyRejected);
     }
+  });
+
+  it("swaps the design system a Project follows, turns it off, and returns to the automatic rule", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    if (project.type === "chat") throw new Error("expected a bound Project");
+    const folder = project.binding.canonicalRoot;
+    const chosen = changeProjectDesignSystem(
+      project,
+      { kind: "file", folder, path: "apps/site/DESIGN.md" },
+      updatedAt,
+    );
+    expect(chosen).toMatchObject({
+      designSystem: { kind: "file", folder, path: "apps/site/DESIGN.md" },
+      version: 2,
+    });
+    const off = changeProjectDesignSystem(chosen, { kind: "none" }, updatedAt);
+    expect(off).toMatchObject({ designSystem: { kind: "none" }, version: 3 });
+    const automatic = changeProjectDesignSystem(off, null, updatedAt);
+    expect(automatic).not.toHaveProperty("designSystem");
+    expect(() => changeProjectDesignSystem(automatic, null, updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+  });
+
+  it("refuses a design system outside the Project's folders, and any for a Chat Project", () => {
+    const project = makeProject(ids.work, "0/1", { type: "work" });
+    expect(() =>
+      changeProjectDesignSystem(
+        project,
+        { kind: "file", folder: "/somewhere/else", path: "DESIGN.md" },
+        updatedAt,
+      ),
+    ).toThrow(ProjectPolicyRejected);
+    expect(() =>
+      changeProjectDesignSystem(makeProject(ids.chat, "0/1"), { kind: "none" }, updatedAt),
+    ).toThrow(ProjectPolicyRejected);
   });
 
   it("refuses to save the brand kit a Project already has", () => {

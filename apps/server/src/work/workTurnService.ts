@@ -131,6 +131,8 @@ import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { WorkTurnFileObserver } from "./workTurnFileObserver";
 import type { WorkProjectStatusFiles } from "./workProjectStatusFiles";
+import { designSystemFolders, type DesignSystemFiles } from "../designSystems/designSystemFiles";
+import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
   DEFAULT_WORK_STATUS_STALE_AFTER_DAYS,
   WORK_STATUS_FILE_NAME,
@@ -462,6 +464,11 @@ export interface WorkTurnServiceDependencies {
    * own transcript as before.
    */
   readonly projectStatusFiles?: WorkProjectStatusFiles;
+  /**
+   * The Project's design systems (`DESIGN.md`). Absent on a host that reads
+   * none, which sends the turn without design-system context.
+   */
+  readonly designSystemFiles?: Pick<DesignSystemFiles, "primary">;
   /** Days before a status counts as stale and a new task opens by taking stock. */
   readonly statusStaleAfterDays?: number;
   /**
@@ -575,6 +582,7 @@ export class WorkTurnService {
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
+  readonly #designSystemFiles: Pick<DesignSystemFiles, "primary"> | undefined;
   readonly #statusStaleAfterDays: number;
   readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
@@ -630,6 +638,7 @@ export class WorkTurnService {
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
+    this.#designSystemFiles = dependencies.designSystemFiles;
     this.#statusStaleAfterDays =
       dependencies.statusStaleAfterDays ?? DEFAULT_WORK_STATUS_STALE_AFTER_DAYS;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
@@ -1422,6 +1431,11 @@ export class WorkTurnService {
                 command.threadId,
                 previous === undefined,
               )),
+          // A server Project's folder is on another machine; its runtime reads it there.
+          ...(project === undefined ||
+          (thread !== undefined && this.#serverProjects?.holds(thread) === true)
+            ? []
+            : await this.#designSystemContributions(project, command.threadId)),
           ...priorTranscript,
           ...(handoff === undefined
             ? []
@@ -2686,6 +2700,48 @@ export class WorkTurnService {
       });
     }
     return contributions;
+  }
+
+  /**
+   * The Project's design system, so user-facing work follows it: the rule,
+   * then the primary `DESIGN.md` as keyed standing context that is sent again
+   * only when the file changed.
+   */
+  async #designSystemContributions(
+    project: Extract<Project, { readonly type: "work" }>,
+    threadId: WorkThreadId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    const files = this.#designSystemFiles;
+    const folders = designSystemFolders(project);
+    if (files === undefined || folders === undefined) return [];
+    const context = await designSystemTurnContext(files, folders);
+    if (context === undefined) return [];
+    return [
+      {
+        text: context.instructions,
+        sourceKind: "instruction",
+        referenceId: `design-system:instruction:${String(threadId)}`,
+        category: "octant-policy",
+        posture: "required",
+        block: { kind: "instructions", text: context.instructions },
+      },
+      ...(context.system === undefined
+        ? []
+        : [
+            {
+              text: context.system.text,
+              sourceKind: "file" as const,
+              referenceId: `design-system:${String(threadId)}`,
+              category: "workspace-context" as const,
+              posture: "compressible" as const,
+              block: {
+                kind: "project-memory" as const,
+                key: context.system.key,
+                text: context.system.text,
+              },
+            },
+          ]),
+    ];
   }
 
   /**
