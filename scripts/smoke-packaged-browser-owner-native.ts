@@ -910,9 +910,20 @@ end run`;
             (s) => !s.includes("Check and add") && !s.includes("AXButton | Continue |"),
           );
           if (projectPickerDiscovery) {
-            await wait("back-to-app", (s) => s.includes("Back to app"));
-            await native("reveal", "Back to app");
-            await native("click", "Back to app");
+            // Settings is a sheet over the app in a wide window, left by its
+            // own "Close Settings" control; in a narrow window it is still the
+            // page with "Back to app". The route waited for "Back to app"
+            // alone and never settled once Settings opened as a sheet.
+            const settings = await wait(
+              "leave-settings",
+              (s) => s.includes("| Close Settings |") || s.includes("Back to app"),
+            );
+            if (settings.includes("| Close Settings |")) {
+              await native("click", "Close Settings");
+            } else {
+              await native("reveal", "Back to app");
+              await native("click", "Back to app");
+            }
             await wait("work-mode-entry", (s) => s.includes(" | Work |"));
             await native("reveal", "Work");
             await native("click", "Work");

@@ -938,6 +938,68 @@
   pointer-events: auto;
 }
 
+/* Settings while it loads: its rail and a page in outline, so the rail and
+   the page title are roughly where they will be and nothing swaps places
+   when Settings arrives. These rules are here, not in settings.css, because
+   that stylesheet arrives with Settings itself: styled from it, the outline
+   was a blank panel for exactly the moment it exists to cover. The frame
+   repeats Settings' own columns for that reason. */
+.settings-loading {
+  display: grid;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  grid-template-columns: var(--octant-sidebar-width, 248px) minmax(0, 1fr);
+}
+
+.settings-loading[data-presentation="sheet"] {
+  height: 100%;
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.settings-loading[data-presentation="narrow"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-loading__rail,
+.settings-loading__page {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oct-space-4);
+}
+
+.settings-loading__rail {
+  padding: var(--oct-space-6) var(--oct-space-5);
+  border-right: 1px solid var(--oct-border);
+}
+
+.settings-loading__page {
+  padding: var(--oct-space-12) var(--oct-space-8);
+}
+
+.settings-loading__title {
+  width: 96px;
+  height: 12px;
+  margin-bottom: var(--oct-space-2);
+}
+
+.settings-loading__rail-row {
+  width: 64%;
+  height: 12px;
+}
+
+.settings-loading__rail-row:nth-child(even) {
+  width: 48%;
+}
+
+.settings-loading__page-row {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--oct-radius-md);
+}
+
 /* A sheet opened in a wide window stays a sheet when the window is made
    narrow, where there is no room around it: it then fills the window. */
 @media (max-width: 960px) {
@@ -951,19 +1013,6 @@
     border: 0;
     border-radius: 0;
   }
-}
-
-/* The persisted app preference must stop entrance motion just like the OS
-   preference, including feature-owned animations on the shared popup. */
-html[data-octant-reduced-motion="true"]
-  :is(
-    .octant-dialog__popup,
-    .octant-dialog__backdrop,
-    .octant-sheet__popup,
-    .octant-sheet__backdrop
-  ) {
-  animation: none;
-  transition: none;
 }
 
 /* One inset for every dialog. The recipe's own padding is a rem step, which

@@ -289,7 +289,14 @@ html[data-octant-theme-mode="light"] {
 
 /* Every Octant-owned scroll surface inherits one quiet, visible scrollbar.
    Feature panels may change geometry, but not silently fall back to browser
-   chrome or hide the only pointer affordance. */
+   chrome or hide the only pointer affordance.
+
+   It is one treatment, declared here and nowhere else: a thin thumb and no
+   painted track, in a pane, a menu, a popup and a sheet alike. Where the
+   system floats scrollbars over content the thumb floats; where it keeps a
+   strip for them the strip is clear. The two standard properties are the
+   rule, and an engine that knows them ignores the `::-webkit-scrollbar` parts
+   below, which only speak for one that does not. */
 :where(*) {
   scrollbar-color: var(--octant-border-strong) transparent;
   scrollbar-width: thin;
@@ -6869,14 +6876,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   z-index: 5;
   overflow: auto;
   background: var(--oct-bg);
-}
-
-.workspace-rail-loading {
-  display: grid;
-  min-height: 100%;
-  place-items: center;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
 }
 
 .code-board__status-filter {

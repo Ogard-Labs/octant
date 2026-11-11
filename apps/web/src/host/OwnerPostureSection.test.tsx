@@ -121,6 +121,85 @@ describe("owner Code recovery controls", () => {
   });
 });
 
+describe("owner wake switches", () => {
+  const wakeReading = (coordinatorWake?: boolean) => ({
+    threadId: target.posture.subject.threadId,
+    messageWake: false,
+    ...(coordinatorWake === undefined ? {} : { coordinatorWake }),
+    version: "c".repeat(64),
+  });
+  function wakeFixture(change: OwnerActionResult, coordinatorWake?: boolean) {
+    const base = fixture({ status: "done", body: {} });
+    const readThreadWake = vi.fn(
+      async (): Promise<OwnerActionResult> => ({
+        status: "done",
+        body: { status: "read", wake: wakeReading(coordinatorWake) },
+      }),
+    );
+    const changeThreadWake = vi.fn(async (): Promise<OwnerActionResult> => change);
+    const spoke: OwnerSpoke = {
+      ...base.spoke,
+      client: { ...base.spoke.client, readThreadWake, changeThreadWake },
+    };
+    return { spoke, readThreadWake, changeThreadWake };
+  }
+  async function openWake(spoke: OwnerSpoke) {
+    const user = userEvent.setup();
+    render(<OwnerPostureSection spokes={[spoke]} />);
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
+    await user.click(screen.getByRole("button", { name: "Read wake switches" }));
+    return user;
+  }
+
+  it("shows a worker's two switches and changes one against the reading shown, then drops it", async () => {
+    const { spoke, readThreadWake, changeThreadWake } = wakeFixture(
+      { status: "done", body: {} },
+      true,
+    );
+    const user = await openWake(spoke);
+    expect(readThreadWake).toHaveBeenCalledWith(target.posture.subject.threadId);
+    expect(await screen.findByText("Wake when a message arrives: Off")).toBeVisible();
+    expect(screen.getByText("Wake for coordinator: On")).toBeVisible();
+    expect(screen.queryByText(/coordinator role/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Turn off Wake for coordinator" }));
+    expect(changeThreadWake).toHaveBeenCalledWith({
+      threadId: target.posture.subject.threadId,
+      expectedVersion: "c".repeat(64),
+      switch: "coordinator-wake",
+      wake: false,
+    });
+    expect(screen.queryByRole("button", { name: /Turn (on|off)/ })).toBeNull();
+    expect(screen.getByText(/Wake for coordinator is off/)).toBeVisible();
+  });
+
+  it("offers only Wake when a message arrives on a thread that is not a worker", async () => {
+    const { spoke } = wakeFixture({ status: "done", body: {} });
+    await openWake(spoke);
+    expect(
+      await screen.findByRole("button", { name: "Turn on Wake when a message arrives" }),
+    ).toBeVisible();
+    expect(screen.queryByText(/Wake for coordinator/)).toBeNull();
+  });
+
+  it.each([
+    ["wake-stale", "Read its wake switches again"],
+    ["not-a-worker", "not a coordinator's worker"],
+    ["not-found", "no longer active"],
+    ["refused", "needs its own fresh unlock"],
+    ["own-unlock-required", "needs its own unlock"],
+  ])("explains a %s refusal without retrying the change", async (kind, text) => {
+    const { spoke, changeThreadWake } = wakeFixture({ status: "refused", kind }, true);
+    const user = await openWake(spoke);
+    await user.click(
+      await screen.findByRole("button", { name: "Turn on Wake when a message arrives" }),
+    );
+    expect(screen.getByText(new RegExp(text))).toBeVisible();
+    expect(changeThreadWake).toHaveBeenCalledTimes(1);
+  });
+});
+
 function deferred<T>() {
   let resolve: (value: T) => void = () => {
     throw new Error("Promise not initialized");

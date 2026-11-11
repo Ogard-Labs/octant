@@ -214,6 +214,34 @@ jobs:
           fi
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
+      # The first-install disk image, built, signed, notarized and stapled by
+      # the packaging step above. It is attached to the release for people to
+      # download and is deliberately not handed to the feed job: the updater
+      # reads the zip. Only the Octant flavor builds one, so a Nightly row finds
+      # none and uploads nothing.
+      - name: Publish the disk image
+        if: matrix.apple_signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRODUCT: ${{ inputs.product }}
+          ASSET_PREFIX: ${{ inputs.asset_prefix }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          images=("${SOURCE_DIR}/out/${PRODUCT}-"*"-darwin-arm64.dmg")
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "No disk image was built for ${PRODUCT}; nothing to attach."
+            exit 0
+          fi
+          if [ "${#images[@]}" -ne 1 ]; then
+            echo "Expected one ${PRODUCT} disk image, found ${#images[@]}." >&2
+            exit 1
+          fi
+          image="${RUNNER_TEMP}/release/${ASSET_PREFIX}-${VERSION}-darwin-arm64.dmg"
+          cp "${images[0]}" "$image"
+          gh release upload "v${VERSION}" "$image" --clobber
+
       # What this Octant candidate's host offers an Octant Nightly window, so
       # a Nightly build can be checked against the published Octant before it
       # ships. One row attaches it; the document does not depend on the

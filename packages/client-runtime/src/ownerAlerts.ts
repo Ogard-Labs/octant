@@ -19,7 +19,12 @@ export interface OwnerSpoke {
     Partial<
       Pick<
         OwnerAdministrationClient,
-        "listPostures" | "changePosture" | "readApprovals" | "answerApproval"
+        | "listPostures"
+        | "changePosture"
+        | "readThreadWake"
+        | "changeThreadWake"
+        | "readApprovals"
+        | "answerApproval"
       >
     >;
   readonly browser?: OwnerBrowserClient;
