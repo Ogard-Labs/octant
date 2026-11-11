@@ -1726,6 +1726,20 @@ declaration or load a resource. A kit carries no filesystem, shell, or provider
 authority, so Chat Projects hold one too. See [Canvas](design/canvas.md) for how
 it reaches an agent and a frame.
 
+A Work or Code Project's **design system** is a `DESIGN.md` in its folder,
+whose content is read from the file and never stored on the record or
+journaled. Which file speaks for the Project (or none) is the person's choice,
+kept on the record as `designSystem` and journaled as
+`project.design-system-changed@1`; without one, the top-level file does. Every
+Work and Code turn is told to follow it and carries the Project's own file as
+keyed standing context; Canvas designs draw with its tokens, which take the
+place of the brand kit when present, and a Canvas that follows it (Canvas
+schema version 28) draws its typed blocks' colours from it. Only a window on this host lists, reads, creates, or
+saves one, a save replaces only the revision it was opened at, and no read or
+write follows a link. This is product context, not an agent brief: the rule
+below that Octant writes no agent brief and a Work turn reads no `AGENTS.md`
+is unchanged. See [Project design systems](design/design-systems.md).
+
 A Work Project may opt into a **status file**: `STATUS.md` at the top of its
 folder, where the work stands, with dated follow-ups and deadlines. The setting
 lives on the Project record as `statusFile` and is journaled as

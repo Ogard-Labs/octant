@@ -25,7 +25,11 @@ labels keep them apart.
 
 **Categorical series order.** Six hues, assigned in a fixed order so a series
 keeps the same colour across charts and legends: brass, teal, rose, violet,
-green, blue (`--oct-series-1..6`, each pinned per mode). A seventh series
+green, blue (`--oct-series-1..6`, each pinned per mode). A Canvas that follows
+a design system replaces these with the design system's chart palette (or its
+primary and secondary colours), and its accent with its primary colour, for
+every typed block it holds; the tones, text, and the second channel stay as
+here ([Project design systems](design-systems.md#where-it-is-used)). A seventh series
 restarts the order, and the legend, the dash pattern, and the data table keep
 them apart. A series label is drawn in `--oct-fg-2`, never in the series hue: a
 12px label needs text contrast the mark's hue does not carry.

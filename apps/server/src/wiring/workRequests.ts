@@ -9,6 +9,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
+import { createDesignSystemRouteHandler } from "../designSystemRoutes";
+import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import {
   composeWorkBoardEvidence,
   type WorkBoardThread,
@@ -488,6 +490,11 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     status: workProjectStatusReader,
     folder: listWorkFolderTopLevel,
   });
+  const designSystemRoutes = createDesignSystemRouteHandler({
+    files: new DesignSystemFiles(),
+    projects: projectService,
+    windowAuthorityStore,
+  });
   const sidebarBackgroundStore = new SidebarBackgroundStore({
     dataDirectory: providerDataDirectory,
   });
@@ -499,6 +506,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     currentAppBackground: () => persistence.readThemeSettings()?.settings.appBackground ?? null,
   });
   return {
+    designSystemRoutes,
     fleetActivityRoutes,
     pendingRequestRoutes,
     sidebarBackgroundRoutes,

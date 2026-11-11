@@ -1,4 +1,10 @@
 import type { CanvasDocumentRecipe } from "@octant/contracts/canvas-skill";
+import { admitCanvasDesignSystemApply } from "@octant/domain/canvas-design-system-policy";
+import {
+  decodeCanvasDesignSystemApplyCommand,
+  type CanvasDesignSystemApplyCommand,
+} from "@octant/contracts/canvas-board";
+import type { CanvasDesignSystem } from "@octant/contracts/canvas";
 import { canvasRecipeStarterBlocks } from "@octant/domain/canvas-recipe-starter";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
@@ -632,6 +638,37 @@ export class CanvasService {
   }
 
   /**
+   * Record a person's switch of the Canvas's design system as a new version.
+   * The route has already read the chosen `DESIGN.md` under the Canvas's own
+   * Project (`designSystem`, undefined for none); like a drag, the switch
+   * comes from the person's own window, so it is recorded as that person.
+   */
+  applyDesignSystem(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+    designSystem: CanvasDesignSystem | undefined,
+  ): CanvasDiagramLayoutReviseResult {
+    let command: CanvasDesignSystemApplyCommand;
+    try {
+      command = { ...decodeCanvasDesignSystemApplyCommand(requestInput), actor: this.#actor };
+    } catch {
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas design system switch is malformed.",
+      };
+    }
+    return this.#appendBoardRevision(
+      command,
+      context,
+      project,
+      "Canvas design system switch is not authorized in this workspace.",
+      (current) => admitCanvasDesignSystemApply(command, current, designSystem, this.#clock()),
+    );
+  }
+
+  /**
    * Record a person's change to one plan task's status as a new version. Like
    * a drag, it comes from the person's own window, so the host records it as
    * that person whatever actor the request names.
@@ -855,11 +892,17 @@ export class CanvasService {
      */
     authoredBy?: CanvasActor,
     presentation?: CanvasPresentation,
+    /**
+     * The Project's design system, read by the host. A route never passes
+     * it: the agent tool stamps the one its thread's Project follows.
+     */
+    designSystem?: CanvasDesignSystem,
   ): CanvasCreateResult {
     return this.#open(requestInput, context, project, {
       ...(blocks === undefined ? {} : { blocks }),
       ...(authoredBy === undefined ? {} : { authoredBy }),
       ...(presentation === undefined ? {} : { presentation }),
+      ...(designSystem === undefined ? {} : { designSystem }),
     });
   }
 
@@ -941,11 +984,12 @@ export class CanvasService {
       readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
       readonly authoredBy?: CanvasActor;
       readonly presentation?: CanvasPresentation;
+      readonly designSystem?: CanvasDesignSystem;
       /** The blocks hold a page a person imported from outside Octant. */
       readonly importedPage?: true;
     },
   ): CanvasCreateResult {
-    const { blocks, authoredBy, presentation } = document;
+    const { blocks, authoredBy, presentation, designSystem } = document;
     let request;
     try {
       request = authorizeCanvasCreateRequest({
@@ -1029,6 +1073,7 @@ export class CanvasService {
         createdAt: admitted.receipt.createdAt,
         ...(starter === undefined ? {} : { blocks: starter }),
         ...(presentation === undefined ? {} : { presentation }),
+        ...(designSystem === undefined ? {} : { designSystem }),
       });
       this.#eventStore.appendCreate({
         canvasId,
