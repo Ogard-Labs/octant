@@ -13290,7 +13290,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
-  ([Hub and spokes](design/hub-and-spokes.md), built). The listener, pairing tickets, pairing
+  ([Hub and spokes](design/hub-and-spokes.md), built). An outside agent on
+  another machine is designed as a third such principal, held to an agent
+  grant the person creates at a local window
+  ([Agent access from other machines](design/agent-access.md), designed, not
+  built). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the
