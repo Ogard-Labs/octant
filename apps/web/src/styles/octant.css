@@ -192,6 +192,8 @@
      dot that says something is live. */
   --oct-motion-spin: 900ms;
   --oct-motion-pulse: 1.6s;
+  /* CSS fallback for the Flowing ground: one slow drift, not an interaction. */
+  --oct-motion-flowing: 36s;
   --oct-ease-standard: ease;
 
   --oct-container-max: 1200px;

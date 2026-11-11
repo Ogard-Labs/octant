@@ -171,6 +171,33 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "characters" });
   });
 
+  it("saves flowing colour as the ground in one choice, then stills the field", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <AppBackgroundSettings
+        background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Application background" }));
+    await user.click(await screen.findByRole("option", { name: "Flowing" }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "flowing" });
+
+    const field = { ...DEFAULT_APP_BACKGROUND, kind: "flowing" as const };
+    rerender(<AppBackgroundSettings background={field} library={library()} onChange={onChange} />);
+    expect(screen.queryByRole("group", { name: "Background effect" })).toBeNull();
+    const motion = screen.getByRole("group", { name: "Background motion" });
+    expect(within(motion).getByRole("button", { name: "Wave" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(motion).getByRole("button", { name: "Still" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ motion: "still" }));
+  });
+
   it("uploads a photo through the host and makes it the ground", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
