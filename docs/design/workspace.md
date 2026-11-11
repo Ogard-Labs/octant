@@ -1149,13 +1149,20 @@ sit side by side without giving any thread a view of another's. The tabs use
 the shared tab rail, which wraps rather than scrolls so no tab hides off the
 edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
-page's picture with the thread, and a thread that kept screenshots shows a
+page's picture with the thread, and, in a Work or Code thread's Browser, a
+**Draw on page** button (a pen-line icon beside it) that keeps the same capture,
+shows it still in place of the page, and floats a drawing bar ("Drawing tools":
+Select, Pen, Box, Arrow, Text, ink, stroke width, Undo, Redo, Delete, **Add to
+chat**, **Discard drawing**) over its bottom centre; **Add to chat** puts the
+marked-up picture in that thread's composer as an ordinary image and sends
+nothing, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
 An agent's recording sits in the strip and the panel like a screenshot, still,
 with a play mark and its length, and plays when the person opens it.
-The rules are in [Browser captures](browser-captures.md) and
+The rules are in [Browser captures](browser-captures.md),
+[Marking up a capture](browser-captures.md#marking-up-a-capture) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device

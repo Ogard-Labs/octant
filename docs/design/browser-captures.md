@@ -188,6 +188,76 @@ the Browser pane
   retries on the next beat.
 - Visual rules are in [DESIGN.md](../../DESIGN.md#transcript).
 
+## Marking up a capture
+
+A person can draw on a picture of the page and put it in the thread's message.
+The marked-up picture is an attachment of that message, not a capture.
+
+- **Where it is offered.** The toolbar's **Draw on page** button (a pen-line
+  icon beside Screenshot) is offered where the Screenshot control is, and only
+  in a Work or Code thread's Browser, where the thread's composer is the place
+  a picture goes. A Project's Browser, Zen's research Browser, and a paired
+  device have no such composer, so the button is absent there, not dead.
+  Chat has no Browser.
+- **The still is the person's own capture.** Pressing the button takes a
+  screenshot through the person's Screenshot route and reads that capture back
+  through the ordinary image read, so the credential-field refusal, the
+  `browser.capture-kept@1` record naming the person, the thread's taint, the
+  32-capture window and the capture strip all behave as for a screenshot. A
+  capture that was not kept says why in the Screenshot control's own words and
+  no drawing starts. Nothing else reads the page's pixels: the native page's
+  view is never read, and a capture the window may not read is never read.
+  Rationale: one source of pictures means one place that decides whether a page
+  may be pictured. Private and stored-profile pages follow whatever the
+  Screenshot control does for them; drawing adds no exception either way.
+- **Taint.** The capture the still comes from is kept after the observation
+  that produced it, so the thread is already marked as holding outside content
+  and the capture adds the page's origin ([What is kept](#what-is-kept)). The
+  marked-up picture is page content: it carries that origin's taint with the
+  thread, and adding it to the message changes nothing about it.
+- **Drawing.** The still replaces the page area, fitted and centred, with a
+  drawing layer in the picture's own pixels over it. The live page is not
+  interactive meanwhile: a native page leaves the window for as long as the
+  layer exists, and a headless preview is not mounted, so a stroke never clicks
+  the page. Using a navigation control of the Browser leaves drawing and
+  discards the marks. Rationale: a drawing over a page that is changing under
+  it would no longer mark what the person saw.
+- **Tools.** A bar floats at the bottom centre of the page area
+  (`role="toolbar"`, "Drawing tools"): **Select** (move a mark), **Pen**,
+  **Box**, **Arrow**, **Text**, an ink choice (red by default, then yellow,
+  green, blue, white, black), **Thin stroke** and **Thick stroke**, **Undo**,
+  **Redo**, **Delete** (the selected mark; disabled with none), **Add to chat**,
+  and **Discard drawing**. Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z undo and redo,
+  Delete or Backspace removes the selected mark, and Escape drops a stroke in
+  progress or the selection and nothing more.
+  Text is typed at the clicked point (Enter or leaving the field keeps it,
+  Escape cancels, empty text adds nothing) in the interface font with a thin
+  outline contrasting with its ink so it reads on any page.
+- **Limits.** At most 200 marks, and a stroke is thinned to 300 points. A click
+  that draws nothing (a box under 4 pixels across, a one-point stroke, a
+  nearly zero-length arrow) adds no mark. Undo reaches back 200 steps. The ink
+  colours are drawn into a picture that leaves the app, so they are fixed
+  values in code and do not follow the theme.
+- **Add to chat.** The still and the marks are composed at the still's own size
+  and exported as a PNG file (`browser-markup.png`). The drawing layer and the
+  export read one description of each mark, so the attached picture is what
+  was drawn. The file goes to the composer of that thread, in this window,
+  through the composer's own image attach: its limits (PNG, JPEG, WebP, GIF;
+  10 MiB each; at most 8 a turn), its refusal when the model reads no images,
+  its upload to the host's staging area in Code, and its thumbnail apply
+  unchanged. Nothing is sent until the person sends the message. Drawing ends,
+  the toolbar says "Added to the message", and the thread's prompt takes focus
+  only when its composer is open in this window.
+- **Waiting.** If the thread's composer is not open, the picture waits in this
+  window's memory for it, at most 8 per thread, and is attached when the
+  composer opens; the toolbar says it will be. A reload drops it. Nothing is
+  stored on the host, in the journal, or in the data directory: the marked-up
+  picture exists only as the message's attachment, and the capture beneath it
+  stays the thread's only record of the page.
+- **Sharpness.** The still is the bounded capture picture (about 40 KiB, up to
+  1280 pixels wide), so it is soft beside the page: small text on it can blur.
+  Drawing does not raise its quality.
+
 ## Proof
 
 Proof is a thread's record of a Browser check: the agent's recent Browser steps

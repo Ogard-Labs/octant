@@ -1,3 +1,4 @@
+import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
@@ -2873,6 +2874,64 @@ describe("WorkThreadWorkspace", () => {
 
     await screen.findByLabelText("Bound provider and model");
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+  });
+
+  it("attaches a picture marked up in this thread's Browser, and refuses it on a model that cannot read images", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const groups = (modalities: ReadonlyArray<string>) => [
+      {
+        ...providerGroup(),
+        sections: [
+          {
+            label: "Models",
+            models: [
+              { model: { id: modelId, displayName: "Model One", inputModalities: modalities } },
+            ],
+          },
+        ],
+      } as never,
+    ];
+    const offer = () =>
+      threadImageOffers.offer(
+        threadImageOfferKey("work", String(threadId)),
+        new File([new Uint8Array([137, 80, 78])], "browser-markup.png", { type: "image/png" }),
+      );
+    const first = render(
+      <WorkThreadWorkspace
+        providerGroups={groups(["text", "image"])}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [] })) } as never}
+      />,
+    );
+    await screen.findByLabelText("Bound provider and model");
+    act(() => {
+      offer();
+    });
+    expect(await screen.findByAltText("browser-markup.png")).toBeInTheDocument();
+    expect(screen.getByLabelText("Work prompt")).toHaveFocus();
+    first.unmount();
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={groups(["text"])}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await screen.findByLabelText("Bound provider and model");
+    act(() => {
+      offer();
+    });
+    expect(await screen.findByLabelText("Attached images")).toHaveTextContent(
+      "Choose an image-capable model to attach images.",
+    );
+    expect(screen.queryByAltText("browser-markup.png")).not.toBeInTheDocument();
   });
 
   it("says a text-only model cannot take a pasted image instead of attaching it", async () => {

@@ -4,12 +4,13 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserWorkspace } from "./BrowserWorkspace";
+import { threadImageOffers } from "../composer/threadImageOffers";
+import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
 const localServers = vi.hoisted(() => ({
@@ -23,6 +24,34 @@ vi.mock("../environment/useLocalServersController", () => ({
     open: (listenerId: string) => localServers.open(listenerId),
   }),
 }));
+
+const pointing = vi.hoisted(() => ({
+  armed: false,
+  lastReason: undefined as string | undefined,
+}));
+vi.mock("./useBrowserFeedbackPointing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./useBrowserFeedbackPointing")>();
+  return {
+    ...actual,
+    useBrowserFeedbackPointing: (
+      input: Parameters<typeof actual.useBrowserFeedbackPointing>[0],
+    ) => {
+      pointing.lastReason = input.unavailableReason;
+      const real = actual.useBrowserFeedbackPointing(input);
+      return pointing.armed ? { ...real, pointing: true } : real;
+    },
+  };
+});
+
+// jsdom has no 2D canvas, so the export is stood in for; its plan and painting
+// are tested in markupExport.test.ts.
+vi.mock("./markupExport", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./markupExport")>();
+  return {
+    ...actual,
+    exportMarkedPicture: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+  };
+});
 
 const threadId = "10000000-0000-4000-8000-000000000001";
 const authority = {
@@ -793,6 +822,213 @@ describe("BrowserWorkspace", () => {
       render(<BrowserWorkspace client={withContext()} tab={tab} />);
       expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Screenshot" })).not.toBeInTheDocument();
+    });
+    describe("Draw on page", () => {
+      const captureId = "a0000000-0000-4000-8000-000000000002";
+      const pictureUrl = "data:image/png;base64,iVBORw0KGgo=";
+      const originalImage = globalThis.Image;
+
+      class LoadedImage {
+        naturalWidth = 400;
+        naturalHeight = 200;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      }
+
+      afterEach(() => {
+        globalThis.Image = originalImage;
+        pointing.armed = false;
+      });
+
+      function keptCapture() {
+        return vi.fn(
+          async () =>
+            ({
+              status: "running",
+              threadId,
+              context,
+              observation: observation({ capture: { status: "kept", captureId } }),
+              evidence: [],
+            }) as any,
+        );
+      }
+
+      function drawable(takeCapture: BrowserAutomationClient["takeCapture"] = keptCapture()) {
+        globalThis.Image = LoadedImage as unknown as typeof Image;
+        const browser = withContext(takeCapture);
+        browser.readCapture = vi.fn(async () => ({ captureId, dataUrl: pictureUrl }) as any);
+        return browser;
+      }
+
+      async function openDrawing(browser: BrowserAutomationClient) {
+        render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        return screen.findByRole("toolbar", { name: "Drawing tools" });
+      }
+
+      function drag(layer: Element, from: [number, number], to: [number, number]) {
+        vi.spyOn(layer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 200));
+        const event = (type: string, [x, y]: [number, number]) =>
+          fireEvent(
+            layer,
+            new MouseEvent(type, {
+              clientX: x,
+              clientY: y,
+              button: 0,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        event("pointerdown", from);
+        event("pointermove", [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2 + 12]);
+        event("pointermove", to);
+        event("pointerup", to);
+      }
+
+      it("takes a capture and shows the still with the drawing bar", async () => {
+        const takeCapture = keptCapture();
+        const browser = drawable(takeCapture);
+        const bar = await openDrawing(browser);
+        expect(takeCapture).toHaveBeenCalledWith({
+          threadId,
+          request: expect.objectContaining({ kind: "screenshot", contextId: context.contextId }),
+        });
+        expect(browser.readCapture).toHaveBeenCalledWith({ threadId, captureId });
+        expect(within(bar).getByRole("button", { name: "Pen" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+        expect(within(bar).getByRole("button", { name: "Add to chat" })).toBeEnabled();
+        expect(screen.getByRole("application", { name: "Page capture to draw on" })).toBeVisible();
+        // The page's own click-through preview is not mounted while the picture is drawn on.
+        expect(
+          screen.queryByRole("article", { name: "Interactive headless Browser preview" }),
+        ).toBeNull();
+      });
+
+      it("says why a screenshot was not kept and shows no drawing bar", async () => {
+        const takeCapture = vi.fn(
+          async () =>
+            ({
+              status: "running",
+              threadId,
+              context,
+              observation: observation({ capture: { status: "not-kept", reason: "no-picture" } }),
+              evidence: [],
+            }) as any,
+        );
+        const browser = drawable(takeCapture);
+        render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        expect(
+          await screen.findByText(
+            "This screenshot could not be kept: the Browser gave no picture of this page.",
+          ),
+        ).toBeVisible();
+        expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
+        expect(browser.readCapture).not.toHaveBeenCalled();
+      });
+
+      it("takes the native page out of the window while the picture is drawn on and brings it back after", async () => {
+        const browser = drawable();
+        await openDrawing(browser);
+        expect(document.querySelector(RENDERER_OVERLAY_SELECTOR)).not.toBeNull();
+        expect(document.querySelector(".browser-markup")).not.toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
+        await waitFor(() => expect(document.querySelector(RENDERER_OVERLAY_SELECTOR)).toBeNull());
+      });
+
+      it("adds a pen mark for a drag and removes it again with Undo", async () => {
+        const browser = drawable();
+        const bar = await openDrawing(browser);
+        const layer = screen.getByRole("application", { name: "Page capture to draw on" });
+        expect(within(bar).getByRole("button", { name: "Undo" })).toBeDisabled();
+        drag(layer, [20, 20], [120, 60]);
+        expect(layer.querySelectorAll("polyline")).toHaveLength(1);
+        fireEvent.click(within(bar).getByRole("button", { name: "Undo" }));
+        expect(layer.querySelectorAll("polyline")).toHaveLength(0);
+        fireEvent.click(within(bar).getByRole("button", { name: "Redo" }));
+        expect(layer.querySelectorAll("polyline")).toHaveLength(1);
+      });
+
+      it("offers one PNG to this thread's message and leaves drawing mode", async () => {
+        const taken = vi.fn();
+        const unsubscribe = threadImageOffers.subscribe(`work:${threadId}`, taken);
+        try {
+          const browser = drawable();
+          const bar = await openDrawing(browser);
+          drag(
+            screen.getByRole("application", { name: "Page capture to draw on" }),
+            [20, 20],
+            [120, 60],
+          );
+          fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
+          await waitFor(() => expect(taken).toHaveBeenCalledOnce());
+          const [file] = taken.mock.calls[0] as [File];
+          expect(file.type).toBe("image/png");
+          expect(file.name).toBe("browser-markup.png");
+          expect(await screen.findByText("Added to the message")).toBeVisible();
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
+          expect(document.querySelector(RENDERER_OVERLAY_SELECTOR)).toBeNull();
+        } finally {
+          unsubscribe();
+        }
+      });
+
+      it("discards the drawing on Close without offering anything", async () => {
+        const taken = vi.fn();
+        const unsubscribe = threadImageOffers.subscribe(`work:${threadId}`, taken);
+        try {
+          const browser = drawable();
+          await openDrawing(browser);
+          fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
+          expect(taken).not.toHaveBeenCalled();
+        } finally {
+          unsubscribe();
+        }
+      });
+
+      it("leaves drawing mode when the person uses a navigation control", async () => {
+        const browser = drawable();
+        await openDrawing(browser);
+        fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+        await waitFor(() =>
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull(),
+        );
+      });
+
+      it("is absent where the Screenshot control is absent and where the thread has no composer", async () => {
+        globalThis.Image = LoadedImage as unknown as typeof Image;
+        const without = withContext();
+        without.readCapture = vi.fn(async () => ({ captureId, dataUrl: pictureUrl }) as any);
+        const first = render(<BrowserWorkspace canDrawOnPage client={without} tab={tab} />);
+        expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+        expect(screen.queryByRole("button", { name: "Draw on page" })).toBeNull();
+        first.unmount();
+
+        const noComposer = drawable();
+        render(<BrowserWorkspace client={noComposer} tab={tab} />);
+        expect(await screen.findByRole("button", { name: "Screenshot" })).toBeVisible();
+        expect(screen.queryByRole("button", { name: "Draw on page" })).toBeNull();
+      });
+
+      it("cannot be started while an element is being pointed at, and pointing is refused while drawing", async () => {
+        pointing.armed = true;
+        const browser = drawable();
+        render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
+        expect(await screen.findByRole("button", { name: "Draw on page" })).toBeDisabled();
+        cleanup();
+
+        pointing.armed = false;
+        await openDrawing(drawable());
+        expect(pointing.lastReason).toBe(
+          "Finish or discard the drawing before choosing an element.",
+        );
+      });
     });
   });
 

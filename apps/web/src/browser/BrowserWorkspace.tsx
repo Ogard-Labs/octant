@@ -18,6 +18,7 @@ import type {
   BrowserActionKind,
   BrowserActionRequest,
   BrowserCaptureNotKeptReason,
+  BrowserCaptureId,
   BrowserContextId,
   BrowserProfile,
   BrowserViewportPoint,
@@ -40,6 +41,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   PanelRight,
+  PenLine,
   RotateCw,
   ShieldCheck,
   Undo2,
@@ -56,6 +58,12 @@ import { useProductFeedback } from "./useProductFeedback";
 import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
+import { BrowserMarkupStage } from "./BrowserMarkupStage";
+import {
+  MAX_WAITING_OFFERS,
+  threadImageOfferKey,
+  threadImageOffers,
+} from "../composer/threadImageOffers";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
@@ -77,6 +85,8 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
+  // A kept capture being drawn on: the page leaves the window for as long as it is up.
+  ".browser-markup",
   ".octant-dialog__backdrop",
   ".octant-dialog__viewport",
   ".octant-dialog__popup",
@@ -119,6 +129,11 @@ export interface BrowserWorkspaceProps {
   readonly onManageExtensions?: () => void;
   /** A newly added Browser tab must not attach to another tab's current context. */
   readonly startFresh?: boolean;
+  /**
+   * Offer Draw on page. Only where this thread's message is the place a marked-up
+   * picture goes: a Browser with no thread composer beside it offers nothing.
+   */
+  readonly canDrawOnPage?: boolean;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -145,6 +160,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // because every poll of the page rewrites `message`.
   const [captureNotice, setCaptureNotice] = useState<string>();
   const [capturing, setCapturing] = useState(false);
+  // The person's own kept capture while it is being drawn on; its marks live in
+  // the stage and are dropped with it.
+  const [markupPicture, setMarkupPicture] = useState<string>();
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
@@ -293,19 +311,26 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const nativeState = nativeSurface.state;
-  const feedbackSelectionUnavailable = !activeContext
-    ? "Open a Browser page before choosing an element."
-    : snapshot?.waitingForPerson === "sign-in"
-      ? "Finish sign-in and Continue before choosing an element."
-      : nativeSurface.embedded !== undefined
-        ? "Element selection is not available in this embedded Browser presentation yet."
-        : nativeContext &&
-            (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
-              props.hostBridge.subscribeBrowserSurfaceState === undefined)
-          ? "This app build cannot select a native Browser element."
-          : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
-            ? "Refresh the page preview before choosing an element."
-            : undefined;
+  // A page that is gone leaves nothing to draw on.
+  useEffect(() => {
+    if (!activeContext) setMarkupPicture(undefined);
+  }, [activeContext]);
+  const feedbackSelectionUnavailable =
+    markupPicture !== undefined
+      ? "Finish or discard the drawing before choosing an element."
+      : !activeContext
+        ? "Open a Browser page before choosing an element."
+        : snapshot?.waitingForPerson === "sign-in"
+          ? "Finish sign-in and Continue before choosing an element."
+          : nativeSurface.embedded !== undefined
+            ? "Element selection is not available in this embedded Browser presentation yet."
+            : nativeContext &&
+                (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
+                  props.hostBridge.subscribeBrowserSurfaceState === undefined)
+              ? "This app build cannot select a native Browser element."
+              : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
+                ? "Refresh the page preview before choosing an element."
+                : undefined;
   const feedbackPointing = useBrowserFeedbackPointing({
     contextId:
       snapshot?.context?.contextId === undefined ? undefined : String(snapshot.context.contextId),
@@ -646,6 +671,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     > = {},
   ): Promise<void> {
     if (snapshot?.context === undefined || scope === undefined) return;
+    // The page is about to change under the picture: the marks go with it.
+    setMarkupPicture(undefined);
     localFailure.current = false;
     setStatus("waiting");
     setMessage(undefined);
@@ -671,8 +698,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   /**
    * The person's Screenshot control: the one pane gesture that keeps a picture
    * with the thread. Refreshing the preview is an ordinary action and keeps none.
+   * Answers the kept capture's id, or undefined when none was kept.
    */
-  async function takeScreenshot(): Promise<void> {
+  async function keepScreenshot(): Promise<BrowserCaptureId | undefined> {
     const takeCapture = props.client.takeCapture;
     if (
       snapshot?.context === undefined ||
@@ -680,7 +708,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       props.tab.threadId === undefined ||
       takeCapture === undefined
     ) {
-      return;
+      return undefined;
     }
     localFailure.current = false;
     setCapturing(true);
@@ -698,16 +726,63 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         },
       });
       update(next);
-      if (next.observation?.capture?.status === "not-kept") {
-        setCaptureNotice(captureNotKeptNotice(next.observation.capture.reason));
+      const capture = next.observation?.capture;
+      if (capture?.status === "not-kept") {
+        setCaptureNotice(captureNotKeptNotice(capture.reason));
       }
+      return capture?.status === "kept" ? capture.captureId : undefined;
     } catch (error) {
       localFailure.current = true;
       localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
       applyFailure(error, setStatus, setMessage);
+      return undefined;
     } finally {
       setCapturing(false);
     }
+  }
+
+  async function takeScreenshot(): Promise<void> {
+    await keepScreenshot();
+  }
+
+  /**
+   * Draw on page: keep a screenshot exactly as the Screenshot control does,
+   * then draw on that kept picture. No other source of pixels is read, so the
+   * credential-field refusal, the journal record and the origin's taint all
+   * apply as they do for any capture.
+   */
+  async function startMarkup(): Promise<void> {
+    const readCapture = props.client.readCapture;
+    const threadId = props.tab.threadId;
+    if (readCapture === undefined || threadId === undefined) return;
+    const captureId = await keepScreenshot();
+    if (captureId === undefined) return;
+    try {
+      const image = await readCapture.call(props.client, { threadId, captureId });
+      setMarkupPicture(image.dataUrl);
+    } catch {
+      setCaptureNotice("The kept screenshot could not be opened for drawing.");
+    }
+  }
+
+  function addMarkupToMessage(file: File): void {
+    if (props.tab.threadId === undefined) return;
+    const result = threadImageOffers.offer(
+      threadImageOfferKey(props.tab.mode, String(props.tab.threadId)),
+      file,
+    );
+    if (result === "full") {
+      setCaptureNotice(
+        `This thread already has ${String(MAX_WAITING_OFFERS)} pictures waiting for its message. Open the thread and send or remove one first.`,
+      );
+      return;
+    }
+    setMarkupPicture(undefined);
+    setCaptureNotice(
+      result === "taken"
+        ? "Added to the message"
+        : "Added to the message when you open this thread",
+    );
   }
 
   async function stop(cancel: boolean): Promise<void> {
@@ -951,6 +1026,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   function nativeCommand(command: "back" | "forward" | "reload" | "stop"): void {
     if (snapshot?.context === undefined || props.hostBridge?.commandBrowserSurface === undefined)
       return;
+    setMarkupPicture(undefined);
     void props.hostBridge
       .commandBrowserSurface({
         contextId: snapshot.context.contextId,
@@ -1236,6 +1312,24 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             <Camera aria-hidden="true" size={14} />
           </OctantButton>
         ) : null}
+        {activeContext &&
+        props.canDrawOnPage === true &&
+        props.tab.threadId !== undefined &&
+        props.client.takeCapture !== undefined &&
+        props.client.readCapture !== undefined ? (
+          <OctantButton
+            aria-label="Draw on page"
+            className="browser-workspace__close"
+            disabled={capturing || markupPicture !== undefined || feedbackPointing.pointing}
+            onClick={() => void startMarkup()}
+            size="icon"
+            title="Draw on page (keeps a screenshot with this thread)"
+            type="button"
+            variant="ghost"
+          >
+            <PenLine aria-hidden="true" size={16} />
+          </OctantButton>
+        ) : null}
         {activeContext ? (
           props.hostBridge?.openBrowserExternal === undefined ? null : (
             <OctantButton
@@ -1442,6 +1536,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ref={nativeSurface.mount}
         >
           {nativeSurface.embedded}
+          {markupPicture === undefined ? null : (
+            <BrowserMarkupStage
+              dataUrl={markupPicture}
+              onAddToChat={addMarkupToMessage}
+              onClose={() => setMarkupPicture(undefined)}
+            />
+          )}
           {nativeSurface.failed ? (
             <OctantAlert className="browser-workspace__native-error" tone="danger">
               <p>The live Chromium page could not attach to this pane.</p>
@@ -1450,6 +1551,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               </OctantButton>
             </OctantAlert>
           ) : null}
+        </div>
+      ) : markupPicture !== undefined ? (
+        // The headless preview's click-through handlers are not mounted while
+        // the picture is drawn on, so a stroke can never click the page.
+        <div className="browser-workspace__markup-page">
+          <BrowserMarkupStage
+            dataUrl={markupPicture}
+            onAddToChat={addMarkupToMessage}
+            onClose={() => setMarkupPicture(undefined)}
+          />
         </div>
       ) : (
         <article

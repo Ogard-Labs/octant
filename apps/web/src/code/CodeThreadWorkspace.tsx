@@ -101,6 +101,7 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments } from "./useCodeAttachments";
+import { threadImageOfferKey, useThreadImageOffers } from "../composer/threadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
@@ -689,6 +690,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         attachments.refuse("Choose a vision model to attach images.");
       else void attachments.attach(files);
     },
+  });
+  // A picture marked up in this thread's Browser arrives here as a file and
+  // meets the same checks as one dropped on the composer.
+  useThreadImageOffers(threadImageOfferKey("code", String(props.threadId)), (file, arrival) => {
+    if (props.attachmentClient === undefined) {
+      attachments.refuse("Image attachments are unavailable on this host.");
+    } else if (boundModelReadsImages(providerGroups, thread) === false) {
+      attachments.refuse("Choose a vision model to attach images.");
+    } else {
+      void attachments.attach([file]);
+    }
+    if (arrival === "live") textareaRef.current?.focus();
   });
   if (props.controller.status === "disconnected") {
     return (

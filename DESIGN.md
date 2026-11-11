@@ -1319,6 +1319,22 @@ reads by shape and word, never by colour. It moves only once opened, where a
 ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
 its first frame.
 
+**Draw on page** is a ghost icon button (a 16px pen-line) beside Screenshot in
+the Browser toolbar, offered only in a Work or Code thread's Browser. While a
+picture is drawn on, its still fills the page area, fitted and centred on the
+canvas colour, and one floating bar sits at the bottom centre
+(`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
+shadow of a menu, with no outline and no blur. Its controls are 16px icon
+buttons with a tooltip, the chosen tool and width pressed (`aria-pressed`):
+Select, Pen, Box, Arrow, Text; six ink dots named Red, Yellow, Green, Blue,
+White and Black, the chosen one ringed in the text colour; Thin and Thick
+stroke; Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
+button, and **Discard drawing**. The ink colours are drawn into a picture that
+leaves the app, so they are fixed values in code
+(`apps/web/src/theme/markupInk.ts`), the one place the renderer draws a
+colour that no theme changes. A selected mark is outlined with a dashed accent
+line; that outline is never in the exported picture.
+
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.

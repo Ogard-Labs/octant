@@ -4598,7 +4598,8 @@ flowchart LR
     they ask: neither the MCP tool approval view nor the harness approval
     carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
-  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  tool, or the person takes with the Browser pane's Screenshot control (or
+  Draw on page, which takes the same capture to draw on), is kept
   with the thread that owns the Browser, and so is a short recording (an
   animated PNG) of the agent's page during one call that asked for it with
   `record`. The bytes live in the host's managed
