@@ -1101,18 +1101,27 @@ describe("the public-block visual language", () => {
         css,
       )?.[1] ?? "";
 
-    it("puts a notice above the page and below everything the person opens", () => {
-      expect(layer("toast")).toBeGreaterThan(layer("sticky"));
+    it("stands a notice above dialogs and sheets and below everything a person aims at", () => {
+      // Under a dialog's backdrop a notice could be neither read nor dismissed;
+      // under a menu's items it took their clicks.
       expect(layer("toast")).toBeGreaterThan(layer("overlay"));
-      expect(layer("toast")).toBeLessThan(layer("floating"));
-      expect(layer("floating")).toBeLessThan(layer("modal"));
+      expect(layer("floating")).toBeGreaterThan(layer("overlay"));
+      expect(layer("toast")).toBeGreaterThan(layer("floating"));
+      expect(layer("toast")).toBeLessThan(layer("popup"));
     });
 
-    it("keeps the shadcn popups on the floating layer", () => {
-      for (const recipe of ["dropdown-menu", "popover", "select", "combobox"]) {
+    it("keeps every popup recipe on the popup layer and never on a number of its own", () => {
+      for (const recipe of ["dropdown-menu", "context-menu", "popover", "select", "combobox"]) {
         const source = readFileSync(join(webRoot, "ui", "shadcn", `${recipe}.tsx`), "utf8");
-        expect(source).toContain(`"z-${layer("floating")} `);
+        expect(source).toContain('"z-[var(--oct-z-popup)] ');
+        expect(source).not.toMatch(/\bz-\d+\b/);
       }
+      for (const file of ["OctantPopover.tsx", "OctantSelect.tsx"]) {
+        const source = readFileSync(join(webRoot, "ui", "base", file), "utf8");
+        expect(source).toContain("z-[var(--oct-z-popup)]");
+        expect(source).not.toMatch(/\bz-\d+\b/);
+      }
+      expect(ruleBody(base, ".octant-menu__positioner")).toContain("z-index: var(--oct-z-popup);");
     });
 
     it("draws dialogs and sheets on the floating layer", () => {
@@ -1126,9 +1135,9 @@ describe("the public-block visual language", () => {
       }
     });
 
-    it("puts a tooltip and a hover card above the notices they may overlap", () => {
+    it("puts a tooltip and a hover card on the popup layer", () => {
       for (const part of [".octant-tooltip__positioner", ".octant-preview-card__positioner"]) {
-        expect(ruleBody(system, part)).toContain("z-index: var(--oct-z-modal);");
+        expect(ruleBody(system, part)).toContain("z-index: var(--oct-z-popup);");
       }
     });
 

@@ -958,7 +958,7 @@ h6 {
 }
 
 .octant-menu__positioner {
-  z-index: 80;
+  z-index: var(--oct-z-popup);
   max-width: calc(100vw - 16px);
   outline: 0;
 }

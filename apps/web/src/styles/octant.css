@@ -314,13 +314,15 @@
   --oct-z-base: 1;
   --oct-z-sticky: 20;
   --oct-z-overlay: 40;
-  /* A notice sits above the page and below everything the person opens: a
-     menu, popover, select, dialog or sheet stays usable under a toast that
-     lands on it. `--oct-z-floating` is the layer of dialogs and popups; the
-     shadcn recipes spell it `z-50`, and a contract test keeps the two equal. */
-  --oct-z-toast: 45;
+  /* Dialogs and sheets stand on the floating layer, a notice above them so
+     that one raised while a dialog is open can still be read and dismissed,
+     and everything a person opens to aim at (menu, popover, select,
+     combobox, tooltip, hover card) above the notice, so a notice that lands
+     on it never takes its clicks. The shadcn recipes spell `--oct-z-popup`
+     as a class; the contract test keeps the order. */
   --oct-z-floating: 50;
-  --oct-z-modal: 60;
+  --oct-z-toast: 55;
+  --oct-z-popup: 60;
 
   /* Media queries cannot read custom properties, so the literals below
      are repeated by hand in @media rules. These exist so JS and future
@@ -2096,7 +2098,7 @@ input.switch:checked::after {
 }
 
 .octant-tooltip__positioner {
-  z-index: var(--oct-z-modal);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-tooltip {
@@ -2127,7 +2129,7 @@ input.switch:checked::after {
    at the tooltip's layer so a card opened from a menu-adjacent row is never
    buried under the dock. */
 .octant-preview-card__positioner {
-  z-index: var(--oct-z-modal);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-preview-card {
