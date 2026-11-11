@@ -76,6 +76,12 @@ export interface ComposerModelPickerProps {
   /** Opens Model roles on Settings › Octant Harness, linked from the Octant entry's note. */
   readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
+  /**
+   * The model cannot change for the rest of this thread's life (a completed
+   * thread), as opposed to being busy for now. The name is a fact to read, so
+   * it keeps its ink; every other disabled picker keeps the disabled look.
+   */
+  readonly locked?: boolean;
   readonly ariaLabel?: string;
   /**
    * The selected model's declared options, shown beside its configuration
@@ -134,7 +140,7 @@ interface ModelRow {
 export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [selectionPending, setSelectionPending] = useState(false);
-  const controlsDisabled = props.disabled === true || selectionPending;
+  const controlsDisabled = props.disabled === true || props.locked === true || selectionPending;
   // A request from outside the picker (the limit notice under a compaction)
   // opens it; the count it mounted with is no request.
   // Only the active pane's thread composer answers: the scope spans the whole
@@ -674,7 +680,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
           </>
         }
-        triggerClassName="composer-model-picker__trigger"
+        triggerClassName={`composer-model-picker__trigger${props.locked === true ? " composer-model-picker__trigger--locked" : ""}`}
         triggerLabel={ariaLabel}
         triggerVariant="ghost"
         triggerDisabled={controlsDisabled}

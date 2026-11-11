@@ -1820,6 +1820,51 @@ deletes from its disk; a paired device is refused both. The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
+The host reads a worktree's changes outside any sandbox, so it runs nothing a
+repository configured: Git starts with `core.fsmonitor=false`,
+`GIT_OPTIONAL_LOCKS=0`, no global or system config, and
+`--ignore-submodules=dirty`, and a repository whose local or worktree config
+gives a filter a clean or process command is not read at all (its worktree is
+never found clean). Checked with a fixture whose fsmonitor and clean filter
+write a marker file: plain `git status` runs both, the host's read runs
+neither.
+
+Settings › Code › Worktrees on this computer lists the Git worktrees other
+tools and agents made, found without an index: a bounded walk of the home
+folder (400,000 entries, 20 seconds, depth 10) reads names only and follows
+each linked worktree's `.git` file to its repository's common folder, and
+each Code Project's repository is added whatever the walk finds; each
+repository is then asked once with `git worktree list`, so a worktree is
+found wherever it lives. The walk skips package and toolchain caches,
+`node_modules`, the Trash, and the platform's per-user application data
+(`Library` on macOS, `AppData` on Windows, `.local` on Linux), does not enter
+a repository's working tree once found, and asks a clone with no
+`worktrees` folder nothing. Spotlight is not used: it does not index `.git`
+files. A scan runs only when the person asks, one at a time, and its result
+is kept in memory until the host restarts; worktrees Octant owns are left
+out. Each row says whether its folder is gone, Git locked it, its commit is
+pushed or merged, when Git last recorded using it, and a bounded size.
+Removing one works everything out again from Git: it refuses the
+repository's own checkout, a bare repository, a locked worktree, one Octant
+owns, a folder now linked to another repository or whose link is broken,
+uncommitted or untracked changes, and a repository that sets a filter
+command. Commits only this worktree's branch reaches are listed and must be
+confirmed as the same set (up to 200), a detached HEAD's are refused, and
+Git's own records changing in the last 15 minutes ask once more, since
+another program may be working there. Then `git worktree remove`, never
+forced, removes it and the branch stays. A worktree whose folder is gone has
+only its own `worktrees/<name>` record removed, not the repository's other
+prunable entries, and is refused when it was on a detached HEAD whose commits
+no branch, tag or remote-tracking ref keeps: that record's HEAD and reflog may
+be all that keeps them from collection. Removing several at once asks once
+first, as removing one does. Settings › Code › Xcode builds, on a Mac, lists the build
+folders in `~/Library/Developer/Xcode/DerivedData` whose `info.plist`
+workspace is gone (orphaned) or that Xcode has not opened for 30 days
+(unused); a workspace on an unmounted volume is neither. Removing one reads
+it again and keeps a folder Xcode has opened since. Both lists and every
+removal are a local window's only; nothing is journaled, because none of
+these folders is Octant's.
+
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
 resolves itself: the client names the source thread and a finished turn, and
 the host picks the files from its own record — the checkpoint the next writing
@@ -3425,8 +3470,13 @@ the thread it came from.
   saying paused or scheduled and opening the routine in Automation Center
   where the host can (the phone shows the card without Open). The desktop and
   web thread's Environment lists the routine in its Routines row, paused or
-  not, as it lists any routine made from the thread; the phone has no
-  Environment, and a paired device cannot read routines.
+  not, as it lists any routine made from the thread. The phone has no
+  Environment, so its Work and Code thread screen shows a read-only
+  **Scheduled** list of the routines the thread set up (name, schedule, and
+  whether it is paused). A paired device may read routines, because the remote
+  route policy classifies an Automation list as a Project overview read and
+  forwards it for the device's own host; it may not resume or edit one from the
+  phone, so a paused routine says to resume it at a window on this computer.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
@@ -15761,7 +15811,10 @@ update source. Octant Nightly builds no disk image.
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and
 Windows Work and Code only after an explicitly approved Windows confinement
-design is documented. Everything on the work board is in scope for the first
+design is documented. Finding and removing worktrees on this computer is
+authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
+host-side Git and file operations a person confirms, starts no agent, and so
+does not lift that confinement gate. Everything on the work board is in scope for the first
 proper preview release (maintainer decision, 2026-11-06, which replaces the
 2026-10-26 post-preview track): mobile maturity (Android internal builds,
 redacted push, capture and voice, public store distribution), a full LSP /

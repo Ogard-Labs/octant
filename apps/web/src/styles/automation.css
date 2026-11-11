@@ -630,7 +630,7 @@
 .list-arrangement__field select {
   min-height: var(--oct-control-height-sm);
   padding: 0 0.4rem;
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   color: inherit;

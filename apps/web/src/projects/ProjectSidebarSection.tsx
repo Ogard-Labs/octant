@@ -51,6 +51,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { RAIL_PROJECT_LIMIT } from "../shell/SidebarRail";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -768,22 +769,24 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             Project tree moved it into its heading, pressing the switch threw
             the switch itself 62px left and 20px down from under the pointer. */}
         {listTools}
-        {projectViewEditor === undefined || projectViewState === undefined ? null : (
-          <CodeProjectViewEditorDialog
-            mode={projectViewEditor.mode}
-            onClose={() => setProjectViewEditor(undefined)}
-            onSave={(input) => {
-              persistProjectViewState(
-                projectViewEditor.mode === "create"
-                  ? createCodeProjectView(projectViewState, input)
-                  : updateCodeProjectView(projectViewState, input),
-              );
-              setProjectViewEditor(undefined);
-            }}
-            projects={props.projects}
-            {...(editingView === undefined ? {} : { view: editingView })}
-          />
-        )}
+        <OctantDialogPresence>
+          {projectViewEditor === undefined || projectViewState === undefined ? null : (
+            <CodeProjectViewEditorDialog
+              mode={projectViewEditor.mode}
+              onClose={() => setProjectViewEditor(undefined)}
+              onSave={(input) => {
+                persistProjectViewState(
+                  projectViewEditor.mode === "create"
+                    ? createCodeProjectView(projectViewState, input)
+                    : updateCodeProjectView(projectViewState, input),
+                );
+                setProjectViewEditor(undefined);
+              }}
+              projects={props.projects}
+              {...(editingView === undefined ? {} : { view: editingView })}
+            />
+          )}
+        </OctantDialogPresence>
         {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
           <ProjectThreadStatus
             {...(props.threadErrorMessage === undefined

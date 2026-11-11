@@ -202,7 +202,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Background",
           scope: "app",
           keywords:
-            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("appearance.scheme.light-preset"),
@@ -280,7 +280,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("app-background-motion"),
           label: "Background motion",
           scope: "app",
-          keywords: "background motion still wave animate animated move click ripple bounce pixels",
+          keywords:
+            "background motion still wave animate animated move click ripple bounce pixels flowing",
         },
         {
           id: settingId("app-background-effect"),
@@ -667,6 +668,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
+        },
+        {
+          id: settingId("host-worktrees"),
+          label: "Worktrees on this computer",
+          scope: "host",
+          keywords:
+            "worktrees agents stale scan computer home folder other tools git worktree remove prune disk space",
+        },
+        {
+          id: settingId("xcode-build-data"),
+          label: "Xcode builds",
+          scope: "host",
+          keywords:
+            "xcode derived data deriveddata build folders cache stale orphaned disk space remove",
         },
         {
           id: settingId("open-in-applications"),

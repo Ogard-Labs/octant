@@ -40,6 +40,43 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
+  it("marks only a picker whose model cannot change as locked, so its name keeps its ink", () => {
+    const view = render(
+      <ComposerModelPicker
+        ariaLabel="Locked model"
+        groups={groups()}
+        locked
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    const locked = screen.getByRole("button", { name: "Locked model" });
+    expect(locked).toBeDisabled();
+    expect(locked).toHaveClass("composer-model-picker__trigger--locked");
+    view.unmount();
+
+    const busy = render(
+      <ComposerModelPicker
+        ariaLabel="Busy model"
+        disabled
+        groups={groups()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Busy model" })).not.toHaveClass(
+      "composer-model-picker__trigger--locked",
+    );
+    busy.unmount();
+
+    render(<ComposerModelPicker ariaLabel="No provider" groups={[]} onSelect={vi.fn()} />);
+    const none = screen.getByRole("button", { name: "No provider" });
+    expect(none).toBeDisabled();
+    expect(none).not.toHaveClass("composer-model-picker__trigger--locked");
+  });
+
   it("opens the requested task's existing picker without selecting or granting anything", async () => {
     const onSelect = vi.fn();
     requestThreadControl("browser-owner", "provider");

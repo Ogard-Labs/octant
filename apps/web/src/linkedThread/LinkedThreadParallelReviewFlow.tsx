@@ -2,6 +2,7 @@ import type { LinkedThreadParallelReviewController } from "./useLinkedThreadPara
 import { LinkedThreadAggregateView } from "./LinkedThreadAggregateView";
 import { LinkedThreadPreviewDialog } from "./LinkedThreadPreviewDialog";
 import { useParallelRunOutcomes } from "./useParallelRunOutcomes";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface LinkedThreadParallelReviewFlowProps {
   readonly controller: LinkedThreadParallelReviewController;
@@ -18,20 +19,22 @@ export function LinkedThreadParallelReviewFlow(props: LinkedThreadParallelReview
   });
   return (
     <>
-      {controller.preview === undefined ? null : (
-        <LinkedThreadPreviewDialog
-          error={controller.errorMessage}
-          notice={controller.notice}
-          onClose={controller.close}
-          onConfirm={() => {
-            void controller.confirm();
-          }}
-          open={controller.dialogOpen}
-          preview={controller.preview}
-          skillName={controller.skillName}
-          submitting={controller.submitting}
-        />
-      )}
+      <OctantDialogPresence>
+        {controller.preview === undefined ? null : (
+          <LinkedThreadPreviewDialog
+            error={controller.errorMessage}
+            notice={controller.notice}
+            onClose={controller.close}
+            onConfirm={() => {
+              void controller.confirm();
+            }}
+            open={controller.dialogOpen}
+            preview={controller.preview}
+            skillName={controller.skillName}
+            submitting={controller.submitting}
+          />
+        )}
+      </OctantDialogPresence>
       {controller.aggregate === undefined ? null : (
         <LinkedThreadAggregateView
           aggregate={controller.aggregate}

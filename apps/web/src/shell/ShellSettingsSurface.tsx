@@ -15,6 +15,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -90,6 +91,7 @@ export interface ShellSettingsSurfaceProps {
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
+  readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
@@ -191,6 +193,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.archivedWorktreesClient === undefined
               ? {}
               : { archivedWorktreesClient: props.archivedWorktreesClient })}
+            {...(props.diskCleanupClient === undefined
+              ? {}
+              : { diskCleanupClient: props.diskCleanupClient })}
             {...(props.personMemoryClient === undefined
               ? {}
               : { personMemoryClient: props.personMemoryClient })}

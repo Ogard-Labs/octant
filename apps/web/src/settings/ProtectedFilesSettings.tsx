@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { SettingRow, SettingsCompactRow, SettingsSection, SettingsState } from "./primitives";
@@ -228,27 +229,30 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
   return (
     <SettingsSection description={PROTECTED_FILES_FACT} title="Protected files">
       {body}
-      {confirming === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Remove protection"
-          destructive
-          onCancel={() => setConfirming(undefined)}
-          onConfirm={() => {
-            const group = confirming;
-            setConfirming(undefined);
-            void send({
-              kind: "remove-built-in-protected-files",
-              id: group.id,
-              confirmed: true,
-            });
-          }}
-          pending={busy}
-          title={`Stop protecting ${confirming.label}?`}
-        >
-          Every agent on this computer will be able to read and change {confirming.paths.join(", ")}
-          . The change is recorded, and you can protect them again here.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {confirming === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Remove protection"
+            destructive
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => {
+              const group = confirming;
+              setConfirming(undefined);
+              void send({
+                kind: "remove-built-in-protected-files",
+                id: group.id,
+                confirmed: true,
+              });
+            }}
+            pending={busy}
+            title={`Stop protecting ${confirming.label}?`}
+          >
+            Every agent on this computer will be able to read and change{" "}
+            {confirming.paths.join(", ")}. The change is recorded, and you can protect them again
+            here.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

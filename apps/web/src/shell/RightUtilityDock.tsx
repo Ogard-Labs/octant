@@ -1,6 +1,7 @@
 import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { ShellResizeHandle } from "./ShellResizeHandle";
@@ -75,7 +76,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     return () => observer.disconnect();
   }, [props.isNarrow, props.open]);
 
-  if (!props.open) return null;
+  if (!props.open && !props.isNarrow) return null;
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second
@@ -120,18 +121,22 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
 
   if (props.isNarrow) {
     return (
-      <OctantDialog
-        initialFocus={closeButton}
-        label={
-          props.resolution.kind === "closed" ? "Right sidebar" : props.resolution.surface.label
-        }
-        onClose={props.onClose}
-        open
-        popupId="right-utility-dock"
-        {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
-      >
-        {surface}
-      </OctantDialog>
+      <OctantDialogPresence>
+        {props.open ? (
+          <OctantDialog
+            initialFocus={closeButton}
+            label={
+              props.resolution.kind === "closed" ? "Right sidebar" : props.resolution.surface.label
+            }
+            onClose={props.onClose}
+            open
+            popupId="right-utility-dock"
+            {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
+          >
+            {surface}
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     );
   }
 

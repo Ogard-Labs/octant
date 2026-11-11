@@ -3743,6 +3743,13 @@ html[data-octant-increased-contrast="true"]
   overflow-wrap: anywhere;
 }
 
+.host-worktrees__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  justify-content: flex-end;
+}
+
 .archived-worktrees__mono {
   font-family: var(--oct-font-mono);
   overflow-wrap: anywhere;

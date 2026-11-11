@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface CanvasPublicLinksSectionProps {
   readonly canvasId: CanvasId;
@@ -190,18 +191,20 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
           {notice}
         </p>
       )}
-      {revoking === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Revoke link"
-          destructive
-          onCancel={() => setRevoking(undefined)}
-          onConfirm={() => void revoke(revoking)}
-          pending={busy}
-          title="Revoke this public link?"
-        >
-          Anyone who has {revoking.url} will no longer be able to open it.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {revoking === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Revoke link"
+            destructive
+            onCancel={() => setRevoking(undefined)}
+            onConfirm={() => void revoke(revoking)}
+            pending={busy}
+            title="Revoke this public link?"
+          >
+            Anyone who has {revoking.url} will no longer be able to open it.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

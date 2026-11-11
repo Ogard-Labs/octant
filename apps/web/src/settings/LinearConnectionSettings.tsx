@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts/integration";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
@@ -173,20 +174,22 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             </div>
           </SettingRow>
         </div>
-        {connected && disconnectArmed ? (
-          <OctantConfirmDialog
-            confirmLabel="Confirm disconnect"
-            destructive
-            onCancel={() => setDisconnectArmed(false)}
-            onConfirm={() => {
-              setDisconnectArmed(false);
-              void runCommand("logout");
-            }}
-            title="Disconnect Linear?"
-          >
-            Remove this host&apos;s Linear connection? You can reconnect later.
-          </OctantConfirmDialog>
-        ) : null}
+        <OctantDialogPresence>
+          {connected && disconnectArmed ? (
+            <OctantConfirmDialog
+              confirmLabel="Confirm disconnect"
+              destructive
+              onCancel={() => setDisconnectArmed(false)}
+              onConfirm={() => {
+                setDisconnectArmed(false);
+                void runCommand("logout");
+              }}
+              title="Disconnect Linear?"
+            >
+              Remove this host&apos;s Linear connection? You can reconnect later.
+            </OctantConfirmDialog>
+          ) : null}
+        </OctantDialogPresence>
         <div className="settings-feedback-slot" aria-live="polite">
           {commandError === undefined ? null : (
             <SettingsState kind="error">{commandError}</SettingsState>
