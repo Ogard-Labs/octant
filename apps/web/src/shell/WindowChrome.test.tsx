@@ -841,25 +841,20 @@ describe("WindowChrome", () => {
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's tray takes the whole material, and the card on it keeps
-    // the raised card's fill: a card that was glass too blurred the tray it
-    // stood in and came out darker than the tray.
-    const tray =
-      systemStyles.match(
-        /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.composer-frame:not\(\.composer-frame--held\) \{([^}]*)\}/,
-      )?.[1] ?? "";
-    expect(tray).toContain("background-color: var(--oct-glass-floor);");
-    expect(tray).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
+    // The composer's pill is the glass surface, with the glass stroke as its
+    // ring; the frame around it and its rows draws nothing.
     const surface =
       systemStyles.match(
         /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
       )?.[1] ?? "";
-    expect(surface).not.toContain("backdrop-filter");
+    expect(surface).toContain("background-color: var(--oct-glass-floor);");
+    expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
     expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
-    // Under Window glass the card is a clear step over the tray, not the same
-    // grey with a ring.
+    expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
+    // Under Window glass the pill is a step lighter than the glass around
+    // it: the floor made it the darker of the two.
     expect(systemStyles).toMatch(
-      /\.shell--material-translucent \.composer-frame \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
+      /\.shell--material-translucent \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
     );
   });
 

@@ -62,8 +62,11 @@ describe("plan usage above the composer", () => {
     const group = await screen.findByRole("group", { name: "Plan usage left" });
     expect(within(group).getByText("5h")).toBeVisible();
     expect(within(group).getByText("85%")).toBeVisible();
-    expect(within(group).getByText("wk")).toBeVisible();
+    expect(within(group).getByText("week")).toBeVisible();
     expect(within(group).getByText("43%")).toBeVisible();
+    // Each meter says its window and its share in one name.
+    expect(within(group).getByRole("img", { name: /85% left$/ })).toBeVisible();
+    expect(within(group).getByRole("img", { name: /43% left$/ })).toBeVisible();
     // Another account's windows never stand in for the one the thread will use.
     expect(within(group).queryByText("10%")).toBeNull();
   });

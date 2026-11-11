@@ -1,8 +1,10 @@
-/* Plan usage above a composer: a short name, a thin bar and the share left,
-   for the shortest and the longest window the provider reported. Meta ink on
-   the page, tabular figures, no fill behind the row. The fill is the theme's
+/* Plan usage beside a composer: a bar and the share left, for the shortest
+   and the longest window the provider reported. The figure is in the primary
+   ink, tabular, with no fill behind the row. One meter carries no name (the
+   tooltip has it); two each lead with a quiet one. The fill is the theme's
    accent (the ink, in the monochrome default); a window near its limit or
-   spent takes the warning or danger ink, as the context meter's popover does. */
+   spent takes the warning or danger ink, as the context meter's popover
+   does. */
 .plan-usage {
   display: inline-flex;
   flex: 0 0 auto;
@@ -19,7 +21,7 @@
 
   display: inline-flex;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
 }
 
 .plan-usage__meter[data-level="near"] {
@@ -30,28 +32,36 @@
   --plan-usage-fill: var(--oct-danger-fg);
 }
 
+/* A name is there only to tell two meters apart, so it is the quiet ink. */
 .plan-usage__name {
-  color: var(--oct-fg);
+  color: var(--oct-meta);
 }
 
 .plan-usage__bar {
   flex: 0 0 auto;
 }
 
+/* The smooth bar is a groove with a raised fill: the track is pressed into
+   the page and the fill carries the bevel's highlight, the same two edges a
+   button has. At 3px with flat paints it was a hairline that read as an
+   underline of the figure beside it. */
 .plan-usage__bar--smooth {
   display: inline-block;
-  width: 52px;
-  height: 3px;
+  width: 56px;
+  height: 6px;
   overflow: hidden;
   background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
   border-radius: var(--oct-radius-pill);
+  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .plan-usage__bar--smooth > span {
   display: block;
   height: 100%;
+  min-width: 6px;
   background: var(--plan-usage-fill);
   border-radius: inherit;
+  box-shadow: inset 0 1px 0 var(--octant-bevel-strong);
 }
 
 /* Square cells; the unlit ones are the track, the lit ones the accent. */
@@ -66,5 +76,7 @@
 
 .plan-usage__percent {
   min-width: 3ch;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
   text-align: right;
 }

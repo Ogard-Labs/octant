@@ -14,7 +14,6 @@
     "apps/web/src/styles/project-threads.css": 3
   },
   "spacing-scale": {
-    "apps/web/src/styles.css": 2,
-    "apps/web/src/styles/octant.css": 1
+    "apps/web/src/styles.css": 2
   }
 }
