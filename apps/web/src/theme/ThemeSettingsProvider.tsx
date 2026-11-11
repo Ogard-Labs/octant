@@ -27,6 +27,7 @@ import {
   SYSTEM_INCREASED_CONTRAST,
 } from "./increasedContrastAttribute";
 import { rememberThemeMode } from "./firstPaintTheme";
+import { upgradeLegacyAccent } from "./accentSwatches";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -127,7 +128,12 @@ export function ThemeSettingsProvider(props: {
 
   const applied = useMemo(() => {
     if (props.settings === undefined) return undefined;
-    const accessible = enforceSidebarBackgroundAccessibility(props.settings);
+    // The one place stored overrides enter the renderer's painting: an accent
+    // saved before the light fills were deepened is read as the same swatch.
+    const accessible = enforceSidebarBackgroundAccessibility({
+      ...props.settings,
+      semanticOverrides: upgradeLegacyAccent(props.settings.semanticOverrides),
+    });
     // The grey roles follow the combined value, so an OS that asks for
     // increased contrast gets them even while the in-app setting is off.
     return {
