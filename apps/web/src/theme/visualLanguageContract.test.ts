@@ -850,6 +850,27 @@ describe("the public-block visual language", () => {
     expect(tray).toMatch(/min-width:\s*min-content/);
   });
 
+  it("lets the Review tool's heads wrap instead of overlapping or clipping at the dock's 280px minimum", () => {
+    // jsdom has no layout, so the rules are pinned in the CSS. At 280px the
+    // findings head kept its nowrap status line at full width, ran 14px past
+    // the edge, and drew the "Review" label over it; the view switch's last
+    // item was cut off. Both now wrap to a second row.
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const history = readFileSync(join(webRoot, "gitHistory/git-history.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      css.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+    expect(rule(dock, "\\.right-utility-dock__tool \\.code-delivery-pane__toolbar")).toMatch(
+      /flex-wrap:\s*wrap/,
+    );
+    const status = rule(dock, "\\.right-utility-dock__tool \\.code-delivery-pane__toolbar > p");
+    expect(status).toMatch(/white-space:\s*normal/);
+    expect(status).toMatch(/max-width:\s*100%/);
+    const views = rule(history, '\\.git-history__toolbar \\[data-slot="toggle-group"\\]');
+    expect(views).toMatch(/flex-wrap:\s*wrap/);
+    expect(views).toMatch(/max-width:\s*100%/);
+  });
+
   it("keeps Usage on the open grammar instead of stat cards", () => {
     const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
     const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");
