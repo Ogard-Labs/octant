@@ -3066,13 +3066,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     />
                   </span>
                 )}
-                <ComposerVoiceButton
-                  disabled={creating || completionLocked}
-                  onTranscript={(transcript) =>
-                    rememberDraft(appendTranscript(prompt, transcript), null)
-                  }
-                />
               </>
+            ),
+            dictate: (
+              <ComposerVoiceButton
+                disabled={creating || completionLocked}
+                onTranscript={(transcript) =>
+                  rememberDraft(appendTranscript(prompt, transcript), null)
+                }
+              />
             ),
             actions: {
               kind: "send-or-stop",
