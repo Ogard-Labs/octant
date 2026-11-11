@@ -1085,4 +1085,29 @@ describe("the public-block visual language", () => {
       );
     });
   });
+
+  describe("dock tool tiles", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const body = (selector: string) => {
+      const start = dock.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return dock.slice(start, dock.indexOf("}", start));
+    };
+
+    it("clips every tile to its box and gives its tool a definite height to scroll within", () => {
+      expect(body(".dock-tile")).toMatch(/overflow:\s*hidden/);
+      const tool = body(".dock-tile > .right-utility-dock__tool");
+      expect(tool).toMatch(/overflow:\s*hidden/);
+      expect(tool).toMatch(/min-height:\s*0/);
+      expect(tool).toMatch(/flex:\s*1 1 0/);
+      expect(
+        body('.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > *'),
+      ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
+    });
+
+    it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
+      expect(body(".dock-tile")).not.toMatch(/background/);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
+    });
+  });
 });

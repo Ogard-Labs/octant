@@ -58,6 +58,12 @@ export interface ThreadUtilityDockState {
    * stands for all of a tool's tabs. Never present on the bottom panel's state.
    */
   readonly minimised?: ReadonlyArray<string>;
+  /**
+   * The Browser page that was last shown. The Browser is one tool with pages,
+   * so showing "the Browser" again (from its strip entry, a menu, a drag or its
+   * card) returns to this page rather than to whichever page is first.
+   */
+  readonly lastBrowser?: string;
 }
 
 /**
@@ -203,14 +209,18 @@ export function closeUtilityTabState(
     return settle(tabs, state.layout, state.active, {
       preferred: neighbourTile(state, tabId),
       minimised,
+      lastBrowser: state.lastBrowser,
     });
   }
-  if (state.active !== tabId) return settle(tabs, undefined, state.active, { minimised });
+  if (state.active !== tabId) return settle(tabs, undefined, state.active, { minimised, lastBrowser: state.lastBrowser });
   // The shown tool went: the next one that is not a card takes its place.
   const cards = new Set(minimised);
   const before = state.tabs.slice(0, closedIndex).filter((tab) => !cards.has(tab.id)).length;
   const visible = tabs.filter((tab) => !cards.has(tab.id));
-  return settle(tabs, undefined, visible[Math.min(before, visible.length - 1)]?.id, { minimised });
+  return settle(tabs, undefined, visible[Math.min(before, visible.length - 1)]?.id, {
+    minimised,
+    lastBrowser: state.lastBrowser,
+  });
 }
 
 /**
@@ -224,7 +234,10 @@ export function removeUtilityTabs(
 ): ThreadUtilityDockState {
   const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
-  return settle(tabs, state.layout, state.active, { minimised: state.minimised });
+  return settle(tabs, state.layout, state.active, {
+    minimised: state.minimised,
+    lastBrowser: state.lastBrowser,
+  });
 }
 
 export function retainAvailableUtilityTabs(
@@ -235,7 +248,10 @@ export function retainAvailableUtilityTabs(
   if (tabs.length === state.tabs.length) {
     if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
-  return settle(tabs, state.layout, state.active, { minimised: state.minimised });
+  return settle(tabs, state.layout, state.active, {
+    minimised: state.minimised,
+    lastBrowser: state.lastBrowser,
+  });
 }
 
 /** The tabs the dock body shows, in layout order, or just the active tab. */
@@ -276,6 +292,7 @@ export function showUtilityTabAlone(
   if (state.layout === undefined && state.active === tabId) return state;
   return settle(state.tabs, undefined, tabId, {
     minimised: withoutMinimisedTool(state, tab.surface),
+    lastBrowser: state.lastBrowser,
   });
 }
 
@@ -293,7 +310,7 @@ export function hideUtilityTile(
     state.tabs,
     withoutTile(layout, tabId),
     state.active === tabId ? neighbourTile(state, tabId) : state.active,
-    { minimised: state.minimised },
+    { minimised: state.minimised, lastBrowser: state.lastBrowser },
   );
 }
 
@@ -326,11 +343,19 @@ export function minimiseUtilityTool(
   if (layout === undefined) {
     const active =
       state.active !== undefined && toolIds.has(state.active) ? undefined : state.active;
-    return { tabs: state.tabs, ...(active === undefined ? {} : { active }), minimised: cards };
+    const { active: _shown, layout: _none, ...rest } = withoutCards(state);
+    return withLastBrowser({
+      ...rest,
+      ...(active === undefined ? {} : { active }),
+      minimised: cards,
+    });
   }
   const order = layoutTabIds(layout);
   const remaining = order.filter((id) => !toolIds.has(id));
-  if (remaining.length === 0) return { tabs: state.tabs, minimised: cards };
+  if (remaining.length === 0) {
+    const { active: _shown, layout: _gone, ...rest } = withoutCards(state);
+    return withLastBrowser({ ...rest, minimised: cards });
+  }
   let focus = state.active;
   if (state.active !== undefined && toolIds.has(state.active)) {
     const before = order
@@ -340,7 +365,10 @@ export function minimiseUtilityTool(
   }
   let kept = layout;
   for (const id of toolIds) kept = withoutTile(kept, id);
-  return settle(state.tabs, kept, focus, { minimised: cards });
+  return settle(state.tabs, kept, focus, {
+    minimised: cards,
+    lastBrowser: state.lastBrowser,
+  });
 }
 
 /**
@@ -520,6 +548,13 @@ function neighbourTile(state: ThreadUtilityDockState, tabId: string): string | u
  * any other hidden tab replaces the focused tile's tool.
  */
 function focusTab(original: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  return withLastBrowser(focusTabUnrecorded(original, tabId));
+}
+
+function focusTabUnrecorded(
+  original: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
   const tab = original.tabs.find((candidate) => candidate.id === tabId);
   if (tab === undefined) return original;
   // Showing any tab of a minimised tool brings the whole tool back.
@@ -552,12 +587,13 @@ function withMinimised(
   minimised: ReadonlyArray<string> | undefined,
 ): ThreadUtilityDockState {
   if (minimised === state.minimised) return state;
-  return {
-    tabs: state.tabs,
-    ...(state.active === undefined ? {} : { active: state.active }),
-    ...(state.layout === undefined ? {} : { layout: state.layout }),
-    ...(minimised === undefined ? {} : { minimised }),
-  };
+  return { ...withoutCards(state), ...(minimised === undefined ? {} : { minimised }) };
+}
+
+/** A state without its cards: what is shown and which Browser page was last. */
+function withoutCards(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const { minimised: _cards, ...rest } = state;
+  return rest;
 }
 
 function browserTileTabId(state: ThreadUtilityDockState): string | undefined {
@@ -601,7 +637,37 @@ function settle(
   options: {
     readonly preferred?: string | undefined;
     readonly minimised?: ReadonlyArray<string> | undefined;
+    readonly lastBrowser?: string | undefined;
   } = {},
+): ThreadUtilityDockState {
+  return withLastBrowser({
+    ...settleUnrecorded(tabs, layout, active, options),
+    ...(options.lastBrowser === undefined ? {} : { lastBrowser: options.lastBrowser }),
+  });
+}
+
+/**
+ * Records the Browser page now on screen as the one to return to, and forgets
+ * a remembered page that is no longer an open Browser page.
+ */
+function withLastBrowser(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const isBrowser = (id: string | undefined) =>
+    id !== undefined && state.tabs.some((tab) => tab.id === id && tab.surface === "browser");
+  const shown = shownUtilityTabIds(state).find(isBrowser);
+  const next = shown ?? (isBrowser(state.lastBrowser) ? state.lastBrowser : undefined);
+  if (next === state.lastBrowser) return state;
+  const { lastBrowser: _dropped, ...rest } = state;
+  return next === undefined ? rest : { ...rest, lastBrowser: next };
+}
+
+function settleUnrecorded(
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  layout: DockTileLayout | undefined,
+  active: string | undefined,
+  options: {
+    readonly preferred?: string | undefined;
+    readonly minimised?: ReadonlyArray<string> | undefined;
+  },
 ): ThreadUtilityDockState {
   const open = new Set(tabs.map((tab) => tab.id));
   const minimised = (options.minimised ?? []).filter((id) => open.has(id));
@@ -684,7 +750,7 @@ function place(
         columns: [...scaled.slice(0, focusedColumn + 1), added, ...scaled.slice(focusedColumn + 1)],
       },
       tabId,
-      { minimised: state.minimised },
+      { minimised: state.minimised, lastBrowser: state.lastBrowser },
     );
   }
   // "Beside" with both columns present falls back to below in the last column.
@@ -706,7 +772,7 @@ function place(
       ),
     },
     tabId,
-    { minimised: state.minimised },
+    { minimised: state.minimised, lastBrowser: state.lastBrowser },
   );
 }
 
@@ -889,6 +955,7 @@ interface StoredDockState {
   readonly active?: string;
   readonly layout?: DockTileLayout;
   readonly minimised?: ReadonlyArray<string>;
+  readonly lastBrowser?: string;
 }
 
 function encodeDockStates(
@@ -905,6 +972,7 @@ function encodeDockStates(
       ...(tiled && state.minimised !== undefined && state.minimised.length > 0
         ? { minimised: [...state.minimised] }
         : {}),
+      ...(tiled && state.lastBrowser !== undefined ? { lastBrowser: state.lastBrowser } : {}),
     };
   }
   return encoded;
@@ -935,7 +1003,13 @@ function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState
   const minimised = tiled ? decodeMinimised(candidate.minimised, tabs) : [];
   const cards = new Set(minimised);
   const visible = tabs.filter((tab) => !cards.has(tab.id));
-  const withCards = minimised.length === 0 ? {} : { minimised };
+  const remembered =
+    tiled &&
+    typeof candidate.lastBrowser === "string" &&
+    tabs.some((tab) => tab.id === candidate.lastBrowser && tab.surface === "browser")
+      ? { lastBrowser: candidate.lastBrowser }
+      : {};
+  const withCards = { ...(minimised.length === 0 ? {} : { minimised }), ...remembered };
   const fallback = visible.at(-1)?.id;
   const activeCandidate = typeof candidate.active === "string" ? candidate.active : undefined;
   // A record that holds cards and names no active tab was showing the overview.

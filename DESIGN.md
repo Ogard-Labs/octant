@@ -2248,7 +2248,11 @@ ever under its floor: when stacked tiles cannot all fit the dock, the tile area
 scrolls with every tile at the floor. Choosing a tab that is shown
 focuses its tile; choosing one that is not replaces the focused tile's tool.
 All Browser tabs are pages of one Browser tool, so there is at most one Browser
-tile and choosing another page changes that tile's page. A tile resolves its own
+tile and choosing another page changes that tile's page; the dock remembers the
+page last shown and returns to it whenever the Browser is shown again, from its
+strip entry, a menu or a drag. A tile clips its tool to its box (it has no fill of
+its own), and gives the tool a definite height to scroll within, so one tool's
+rows are never painted over the next tile. A tile resolves its own
 tool: one that cannot be described for the active pane says so inside its tile,
 never shows another pane's content, and leaves the other tiles on screen. The
 single-tool view is the same tile area with one caption-less tile, and tiles are

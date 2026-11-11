@@ -37,6 +37,12 @@ import {
   type ThreadUtilityDockStates,
 } from "./rightUtilityDockSelection";
 
+/** The remembered Browser page is checked by its own tests; these compare tabs and selection. */
+function bare(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const { lastBrowser: _remembered, ...rest } = state;
+  return rest;
+}
+
 describe("thread-owned right utility dock tabs", () => {
   it("adds independent Browser and Terminal instances while singleton tools stay singular", () => {
     const browserOne = "10000000-0000-4000-8000-000000000001";
@@ -50,7 +56,7 @@ describe("thread-owned right utility dock tabs", () => {
     state = addUtilityTabState(state, "files", "10000000-0000-4000-8000-000000000004");
     state = addUtilityTabState(state, "files", "10000000-0000-4000-8000-000000000005");
 
-    expect(state).toEqual({
+    expect(bare(state)).toEqual({
       tabs: [
         { id: browserOne, surface: "browser" },
         { id: browserTwo, surface: "browser" },
@@ -69,7 +75,7 @@ describe("thread-owned right utility dock tabs", () => {
 
     states = addThreadUtilityTab(states, key, "browser", tabId, contextId);
 
-    expect(threadUtilityDockState(states, key)).toEqual({
+    expect(bare(threadUtilityDockState(states, key))).toEqual({
       tabs: [{ id: tabId, surface: "browser", browserContextId: contextId }],
       active: tabId,
     });
@@ -86,7 +92,7 @@ describe("thread-owned right utility dock tabs", () => {
     // An announced agent session belongs to the thread's shared context, so
     // the reveal selects the singleton tab instead of whichever dedicated
     // instance a link open added first.
-    expect(threadUtilityDockState(states, key)).toEqual({
+    expect(bare(threadUtilityDockState(states, key))).toEqual({
       tabs: [
         { id: dedicatedId, surface: "browser" },
         { id: "browser", surface: "browser" },
@@ -107,21 +113,21 @@ describe("thread-owned right utility dock tabs", () => {
     states = openThreadUtilityTab(states, first, "terminal");
     states = openThreadUtilityTab(states, second, "ios-simulator");
 
-    expect(threadUtilityDockState(states, first)).toEqual({
+    expect(bare(threadUtilityDockState(states, first))).toEqual({
       tabs: [
         { id: "browser", surface: "browser" },
         { id: "terminal", surface: "terminal" },
       ],
       active: "terminal",
     });
-    expect(threadUtilityDockState(states, second)).toEqual({
+    expect(bare(threadUtilityDockState(states, second))).toEqual({
       tabs: [{ id: "ios-simulator", surface: "ios-simulator" }],
       active: "ios-simulator",
     });
 
     states = selectThreadUtilityTab(states, first, "browser");
     states = closeThreadUtilityTab(states, first, "browser");
-    expect(threadUtilityDockState(states, first)).toEqual({
+    expect(bare(threadUtilityDockState(states, first))).toEqual({
       tabs: [{ id: "terminal", surface: "terminal" }],
       active: "terminal",
     });
@@ -186,9 +192,11 @@ describe("thread utility presentation persistence", () => {
     writeUtilityDockPresentation({ localStorage }, "window-a", { open: true, threads: states });
 
     expect(
-      threadUtilityDockState(
-        readUtilityDockPresentation({ localStorage }, "window-a").threads,
-        key,
+      bare(
+        threadUtilityDockState(
+          readUtilityDockPresentation({ localStorage }, "window-a").threads,
+          key,
+        ),
       ),
     ).toEqual({
       tabs: [
@@ -217,14 +225,14 @@ describe("thread utility presentation persistence", () => {
     const restored = readUtilityDockPresentation({ localStorage }, "window-a");
 
     expect(restored.open).toBe(true);
-    expect(threadUtilityDockState(restored.threads, first)).toEqual({
+    expect(bare(threadUtilityDockState(restored.threads, first))).toEqual({
       tabs: [
         { id: "browser", surface: "browser" },
         { id: "terminal", surface: "terminal" },
       ],
       active: "browser",
     });
-    expect(threadUtilityDockState(restored.threads, second)).toEqual({
+    expect(bare(threadUtilityDockState(restored.threads, second))).toEqual({
       tabs: [{ id: "files", surface: "files" }],
       active: "files",
     });
@@ -305,9 +313,11 @@ describe("thread utility presentation persistence", () => {
     );
 
     expect(
-      threadUtilityDockState(
-        readUtilityDockPresentation({ localStorage }, "window-a").threads,
-        key,
+      bare(
+        threadUtilityDockState(
+          readUtilityDockPresentation({ localStorage }, "window-a").threads,
+          key,
+        ),
       ),
     ).toEqual({
       tabs: [
@@ -324,7 +334,9 @@ describe("thread utility presentation persistence", () => {
     const states = openThreadUtilityTab(new Map(), key, "terminal");
     writeBottomPanelToolPresentation({ localStorage }, "window-a", states);
     expect(
-      threadUtilityDockState(readBottomPanelToolPresentation({ localStorage }, "window-a"), key),
+      bare(
+        threadUtilityDockState(readBottomPanelToolPresentation({ localStorage }, "window-a"), key),
+      ),
     ).toEqual({
       tabs: [{ id: "terminal", surface: "terminal" }],
       active: "terminal",
@@ -666,6 +678,60 @@ describe("dock tool tiles", () => {
       closeUtilityTabState(state, "files"),
     );
     expect(closed.tabs.map((tab) => tab.id)).toEqual(["terminal", "plan"]);
+  });
+
+  it("remembers the Browser page last shown and forgets it when that page closes", () => {
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = openUtilityTabState(state, "files");
+    expect(state.lastBrowser).toBe(pageTwo);
+    state = selectUtilityTabState(state, pageOne);
+    expect(state.lastBrowser).toBe(pageOne);
+    state = selectUtilityTabState(state, pageTwo);
+    state = showUtilityTabAlone(selectUtilityTabState(state, "files"), "files");
+    expect(state.lastBrowser).toBe(pageTwo);
+    expect(closeUtilityTabState(state, pageTwo).lastBrowser).toBeUndefined();
+    expect(closeUtilityTabState(state, pageOne).lastBrowser).toBe(pageTwo);
+  });
+
+  it("keeps the remembered Browser page through a stored round trip and drops one that is gone", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = openUtilityTabState(state, "files");
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
+      open: true,
+      threads: new Map([[key, state]]),
+    });
+    const read = (value: unknown) => {
+      localStorage.setItem(
+        "octant.shell.utility-dock.window-a.v1",
+        JSON.stringify({ open: true, threads: { [key]: value } }),
+      );
+      return threadUtilityDockState(
+        readUtilityDockPresentation({ localStorage }, "window-a").threads,
+        key,
+      );
+    };
+    writeUtilityDockPresentation({ localStorage }, "window-b", {
+      open: true,
+      threads: new Map([[key, state]]),
+    });
+    expect(
+      threadUtilityDockState(readUtilityDockPresentation({ localStorage }, "window-b").threads, key)
+        .lastBrowser,
+    ).toBe(pageTwo);
+    expect(
+      read({ tabs: ["files"], active: "files", lastBrowser: "files" }).lastBrowser,
+    ).toBeUndefined();
+    expect(read({ tabs: ["files"], active: "files", lastBrowser: 7 }).lastBrowser).toBeUndefined();
   });
 
   it("counts the columns a state shows", () => {

@@ -719,10 +719,44 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  /* A tile has no fill of its own, so anything a tool paints past its box
+     would show in the next tile (a Files tree drawn over Vitals). It clips. */
+  overflow: hidden;
 }
 
+/* The tool gets a definite height to scroll within: the tile's body flexes to
+   what the caption leaves, and the tool's own root flexes to the body, so a
+   percentage height anywhere below cannot resolve to its content. */
 .dock-tile > .right-utility-dock__tool {
+  display: flex;
   height: auto;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > * {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.dock-tile > .right-utility-dock__tool[data-dock-inset="true"] {
+  overflow: auto;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages {
+  flex: none;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages__page-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages__page-body > * {
   min-height: 0;
   flex: 1 1 0;
 }
