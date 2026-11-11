@@ -23,6 +23,9 @@ export function WhatsNewAnnouncementDialog(props: WhatsNewAnnouncementDialogProp
   // The dialog fades out after it is answered, and the answer clears the
   // announcement at once; keep the last one so the content does not empty
   // while it is still on screen.
+  // The dialog opens on its one forward action, as an alert opens on its
+  // default button; "Not now" is a Tab or an Escape away.
+  const primary = useRef<HTMLButtonElement>(null);
   const last = useRef(props.announcement);
   if (props.announcement !== undefined) last.current = props.announcement;
   const announcement = props.announcement ?? last.current;
@@ -30,6 +33,7 @@ export function WhatsNewAnnouncementDialog(props: WhatsNewAnnouncementDialogProp
     <OctantDialog
       className="whats-new-announcement"
       describedBy={bodyId}
+      initialFocus={primary}
       label="What's new"
       labelledBy={titleId}
       onClose={props.onNotNow}
@@ -52,10 +56,10 @@ export function WhatsNewAnnouncementDialog(props: WhatsNewAnnouncementDialogProp
         {announcement?.body}
       </p>
       <div className="whats-new-announcement__actions">
-        <OctantButton onClick={props.onNotNow} type="button" variant="ghost">
+        <OctantButton onClick={props.onNotNow} type="button" variant="secondary">
           Not now
         </OctantButton>
-        <OctantButton onClick={props.onOpenNotes} type="button">
+        <OctantButton onClick={props.onOpenNotes} ref={primary} type="button">
           {announcement?.actionLabel ?? "See what's new"}
         </OctantButton>
       </div>

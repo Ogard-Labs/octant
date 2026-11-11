@@ -3133,16 +3133,21 @@ small raised card above the profile row. A 64px band carries the Octant
 aperture on a soft wash of the theme's ink with a hint of the accent, so the
 card is depth and not an accent banner. Under it sit a "New · v{version}" line,
 the notes' first line as a one-line strong headline, the next paragraph as a
-muted two-line summary, and a quiet "Find out what's new" button that opens the
-notes dialog. A "Dismiss" icon button sits top right. Either one acknowledges
+muted two-line summary, and a quiet "Find out what's new" button with a
+trailing arrow that opens the notes dialog. A "Dismiss" icon button sits top
+right. Either one acknowledges
 the update, so the card shows once. The collapsed icon rail never draws the
 card and does not acknowledge it; it waits for the sidebar to open. A browser
 or remote client has no card.
 
 A release may bundle one announcement beside its notes. It replaces the card as
-a modal dialog: a picture on top (the aperture band when there is none), a
-title, a body, "Not now", and a primary button that opens the notes, labelled
-"See what's new" unless the release names its own. Any answer acknowledges the
+a modal dialog laid out as a poster: a 200px picture running to the dialog's
+edges at its top (the aperture band with the mark at 56px when there is none),
+then a title, a body and the two answers, all centred. "Not now" is the quiet
+filled button and the primary button opens the notes, labelled "See what's
+new" unless the release names its own; the dialog opens with focus on the
+primary button. (With the picture inset and the text ranged left it read as a
+settings dialog that happened to hold an image.) Any answer acknowledges the
 update and the card is not shown afterwards. The announcement is a bounded file
 and an optional bundled picture; an invalid one is simply absent. The rule is in
 [Decisions and requirements](docs/design/decisions.md#whats-new-after-an-update).

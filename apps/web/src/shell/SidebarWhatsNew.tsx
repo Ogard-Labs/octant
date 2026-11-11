@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import type { WhatsNewCardContent } from "../settings/useWhatsNewAfterUpdate";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -49,6 +49,7 @@ export function SidebarWhatsNew(props: SidebarWhatsNewProps) {
         )}
         <OctantButton onClick={leave(props.onOpenNotes)} size="sm" type="button" variant="ghost">
           Find out what's new
+          <ArrowRight aria-hidden="true" size={12} />
         </OctantButton>
       </div>
     </section>

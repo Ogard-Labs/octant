@@ -4374,18 +4374,36 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   margin-left: calc(-1 * var(--oct-space-2));
 }
 
+/* An announcement is a poster, not a form: the picture runs to the dialog's
+   edges at its top, and the words and the two answers are centred under it.
+   With the picture inset and the text ranged left it read as a settings
+   dialog that happened to hold an image. */
 .whats-new-announcement {
   --octant-dialog-width: 440px;
   display: grid;
+  justify-items: center;
   gap: var(--oct-space-3);
   overflow: hidden;
+  padding: 0 0 var(--oct-space-6);
+  text-align: center;
 }
 
 .whats-new-announcement__art,
 .whats-new-announcement__picture {
   width: 100%;
-  height: 180px;
-  border-radius: var(--oct-radius-md);
+  height: 200px;
+  margin-bottom: var(--oct-space-2);
+}
+
+/* The mark is the picture when a release bundles none, so it is drawn at a
+   picture's size, not an icon's. */
+.whats-new-announcement__art > .aperture-art__mark {
+  width: 56px;
+  height: 56px;
+}
+
+.whats-new-announcement > :is(h2, p, .whats-new-announcement__actions) {
+  padding-inline: var(--oct-space-6);
 }
 
 .whats-new-announcement__picture {
@@ -4402,8 +4420,9 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 
 .whats-new-announcement__actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
 }
 
 .code-home__project-setup {
