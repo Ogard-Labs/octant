@@ -859,9 +859,10 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
 - A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
-- The wake switches (never the role) may also be set from an owner device through the owner routes, each change under its own fresh unlock and journaled as that device; no owner-device screen calls them yet.
+- The wake switches (never the role) may also be set from an owner device through the owner routes and the owner access recovery screen on the phone and in a browser, each change under its own fresh unlock and journaled as that device.
+- A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; paired browsers and phones show pending proposals read-only, and approval stays at a local window.
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
-- Wake, start and hop counts are held in host memory; a restart starts them again.
+- Wake, start and hop counts are kept in a host store (forward-only migration), so the hourly bounds and the hop count hold across a restart; the start count never reads fewer than the workers created in the last hour.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
 - A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
