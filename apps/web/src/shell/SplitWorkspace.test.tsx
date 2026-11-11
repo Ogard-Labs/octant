@@ -119,7 +119,7 @@ describe("tabs side by side", () => {
     expect(onKeepContentTab).toHaveBeenCalledWith(chatTab(1).threadId);
   });
 
-  it("drags the open tab with its pane, and another tab as one leaving this pane's row", () => {
+  it("drags every tab of a pane that holds several as one leaving its row, the open one handing the pane to its neighbour", () => {
     const { layout, contentTabs } = threeChatTabs();
     const callbacks = splitCallbacks();
     render(
@@ -134,13 +134,20 @@ describe("tabs side by side", () => {
     fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 0" }), { button: 0 });
     fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 2" }), { button: 0 });
     const sources = vi.mocked(callbacks.drag.onPointerDown).mock.calls.map(([, source]) => source);
-    expect(sources[0]).toMatchObject({ paneId: firstPaneId, surface: chatTab(0) });
-    expect(sources[0]).not.toHaveProperty("fromTab");
+    // The open tab leaves too, so it can split the pane it is in; the pane
+    // then shows the neighbour a close would show.
+    expect(sources[0]).toMatchObject({
+      surface: chatTab(0),
+      fromTab: { paneId: firstPaneId, tabId: chatTab(0).id },
+      openTab: { paneId: firstPaneId },
+    });
+    expect(sources[0]).not.toHaveProperty("paneId");
     expect(sources[1]).toMatchObject({
       surface: chatTab(2),
       fromTab: { paneId: firstPaneId, tabId: chatTab(2).id },
     });
     expect(sources[1]).not.toHaveProperty("paneId");
+    expect(sources[1]).not.toHaveProperty("openTab");
   });
 });
 

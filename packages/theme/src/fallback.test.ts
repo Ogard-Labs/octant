@@ -126,6 +126,46 @@ describe("theme fallback policy", () => {
     expect(resolved.droppedOverrides[0]?.reason).toBe("insufficient-contrast");
   });
 
+  it("applies an override scoped to one mode only in that mode", () => {
+    const semanticOverrides = [
+      { role: "accent", color: "#2b2b2e", mode: "light" },
+      { role: "accent", color: "#ffffff", mode: "dark" },
+    ] as const;
+    const light = resolveEffectiveTokens(makeSettings({ mode: "light", semanticOverrides }), false);
+    const dark = resolveEffectiveTokens(makeSettings({ mode: "dark", semanticOverrides }), false);
+    expect(light.tokens["accent"]).toBe("#2b2b2e");
+    expect(dark.tokens["accent"]).toBe("#ffffff");
+  });
+
+  it("checks a shared ink against an accent scoped to this mode, wherever the accent is listed", () => {
+    const resolved = resolveEffectiveTokens(
+      makeSettings({
+        mode: "dark",
+        semanticOverrides: [
+          { role: "accent-foreground", color: "#141414" },
+          { role: "accent", color: "#2b2b2e", mode: "dark" },
+        ],
+      }),
+      false,
+    );
+    expect(resolved.tokens["accent"]).toBe("#2b2b2e");
+    expect(resolved.droppedOverrides).toEqual([
+      { role: "accent-foreground", reason: "insufficient-contrast" },
+    ]);
+  });
+
+  it("never checks a shared override that a mode-scoped one replaces", () => {
+    const semanticOverrides = [
+      { role: "accent-foreground", color: "#ffffff" },
+      { role: "accent", color: "#ffffff", mode: "dark" },
+      { role: "accent-foreground", color: "#141414", mode: "dark" },
+    ] as const;
+    for (const mode of ["light", "dark"] as const) {
+      const resolved = resolveEffectiveTokens(makeSettings({ mode, semanticOverrides }), false);
+      expect(resolved.droppedOverrides).toEqual([]);
+    }
+  });
+
   it("keeps a non-text accent override even when its contrast against the workspace is low", () => {
     const resolved = resolveEffectiveTokens(
       makeSettings({ mode: "dark", semanticOverrides: [{ role: "accent", color: "#222225" }] }),

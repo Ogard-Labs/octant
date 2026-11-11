@@ -401,7 +401,7 @@ import {
   type ThreadUtilityDockKey,
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
-import { threadDragSurface } from "./shell/threadDragSurface";
+import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import { RemotePairingView } from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
@@ -1462,6 +1462,9 @@ function LaunchedShell(
   // open path on drop, so a drag cannot place a cross-Project thread without
   // the switch-Project handling every other open gets.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
+  // The Chat list's thread ids, read when a drag starts; filled in below once
+  // the Chat controller exists.
+  const chatThreadIdsForDrag = useRef<ReadonlySet<string>>(new Set());
   const workspaceDrag = useWorkspaceSurfaceDrag({
     ...(controller.workspace?.focusedPaneId === undefined
       ? {}
@@ -1483,21 +1486,52 @@ function LaunchedShell(
         });
         return;
       }
+      // Chat and Work threads share the sidebar's list but not a layout: each
+      // mode keeps its own panes. A row of the other mode cannot be placed in
+      // the pane it was dropped on (the host refuses it as a different mode),
+      // so the drop opens the thread the way its click does and the window
+      // follows it to that mode.
+      if (row !== undefined && activeMode !== "code") {
+        if (source.surface.kind === "work-thread" && activeMode !== "work") {
+          selectWorkThread(row.rowId);
+          return;
+        }
+        if (source.surface.kind === "chat-thread" && activeMode !== "chat") {
+          selectChatThread(row.rowId);
+          return;
+        }
+      }
       // Two to four selected tabs dragged together lay out side by side in
       // the pane they land on, at its centre or an edge alike.
       if (source.surfaces !== undefined && source.surfaces.length >= 2) {
         void controller.arrangeSideBySide(destination.targetPaneId, source.surfaces);
         return;
       }
-      void controller
-        .dropSurface(
-          source.surface,
-          destination,
-          row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+      // A pane's open tab first hands the pane to another of its tabs, so it is
+      // placed like any other tab: the host refuses to split a pane off the
+      // surface it is showing. A refused hand-over leaves everything as it
+      // was, and a placement refused after it gives the pane back to the tab.
+      const openTab = source.openTab;
+      const handedOver =
+        openTab === undefined
+          ? Promise.resolve(true)
+          : controller.showAnotherContentTab(openTab.paneId, source.surface.id);
+      void handedOver
+        .then((ready) =>
+          ready
+            ? controller.dropSurface(
+                source.surface,
+                destination,
+                row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+              )
+            : false,
         )
         .then((placed) => {
-          // A tab that was not its pane's open one leaves that pane's row
-          // once it is placed somewhere else; a refused drop leaves it.
+          if (!placed && openTab !== undefined) {
+            void controller.activateContentTab(openTab.paneId, source.surface.id);
+          }
+          // A tab leaves its pane's row once it is placed somewhere else; a
+          // refused drop leaves it.
           const fromTab = source.fromTab;
           if (!placed || fromTab === undefined) return;
           if (
@@ -1518,7 +1552,10 @@ function LaunchedShell(
         sidebarDragRows.current.set(dragKey, row);
         workspaceDrag.onPointerDown(event, {
           dragKey,
-          surface: threadDragSurface(activeMode, row),
+          surface: threadDragSurface(
+            sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current),
+            row,
+          ),
           title: row.title,
         });
       },
@@ -1699,6 +1736,17 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The sidebar's shared list reads Chat rows only once the Chat list is
+  // ready, so a drag decides a row's kind from the same set its click does.
+  chatThreadIdsForDrag.current = useMemo(
+    () =>
+      new Set(
+        chatController.status === "ready"
+          ? chatController.navigation.map((thread) => String(thread.threadId))
+          : [],
+      ),
+    [chatController.navigation, chatController.status],
+  );
   const createCodeOperationId = useCallback(
     () => globalThis.crypto.randomUUID() as CodeOperationId,
     [],

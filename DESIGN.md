@@ -177,11 +177,16 @@ success. Purple's light-page text value had to be darkened until it read close
 to the plain ink, which loses the point of an accent.
 
 Appearance › Accent offers a one-click accent colour: Blue (the theme's own),
-Clay, Amber, Green, Purple, or Mono. Mono is the grey look: it sets Style to
-Mono, because the ink accent needs different values in light and dark, which a
-single override cannot hold. A colour swatch overrides the accent fill and
-puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
+Sky, Teal, Green, Lime, Amber, Orange, Clay, Rose, Pink, Purple, Indigo, the
+neutrals Steel, Slate, Silver, Graphite, Carbon and White, or Mono. Mono is the
+grey look: it sets Style to Mono and its ink accent. A swatch overrides the
+accent fill and the ink on it (`accent-foreground` and `primary-foreground`):
+dark ink on most, white on Slate, Graphite and light-mode Carbon, each clearing
+normal-text contrast on its fill (`accentSwatches.ts`). Accent text stays on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
+White would vanish on the light page and Carbon on the dark one, so each takes a
+silver in that mode, written as a mode-only override: an override's optional
+`mode` limits it to the light or the dark theme.
 The accent colours switches, selected states, and sliders;
 status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See
@@ -1598,7 +1603,10 @@ its Tint slider. It takes effect only when the host resolved the material
 translucent, so every accessibility, performance, and host-support gate
 applies; then the frame (the sidebar colour) and the sheet (the workspace
 colour) are each at the Tint's opacity over the native material, and reduced
-transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers, and other controls drawn
+transparency or an unsupported host leaves them opaque. A browser is such a
+host: with no native material behind the page, Glass would leave the frame and
+the sheet as the page colour and take the sidebar's own colour away, so a
+browser window always paints the theme's opaque surfaces. Menus, dialogs, popovers, and other controls drawn
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
