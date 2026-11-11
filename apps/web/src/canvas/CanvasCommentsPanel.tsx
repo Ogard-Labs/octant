@@ -23,7 +23,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canvasBlockLabel } from "./canvasBlockLabel";
 import { canvasTableRowLabel } from "./blocks/TableBlock";
 import { canvasCommentAgentState } from "./canvasCommentAgentTurn";
-import type { CanvasCommentArea } from "./canvasTools";
+import {
+  canvasAnchorInputOfMark,
+  canvasMarkLabel,
+  canvasMarkOfAnchor,
+  type CanvasCommentMark,
+} from "./canvasTools";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -58,9 +63,9 @@ export interface CanvasCommentsPanelProps {
    * An area a reader has just marked on a block. The next comment lands on
    * it unless the reader picks another anchor, which gives the area up.
    */
-  readonly draftArea?: CanvasCommentArea;
+  readonly draftMark?: CanvasCommentMark;
   /** The marked area was commented on or given up. */
-  readonly onDraftAreaDone?: () => void;
+  readonly onDraftMarkDone?: () => void;
   readonly onShowAllBlocks?: () => void;
   /** Every journaled thread, reported whenever the host's list is reloaded. */
   readonly onThreadsChange?: (threads: ReadonlyArray<CanvasCommentThread>) => void;
@@ -245,10 +250,11 @@ export function canvasCommentAnchorChoices(
 }
 
 function anchorLabel(anchor: CanvasCommentAnchor, choices: ReadonlyArray<AnchorChoice>): string {
-  if (anchor.kind === "region") {
-    // An area is not a named part, so it reads as its block's.
-    const block = choices.find((choice) => choice.id === `block:${String(anchor.blockId)}`);
-    return block === undefined ? OUTDATED_ANCHOR_LABEL : areaLabel(block.label);
+  const mark = canvasMarkOfAnchor(anchor);
+  if (mark !== undefined) {
+    // A drawn mark is not a named part, so it reads as its block's.
+    const block = choices.find((choice) => choice.id === `block:${mark.blockId}`);
+    return block === undefined ? OUTDATED_ANCHOR_LABEL : canvasMarkLabel(mark.kind, block.label);
   }
   const match = choices.find((choice) => sameAnchor(choice.anchor, anchor));
   // A comment whose anchor left the document is shown, not dropped: the
@@ -272,8 +278,7 @@ function sameAnchor(left: CanvasCommentAnchor, right: CanvasCommentAnchor): bool
 }
 
 const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";
-const DRAFT_AREA_CHOICE_ID = "draft-area";
-const areaLabel = (blockLabel: string) => `Area · ${blockLabel}`;
+const DRAFT_MARK_CHOICE_ID = "draft-mark";
 
 function authorLabel(item: Pick<CanvasCommentThread["comment"], "author" | "origin">): string {
   const who = item.author.kind === "agent" ? "Agent" : "You";
@@ -322,32 +327,26 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
     focusedChoiceId !== undefined &&
     anchorId === focusedChoiceId &&
     !choices.some((choice) => choice.id === focusedChoiceId);
-  // A marked area leads the picker while it waits for its comment. Its block
-  // may have left the Canvas since it was marked, and then there is no area.
-  const draftArea = props.draftArea;
+  // A drawn mark leads the picker while it waits for its comment. Its block
+  // may have left the Canvas since it was made, and then there is no mark.
+  const draftMark = props.draftMark;
   const draftBlock =
-    draftArea === undefined
+    draftMark === undefined
       ? undefined
-      : choices.find((choice) => choice.id === `block:${draftArea.blockId}`);
+      : choices.find((choice) => choice.id === `block:${draftMark.blockId}`);
   const draftBlockLabel = draftBlock?.label;
   const draftChoice = useMemo<AnchorChoice | undefined>(
     () =>
-      draftArea === undefined || draftBlockLabel === undefined
+      draftMark === undefined || draftBlockLabel === undefined
         ? undefined
         : {
-            id: DRAFT_AREA_CHOICE_ID,
-            label: areaLabel(draftBlockLabel),
-            anchor: decodeCanvasCommentAnchor({
-              kind: "region",
-              blockId: draftArea.blockId,
-              regionId: globalThis.crypto.randomUUID(),
-              x: draftArea.x,
-              y: draftArea.y,
-              width: draftArea.width,
-              height: draftArea.height,
-            }),
+            id: DRAFT_MARK_CHOICE_ID,
+            label: canvasMarkLabel(draftMark.kind, draftBlockLabel),
+            anchor: decodeCanvasCommentAnchor(
+              canvasAnchorInputOfMark(draftMark, globalThis.crypto.randomUUID()),
+            ),
           },
-    [draftArea, draftBlockLabel],
+    [draftMark, draftBlockLabel],
   );
   const selectedAnchor =
     draftChoice ??
@@ -651,7 +650,7 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
               }),
               () => {
                 setBody("");
-                if (selectedAnchor.id === DRAFT_AREA_CHOICE_ID) props.onDraftAreaDone?.();
+                if (selectedAnchor.id === DRAFT_MARK_CHOICE_ID) props.onDraftMarkDone?.();
               },
             );
           }}
@@ -662,9 +661,9 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
               aria-label="Comment anchor"
               disabled={working}
               onValueChange={(id) => {
-                if (id === DRAFT_AREA_CHOICE_ID) return;
+                if (id === DRAFT_MARK_CHOICE_ID) return;
                 setAnchorId(id);
-                if (draftChoice !== undefined) props.onDraftAreaDone?.();
+                if (draftChoice !== undefined) props.onDraftMarkDone?.();
               }}
               options={(draftChoice === undefined ? choices : [draftChoice, ...choices]).map(
                 (choice) => ({ id: choice.id, label: choice.label }),

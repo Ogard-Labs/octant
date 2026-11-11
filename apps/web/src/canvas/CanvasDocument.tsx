@@ -4,6 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { canvasReadingOrder, type CanvasReadingItem } from "@octant/domain/canvas-dashboard-layout";
 import { canvasBlockLabel } from "./canvasBlockLabel";
+import type { CanvasCommentMark } from "./canvasTools";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
@@ -62,21 +63,20 @@ export interface CanvasDocumentComments {
   /** Unresolved threads anchored to a mockup or board node, by block then node. */
   readonly openNodeCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
   /**
-   * The freeform areas drawn over a block: those of its unresolved threads,
-   * and the one a person has just marked and not yet commented on.
+   * The marks drawn over a block: those of its unresolved threads, and the
+   * one a person has just made and not yet commented on.
    */
-  readonly areas?: ReadonlyMap<string, ReadonlyArray<CanvasBlockAreaMark>>;
+  readonly marks?: ReadonlyMap<string, ReadonlyArray<CanvasBlockMark>>;
   readonly onOpen: (blockId: string, rowId?: string) => void;
 }
 
-/** One area of a block, in percent of the block's drawn box. */
-export interface CanvasBlockAreaMark {
+/** One mark on a block, in percent of the block's drawn box. */
+export interface CanvasBlockMark {
   readonly key: string;
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  /** Marked and waiting for its comment. */
+  readonly mark: CanvasCommentMark;
+  /** A note's words, drawn where it is pinned. */
+  readonly text?: string;
+  /** Made and waiting for its comment. */
   readonly draft?: boolean;
 }
 
@@ -99,24 +99,13 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
-  // What comments add to a block: its marker in the margin and the areas
-  // people marked on it.
+  // What comments add to a block: its marker in the margin and the marks
+  // people drew on it.
   const commentMarks = (block: CanvasDefinition["blocks"][number]) =>
     comments === undefined ? null : (
       <>
-        {(comments.areas?.get(String(block.blockId)) ?? []).map((area) => (
-          <span
-            aria-hidden="true"
-            className="canvas-block__area"
-            data-draft={area.draft === true ? "true" : "false"}
-            key={area.key}
-            style={{
-              left: `${String(area.x)}%`,
-              top: `${String(area.y)}%`,
-              width: `${String(area.width)}%`,
-              height: `${String(area.height)}%`,
-            }}
-          />
+        {(comments.marks?.get(String(block.blockId)) ?? []).map((item) => (
+          <BlockMark item={item} key={item.key} />
         ))}
         <CommentMarker
           count={comments.openCounts.get(String(block.blockId)) ?? 0}
@@ -288,6 +277,58 @@ function runsOfMetrics(
     else runs.push([item]);
   }
   return runs;
+}
+
+/**
+ * A mark over its block. It is hidden from assistive technology because the
+ * comment it belongs to is already counted on the block's marker and read in
+ * the drawer; the mark only shows a sighted reader where it sits.
+ */
+function BlockMark({ item }: { readonly item: CanvasBlockMark }) {
+  const { mark } = item;
+  const draft = item.draft === true ? "true" : "false";
+  if (mark.kind === "stroke") {
+    return (
+      <svg
+        aria-hidden="true"
+        className="canvas-block__stroke"
+        data-draft={draft}
+        preserveAspectRatio="none"
+        viewBox="0 0 100 100"
+      >
+        <polyline
+          points={mark.points.map((point) => `${String(point.x)},${String(point.y)}`).join(" ")}
+        />
+      </svg>
+    );
+  }
+  if (mark.kind === "note") {
+    return (
+      <span
+        aria-hidden="true"
+        className="canvas-block__note"
+        data-draft={draft}
+        style={{ left: `${String(mark.x)}%`, top: `${String(mark.y)}%` }}
+      >
+        {item.text === undefined ? null : (
+          <span className="canvas-block__note-text">{item.text}</span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="canvas-block__area"
+      data-draft={draft}
+      style={{
+        left: `${String(mark.x)}%`,
+        top: `${String(mark.y)}%`,
+        width: `${String(mark.width)}%`,
+        height: `${String(mark.height)}%`,
+      }}
+    />
+  );
 }
 
 function CommentMarker(props: {

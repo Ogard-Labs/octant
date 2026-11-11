@@ -44,8 +44,13 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel, canvasCommentAnchorChoices } from "./CanvasCommentsPanel";
 import { CanvasToolRail } from "./CanvasToolRail";
 import { CanvasToolSurface } from "./CanvasToolSurface";
-import type { CanvasCommentArea, CanvasCommentPick, CanvasTool } from "./canvasTools";
-import type { CanvasBlockAreaMark } from "./CanvasDocument";
+import {
+  canvasMarkOfAnchor,
+  type CanvasCommentMark,
+  type CanvasCommentPick,
+  type CanvasTool,
+} from "./canvasTools";
+import type { CanvasBlockMark } from "./CanvasDocument";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
   canvasCommentAgentPrompt,
@@ -134,7 +139,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     { readonly kind: "node" | "edge"; readonly id: string } | undefined
   >(undefined);
   const [tool, setTool] = useState<CanvasTool>("select");
-  const [draftArea, setDraftArea] = useState<CanvasCommentArea | undefined>(undefined);
+  const [draftMark, setDraftMark] = useState<CanvasCommentMark | undefined>(undefined);
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
@@ -809,7 +814,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const openCounts = new Map<string, number>();
   const openRowCounts = new Map<string, Map<string, number>>();
   const openNodeCounts = new Map<string, Map<string, number>>();
-  const areas = new Map<string, ReadonlyArray<CanvasBlockAreaMark>>();
+  const marks = new Map<string, ReadonlyArray<CanvasBlockMark>>();
   for (const thread of openThreads) {
     const anchor = thread.comment.anchor;
     const blockId = String(anchor.blockId);
@@ -824,23 +829,23 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       nodes.set(String(anchor.nodeId), (nodes.get(String(anchor.nodeId)) ?? 0) + 1);
       openNodeCounts.set(blockId, nodes);
     }
-    if (anchor.kind === "region") {
-      areas.set(blockId, [
-        ...(areas.get(blockId) ?? []),
+    const mark = canvasMarkOfAnchor(anchor);
+    if (mark !== undefined) {
+      marks.set(blockId, [
+        ...(marks.get(blockId) ?? []),
         {
-          key: String(anchor.regionId),
-          x: anchor.x,
-          y: anchor.y,
-          width: anchor.width,
-          height: anchor.height,
+          key: String(thread.comment.commentId),
+          mark,
+          // A note's words are drawn where it is pinned.
+          ...(mark.kind === "note" ? { text: thread.comment.body } : {}),
         },
       ]);
     }
   }
-  if (draftArea !== undefined) {
-    areas.set(draftArea.blockId, [
-      ...(areas.get(draftArea.blockId) ?? []),
-      { ...draftArea, key: "draft", draft: true },
+  if (draftMark !== undefined) {
+    marks.set(draftMark.blockId, [
+      ...(marks.get(draftMark.blockId) ?? []),
+      { key: "draft", mark: draftMark, draft: true },
     ]);
   }
   const overflowItems = [
@@ -956,7 +961,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     setFocusedBlockId(blockId);
     setFocusedRowId(rowId);
     setFocusedPart(undefined);
-    setDraftArea(undefined);
+    setDraftMark(undefined);
     setCommentsOpen(true);
   };
   // The Comment tool: the drawer opens on the part the person pointed at.
@@ -966,18 +971,18 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       setFocusedPart({ kind: pick.part.kind, id: pick.part.id });
     }
   };
-  // The Area tool: the drawer opens on the block, with the area waiting for
-  // its comment.
-  const openCommentsOnArea = (area: CanvasCommentArea) => {
-    openCommentsOn(area.blockId);
-    setDraftArea(area);
+  // The Area, Pen, and Text tools: the drawer opens on the block, with the
+  // mark waiting for its comment.
+  const openCommentsOnMark = (mark: CanvasCommentMark) => {
+    openCommentsOn(mark.blockId);
+    setDraftMark(mark);
   };
   // Every tool but Select ends in a comment, so a Canvas that takes none
   // keeps the pointer it always had and shows no rail.
   const activeTool: CanvasTool = commentsAvailable ? tool : "select";
   const anchorIds = new Set(canvasCommentAnchorChoices(definition).map((choice) => choice.id));
   const closeComments = () => {
-    setDraftArea(undefined);
+    setDraftMark(undefined);
     setCommentsOpen(false);
     commentsReturnFocus.current?.focus();
     commentsReturnFocus.current = null;
@@ -1130,7 +1135,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             inside it rather than painting over the drawer's controls. */}
         <CanvasToolSurface
           isAnchor={(choiceId) => anchorIds.has(choiceId)}
-          onArea={openCommentsOnArea}
+          onMark={openCommentsOnMark}
           onPick={openCommentsOnPick}
           tool={activeTool}
         >
@@ -1147,7 +1152,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                     openCounts,
                     openRowCounts,
                     openNodeCounts,
-                    areas,
+                    marks,
                     onOpen: openCommentsOn,
                   },
                 }
@@ -1190,7 +1195,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                 setFocusedRowId(undefined);
                 setFocusedPart(undefined);
               }}
-              onDraftAreaDone={() => setDraftArea(undefined)}
+              onDraftMarkDone={() => setDraftMark(undefined)}
               onThreadsChange={setCommentThreads}
               send={commentsClient.send}
               history={history}
@@ -1198,7 +1203,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
               {...(focusedRowId === undefined ? {} : { focusedRowId })}
               {...(focusedPart === undefined ? {} : { focusedPart })}
-              {...(draftArea === undefined ? {} : { draftArea })}
+              {...(draftMark === undefined ? {} : { draftMark })}
             />
           </aside>
         ) : null}

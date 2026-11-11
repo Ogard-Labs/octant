@@ -2465,8 +2465,9 @@ Diagram and flow boards are editable by a local person, and comments are journal
 - Only a window on this host edits boards or comments. A paired browser reads them.
 - Inline diagrams follow their drawing's proportions without gaining layout-editing authority; document workspaces keep the fixed board frame. Retry loops use visible return lanes with shape-aware ports and space before neighbouring automatic-layout nodes. [Canvas visuals: Inline diagram proportions and retry loops](canvas-visuals.md#inline-diagram-proportions-and-retry-loops) owns the layout rule.
 - Send to agent queues a turn under the thread's own authority and creates no new authority.
-- The workspace tab's tool rail (Select, Hand, Comment, Area) only chooses what the pointer does and which anchor a comment gets. It journals nothing and adds no command or authority.
+- The workspace tab's tool rail (Select, Hand, Comment, Area, Pen, Text) only chooses what the pointer does and which anchor a comment gets. It journals nothing and adds no command or authority.
 - An area comment is a `region` anchor in percent of its block's drawn box. A board takes none, because its picture moves under its box.
+- A drawn mark (an area, a pen line, a pinned note) is a comment's anchor and never an object of its own, so it follows the comment rules and adds no aggregate, command or route. A pen line is a `stroke` anchor of 2 to 128 points bounded to the block's box; a note is a `region` of no size. A build older than the `stroke` kind cannot read a comment that carries one.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
 

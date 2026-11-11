@@ -3325,23 +3325,36 @@
   cursor: grabbing;
 }
 
-.canvas-tool-surface:is([data-tool="comment"], [data-tool="area"]),
-.canvas-tool-surface:is([data-tool="comment"], [data-tool="area"]) * {
+.canvas-tool-surface:is(
+  [data-tool="comment"],
+  [data-tool="area"],
+  [data-tool="pen"],
+  [data-tool="text"]
+),
+.canvas-tool-surface:is(
+    [data-tool="comment"],
+    [data-tool="area"],
+    [data-tool="pen"],
+    [data-tool="text"]
+  )
+  * {
   cursor: crosshair;
 }
 
-/* A finger dragging an area must not also scroll the page: the browser took
-   the gesture, cancelled the pointer, and the box was lost. Every part is
-   named because a chart sets its own panning. Hand keeps the browser's own
-   touch scrolling, which already moves the page. */
+/* A finger dragging an area or a line must not also scroll the page: the
+   browser took the gesture, cancelled the pointer, and the mark was lost.
+   Every part is named because a chart sets its own panning. Hand keeps the
+   browser's own touch scrolling, which already moves the page. */
 .canvas-tool-surface[data-tool="area"],
-.canvas-tool-surface[data-tool="area"] * {
+.canvas-tool-surface[data-tool="area"] *,
+.canvas-tool-surface[data-tool="pen"],
+.canvas-tool-surface[data-tool="pen"] * {
   touch-action: none;
 }
 
-/* A board's picture moves under its block, so it takes no area. */
-.canvas-tool-surface[data-tool="area"] .canvas-board,
-.canvas-tool-surface[data-tool="area"] .canvas-board * {
+/* A board's picture moves under its block, so it takes no drawn mark. */
+.canvas-tool-surface:is([data-tool="area"], [data-tool="pen"], [data-tool="text"]) .canvas-board,
+.canvas-tool-surface:is([data-tool="area"], [data-tool="pen"], [data-tool="text"]) .canvas-board * {
   cursor: not-allowed;
 }
 
@@ -3359,8 +3372,83 @@
 }
 
 /* Over the block's own raised parts, under its sticky header. */
-.canvas-block__area {
+.canvas-block__area,
+.canvas-block__stroke,
+.canvas-block__note {
   z-index: 1;
+}
+
+/* A line is drawn in the block's own percent, stretched to its box, so the
+   stroke width is kept in screen pixels rather than stretched with it. */
+.canvas-tool-surface__ink,
+.canvas-block__stroke {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-tool-surface__ink {
+  z-index: calc(var(--oct-z-sticky) + 2);
+}
+
+.canvas-tool-surface__ink polyline,
+.canvas-block__stroke polyline {
+  fill: none;
+  stroke: var(--oct-accent-fg);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Like an area, a line waiting for its comment reads as unfinished. */
+.canvas-block__stroke[data-draft="true"] polyline {
+  stroke-dasharray: 4 3;
+}
+
+/* A note is a dot on the point it is pinned to, with its words beside it.
+   The dot is pulled back by its radius so its centre is the point. */
+.canvas-block__note {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-1);
+  margin: -4px 0 0 -4px;
+  pointer-events: none;
+}
+
+.canvas-block__note::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-accent-fg);
+}
+
+.canvas-block__note[data-draft="true"]::before {
+  box-shadow: 0 0 0 4px var(--oct-accent-soft);
+}
+
+/* The words float over the block, so they keep a fill and an edge. Three
+   lines at most: the whole comment is in the drawer. */
+.canvas-block__note-text {
+  display: -webkit-box;
+  max-width: 240px;
+  padding: 2px var(--oct-space-2);
+  overflow: hidden;
+  border: 1px solid var(--oct-accent-fg);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-bg);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .canvas-tool-surface__target {

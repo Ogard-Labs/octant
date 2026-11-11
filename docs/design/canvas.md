@@ -1056,7 +1056,7 @@ snapshots serialise the definition and so never carry comments.
 
 In the workspace tab a Canvas that takes comments shows a tool rail: a vertical
 toggle group floating over the document's left gutter, which is widened under
-it, with four tools of which exactly one is chosen. **Select** is the Canvas as
+it, with six tools of which exactly one is chosen. **Select** is the Canvas as
 it is without the rail. **Hand** drags the document to scroll it. **Comment**
 opens the comments drawer on the part a person clicks: the nearest node, edge,
 or table row around the pointer that the drawer's anchor picker offers (so a
@@ -1064,13 +1064,16 @@ callout pinned to a mockup container is picked from anything inside it),
 otherwise its block, otherwise the block around it; that part is outlined under
 the pointer first. **Area** opens the drawer on a box a person drags over one block, and
 the next comment is anchored to it as a `region` unless the person picks
-another anchor, which gives the box up, as closing the drawer does. While any
+another anchor, which gives the box up, as closing the drawer does. **Pen**
+does the same with a line a person draws over one block, anchored as a
+`stroke`, and **Text** with a point a person clicks, anchored as a `region` of
+no size: a note, whose comment's words are drawn at that point. While any
 tool but Select is chosen the renderer takes pointer input before the blocks
 do, so no board pans, no control fires, and no frame takes the pointer into its
 own page; a click made from the keyboard still reaches its control. The margin
 markers and the drawer's anchor picker stay the keyboard path to every anchor
-the Comment tool reaches; an area has no keyboard path. Escape returns to
-Select. The rail and its tools are renderer state: nothing about them is
+the Comment tool reaches; a drawn mark (an area, a line, a note) has no
+keyboard path. Escape returns to Select. The rail and its tools are renderer state: nothing about them is
 journaled and they add no command, since a pick only chooses the anchor of an
 ordinary `canvas-comment-add`. A surface that offers no comments (the inline
 placement, a shared snapshot) shows no rail.
@@ -1089,6 +1092,29 @@ washed; a resolved thread's area is not drawn. In the drawer a region reads
 "Area · " and its block's name, and both the Send to agent prompt and the
 tool's requested-changes guidance state the percent reading, so the agent can
 place the area on the block it is shown.
+
+A drawn mark is a comment's anchor, never an object of its own: it exists only
+with the comment that says what it means, so it is journaled, authorized,
+synced, resolved, deleted, and sent to the agent by the comment rules above and
+needs no aggregate, command, or route. A mark with no words would tell the
+agent nothing, which is why the drawer opens on every mark. A `stroke` anchor
+(the comment contract's sixth kind) holds 2 to 128 points, each `x` and `y` a
+percent of the block's drawn box and, unlike a region's, refused outside 0 to
+100; the renderer drops a pointer's repeats, keeps the line inside the box,
+and thins a longer line evenly to 128 points with both ends kept. A drag that
+never leaves an 8px square draws nothing. A note is a `region` of no width and
+no height rather than a new kind, so every build that reads a region reads it.
+A build older than the `stroke` kind cannot decode a comment that carries one:
+it skips that comment when it replays its journal and cannot import it from
+artifact sync, and the comment is read again by a build that knows the kind
+from the journal that wrote it. An open thread's line is drawn over its block
+at a constant 2px, dashed while it waits for its comment; an open note is a dot
+on its point with at most three lines of its comment beside it. Neither is
+drawn once resolved. A board takes no line and no note, for the reason it
+takes no area, and a touch drag under Pen draws and does not scroll. In the
+drawer a line reads "Pen mark · " and a note "Note · " with the block's name.
+The Send to agent prompt names a note's point and the box a line stays inside;
+the line's points ride in the request's anchor.
 
 ## Artifact library and tags
 
