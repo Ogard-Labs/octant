@@ -4427,6 +4427,16 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Startup check.** Startup decodes journal rows to prove the journal is
+  readable, then records a disposable watermark: the sequence it verified
+  through plus a fingerprint of the event registry and the schema head. The next
+  start decodes only rows after the watermark. A different fingerprint, a
+  migration in the same start, a missing, malformed or too-high watermark, or
+  any rewrite or delete of a journal row (a trigger clears it in the same
+  transaction, so purge, compaction and host-identity rewrites are covered)
+  means a full scan. An incompatible row is quarantined wherever it sits, and a
+  diagnostics call with `fresh` always scans everything. Deleting the watermark
+  only makes the next start slower.
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.

@@ -65,6 +65,12 @@ import {
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
+import {
+  clearJournalWatermark,
+  journalVerificationFingerprint,
+  readJournalWatermark,
+  recordJournalWatermark,
+} from "./journalWatermark";
 import { sweepUnrecordedSessionData } from "./unrecordedSessionSweep";
 import {
   CheckpointAheadOfJournal,
@@ -394,8 +400,17 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     const runtime = createPhase1RuntimeRegistries();
     const projections = runtime.projections;
     const journal = new Journal({ connection, registry: runtime.events, projections, clock });
-    const compatibility = journal.inspectCompatibility();
+    // Rows an earlier start already found compatible are skipped, unless this
+    // start migrated the schema or the registry's events changed.
+    const fingerprint = journalVerificationFingerprint(runtime.events, connection);
+    const scannedHead = journal.headSequence();
+    const verifiedThrough =
+      migration.status.appliedVersions.length > 0
+        ? 0
+        : readJournalWatermark(connection, fingerprint, scannedHead);
+    const compatibility = journal.inspectCompatibility(100, verifiedThrough);
     if (!compatibility.compatible) {
+      clearJournalWatermark(connection);
       quarantineIncompatibleJournal({
         connection,
         projections,
@@ -424,6 +439,10 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       console.warn(
         `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
       );
+    } else if (scannedHead !== verifiedThrough) {
+      // Only a scan that found the journal compatible and left its rows
+      // untouched may move the watermark.
+      recordJournalWatermark(connection, fingerprint, scannedHead, clock());
     }
     // Before any service can start a provider session, so no live session
     // can still be waiting to journal its record.

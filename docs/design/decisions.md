@@ -128,6 +128,7 @@ The server decides every authority question, the event journal is the record, an
 
 - Every authority check (mode, Project, thread, provider, approval, remote principal, spend ceiling) runs in the server before a side effect; renderers only show what the server allows.
 - Commands append versioned events; read models are idempotent projections rebuildable from the journal.
+- Startup verifies only journal rows after a disposable watermark (sequence plus registry and schema fingerprint); any fingerprint change, migration, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
 - The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
 
