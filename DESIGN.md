@@ -1086,7 +1086,14 @@ pressed control tint and its thumb, off, the primary text at 62%, so it is
 never the page's black on a dark track; a toned notice's ground is its tone at
 14%, and a plain notice takes the control tint. The shell's own loading state
 (Opening Settings) is clear on the shell's surface, where the opaque page
-colour turned the whole window black for the moment Settings took to load. On an OLED
+colour turned the whole window black for the moment Settings took to load. The
+window's own loading state, before any shell exists, is clear on the document's
+ground (the page colour in a browser, the app ground in a native window, the
+desktop through the glass once the host's glass is on), and the first frame is
+drawn in the mode the last window used, remembered in the renderer's storage,
+so a light theme never opens on the dark default. A native window is shown
+only when its first frame is ready; a glass window is created clear, and an
+opaque one keeps the window's own dark fill until the renderer paints. On an OLED
 preset over a bright desktop the opaque fills stood as near-black blocks on
 mid-grey glass: every Settings button, each message and the composer. Menus,
 popovers and dialogs sit outside the shell and stay opaque, and reduced

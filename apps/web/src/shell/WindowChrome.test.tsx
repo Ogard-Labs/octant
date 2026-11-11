@@ -631,6 +631,10 @@ describe("WindowChrome", () => {
     const sheetBoundary = cssRule(".octant-sheet__popup .shell-boundary");
     expect(sheetBoundary).toContain("background: transparent;");
     expect(sheetBoundary).toContain("min-height: 0;");
+    // The window's own loading state, before any shell exists, sits on the
+    // document's ground: the theme's opaque page colour on top of it was the
+    // black panel between launch and the first interface.
+    expect(cssRule("#root > .shell-boundary")).toContain("background: transparent;");
     // A feature stylesheet sizes and places a popup; it does not repaint it.
     const branchMenu = cssRule(".code-branch-selector__menu");
     expect(branchMenu).not.toMatch(/(^|\s)border:/);
