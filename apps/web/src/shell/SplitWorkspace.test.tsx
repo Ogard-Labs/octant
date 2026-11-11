@@ -8,6 +8,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { splitCallbacks, splitLayout } from "../App.test-fixtures";
+import { ThreadCoordinatorMenuItems } from "../projects/ThreadRowMenu";
 import { SplitWorkspace } from "./SplitWorkspace";
 import { useWorkspaceSurfaceDrag, type WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import type {
@@ -118,7 +119,7 @@ describe("tabs side by side", () => {
     expect(onKeepContentTab).toHaveBeenCalledWith(chatTab(1).threadId);
   });
 
-  it("drags the open tab with its pane, and another tab as one leaving this pane's row", () => {
+  it("drags every tab of a pane that holds several as one leaving its row, the open one handing the pane to its neighbour", () => {
     const { layout, contentTabs } = threeChatTabs();
     const callbacks = splitCallbacks();
     render(
@@ -133,13 +134,20 @@ describe("tabs side by side", () => {
     fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 0" }), { button: 0 });
     fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 2" }), { button: 0 });
     const sources = vi.mocked(callbacks.drag.onPointerDown).mock.calls.map(([, source]) => source);
-    expect(sources[0]).toMatchObject({ paneId: firstPaneId, surface: chatTab(0) });
-    expect(sources[0]).not.toHaveProperty("fromTab");
+    // The open tab leaves too, so it can split the pane it is in; the pane
+    // then shows the neighbour a close would show.
+    expect(sources[0]).toMatchObject({
+      surface: chatTab(0),
+      fromTab: { paneId: firstPaneId, tabId: chatTab(0).id },
+      openTab: { paneId: firstPaneId },
+    });
+    expect(sources[0]).not.toHaveProperty("paneId");
     expect(sources[1]).toMatchObject({
       surface: chatTab(2),
       fromTab: { paneId: firstPaneId, tabId: chatTab(2).id },
     });
     expect(sources[1]).not.toHaveProperty("paneId");
+    expect(sources[1]).not.toHaveProperty("openTab");
   });
 });
 
@@ -722,6 +730,40 @@ describe("SplitWorkspace", () => {
     await openPaneMenu(user, "Second");
     await user.click(await screen.findByRole("menuitem", { name: "Close pane" }));
     expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
+  });
+
+  it("adds a thread's coordinator items to its pane's header menu, and nothing to other panes", async () => {
+    const user = userEvent.setup();
+    const onSetCoordinator = vi.fn();
+    const onSetMessageWake = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+        threadMenuItems={(surface) =>
+          "title" in surface && surface.title === "Second" ? (
+            <ThreadCoordinatorMenuItems
+              actions={{ onSetCoordinator, onSetMessageWake }}
+              thread={{ threadId: "thread-two", title: "Second", coordinator: true }}
+            />
+          ) : undefined
+        }
+      />,
+    );
+
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
+    expect(onSetCoordinator).toHaveBeenCalledWith("thread-two", false);
+    await openPaneMenu(user, "Second");
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
+    );
+    expect(onSetMessageWake).toHaveBeenCalledWith("thread-two", true);
+
+    await openPaneMenu(user, "First");
+    await screen.findByRole("menuitem", { name: "Close pane" });
+    expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
   });
 
   it("activates whichever pane a pointer lands in", () => {

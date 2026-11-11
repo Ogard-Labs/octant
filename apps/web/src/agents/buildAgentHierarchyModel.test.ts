@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentHierarchyModel } from "./buildAgentHierarchyModel";
+import type { AgentRunGraphFact } from "@octant/contracts";
+import { buildAgentHierarchyModel, buildWorkerRunGraphRows } from "./buildAgentHierarchyModel";
 
 const entries = [
   {
@@ -50,6 +51,112 @@ describe("buildAgentHierarchyModel", () => {
       ],
     });
     expect(model.finished.map((row) => row.runId)).toEqual(["newer", "older"]);
+  });
+
+  it("names the listed runs a run waits for and counts the ones it is still held for", () => {
+    const base = entries[0];
+    const model = buildAgentHierarchyModel({
+      entries: [
+        { ...base, runId: "tokens", task: "Color tokens", lifecycleStatus: "completed" },
+        { ...base, runId: "toggle", task: "Theme toggle", lifecycleStatus: "running" },
+        {
+          ...base,
+          runId: "verify",
+          task: "Verify",
+          lifecycleStatus: "waiting",
+          recoveryReason: "waiting-on-dependencies",
+          // The host leaves out a run this window may not read; a wait on one
+          // names nothing and is not counted.
+          dependsOn: ["tokens", "toggle", "not-listed"],
+          normalizedReasoning: "high",
+        },
+      ],
+    });
+
+    const verify = model.working.find((row) => row.runId === "verify");
+    expect(verify?.runsAfter).toEqual([
+      { runId: "tokens", task: "Color tokens" },
+      { runId: "toggle", task: "Theme toggle" },
+    ]);
+    expect(verify?.waitingOn).toBe(1);
+    expect(verify?.effort).toBe("high");
+    expect(model.working.find((row) => row.runId === "toggle")?.runsAfter).toEqual([]);
+  });
+
+  it("does not count a wait the host is not holding the run for", () => {
+    const base = entries[0];
+    const model = buildAgentHierarchyModel({
+      entries: [
+        { ...base, runId: "tokens", task: "Color tokens" },
+        // Started already, then paused for something else: the arrow stays,
+        // the "waiting on" count does not.
+        {
+          ...base,
+          runId: "styles",
+          lifecycleStatus: "waiting",
+          recoveryReason: "provider-reconnect",
+          dependsOn: ["tokens"],
+        },
+      ],
+    });
+
+    const styles = model.working.find((row) => row.runId === "styles");
+    expect(styles?.runsAfter).toHaveLength(1);
+    expect(styles).not.toHaveProperty("waitingOn");
+  });
+
+  it("draws a worker's runs from the host's facts: what ran them, what each waits for, never a review", () => {
+    const fact = (runId: string, more: Record<string, unknown> = {}) =>
+      ({
+        runId,
+        role: "implementation",
+        task: `Task ${runId}`,
+        lifecycleStatus: "completed",
+        executionKind: "octant-managed",
+        route: {
+          requestedProviderInstanceId: "provider-a",
+          requestedModelId: "requested-model",
+          executionProviderInstanceId: "provider-b",
+          executionModelId: "ran-model",
+          poolDerived: false,
+        },
+        createdAt: "2026-08-01T15:00:00.000Z",
+        updatedAt: "2026-08-01T15:01:00.000Z",
+        ...more,
+      }) as unknown as AgentRunGraphFact;
+
+    const rows = buildWorkerRunGraphRows([
+      fact("first"),
+      fact("second", {
+        lifecycleStatus: "waiting",
+        dependsOn: ["first", "not-listed"],
+        heldForDependencies: true,
+        normalizedReasoning: "high",
+        parentRunId: "first",
+      }),
+      fact("third", {
+        lifecycleStatus: "waiting",
+        dependsOn: ["second"],
+        heldForDependencies: true,
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      runId: "first",
+      model: "ran-model",
+      providerInstanceId: "provider-b",
+      needsReview: false,
+      runsAfter: [],
+    });
+    expect(rows[0]).not.toHaveProperty("waitingOn");
+    expect(rows[1]).toMatchObject({
+      effort: "high",
+      parentRunId: "first",
+      runsAfter: [{ runId: "first", task: "Task first" }],
+      // Its one listed dependency finished, so nothing listed still holds it.
+      waitingOn: 0,
+    });
+    expect(rows[2]?.waitingOn).toBe(1);
   });
 
   it("explains an empty thread when posture is Off", () => {

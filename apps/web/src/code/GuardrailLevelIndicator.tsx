@@ -104,13 +104,15 @@ export function ThreadGuardrailLevel(props: {
   const scopeText =
     currentDefault?.status === "known"
       ? currentDefault.matchesSelected
-        ? `selected level matches the current ${currentDefault.scope === "project" ? "Project" : "global"} default`
-        : "selected level differs from the current default"
+        ? currentDefault.scope === "project"
+          ? "Matches this Project’s default"
+          : "Matches your default"
+        : "Differs from the default"
       : read.facts === undefined
         ? selectedOnly
-          ? "effective level not reported"
+          ? "Effective level not reported"
           : undefined
-        : "default not reported";
+        : "Default not reported";
   return (
     <>
       <GuardrailLevelIndicator
@@ -138,9 +140,9 @@ export function GuardrailLevelIndicator(props: {
         {props.selectedOnly ? `Selected ${label}` : label}
       </span>
       {props.scopeText !== undefined ? (
-        <span className="guardrail-level__scope"> · {props.scopeText}</span>
+        <span className="guardrail-level__scope">{props.scopeText}</span>
       ) : props.scope === undefined ? null : (
-        <span className="guardrail-level__scope"> · set by {SCOPE_WORDS[props.scope]}</span>
+        <span className="guardrail-level__scope">Set by {SCOPE_WORDS[props.scope]}</span>
       )}
     </p>
   );

@@ -631,6 +631,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     ambiguousReservationTtlMs: 60_000,
   });
   const spendCeilingHolder: { service?: SpendCeilingService } = {};
+  // The coordinator service is built with the Code runtime, after this wiring.
+  // Until it is, the graph read refuses as it does for a thread that is not a
+  // coordinator.
+  const coordinatorWorkersHolder: {
+    read?: NonNullable<AgentRunRouteDependencies["coordinatorWorkers"]>;
+  } = {};
   // Read per call: the service is built after this wiring, before any child runs.
   const spendService = (): SpendCeilingService => {
     const service = spendCeilingHolder.service;
@@ -1282,6 +1288,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         parentThreadId,
         windowId,
       }),
+    coordinatorWorkers: (coordinatorThreadId) =>
+      coordinatorWorkersHolder.read?.(coordinatorThreadId),
     resolveCenterContext: ({ parentThreadId, mode, requestId, workspaceReceipt }) =>
       resolveAgentRunCenterContext({
         persistence,
@@ -1354,6 +1362,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     agentsManagedToolsFor,
     capacityScheduler,
     contributeChildTools,
+    coordinatorWorkersHolder,
     externalContentIngestionStore,
     managedWorktreeReceipts,
     nativeHarnessRouter,

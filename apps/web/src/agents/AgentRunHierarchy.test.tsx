@@ -864,6 +864,182 @@ describe("AgentRunHierarchy", () => {
     expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible();
   });
 
+  it("opens a subagent from the graph, says what it runs after, and goes back to the graph", async () => {
+    const user = userEvent.setup();
+    const earlier = decodeAgentRunId("33333333-3333-4333-8333-333333333333");
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            ...summaryEntry({ lifecycleStatus: "running", task: "Color tokens" }),
+            runId: earlier,
+            createdAt: "2026-08-01T15:00:00.000Z",
+          },
+          {
+            ...summaryEntry({ lifecycleStatus: "waiting", task: "Contrast check" }),
+            recoveryReason: "waiting-on-dependencies",
+            dependsOn: [earlier],
+            createdAt: "2026-08-01T15:00:30.000Z",
+          },
+        ],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    await user.click(within(graph).getByRole("button", { name: /Contrast check/ }));
+
+    const page = screen.getByRole("region", { name: "Subagent" });
+    expect(page).toHaveTextContent("Runs after Color tokens");
+    expect(page).toHaveTextContent("Starts when the runs it comes after finish.");
+
+    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
+
+    expect(screen.getByRole("group", { name: "Subagent graph" })).toBeInTheDocument();
+  });
+
+  describe("on a coordinator", () => {
+    const workerThreadId = "44444444-4444-4444-8444-444444444444";
+    const workers = [
+      { threadId: workerThreadId, title: "Add dark mode", state: "working" as const },
+    ];
+    const graphFor = (coordinatorThreadId: string) => ({
+      coordinatorThreadId,
+      workers: [
+        {
+          threadId: workerThreadId,
+          runs: [
+            {
+              runId,
+              role: "implementation",
+              task: "Color tokens",
+              lifecycleStatus: "running",
+              executionKind: "octant-managed",
+              route: {
+                requestedProviderInstanceId: "provider-a",
+                requestedModelId: "gpt-6-astra",
+                executionProviderInstanceId: "provider-a",
+                executionModelId: "gpt-6-astra",
+                poolDerived: false,
+              },
+              createdAt: "2026-08-01T15:00:00.000Z",
+              updatedAt: "2026-08-01T15:01:00.000Z",
+            },
+          ],
+          runsTruncated: false,
+        },
+      ],
+      workersTruncated: false,
+    });
+
+    it("reads its workers' subagents from the host and draws them under each worker", async () => {
+      const user = userEvent.setup();
+      const onOpenWorker = vi.fn();
+      const coordinatorGraph = vi.fn(async () => graphFor(String(parentThreadId)) as never);
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          onOpenWorker={onOpenWorker}
+          parentThreadId={parentThreadId}
+          workers={workers}
+        />,
+      );
+
+      expect(await screen.findByRole("button", { name: /Add dark mode/ })).toHaveTextContent(
+        "Working · 1 subagent · 1 working",
+      );
+      expect(coordinatorGraph).toHaveBeenCalledWith(String(parentThreadId));
+
+      await user.click(screen.getByRole("button", { name: "Graph" }));
+      const graph = screen.getByRole("group", { name: "Subagents of Add dark mode" });
+      await user.click(within(graph).getByRole("button", { name: /Color tokens/ }));
+
+      expect(onOpenWorker).toHaveBeenCalledWith(workerThreadId);
+      // A worker's subagent has no page here: its conversation is never asked for.
+      expect(screen.queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+    });
+
+    it("says the answer is partial when the host read only the most recently changed workers", async () => {
+      const older = { threadId: "66666666-6666-4666-8666-666666666666", title: "An older worker" };
+      const coordinatorGraph = vi.fn(
+        async () => ({ ...graphFor(String(parentThreadId)), workersTruncated: true }) as never,
+      );
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          parentThreadId={parentThreadId}
+          workers={[...workers, { ...older, state: "done" as const }]}
+        />,
+      );
+
+      const section = await screen.findByRole("region", { name: "Workers" });
+      // The older worker's row shows no count, which alone would read as
+      // "handed off nothing"; the section says its subagents were not read.
+      expect(
+        await within(section).findByText(
+          "Subagents are shown for the most recently changed workers only.",
+        ),
+      ).toBeVisible();
+      expect(within(section).getByRole("button", { name: /An older worker/ })).toHaveTextContent(
+        "Done",
+      );
+    });
+
+    it("asks the host for nothing on a thread with no workers", async () => {
+      const coordinatorGraph = vi.fn(async () => graphFor(String(parentThreadId)) as never);
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          parentThreadId={parentThreadId}
+        />,
+      );
+
+      await screen.findByRole("status");
+      expect(coordinatorGraph).not.toHaveBeenCalled();
+      expect(screen.queryByRole("region", { name: "Workers" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the workers listed and says their subagents are unreadable when the host refuses", async () => {
+      const coordinatorGraph = vi.fn(async () => {
+        throw new Error("403");
+      });
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          parentThreadId={parentThreadId}
+          workers={workers}
+        />,
+      );
+
+      const section = await screen.findByRole("region", { name: "Workers" });
+      expect(
+        await within(section).findByText("This window cannot read the workers' subagents."),
+      ).toBeVisible();
+      expect(within(section).getByRole("button", { name: /Add dark mode/ })).toHaveTextContent(
+        "Working",
+      );
+    });
+
+    it("ignores an answer about another coordinator", async () => {
+      const coordinatorGraph = vi.fn(
+        async () => graphFor("55555555-5555-4555-8555-555555555555") as never,
+      );
+      render(
+        <AgentRunHierarchy
+          client={emptyClient({ coordinatorGraph })}
+          parentThreadId={parentThreadId}
+          workers={workers}
+        />,
+      );
+
+      const row = await screen.findByRole("button", { name: /Add dark mode/ });
+      await waitFor(() => expect(coordinatorGraph).toHaveBeenCalled());
+      expect(row).not.toHaveTextContent("subagent");
+    });
+  });
+
   it("answers with the retained reply when the live conversation is gone after completion", async () => {
     const user = userEvent.setup();
     const client = emptyClient({

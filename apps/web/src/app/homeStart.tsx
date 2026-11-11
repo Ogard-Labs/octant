@@ -96,6 +96,7 @@ export interface HomeStartInput {
   /** A desktop window reads this computer; a browser window names its host. */
   readonly isDesktop: boolean;
   readonly loadHomePullRequests: ReturnType<typeof sharePullRequestRead>;
+  readonly needsYouCoordinatorTitles: ReadonlyMap<string, string>;
   readonly needsYouThreadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
   readonly now: number;
   readonly openRunningServiceLive:
@@ -158,6 +159,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     hostResourceClient,
     isDesktop,
     loadHomePullRequests,
+    needsYouCoordinatorTitles,
     needsYouThreadProviders,
     now,
     openRunningServiceLive,
@@ -258,6 +260,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+      coordinatorTitles: needsYouCoordinatorTitles,
       feedRevision,
       modes: workingNowModes,
       now: now,

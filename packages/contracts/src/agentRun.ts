@@ -814,6 +814,55 @@ export const AgentRunCenterResponse = Schema.Struct({
 export type AgentRunCenterResponse = typeof AgentRunCenterResponse.Type;
 
 /**
+ * What a coordinator's window may read about the child runs of the workers
+ * that coordinator started (docs/design/coordinator-threads.md).
+ *
+ * Facts for a picture, nothing to act on: a run's task, state, route and the
+ * links that order it. A run's reply, its result packets, its recovery text
+ * and every control stay with the worker thread's own reads, which a window
+ * gets only by holding that worker.
+ */
+export const MAX_AGENT_RUN_COORDINATOR_GRAPH_WORKERS = 32;
+export const MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS = 24;
+
+export const AgentRunGraphFact = Schema.Struct({
+  runId: AgentRunId,
+  parentRunId: Schema.optional(AgentRunId),
+  dependsOn: Schema.optional(AgentRunDependencies),
+  role: AgentRunRole,
+  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  lifecycleStatus: AgentRunLifecycleStatus,
+  executionKind: AgentRunExecutionKind,
+  route: AgentRunCenterRoute,
+  normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  /** The host holds the run until the runs it depends on finish. */
+  heldForDependencies: Schema.optional(Schema.Literal(true)),
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentRunGraphFact = typeof AgentRunGraphFact.Type;
+
+export const AgentRunCoordinatorGraphWorker = Schema.Struct({
+  threadId: CodeThreadId,
+  /** The worker's runs, oldest request first. */
+  runs: Schema.Array(AgentRunGraphFact).pipe(Schema.maxItems(MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS)),
+  /** The worker has more runs than are listed; the newest are kept. */
+  runsTruncated: Schema.Boolean,
+}).annotations(strict);
+export type AgentRunCoordinatorGraphWorker = typeof AgentRunCoordinatorGraphWorker.Type;
+
+export const AgentRunCoordinatorGraph = Schema.Struct({
+  coordinatorThreadId: CodeThreadId,
+  /** Only workers with at least one run; a worker without any adds nothing to the picture. */
+  workers: Schema.Array(AgentRunCoordinatorGraphWorker).pipe(
+    Schema.maxItems(MAX_AGENT_RUN_COORDINATOR_GRAPH_WORKERS),
+  ),
+  /** The coordinator has more workers than were read. */
+  workersTruncated: Schema.Boolean,
+}).annotations(strict);
+export type AgentRunCoordinatorGraph = typeof AgentRunCoordinatorGraph.Type;
+
+/**
  * Ephemeral child-conversation read limits. Live text is a server snapshot,
  * not journal content; these bounds keep a reconnect or a hostile provider
  * from turning a small Environment disclosure into an unbounded stream.
@@ -930,6 +979,7 @@ export const decodeAgentRunCenterRoute = Schema.decodeUnknownSync(AgentRunCenter
 export const decodeAgentRunCenterSummary = Schema.decodeUnknownSync(AgentRunCenterSummary);
 export const decodeAgentRunCenterQuery = Schema.decodeUnknownSync(AgentRunCenterQuery);
 export const decodeAgentRunCenterResponse = Schema.decodeUnknownSync(AgentRunCenterResponse);
+export const decodeAgentRunCoordinatorGraph = Schema.decodeUnknownSync(AgentRunCoordinatorGraph);
 export const decodeAgentRunConversationReadStatus = Schema.decodeUnknownSync(
   AgentRunConversationReadStatus,
 );

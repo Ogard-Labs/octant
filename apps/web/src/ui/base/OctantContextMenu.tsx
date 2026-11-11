@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuGroup,
   ContextMenuItem,
@@ -90,6 +91,7 @@ export const OctantContextMenuContent = ContextMenuContent;
 export const OctantContextMenuGroup = ContextMenuGroup;
 export const OctantContextMenuLabel = ContextMenuLabel;
 export const OctantContextMenuItem = ContextMenuItem;
+export const OctantContextMenuCheckboxItem = ContextMenuCheckboxItem;
 export const OctantContextMenuSeparator = ContextMenuSeparator;
 export const OctantContextMenuSub = ContextMenuSub;
 export const OctantContextMenuSubTrigger = ContextMenuSubTrigger;

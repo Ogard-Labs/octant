@@ -20,6 +20,7 @@ import {
   coordinatorStartingFor,
   decideCoordinatorStart,
   decideMessageWake,
+  readsAsCoordinator,
 } from "@octant/domain";
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { EventEnvelope } from "@octant/contracts";
@@ -35,6 +36,12 @@ export interface CoordinatorServicePorts {
   readonly readThreads: () => ReadonlyArray<CodeThread>;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
   readonly readSettings: () => CodeSettings | undefined;
+  /**
+   * Whether a thread is its Project's designated planner, as the designation
+   * reads now. The planner reads as a coordinator whose starts always need
+   * approval, derived here so no journaled thread record changes.
+   */
+  readonly isDesignatedPlanner: (threadId: string) => boolean;
   /** Whether a thread is marked as having read outside content, as its mark reads now. */
   readonly isMarked: (threadId: string) => boolean;
   /** A thread's state in the closed set the threads tool reports, or `undefined`. */
@@ -114,16 +121,45 @@ export class CoordinatorService {
     this.#ports = ports;
   }
 
-  /** The caller's stored level while it is an open coordinator, else `undefined`. */
+  /**
+   * The caller's stored level while it reads as a coordinator (it holds the
+   * role, or it is its Project's designated planner), else `undefined`.
+   */
   levelOf(threadId: string): ProviderExecutionPolicy | undefined {
     const thread = this.#ports.readThread(threadId);
-    return thread?.coordinator === true && thread.lifecycle !== "archived"
+    return thread !== undefined && this.#readsAsCoordinator(thread)
       ? thread.executionPolicy
       : undefined;
   }
 
   isCoordinator(threadId: string): boolean {
     return this.levelOf(threadId) !== undefined;
+  }
+
+  /**
+   * The workers a thread started, while that thread reads as a coordinator;
+   * `undefined` for any other thread, so a caller that asks about a thread
+   * that never coordinated, or stopped, learns nothing about its lineage.
+   * The same workers and the same bound as the roster a coordinator's turn
+   * carries, most recently changed first.
+   */
+  workersOf(
+    threadId: string,
+  ):
+    | { readonly workers: ReadonlyArray<CodeThread["id"]>; readonly truncated: boolean }
+    | undefined {
+    const coordinator = this.#ports.readThread(threadId);
+    if (coordinator === undefined || !this.#readsAsCoordinator(coordinator)) return undefined;
+    // A worker is created in its coordinator's Project. This answer lets a
+    // window read through the coordinator, so a thread recorded anywhere else
+    // is left out rather than trusted on its lineage alone.
+    const workers = this.#rosterOf(coordinator).filter(
+      (worker) => String(worker.projectId) === String(coordinator.projectId),
+    );
+    return {
+      workers: workers.slice(0, MAX_COORDINATOR_ROSTER_ROWS).map((worker) => worker.id),
+      truncated: workers.length > MAX_COORDINATOR_ROSTER_ROWS,
+    };
   }
 
   /** One `start` call from a coordinator's turn. */
@@ -153,6 +189,10 @@ export class CoordinatorService {
               lifecycle: caller.lifecycle,
               level: caller.executionPolicy,
               marked: this.#ports.isMarked(String(caller.id)),
+              // A worker never coordinates, even one designated as planner
+              // before that rule; it stays refused as unauthorized.
+              designatedPlanner:
+                caller.coordinatorThreadId === undefined && this.#isPlanner(caller),
             },
       profileAllowsStart: input.profileAllowsStart,
       starting: coordinatorStartingFor({
@@ -216,15 +256,8 @@ export class CoordinatorService {
    */
   contextFor(threadId: string): string | undefined {
     const coordinator = this.#ports.readThread(threadId);
-    if (coordinator?.coordinator !== true) return undefined;
-    const workers = this.#ports
-      .readThreads()
-      .filter(
-        (thread) =>
-          String(thread.coordinatorThreadId) === String(coordinator.id) &&
-          thread.lifecycle !== "archived",
-      )
-      .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    if (coordinator === undefined || !this.#readsAsCoordinator(coordinator)) return undefined;
+    const workers = this.#rosterOf(coordinator);
     const rows = workers.slice(0, MAX_COORDINATOR_ROSTER_ROWS).map((worker) => {
       const state = this.#workerState(worker);
       return `- ${String(worker.id)}@${String(worker.projectId)}: ${state ?? "unknown"} (updated ${worker.updatedAt})`;
@@ -238,6 +271,9 @@ export class CoordinatorService {
     return [
       "Coordinator roster, written by Octant from its own records (no agent wrote this).",
       "This turn is read-only: start workers with octant_threads start and message them with send.",
+      ...(this.#isPlanner(coordinator)
+        ? ["You are this Project's planner: every start becomes a proposal a person approves."]
+        : []),
       workers.length === 0
         ? "You have no workers yet."
         : `Your workers (reference: state)${workers.length > rows.length ? `, newest ${String(rows.length)} of ${String(workers.length)}` : ""}:`,
@@ -273,7 +309,7 @@ export class CoordinatorService {
   async sweep(): Promise<void> {
     const threads = this.#ports.readThreads();
     for (const coordinator of threads) {
-      if (coordinator.coordinator !== true || coordinator.lifecycle === "archived") continue;
+      if (!this.#readsAsCoordinator(coordinator)) continue;
       let noticed: { readonly worker: string; readonly hop: number } | undefined;
       for (const worker of threads) {
         if (String(worker.coordinatorThreadId) !== String(coordinator.id)) continue;
@@ -475,6 +511,31 @@ export class CoordinatorService {
     const hostTurn = this.#hostTurns.get(threadId);
     if (hostTurn === undefined) return 0;
     return this.#ports.latestTurnId(threadId) === hostTurn.operationId ? hostTurn.hop + 1 : 0;
+  }
+
+  /** A coordinator's workers that are not archived, most recently changed first. */
+  #rosterOf(coordinator: CodeThread): ReadonlyArray<CodeThread> {
+    return this.#ports
+      .readThreads()
+      .filter(
+        (thread) =>
+          String(thread.coordinatorThreadId) === String(coordinator.id) &&
+          thread.lifecycle !== "archived",
+      )
+      .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }
+
+  #isPlanner(thread: CodeThread): boolean {
+    return this.#ports.isDesignatedPlanner(String(thread.id));
+  }
+
+  #readsAsCoordinator(thread: CodeThread): boolean {
+    return readsAsCoordinator({
+      lifecycle: thread.lifecycle,
+      coordinator: thread.coordinator === true,
+      startedByCoordinator: thread.coordinatorThreadId !== undefined,
+      designatedPlanner: this.#isPlanner(thread),
+    });
   }
 
   #idle(thread: CodeThread): boolean {

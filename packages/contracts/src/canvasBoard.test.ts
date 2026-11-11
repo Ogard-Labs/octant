@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_COMMENT_STROKE_MAX_POINTS,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasComment,
   decodeCanvasCommentAdded,
@@ -36,6 +37,40 @@ const anchor = {
 } as const;
 
 describe("Canvas board comment contracts", () => {
+  const stroke = {
+    kind: "stroke" as const,
+    blockId: "chart-block",
+    strokeId: ids.region,
+    points: [
+      { x: 10, y: 20 },
+      { x: 12.5, y: 24 },
+      { x: 100, y: 0 },
+    ],
+  };
+
+  it("decodes a comment anchored to a freehand stroke over a block", () => {
+    const decoded = decodeCanvasCommentAnchor(stroke);
+    expect(decoded.kind).toBe("stroke");
+    expect(decoded.kind === "stroke" ? decoded.points.length : 0).toBe(3);
+  });
+
+  it("refuses a stroke that is one point, runs past its bound, or leaves its block", () => {
+    const point = { x: 50, y: 50 };
+    expect(() => decodeCanvasCommentAnchor({ ...stroke, points: [point] })).toThrow();
+    expect(() =>
+      decodeCanvasCommentAnchor({
+        ...stroke,
+        points: Array.from({ length: CANVAS_COMMENT_STROKE_MAX_POINTS + 1 }, () => point),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasCommentAnchor({ ...stroke, points: [point, { x: 100.5, y: 50 }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasCommentAnchor({ ...stroke, points: [point, { x: 50, y: -1 }] }),
+    ).toThrow();
+  });
+
   it("decodes a comment anchored to a region", () => {
     const comment = decodeCanvasComment({
       commentId: ids.comment,

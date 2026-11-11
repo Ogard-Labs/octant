@@ -76,6 +76,12 @@ export interface SplitWorkspaceProps {
     placement: "before" | "after",
   ) => void;
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
+  /**
+   * Menu items the surface's own thread offers, placed in the pane's header
+   * menu above Close pane, such as a Code thread's coordinator items. Answers
+   * nothing for a surface with no thread items.
+   */
+  readonly threadMenuItems?: (surface: WorkspaceTab) => React.ReactNode;
   /** Provider identity for thread-owned surfaces, used by the pane's content tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /**
@@ -500,17 +506,26 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     if (selectedTabIds.size > 0) setSelectedTabIds(new Set());
     return false;
   };
+  // A pane's only tab moves its pane, as the title row does. Any other tab
+  // opens where it lands and leaves this pane's row. That includes the open
+  // one when the pane holds more: the pane shows another of its tabs, and
+  // the tab can then split its own pane. Carried with its pane, the
+  // open tab had no drop target anywhere in the pane it was in, and dropped on
+  // another pane it took the whole pane, tabs and all.
+  const tabDragOrigin = (entry: WorkspaceTab) => {
+    const fromTab = { fromTab: { paneId: pane.paneId, tabId: entry.id } };
+    if (String(entry.id) !== String(surface.id)) return fromTab;
+    return navigation.length < 2
+      ? { paneId: pane.paneId }
+      : { ...fromTab, openTab: { paneId: pane.paneId } };
+  };
   const tabDragSource = (entry: WorkspaceTab) => {
     const selected = selectedTabs.length >= 2 && selectedTabIds.has(String(entry.id));
     return {
       dragKey: `tab:${String(pane.paneId)}:${String(entry.id)}`,
       surface: entry,
       title: workspaceSurfaceTitle(entry, props.liveThreadTitles),
-      // The open tab moves its pane, as the title row does; any other tab
-      // opens where it lands and leaves this pane's row.
-      ...(String(entry.id) === String(surface.id)
-        ? { paneId: pane.paneId }
-        : { fromTab: { paneId: pane.paneId, tabId: entry.id } }),
+      ...tabDragOrigin(entry),
       ...(selected ? { surfaces: selectedTabs } : {}),
     };
   };
@@ -782,6 +797,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               onClose={() => props.onClosePane(pane.paneId)}
               onFocus={() => props.onFocus(pane.paneId)}
               onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
+              threadItems={props.threadMenuItems?.(surface)}
               title={title}
             />
           </OctantContextMenuRoot>
@@ -829,6 +845,8 @@ function PaneMenu(props: {
   readonly onSplit: (orientation: "horizontal" | "vertical") => void;
   /** Present when two to four tabs can be laid out side by side. */
   readonly onShowSideBySide?: () => void;
+  /** The surface's own thread items; absent or empty adds nothing. */
+  readonly threadItems?: React.ReactNode;
   readonly title: string;
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
@@ -860,6 +878,12 @@ function PaneMenu(props: {
           )}
         </>
       ) : null}
+      {props.threadItems === undefined || props.threadItems === null ? null : (
+        <>
+          <OctantContextMenuSeparator />
+          {props.threadItems}
+        </>
+      )}
       <OctantContextMenuSeparator />
       <OctantContextMenuItem label="Close pane" onClick={props.onClose}>
         Close pane

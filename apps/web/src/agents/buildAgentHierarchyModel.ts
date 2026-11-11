@@ -1,4 +1,5 @@
-import type { AgentRunResultPacket } from "@octant/contracts";
+import type { AgentRunGraphFact, AgentRunResultPacket } from "@octant/contracts";
+import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
 
 export interface AgentHierarchyInputRoute {
   readonly requestedProviderInstanceId: string;
@@ -15,6 +16,8 @@ export interface AgentHierarchyInputEntry {
   readonly resultsTruncated?: boolean;
   readonly runId: string;
   readonly parentRunId?: string;
+  /** The sibling runs this one waits for, as the host listed them. */
+  readonly dependsOn?: ReadonlyArray<string>;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
@@ -26,6 +29,8 @@ export interface AgentHierarchyInputEntry {
     readonly followUpReason?: string;
   };
   readonly route?: AgentHierarchyInputRoute;
+  /** The effort the run was asked to use, when the host recorded one. */
+  readonly normalizedReasoning?: string;
   readonly recoveryReason?: string;
   /** How the host settled delivering this result to the parent; absent while owed. */
   readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
@@ -46,7 +51,15 @@ export interface AgentHierarchyInputEntry {
     readonly truncated: boolean;
   };
   readonly version: number;
+  /** When the run was requested. Absent from a host that predates the field. */
+  readonly createdAt?: string;
   readonly updatedAt: string;
+}
+
+/** A run another run waits for, named by its task so a reader need not match ids. */
+export interface AgentHierarchyRunReference {
+  readonly runId: string;
+  readonly task: string;
 }
 
 export interface AgentHierarchyRow {
@@ -71,13 +84,43 @@ export interface AgentHierarchyRow {
   readonly usageResume?: AgentHierarchyInputEntry["usageResume"];
   /** The model the host ran, for a row's one-line facts. */
   readonly model?: string;
+  /** The provider instance that ran it, which a surface may draw as that provider's mark. */
+  readonly providerInstanceId?: string;
+  /** The effort the run was asked to use. */
+  readonly effort?: string;
+  /** The listed runs this one waits for, in the host's order. Empty when it waits for none. */
+  readonly runsAfter: ReadonlyArray<AgentHierarchyRunReference>;
+  /**
+   * How many of those have not finished, while the host holds this run for
+   * them. Absent once it started or when it waits for something else.
+   */
+  readonly waitingOn?: number;
   readonly routeLabel?: string;
   readonly routeReason?: string;
   readonly nativeReadOnly: boolean;
   readonly result?: AgentHierarchyInputEntry["result"];
   readonly version: number;
+  readonly createdAt?: string;
   readonly updatedAt: string;
 }
+
+/** What a graph card shows of a run. The list's row carries more, for its page and controls. */
+export type AgentRunGraphRow = Pick<
+  AgentHierarchyRow,
+  | "runId"
+  | "parentRunId"
+  | "role"
+  | "task"
+  | "lifecycleStatus"
+  | "needsReview"
+  | "model"
+  | "providerInstanceId"
+  | "effort"
+  | "runsAfter"
+  | "waitingOn"
+  | "createdAt"
+  | "updatedAt"
+>;
 
 export interface AgentHierarchyModel {
   readonly creationPosture: "off" | "ask" | "automatic";
@@ -123,7 +166,8 @@ export function buildAgentHierarchyModel(input: {
   readonly creationPosture?: "off" | "ask" | "automatic";
 }): AgentHierarchyModel {
   const creationPosture = input.creationPosture ?? "automatic";
-  const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries)));
+  const byId = new Map(input.entries.map((entry) => [entry.runId, entry]));
+  const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries), byId));
   const working = rows.filter((row) => row.bucket === "active");
   const finished = rows
     .filter((row) => row.bucket === "history")
@@ -146,8 +190,18 @@ export function buildAgentHierarchyModel(input: {
   };
 }
 
-function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRow {
+function toRow(
+  entry: AgentHierarchyInputEntry,
+  depth: number,
+  byId: ReadonlyMap<string, AgentHierarchyInputEntry>,
+): AgentHierarchyRow {
   const bucket = ACTIVE.has(entry.lifecycleStatus) ? "active" : "history";
+  const links = runLinks(
+    entry,
+    entry.lifecycleStatus === "waiting" &&
+      entry.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON,
+    byId,
+  );
   return {
     runId: entry.runId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
@@ -172,12 +226,77 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
     ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
     ...(entry.route === undefined
       ? {}
-      : { model: entry.route.executionModelId, routeLabel: routeLabel(entry.route) }),
+      : {
+          model: entry.route.executionModelId,
+          providerInstanceId: entry.route.executionProviderInstanceId,
+          routeLabel: routeLabel(entry.route),
+        }),
+    ...(entry.normalizedReasoning === undefined ? {} : { effort: entry.normalizedReasoning }),
+    ...links,
     ...(entry.route?.routingReason === undefined ? {} : { routeReason: entry.route.routingReason }),
     nativeReadOnly: entry.executionKind === "provider-native",
     version: entry.version,
+    ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
     updatedAt: entry.updatedAt,
   };
+}
+
+/**
+ * The runs a run waits for, by task, and how many of them it is still held
+ * for. Only a listed run is named: the host leaves out one this window may not
+ * read, and a reader cannot open what is not in the list.
+ */
+function runLinks<
+  Run extends { readonly runId: string; readonly task: string; readonly lifecycleStatus: string },
+>(
+  run: { readonly runId: string; readonly dependsOn?: ReadonlyArray<string> },
+  heldForDependencies: boolean,
+  byId: ReadonlyMap<string, Run>,
+): Pick<AgentHierarchyRow, "runsAfter" | "waitingOn"> {
+  const awaited = (run.dependsOn ?? []).flatMap((runId) => {
+    const other = runId === run.runId ? undefined : byId.get(runId);
+    return other === undefined ? [] : [other];
+  });
+  return {
+    runsAfter: awaited.map((other) => ({ runId: other.runId, task: other.task })),
+    ...(heldForDependencies
+      ? { waitingOn: awaited.filter((other) => other.lifecycleStatus !== "completed").length }
+      : {}),
+  };
+}
+
+/**
+ * A worker's runs as its coordinator's graph draws them. The host sends facts
+ * only (no reply, no review state, nothing to act with), so a card here never
+ * asks for review and opens the worker, not a run.
+ */
+export function buildWorkerRunGraphRows(
+  runs: ReadonlyArray<AgentRunGraphFact>,
+): ReadonlyArray<AgentRunGraphRow> {
+  const byId = new Map(
+    runs.map((run) => [
+      String(run.runId),
+      { runId: String(run.runId), task: run.task, lifecycleStatus: run.lifecycleStatus },
+    ]),
+  );
+  return runs.map((run) => ({
+    runId: String(run.runId),
+    ...(run.parentRunId === undefined ? {} : { parentRunId: String(run.parentRunId) }),
+    role: run.role,
+    task: run.task,
+    lifecycleStatus: run.lifecycleStatus,
+    needsReview: false,
+    model: String(run.route.executionModelId),
+    providerInstanceId: String(run.route.executionProviderInstanceId),
+    ...(run.normalizedReasoning === undefined ? {} : { effort: run.normalizedReasoning }),
+    ...runLinks(
+      { runId: String(run.runId), dependsOn: (run.dependsOn ?? []).map(String) },
+      run.heldForDependencies === true,
+      byId,
+    ),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  }));
 }
 
 /**

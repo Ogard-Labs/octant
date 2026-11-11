@@ -54,6 +54,7 @@ interface Harness {
   readonly marked: Set<string>;
   readonly executed: Array<{ readonly command: CodeCommand; readonly context: unknown }>;
   readonly hostTurns: Array<{ readonly threadId: string; readonly prompt: string }>;
+  readonly planners: Set<string>;
   readonly proposals: Array<{
     readonly coordinator: string;
     readonly title: string;
@@ -73,6 +74,7 @@ function harness(): Harness {
   const executed: Harness["executed"] = [];
   const hostTurns: Harness["hostTurns"] = [];
   const proposals: Harness["proposals"] = [];
+  const planners = new Set<string>();
   const turnIds = new Map<string, string>();
   let turnCount = 0;
   const self: { settings: CodeSettings | undefined; clock: number } = {
@@ -84,6 +86,7 @@ function harness(): Harness {
     readThreads: () => [...threads.values()],
     readProject: () => ({ type: "code", lifecycle: "active" }) as unknown as Project,
     readSettings: () => self.settings,
+    isDesignatedPlanner: (id) => planners.has(id),
     isMarked: (id) => marked.has(id),
     threadState: (id) => states.get(id) ?? "idle",
     latestTurnId: (id) =>
@@ -134,6 +137,7 @@ function harness(): Harness {
     executed,
     hostTurns,
     proposals,
+    planners,
     turnIds,
   });
 }
@@ -257,6 +261,48 @@ describe("starting workers", () => {
   });
 });
 
+describe("the designated planner", () => {
+  const PLANNER = OTHER;
+
+  function plannerHarness(): Harness {
+    const h = harness();
+    h.threads.set(PLANNER, codeThread(PLANNER));
+    h.planners.add(PLANNER);
+    return h;
+  }
+
+  it("reads as a coordinator, so its turns take the coordinator's read-only gate and roster", () => {
+    const h = plannerHarness();
+    expect(h.service.isCoordinator(PLANNER)).toBe(true);
+    expect(h.service.levelOf(PLANNER)).toBe("auto-accept-edits");
+    expect(h.service.contextFor(PLANNER)).toContain("every start becomes a proposal");
+    h.planners.delete(PLANNER);
+    expect(h.service.isCoordinator(PLANNER)).toBe(false);
+    expect(h.service.contextFor(PLANNER)).toBeUndefined();
+  });
+
+  it("proposes every start, even under Start without asking, and creates nothing", async () => {
+    const h = plannerHarness();
+    h.settings = { coordinatorStarting: "start-without-asking" } as unknown as CodeSettings;
+    const answer = await h.service.start({ ...startCall({}), callerThreadId: PLANNER });
+    expect(answer).toMatchObject({ result: { status: "proposed" }, isError: false });
+    expect(h.proposals).toEqual([
+      { coordinator: PLANNER, title: "Fix the flaky test", level: "auto-accept-edits" },
+    ]);
+    expect(h.executed).toEqual([]);
+  });
+
+  it("never makes a worker a coordinator, even one designated as planner", async () => {
+    const h = plannerHarness();
+    h.threads.set(PLANNER, codeThread(PLANNER, { coordinatorThreadId: COORDINATOR }));
+    expect(h.service.isCoordinator(PLANNER)).toBe(false);
+    expect(await h.service.start({ ...startCall({}), callerThreadId: PLANNER })).toMatchObject({
+      result: { reason: "unauthorized" },
+    });
+    expect(h.proposals).toEqual([]);
+  });
+});
+
 describe("waking for messages and worker state", () => {
   it("wakes an idle thread whose switch is on, and a worker for its own coordinator", async () => {
     const h = harness();
@@ -306,6 +352,62 @@ describe("waking for messages and worker state", () => {
     // The notice is carried once.
     expect(h.service.contextFor(COORDINATOR)).not.toContain("became idle");
     expect(h.service.contextFor(WORKER)).toBeUndefined();
+  });
+});
+
+describe("naming a coordinator's workers", () => {
+  it("lists the workers a coordinator started, leaving out archived ones and other threads", () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    const elsewhere = "20000000-0000-4000-8000-0000000000bb";
+    h.threads.set(
+      elsewhere,
+      codeThread(elsewhere, {
+        coordinatorThreadId: COORDINATOR,
+        projectId: "40000000-0000-4000-8000-000000000002",
+      }),
+    );
+    h.threads.set(
+      NEW_WORKER,
+      codeThread(NEW_WORKER, { coordinatorThreadId: COORDINATOR, lifecycle: "archived" }),
+    );
+    h.threads.set(OTHER, codeThread(OTHER));
+
+    expect(h.service.workersOf(COORDINATOR)).toEqual({ workers: [WORKER], truncated: false });
+  });
+
+  it("names nothing for a worker, an ordinary thread, or a thread that stopped coordinating", () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    h.threads.set(OTHER, codeThread(OTHER));
+
+    expect(h.service.workersOf(WORKER)).toBeUndefined();
+    expect(h.service.workersOf(OTHER)).toBeUndefined();
+    expect(h.service.workersOf("20000000-0000-4000-8000-0000000000ff")).toBeUndefined();
+
+    // The lineage stays on the worker as history, but the former coordinator
+    // no longer reads through it.
+    h.threads.set(COORDINATOR, codeThread(COORDINATOR));
+    expect(h.service.workersOf(COORDINATOR)).toBeUndefined();
+  });
+
+  it("names the newest workers and says so when there are more than the roster holds", () => {
+    const h = harness();
+    for (let index = 0; index < 34; index += 1) {
+      const id = `20000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
+      h.threads.set(
+        id,
+        codeThread(id, {
+          coordinatorThreadId: COORDINATOR,
+          updatedAt: new Date(Date.parse(now) + index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const roster = h.service.workersOf(COORDINATOR);
+    expect(roster?.workers).toHaveLength(32);
+    expect(roster?.truncated).toBe(true);
+    expect(roster?.workers[0]).toBe("20000000-0000-4000-8000-000000000133");
   });
 });
 

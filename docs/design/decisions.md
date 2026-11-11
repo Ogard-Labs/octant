@@ -38,7 +38,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
-| [Agents and delegation](#agents-and-delegation)                                       | 5         | 4       | 1            | 0                   |
+| [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **193** | **33**       | **4**               |
+| **All areas**                                                                         | **230**   | **194** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -840,18 +840,21 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 A person may make a Code thread a coordinator: a long-lived thread that starts worker threads without asking, talks to them, and brings their requests to the person (maintainer request, 2026-11-10). A person can restrict starting to proposals for the whole host or for one Project.
 
-- Only a person makes or stops a coordinator, from a local window; up to four per Code Project. The role, lineage and switches are fields on the thread, journaled as `code.thread-updated@1`; a creation command may not carry them. A coordinator's proposals use the planner's proposal path; carrying an existing planner designation over to a coordinator is not built yet.
+- Only a person makes or stops a coordinator, from a local window; up to four per Code Project. The role, lineage and switches are fields on the thread, journaled as `code.thread-updated@1`; a creation command may not carry them. A coordinator's proposals use the planner's proposal path. The designated planner reads as a coordinator whose starts always need approval, counted toward the four; designation refuses a worker or a fifth coordinator.
 - A coordinator's own file, shell and Git actions take Plan's read-only gate whatever its level; it has no delivery target, no board card, no pull request of its own, and is never Done. Each turn carries a host-written roster of its workers with no agent-written text.
 - `octant_threads` `start` is offered only to a current coordinator, outside Plan, and to a profile allowlist naming `octant_threads.start`. It creates an ordinary Code thread in the same Project on a new managed worktree, with an `agent`-initiated first turn, so every approval waits for a person. Workers are never coordinators and never offered `start`.
 - Settings › Code › Coordinators › Starting workers is Start without asking (default) or Propose for approval, with a per-Project override; only a person changes it, and the host reads it at every call.
 - A worker's level is at most the coordinator's, and never Full access from a marked coordinator. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
-- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Not built yet: the composer listing, Needs you rows naming the coordinator, and a proposal card in the coordinator thread.
+- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
+- The wake switches (never the role) may also be set from an owner device through the owner routes, each change under its own fresh unlock and journaled as that device; no owner-device screen calls them yet.
+- Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
 - Wake, start and hop counts are held in host memory; a restart starts them again.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
+- A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
-Status: Partly built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
+Status: Built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
 
 ## Boards, pull requests and delivery
 
@@ -2106,8 +2109,9 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
-- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold.
-- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style.
+- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below.
+- Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
+- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 
@@ -2130,6 +2134,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](.
 Every list, board, reader and preference page is one `Surface`. Settings groups its pages by what they change.
 
 - A setting lives on the page of the thing it changes, and a moved setting keeps answering links to its old page.
+- In a wide window Settings is a sheet over the app, which stays mounted and drawn behind a light scrim, so a change to how the app looks is seen as it is made. It closes from its own corner, with Escape, or with a press outside it. In a narrow window it covers the window and offers Back to app.
 - A page names its scope once, under its title. A page header holds one creation action and Back; filters sit in the toolbar.
 - A destination opens on one toolbar row at the Settings page title's size, pinned while the body scrolls, with an icon Back at the leading edge that does not move on press. It carries no description; its one line of detail is only a fact that changes and that a person needs. An empty page is the empty state alone, centred, with search and filters back once there is something to search.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
@@ -2292,10 +2297,12 @@ Status: Built. Since: —. Detail: [Workspace: Panes and content navigation](wor
 
 ### Thread info
 
-What is true about a thread but is not part of its conversation has one home, a panel opened from the strip above the follow-up composer.
+What is true about a thread but is not part of its conversation has one home, a panel opened from the row under the follow-up composer.
 
-- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The composer's toolbar keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
+- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The row under the composer's card keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
 - Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
+- The button is an icon named Thread info. The line under the composer's card is one row in a split pane and two at a phone's width, and the panel is never wider than that line.
+- The panel is a menu drawn like the line's other menus: full-width 30px rows, each its name leading with its value and arrow trailing, headed by the level in force.
 
 Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).
 
@@ -2344,6 +2351,7 @@ Agents may propose routines and delegate work, but a routine exists only through
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
 - The Agents dock shows and controls subagents without starting them. A provider-observed child is labelled observation-only and has no managed controls.
+- The Agents dock draws a thread's subagents as a list or as a graph of which runs each one waits for; a graph card opens the page a list row opens, and the host names a dependency only when the window may read that run.
 
 Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) and [Subagents](workspace.md#subagents).
 
@@ -2394,7 +2402,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A start screen's composer card holds only the prompt and its toolbar. Where the thread runs is one row of chips on the page above it, the working folder among them as a chip that opens its fields over the page.
+- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row under the card. Where a new thread runs is one row of chips above it. Both rows and the card are held by the composer's tray, one raised frame a step under the card, so the composer is one object in two layers; the tray is the glass surface over a ground or under Window glass. The working folder is one of the chips above the card, and opens its fields over the page.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
@@ -2457,6 +2465,9 @@ Diagram and flow boards are editable by a local person, and comments are journal
 - Only a window on this host edits boards or comments. A paired browser reads them.
 - Inline diagrams follow their drawing's proportions without gaining layout-editing authority; document workspaces keep the fixed board frame. Retry loops use visible return lanes with shape-aware ports and space before neighbouring automatic-layout nodes. [Canvas visuals: Inline diagram proportions and retry loops](canvas-visuals.md#inline-diagram-proportions-and-retry-loops) owns the layout rule.
 - Send to agent queues a turn under the thread's own authority and creates no new authority.
+- The workspace tab's tool rail (Select, Hand, Comment, Area, Pen, Text) only chooses what the pointer does and which anchor a comment gets. It journals nothing and adds no command or authority.
+- An area comment is a `region` anchor in percent of its block's drawn box. A board takes none, because its picture moves under its box.
+- A drawn mark (an area, a pen line, a pinned note) is a comment's anchor and never an object of its own, so it follows the comment rules and adds no aggregate, command or route. A pen line is a `stroke` anchor of 2 to 128 points bounded to the block's box; a note is a `region` of no size. A build older than the `stroke` kind cannot read a comment that carries one.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
 

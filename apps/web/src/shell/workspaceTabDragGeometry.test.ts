@@ -69,6 +69,44 @@ describe("workspace surface drag geometry", () => {
     ).toBeNull();
   });
 
+  it("lets a pane's open tab split the pane it is in when the pane holds other tabs, and nothing else there", () => {
+    const openTab: WorkspaceSurfaceDragSource = {
+      dragKey: "tab:open",
+      surface: draggedSurface,
+      title: draggedSurface.title,
+      fromTab: { paneId: sourcePaneId, tabId: draggedSurface.id },
+      openTab: { paneId: sourcePaneId },
+    };
+    const panes = [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)];
+    // Its own pane's right edge: the tab lands beside the pane's next tab.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 390, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toEqual({ kind: "edge", targetPaneId: sourcePaneId, edge: "right" });
+    // Its own pane's centre already shows it.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 200, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toBeNull();
+    // Another pane's centre takes it as it takes any tab.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 600, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toEqual({ kind: "center", targetPaneId });
+  });
+
   it("lets a sidebar row land on any pane's center, including the active one", () => {
     expect(
       resolveWorkspaceSurfaceDropDestination({
@@ -170,6 +208,23 @@ describe("workspace surface drag geometry", () => {
         ],
       }),
     ).toEqual({ kind: "composer", composerKey: "composer-1" });
+  });
+
+  it("keeps a dragged tab on the pane when the pointer is over a composer", () => {
+    expect(
+      resolveSidebarComposerDrop({
+        point: { x: 200, y: 500 },
+        source: {
+          dragKey: "tab:other",
+          surface: draggedSurface,
+          title: draggedSurface.title,
+          fromTab: { paneId: sourcePaneId, tabId: draggedSurface.id },
+        },
+        composerZones: [
+          { key: "composer-1", rect: { left: 40, top: 420, width: 320, height: 120 } },
+        ],
+      }),
+    ).toBeNull();
   });
 
   it("keeps a pane drag on the pane even when the pointer is over a composer", () => {

@@ -144,6 +144,10 @@ export type ShellActions = {
   readonly openDockTab: (surface: RightUtilityDockSurfaceId, opener?: HTMLElement) => void;
   readonly openDraftInActiveProject: (mode: "work" | "code") => void;
   readonly openDraftInProject: (projectId: ProjectId) => Promise<void>;
+  /** New coordinator in a Code Project's sidebar menu. */
+  readonly openCoordinatorDraftInProject: (projectId: ProjectId) => Promise<void>;
+  /** Turns a New coordinator draft back into an ordinary one. */
+  readonly cancelCoordinatorDraft: () => void;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
   readonly openImageLibrary: () => void;
@@ -299,6 +303,9 @@ export type ShellActions = {
       | undefined
     >
   >;
+  readonly setCodeThreadCoordinator: CodeController["setThreadCoordinator"];
+  readonly setCodeThreadCoordinatorWake: CodeController["setThreadCoordinatorWake"];
+  readonly setCodeThreadMessageWake: CodeController["setThreadMessageWake"];
   readonly snoozeChatThread: ChatController["snoozeThread"];
   readonly snoozeCodeThread: CodeController["snoozeThread"];
   readonly spendRevealChatTurn: () => void;

@@ -37,6 +37,11 @@ import type {
   OwnerPostureHost,
   OwnerPostureRead,
 } from "./ownerPostureHost";
+import type {
+  OwnerThreadWakeChange,
+  OwnerThreadWakeHost,
+  OwnerThreadWakeRead,
+} from "./ownerThreadWakeHost";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 
 export interface SoftwareAuthenticator {
@@ -332,5 +337,23 @@ export class TestPostureHost implements OwnerPostureHost {
     });
     this.postures.set(key, next);
     return { status: "changed", posture: next };
+  }
+}
+
+/**
+ * A host's wake switches before a test gives it a Code service: it knows no
+ * thread. A test that needs real threads spies on these with the production
+ * host's own methods.
+ */
+export class TestThreadWakeHost implements OwnerThreadWakeHost {
+  async read(_threadId: Parameters<OwnerThreadWakeHost["read"]>[0]): Promise<OwnerThreadWakeRead> {
+    return { status: "refused", kind: "not-found" };
+  }
+
+  async change(
+    _request: Parameters<OwnerThreadWakeHost["change"]>[0],
+    _authority: Parameters<OwnerThreadWakeHost["change"]>[1],
+  ): Promise<OwnerThreadWakeChange> {
+    return { status: "refused", kind: "not-found" };
   }
 }

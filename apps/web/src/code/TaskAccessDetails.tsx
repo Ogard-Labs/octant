@@ -7,6 +7,7 @@ import type {
   TaskAccessSnapshot,
   TaskAccessRecovery,
 } from "@octant/contracts";
+import { ChevronRight } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
@@ -140,6 +141,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
         variant="ghost"
       >
         Access details
+        <ChevronRight aria-hidden="true" size={12} />
       </OctantButton>
       {open ? (
         <section
@@ -153,7 +155,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
             }
           }}
           aria-label="Task access details"
-          className="flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-3 overflow-y-auto overscroll-contain rounded-md border border-border p-3"
+          className="task-access-details__report flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-3 overflow-y-auto overscroll-contain"
         >
           <p>
             These are the host&apos;s reported limits. Every action is checked again when it runs.
@@ -167,7 +169,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
             </OctantAlert>
           ) : (
             <>
-              <dl className="grid min-w-0 grid-cols-1 gap-1">
+              <dl className="task-access-details__facts">
                 <dt>Task state</dt>
                 <dd>
                   {facts.standing === "active"
@@ -310,12 +312,14 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
               </p>
             </>
           )}
-          <OctantButton type="button" size="sm" variant="outline" onClick={read.refresh}>
-            Refresh access report
-          </OctantButton>
-          <OctantButton type="button" size="sm" variant="ghost" onClick={close}>
-            Close access details
-          </OctantButton>
+          <div className="task-access-details__actions">
+            <OctantButton type="button" size="sm" variant="ghost" onClick={close}>
+              Close access details
+            </OctantButton>
+            <OctantButton type="button" size="sm" variant="outline" onClick={read.refresh}>
+              Refresh access report
+            </OctantButton>
+          </div>
         </section>
       ) : null}
     </div>

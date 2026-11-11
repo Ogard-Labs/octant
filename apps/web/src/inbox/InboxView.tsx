@@ -43,6 +43,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
  */
 export interface InboxDecisionSource extends PendingRequestRowsSource {
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Each worker's coordinator title, by worker thread id, from the window's thread list. */
+  readonly coordinatorTitles?: ReadonlyMap<string, string>;
   /**
    * Opens the thread, where Reply… lets the person type their own answer; for a
    * waiting subagent, opens the thread's Agents tool on that subagent.
@@ -307,6 +309,9 @@ export function InboxView(props: InboxViewProps) {
                   item.kind === "request" ? (
                     <li className="surface-row" key={item.key}>
                       <PendingRequestRow
+                        coordinatorTitle={decisions?.coordinatorTitles?.get(
+                          String(item.entry.request.threadId),
+                        )}
                         onDefer={defer}
                         now={decisions?.now ?? 0}
                         onAnswer={answer}

@@ -28,22 +28,22 @@ describe("a settings section", () => {
     expect(styles).not.toMatch(/border-inline:\s*1px solid/);
   });
 
-  it("groups a section's rows in one card: the card radius, one hairline, a raised fill, no shadow", () => {
+  it("groups a section's rows in one raised card: the card radius, the raised fill, and the card shadow that draws its edge", () => {
     const flat = styles.replace(/\s+/g, " ");
     const card =
       /\.settings-view \.settings-card-section--open > :is\(\.setgroup, \.settings-fact-list, \.settings-panel__body\) \{([^}]*)\}/.exec(
         flat,
       )?.[1] ?? "";
     expect(card).toMatch(/background:\s*var\(--oct-settings-card-fill\)/);
-    expect(card).toMatch(/border:\s*1px solid var\(--oct-hairline\)/);
+    // The edge, the light on the top edge and the short shadow are the one
+    // token's. The clear border is what forced colours draw in their place.
+    expect(card).toMatch(/border:\s*1px solid transparent/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
-    expect(card).toMatch(/box-shadow:\s*none/);
+    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-xs\)/);
     // Menus and popovers inside a row have to escape the card, so it never clips.
     expect(card).toMatch(/overflow:\s*visible/);
     expect(card).not.toMatch(/overflow:\s*hidden/);
-    expect(flat).toMatch(
-      /--oct-settings-card-fill: color-mix\(in oklab, var\(--oct-fg\) 3%, var\(--oct-bg\)\)/,
-    );
+    expect(flat).toMatch(/--oct-settings-card-fill: var\(--octant-card\)/);
   });
 
   it("rounds the first and last row to the card instead of clipping them", () => {

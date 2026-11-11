@@ -3011,13 +3011,16 @@ approval.
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
-and brings their requests to the person. Coordinators are meant to replace the
-planner role below (the planner becoming a coordinator whose starts need
-approval); that carry-over is not built, and today the two roles sit side by
-side, a coordinator's proposals using the planner's proposal path. The rules are in
-[Coordinator threads](design/coordinator-threads.md), which says what is built.
-The planner below keeps working: a designated planner thread still reads the
-board and proposes, and a coordinator's proposals use its proposal path.
+and brings their requests to the person. The planner below is now a
+coordinator whose starts always need approval: the designated planner's turns
+take the coordinator's read-only gate and roster, its `start` proposes through
+the planner's proposal path whatever the start setting, and designation also
+refuses a worker or a fifth coordinator in the Project. The Code navigation and
+bootstrap reads carry `plannerThreadIds`, derived from the designation, so the
+renderer lists the planner among coordinators. The board read leaves the
+planner out like any coordinator, so the planner's own `board` read no longer
+lists its card. The rules are in
+[Coordinator threads](design/coordinator-threads.md).
 
 **The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
@@ -3772,8 +3775,10 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   that turn only.
 - **Waking an idle recipient.** Every Code thread has a **Wake when a message
   arrives** switch in its header menu and its row's context menu. It is off by
-  default, only a person sets it (a window on the host; never an agent, a
-  routine, a paired device, or a peer; an owner device's route is not built),
+  default, only a person sets it (a window on the host, or an owner device
+  through the owner routes `code-threads/wake/read` and
+  `code-threads/wake/change` with its own fresh unlock, journaled as that
+  device; never an agent, a routine, a plain paired device, or a peer),
   and each change is journaled as the thread's own `code.thread-updated@1`
   (command `set-code-thread-message-wake`). When a
   message is admitted for a thread with the switch on and the thread is idle,
@@ -14639,7 +14644,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   release names, before any other field is believed. Stable trusts only the
   stable key (`OCTANT_UPDATE_PUBLIC_KEY`); preview and candidate trust the
   preview key (`OCTANT_UPDATE_PREVIEW_PUBLIC_KEY`) and the stable key. The
-  preview workflow builds unreviewed `main` without an approval gate, so
+  nightly and preview release workflows build unreviewed code without an approval gate, so
   anything merged there can read the key it signs with; a shared key would let
   that code sign a `ring: "stable"` feed and make the stable approval
   meaningless. The stable key may sign previews because its holder can already
@@ -15997,7 +16002,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
   preserve authenticated registration and the functional publication gate.
 - Rollback is a roll-forward. The updater accepts only a strictly newer
-  version, so a bad Nightly is replaced by dispatching the preview workflow
+  version, so a bad Nightly is replaced by dispatching `Release (nightly)`
   from `main` with `rollback_ref`: it rebuilds a published `v*-preview.*` tag
   whose commit is on `main` as Nightly under a new version from the workflow's
   own date and run number. Any other ref is refused before checkout, because

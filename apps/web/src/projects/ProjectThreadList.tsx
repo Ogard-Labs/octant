@@ -1,4 +1,13 @@
-import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
@@ -6,6 +15,7 @@ import {
   Archive,
   Cpu,
   BellRing,
+  ChevronRight,
   CircleAlert,
   LoaderCircle,
   Check,
@@ -25,6 +35,7 @@ import { resolveSnoozePresets } from "@octant/domain";
 import {
   sidebarThreadStatusInput,
   threadRowActivity,
+  threadRowStatusInput,
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
@@ -41,10 +52,13 @@ import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import {
+  groupCoordinatorThreads,
   groupThreadsByCheckout,
   nestFollowUpThreads,
   type CheckoutThreadGroup,
+  type CoordinatorThreadGroup,
 } from "./projectThreadGrouping";
+import { readFoldedCoordinators, writeFoldedCoordinators } from "../shell/activityViewModel";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { ThreadRenameField } from "./ThreadRenameField";
@@ -861,6 +875,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       <SidebarThreadRowContent
         {...(rowAge === undefined ? {} : { age: rowAge })}
         {...(rowCheckout === undefined ? {} : { checkout: rowCheckout })}
+        {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
         status={
@@ -1146,6 +1161,12 @@ export interface ProjectThreadListProps {
    * elsewhere has no use for the extra level.
    */
   readonly groupByCheckout?: boolean;
+  /**
+   * Lists the Project's coordinators first, each with its open workers folded
+   * beneath it, and leaves those workers out of the rows below. The sidebar's
+   * Project tree opts in (docs/design/workspace.md#coordinators).
+   */
+  readonly groupCoordinators?: boolean;
   /** Shown only when the list is ready and genuinely holds no threads. */
   readonly emptyMessage?: string;
   readonly errorMessage?: string;
@@ -1175,9 +1196,16 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
   // suggested it; grouping by checkout happens on the rest, so a worktree
   // child stays under its primary-checkout parent.
   const followUpParents = useContext(FollowUpLineageContext);
+  const coordinatorSplit = useMemo(
+    () =>
+      props.groupCoordinators === true
+        ? groupCoordinatorThreads(props.threads)
+        : { coordinators: [], others: props.threads },
+    [props.groupCoordinators, props.threads],
+  );
   const nesting = useMemo(
-    () => nestFollowUpThreads(props.threads, followUpParents),
-    [followUpParents, props.threads],
+    () => nestFollowUpThreads(coordinatorSplit.others, followUpParents),
+    [coordinatorSplit.others, followUpParents],
   );
   const groups =
     props.groupByCheckout === true ? groupThreadsByCheckout(nesting.topLevel) : undefined;
@@ -1211,7 +1239,21 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
           status={status}
         />
       )}
-      {props.threads.length > 0 ? (
+      {coordinatorSplit.coordinators.length === 0 ? null : (
+        <CoordinatorThreadSection
+          {...(props.actions === undefined ? {} : { actions: props.actions })}
+          {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+          {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+          {...(props.projectNameForThread === undefined
+            ? {}
+            : { projectNameForThread: props.projectNameForThread })}
+          groups={coordinatorSplit.coordinators}
+          lineageThreads={props.threads}
+          onSelectThread={props.onSelectThread}
+        />
+      )}
+      {coordinatorSplit.others.length > 0 ? (
         groups === undefined ? (
           rows(nesting.expand(nesting.topLevel), false)
         ) : (
@@ -1221,10 +1263,149 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
             </ProjectCheckoutGroup>
           ))
         )
-      ) : status === "ready" && props.emptyMessage !== undefined ? (
+      ) : props.threads.length === 0 && status === "ready" && props.emptyMessage !== undefined ? (
         <p className="project-threads__empty">{props.emptyMessage}</p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A Project's coordinators, above its other threads. Each coordinator row has a
+ * fold button that shows or hides its open workers beneath it; folded, the row
+ * says how many of them are working and how many need input, so folding never
+ * hides a request. The window remembers each fold for the session.
+ */
+function CoordinatorThreadSection(props: {
+  readonly actions?: ThreadRowActions;
+  readonly activeThreadId?: string;
+  readonly openThreadIds?: ReadonlyArray<string>;
+  readonly onRenameThread?: (threadId: string, title: string) => void;
+  readonly onSelectThread: (threadId: string) => void;
+  readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
+  readonly groups: ReadonlyArray<CoordinatorThreadGroup>;
+  readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
+}) {
+  const [folded, setFolded] = useState(() => readFoldedCoordinators());
+  const workersId = useId();
+  function toggle(coordinatorId: string) {
+    const next = new Set(folded);
+    if (next.has(coordinatorId)) next.delete(coordinatorId);
+    else next.add(coordinatorId);
+    setFolded(next);
+    writeFoldedCoordinators(next);
+  }
+  const rows = (threads: ReadonlyArray<ChatThreadNavigationItem>) => (
+    <ProjectThreadRows
+      {...(props.actions === undefined ? {} : { actions: props.actions })}
+      {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+      {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+      {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+      {...(props.projectNameForThread === undefined
+        ? {}
+        : { projectNameForThread: props.projectNameForThread })}
+      lineageThreads={props.lineageThreads}
+      onSelectThread={props.onSelectThread}
+      threads={threads}
+    />
+  );
+  return (
+    <div aria-label="Coordinators" className="project-coordinators" role="group">
+      <div aria-hidden="true" className="project-coordinators__heading">
+        Coordinators
+      </div>
+      {props.groups.map((group) => {
+        const coordinatorId = group.coordinator.threadId;
+        const open = !folded.has(coordinatorId);
+        const listId = `${workersId}-${coordinatorId}`;
+        const hasWorkers = group.workers.length > 0;
+        return (
+          <div
+            className="project-coordinator"
+            key={group.coordinator.navigationId ?? coordinatorId}
+          >
+            <div className="project-coordinator__row" data-open={open ? "true" : "false"}>
+              <OctantIconButton
+                aria-controls={open && hasWorkers ? listId : undefined}
+                aria-expanded={open}
+                className="project-coordinator__fold window-no-drag"
+                disabled={!hasWorkers}
+                label={
+                  hasWorkers
+                    ? `${open ? "Hide" : "Show"} workers of ${group.coordinator.title}`
+                    : `${group.coordinator.title} has no open workers`
+                }
+                onClick={() => toggle(coordinatorId)}
+                type="button"
+                variant="bare"
+              >
+                <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
+              </OctantIconButton>
+              <div className="project-coordinator__thread">{rows([group.coordinator])}</div>
+              {open ? null : (
+                <CoordinatorWorkerCounts
+                  coordinatorTitle={group.coordinator.title}
+                  workers={group.workers}
+                />
+              )}
+            </div>
+            {open && hasWorkers ? (
+              <div className="project-coordinator__workers" id={listId}>
+                {rows(group.workers)}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * What a folded coordinator says about its workers: how many are working and
+ * how many need input, read through the sidebar status policy's facts so the
+ * counts match the marks the worker rows wear once unfolded. It obeys the
+ * Status row property, as a folded Project's roll-up does.
+ */
+function CoordinatorWorkerCounts(props: {
+  readonly coordinatorTitle: string;
+  readonly workers: ReadonlyArray<ChatThreadNavigationItem>;
+}) {
+  const shows = useSidebarRowProperties();
+  if (!shows.status) return null;
+  const counts = { working: 0, attention: 0 };
+  for (const worker of props.workers) {
+    const facts = threadRowStatusInput(worker);
+    if (facts.working) counts.working += 1;
+    if (facts.attention) counts.attention += 1;
+  }
+  const reported = (["attention", "working"] as const).filter((status) => counts[status] > 0);
+  if (reported.length === 0) return null;
+  const label = `${props.coordinatorTitle}: ${reported
+    .map(
+      (status) => `${String(counts[status])} ${SIDEBAR_THREAD_STATUS_LABEL[status].toLowerCase()}`,
+    )
+    .join(", ")}`;
+  return (
+    <span aria-label={label} className="project-coordinator__counts" role="img" title={label}>
+      {reported.map((status) => {
+        const Icon = sidebarThreadStatusIcon(status);
+        return (
+          <span className="project-coordinator__count" key={status}>
+            <span
+              aria-hidden="true"
+              className="sidebar-navigation__thread-status"
+              data-activity={status}
+            >
+              {Icon === undefined ? null : (
+                <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+              )}
+            </span>
+            <span aria-hidden="true">{counts[status]}</span>
+          </span>
+        );
+      })}
+    </span>
   );
 }
 

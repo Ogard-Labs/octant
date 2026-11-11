@@ -1,5 +1,5 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
-import { Check, Folder, GitBranch, GitPullRequest } from "lucide-react";
+import { Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
@@ -23,6 +23,13 @@ type ThreadRowPullRequest = ThreadBoardPullRequestSummaries["items"][number];
 export function SidebarThreadRowContent(props: {
   readonly title: string;
   readonly provider?: ThreadProviderIdentity;
+  /**
+   * A coordinator wears the coordinator mark in the icon column instead of
+   * its provider's, so the role reads at a glance in every view.
+   */
+  readonly coordinator?: boolean;
+  /** A worker's coordinator, named as a fact beneath the title. */
+  readonly coordinatorName?: string;
   readonly projectName?: string;
   readonly pullRequest?: ThreadRowPullRequest;
   readonly checkout?: ThreadCheckoutChip;
@@ -31,6 +38,7 @@ export function SidebarThreadRowContent(props: {
   readonly status?: ReactNode;
 }) {
   const hasFacts =
+    props.coordinatorName !== undefined ||
     props.projectName !== undefined ||
     props.pullRequest !== undefined ||
     props.checkout !== undefined;
@@ -46,7 +54,11 @@ export function SidebarThreadRowContent(props: {
           that row's title began one icon column to the left of its neighbours.
           The preference that hides provider icons hides this slot on every row
           alike, so alignment holds there too. */}
-      {props.provider === undefined ? (
+      {props.coordinator === true ? (
+        <span className="sidebar-navigation__thread-provider" title="Coordinator">
+          <Network aria-label="Coordinator" role="img" size={14} strokeWidth={1.8} />
+        </span>
+      ) : props.provider === undefined ? (
         <span aria-hidden="true" className="sidebar-navigation__thread-provider" />
       ) : (
         <span className="sidebar-navigation__thread-provider" title={props.provider.displayName}>
@@ -61,6 +73,17 @@ export function SidebarThreadRowContent(props: {
         <span className="sidebar-navigation__thread-title">{props.title}</span>
         {hasFacts ? (
           <span className="sidebar-navigation__thread-facts">
+            {props.coordinatorName === undefined ? null : (
+              <span
+                className="sidebar-navigation__thread-project"
+                title={`Coordinator: ${props.coordinatorName}`}
+              >
+                <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span className="sidebar-navigation__thread-project-label">
+                  {props.coordinatorName}
+                </span>
+              </span>
+            )}
             {props.projectName === undefined ? null : (
               <span className="sidebar-navigation__thread-project">
                 <Folder aria-hidden="true" size={12} strokeWidth={1.8} />

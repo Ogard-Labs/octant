@@ -291,6 +291,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     AgentRunsWiring,
     | "agentsManagedToolsFor"
+    | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
@@ -393,6 +394,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     agentMessageService,
     agentRunPersistence,
     agentsManagedToolsFor,
+    coordinatorWorkersHolder,
     androidInputGrants,
     androidToolchainService,
     appleToolchainService,
@@ -1640,6 +1642,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readThreads: () => persistence.readCodeThreads(),
       readProject: (projectId) => persistence.readProject(projectId),
       readSettings: () => persistence.readCodeSettings()?.settings,
+      isDesignatedPlanner: (threadId) =>
+        codePlannerService.isPlannerThread(decodeCodeThreadId(threadId)),
       isMarked: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
       threadState: (threadId) => {
@@ -1721,6 +1725,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const unsubscribeCoordinator = persistence.journal.subscribeCommitted((append) =>
       coordinatorService.onCommittedEvents(append.events),
     );
+    coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
     coordinatorService.startSweeping();
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -1751,13 +1756,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         const checkoutById = new Map(
           bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
         );
+        const plannerThreadIds = new Set((bootstrap.plannerThreadIds ?? []).map(String));
         const boardThreads: CodeBoardThread[] = bootstrap.threads
-          // A coordinator is never a board card: it has no delivery and no Done.
+          // A coordinator is never a board card: it has no delivery and no
+          // Done. The designated planner reads as a coordinator, so it is left
+          // out too.
           .filter(
             (thread) =>
               thread.lifecycle !== "archived" &&
               thread.completedAt === undefined &&
-              thread.coordinator !== true,
+              thread.coordinator !== true &&
+              !(
+                thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id))
+              ),
           )
           .map((thread) => {
             const project = projectById.get(String(thread.projectId));

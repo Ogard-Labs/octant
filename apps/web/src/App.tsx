@@ -88,6 +88,7 @@ import { dockToolReads } from "./shell/dockModuleRegistry";
 import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
+import { OctantSheet } from "./ui/base/OctantSheet";
 import type { ShellActions } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
@@ -116,6 +117,7 @@ import {
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
   type CodeTerminalId,
+  type CodeThreadId,
 } from "@octant/contracts/code";
 import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
@@ -400,7 +402,7 @@ import {
   type ThreadUtilityDockKey,
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
-import { threadDragSurface } from "./shell/threadDragSurface";
+import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import { RemotePairingView } from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
@@ -444,6 +446,7 @@ import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
+import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -451,6 +454,7 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
+import { setCodeThreadCoordinator } from "./code/codeThreadCommands";
 import {
   createPlannerProposalTask,
   type PlannerProposalReview,
@@ -814,6 +818,17 @@ function LaunchedShell(
     windowCapability: props.projectWindowCapability,
     windowId: props.launch.windowId,
   });
+  // How Settings is presented is decided when it opens and kept until it
+  // closes. Deciding it from the live window width remounted Settings when a
+  // resize crossed the narrow breakpoint, and the page a person was on went
+  // back to the first one.
+  const [settingsSheetAtOpen, setSettingsSheetAtOpen] = useState<boolean>();
+  if (!controller.settingsOpen && settingsSheetAtOpen !== undefined) {
+    setSettingsSheetAtOpen(undefined);
+  }
+  if (controller.settingsOpen && settingsSheetAtOpen === undefined) {
+    setSettingsSheetAtOpen(!isNarrow);
+  }
   const themeController = useThemeController({
     ...(props.themeClient === undefined ? {} : { client: props.themeClient }),
     serverUrl: props.launch.serverUrl,
@@ -972,6 +987,7 @@ function LaunchedShell(
       setDraftPermissionMode(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
+      setPendingDraftCoordinator(undefined);
     }
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
@@ -1010,6 +1026,10 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
+  // New coordinator opens an ordinary Code draft in its Project; the thread it
+  // creates becomes a coordinator before its first message is sent. It holds
+  // only for that Project, so choosing another one in the draft drops it.
+  const [pendingDraftCoordinator, setPendingDraftCoordinator] = useState<ProjectId>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -1454,6 +1474,9 @@ function LaunchedShell(
   // open path on drop, so a drag cannot place a cross-Project thread without
   // the switch-Project handling every other open gets.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
+  // The Chat list's thread ids, read when a drag starts; filled in below once
+  // the Chat controller exists.
+  const chatThreadIdsForDrag = useRef<ReadonlySet<string>>(new Set());
   const workspaceDrag = useWorkspaceSurfaceDrag({
     ...(controller.workspace?.focusedPaneId === undefined
       ? {}
@@ -1475,21 +1498,52 @@ function LaunchedShell(
         });
         return;
       }
+      // Chat and Work threads share the sidebar's list but not a layout: each
+      // mode keeps its own panes. A row of the other mode cannot be placed in
+      // the pane it was dropped on (the host refuses it as a different mode),
+      // so the drop opens the thread the way its click does and the window
+      // follows it to that mode.
+      if (row !== undefined && activeMode !== "code") {
+        if (source.surface.kind === "work-thread" && activeMode !== "work") {
+          selectWorkThread(row.rowId);
+          return;
+        }
+        if (source.surface.kind === "chat-thread" && activeMode !== "chat") {
+          selectChatThread(row.rowId);
+          return;
+        }
+      }
       // Two to four selected tabs dragged together lay out side by side in
       // the pane they land on, at its centre or an edge alike.
       if (source.surfaces !== undefined && source.surfaces.length >= 2) {
         void controller.arrangeSideBySide(destination.targetPaneId, source.surfaces);
         return;
       }
-      void controller
-        .dropSurface(
-          source.surface,
-          destination,
-          row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+      // A pane's open tab first hands the pane to another of its tabs, so it is
+      // placed like any other tab: the host refuses to split a pane off the
+      // surface it is showing. A refused hand-over leaves everything as it
+      // was, and a placement refused after it gives the pane back to the tab.
+      const openTab = source.openTab;
+      const handedOver =
+        openTab === undefined
+          ? Promise.resolve(true)
+          : controller.showAnotherContentTab(openTab.paneId, source.surface.id);
+      void handedOver
+        .then((ready) =>
+          ready
+            ? controller.dropSurface(
+                source.surface,
+                destination,
+                row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+              )
+            : false,
         )
         .then((placed) => {
-          // A tab that was not its pane's open one leaves that pane's row
-          // once it is placed somewhere else; a refused drop leaves it.
+          if (!placed && openTab !== undefined) {
+            void controller.activateContentTab(openTab.paneId, source.surface.id);
+          }
+          // A tab leaves its pane's row once it is placed somewhere else; a
+          // refused drop leaves it.
           const fromTab = source.fromTab;
           if (!placed || fromTab === undefined) return;
           if (
@@ -1510,7 +1564,10 @@ function LaunchedShell(
         sidebarDragRows.current.set(dragKey, row);
         workspaceDrag.onPointerDown(event, {
           dragKey,
-          surface: threadDragSurface(activeMode, row),
+          surface: threadDragSurface(
+            sidebarRowMode(activeMode, row.threadId, chatThreadIdsForDrag.current),
+            row,
+          ),
           title: row.title,
         });
       },
@@ -1691,6 +1748,17 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The sidebar's shared list reads Chat rows only once the Chat list is
+  // ready, so a drag decides a row's kind from the same set its click does.
+  chatThreadIdsForDrag.current = useMemo(
+    () =>
+      new Set(
+        chatController.status === "ready"
+          ? chatController.navigation.map((thread) => String(thread.threadId))
+          : [],
+      ),
+    [chatController.navigation, chatController.status],
+  );
   const createCodeOperationId = useCallback(
     () => globalThis.crypto.randomUUID() as CodeOperationId,
     [],
@@ -4440,6 +4508,23 @@ function LaunchedShell(
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
   const navigationModel = useMemo(() => {
+    // A worker names its coordinator by title only while that coordinator is
+    // still in the list; an archived one leaves the worker an ordinary row.
+    const codeCoordinatorTitles = new Map(
+      codeController.navigation
+        .filter((thread) => thread.coordinator === true)
+        .map((thread) => [String(thread.threadId), thread.title]),
+    );
+    const workerLineage = (
+      coordinatorThreadId: CodeThreadId | undefined,
+    ): Pick<ChatThreadNavigationItem, "coordinatorThreadId" | "coordinatorTitle"> => {
+      if (coordinatorThreadId === undefined) return {};
+      const coordinatorTitle = codeCoordinatorTitles.get(String(coordinatorThreadId));
+      return {
+        coordinatorThreadId: String(coordinatorThreadId),
+        ...(coordinatorTitle === undefined ? {} : { coordinatorTitle }),
+      };
+    };
     const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       codeController.status === "ready"
         ? codeController.navigation.map((thread) => ({
@@ -4467,6 +4552,11 @@ function LaunchedShell(
               : { lineageParentThreadId: thread.lineageParentThreadId }),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.coordinator === true ? { coordinator: true } : {}),
+            ...(thread.planner === true ? { planner: true } : {}),
+            ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.messageWake === true ? { messageWake: true } : {}),
+            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...threadRest(thread, {
               now: minuteNow,
               awaitingInput:
@@ -4672,6 +4762,11 @@ function LaunchedShell(
     }
     return byThread;
   }, [workingNowProviders, workingNowThreads]);
+  // Needs you names a worker's coordinator beside it, from the window's thread list.
+  const needsYouCoordinatorTitles = useMemo(
+    () => coordinatorTitleByWorker(codeController.navigation),
+    [codeController.navigation],
+  );
   const workingNowBoardFacts = useMemo(
     () =>
       continueCards.kind === "ready" && activeMode === "code"
@@ -4893,6 +4988,8 @@ function LaunchedShell(
       openDockTab,
       openDraftInActiveProject,
       openDraftInProject,
+      openCoordinatorDraftInProject,
+      cancelCoordinatorDraft: () => setPendingDraftCoordinator(undefined),
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
       openImageLibrary,
@@ -5009,6 +5106,9 @@ function LaunchedShell(
       setUsageOpen,
       setWorkBoardOpen,
       setWorkComposerSelection,
+      setCodeThreadCoordinator: codeController.setThreadCoordinator,
+      setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
+      setCodeThreadMessageWake: codeController.setThreadMessageWake,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
@@ -5062,6 +5162,7 @@ function LaunchedShell(
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
     loadHomePullRequests,
+    needsYouCoordinatorTitles,
     needsYouThreadProviders,
     now: minuteNow.getTime(),
     openRunningServiceLive,
@@ -5710,6 +5811,12 @@ function LaunchedShell(
     setArchiveOpen(false);
   }
 
+  /** New coordinator: an ordinary Code draft whose thread becomes a coordinator. */
+  async function openCoordinatorDraftInProject(projectId: ProjectId) {
+    await openDraftInProject(projectId);
+    setPendingDraftCoordinator(projectId);
+  }
+
   async function openDraftInProject(projectId: ProjectId) {
     const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
     if (serverProject !== undefined) {
@@ -6321,6 +6428,32 @@ function LaunchedShell(
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
+      // A draft opened with New coordinator makes its thread a coordinator
+      // before the first message, so the opening turn already runs under the
+      // coordinator's read-only gate. A refusal (a fifth coordinator, a window
+      // that is not local) leaves an ordinary thread with the prompt unsent.
+      if (
+        pendingDraftCoordinator !== undefined &&
+        String(pendingDraftCoordinator) === String(project.id) &&
+        plannerReview === undefined
+      ) {
+        setPendingDraftCoordinator(undefined);
+        const made = await codeController.execute(setCodeThreadCoordinator(created.thread, true));
+        if (made?.kind !== "thread-updated") {
+          const refusal = `The thread was created, but it could not become a coordinator: ${
+            codeController.lastExecuteError.current?.message ?? "the host refused the change."
+          }`;
+          await controller.openCodeThread(
+            created.thread.id,
+            created.thread.title,
+            undefined,
+            created.thread.projectId,
+          );
+          codeThreadControllers.restoreDraft(created.thread.id, input.prompt, refusal);
+          setDraftError(refusal);
+          return false;
+        }
+      }
       // The thread opens before its first turn starts, so tell its own
       // controller which prompt is coming. Otherwise the transcript reads the
       // empty journal and calls the thread empty until the turn is durable.
@@ -7112,6 +7245,53 @@ function LaunchedShell(
       ? undefined
       : String(dockThreadId);
 
+  // Settings floats over the workspace as a sheet in a wide window, so a
+  // change to how the app looks can be seen behind it as it is made. A narrow
+  // window has no room around a sheet, so Settings covers it there, as the
+  // Usage page does at every width.
+  const settingsAsSheet = controller.settingsOpen && (settingsSheetAtOpen ?? !isNarrow);
+  // Read here, where the loaded settings are known to be present: a function
+  // body does not keep that narrowing.
+  const loadedSettings = controller.settings;
+  const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
+    <SettingsContainer
+      onOpenServerProject={(project) => {
+        controller.closeSettings();
+        void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+      }}
+      projectTerminalClient={projectTerminalClient}
+      projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
+      actions={actions}
+      allProjects={projectController.allProjects}
+      {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+      backgroundImageLibrary={backgroundImageLibrary}
+      {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+      chatController={chatController}
+      clients={launchedClients}
+      codeController={codeController}
+      controller={controller}
+      discoveryController={discoveryController}
+      githubClient={githubClient}
+      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+      {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+      hostReservesTitlebarInset={(presentation === "page" || isNarrow) && hostReservesTitlebarInset}
+      isNarrow={isNarrow}
+      linearClient={linearClient}
+      nativeBoundsAvailable={nativeHost !== undefined}
+      {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
+      projectNamesById={projectNamesById}
+      providerController={providerController}
+      settings={loadedSettings}
+      presentation={presentation}
+      surface={surface}
+      sidebarVibrancySupported={sidebarVibrancySupported}
+      themeController={themeController}
+      {...(props.typography === undefined ? {} : { typography: props.typography })}
+      workNavigation={workNavigation}
+      workSettings={workSettings}
+    />
+  );
+
   const shell = (
     <ZenContainer
       actions={actions}
@@ -7135,44 +7315,22 @@ function LaunchedShell(
       )}
       <ShellFrame
         standaloneSurface={
-          controller.settingsOpen || usageOpen ? (
-            <SettingsContainer
-              onOpenServerProject={(project) => {
-                controller.closeSettings();
-                void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
-              }}
-              projectTerminalClient={projectTerminalClient}
-              projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
-              actions={actions}
-              allProjects={projectController.allProjects}
-              {...(props.availableFonts === undefined
-                ? {}
-                : { availableFonts: props.availableFonts })}
-              backgroundImageLibrary={backgroundImageLibrary}
-              {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
-              chatController={chatController}
-              clients={launchedClients}
-              codeController={codeController}
-              controller={controller}
-              discoveryController={discoveryController}
-              githubClient={githubClient}
-              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-              {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-              hostReservesTitlebarInset={hostReservesTitlebarInset}
-              isNarrow={isNarrow}
-              linearClient={linearClient}
-              nativeBoundsAvailable={nativeHost !== undefined}
-              {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
-              projectNamesById={projectNamesById}
-              providerController={providerController}
-              settings={controller.settings}
-              surface={controller.settingsOpen ? "settings" : "usage"}
-              sidebarVibrancySupported={sidebarVibrancySupported}
-              themeController={themeController}
-              {...(props.typography === undefined ? {} : { typography: props.typography })}
-              workNavigation={workNavigation}
-              workSettings={workSettings}
-            />
+          controller.settingsOpen && !settingsAsSheet
+            ? settingsContainer("settings", "page")
+            : usageOpen
+              ? settingsContainer("usage", "page")
+              : undefined
+        }
+        sheet={
+          settingsAsSheet ? (
+            <OctantSheet
+              {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
+              label="Settings"
+              onClose={controller.closeSettings}
+              open
+            >
+              {settingsContainer("settings", "sheet")}
+            </OctantSheet>
           ) : undefined
         }
         {...(shellBackdrop === undefined
@@ -7423,6 +7581,7 @@ function LaunchedShell(
                     machineChanges={machineChanges}
                     navigation={navigationModel}
                     {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                    {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                     {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
                     {...(pendingIssue === undefined ? {} : { pendingIssue })}
                     presentedLayout={controller.presentedLayout}

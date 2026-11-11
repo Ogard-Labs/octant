@@ -149,7 +149,16 @@ import {
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
-import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import {
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -273,6 +282,8 @@ export interface ProjectSidebarSectionProps {
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onNewChatInProject?: (projectId: ProjectId) => void;
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
+  /** New coordinator in a Code Project's menu; absent outside Code. */
+  readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onReorder: (
     projectId: ProjectId,
@@ -652,6 +663,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         onMove={props.onMove}
         onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
+        {...(props.onNewCoordinatorInProject === undefined
+          ? {}
+          : { onNewCoordinatorInProject: props.onNewCoordinatorInProject })}
         onReorder={props.onReorder}
         onProjectOpen={props.onProjectOpen}
         {...(options.allowAdd === true && props.onAddProject !== undefined
@@ -958,6 +972,7 @@ function ProjectGroup(props: {
   readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
+  readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
   readonly onReorder: (
     projectId: ProjectId,
     pinned: boolean,
@@ -1142,6 +1157,9 @@ function ProjectGroup(props: {
                   ? {}
                   : { onColorChange: props.onColorChange })}
                 onMove={props.onMove}
+                {...(props.onNewCoordinatorInProject === undefined
+                  ? {}
+                  : { onNewCoordinator: props.onNewCoordinatorInProject })}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
                 onRestore={props.onRestore}
@@ -1179,9 +1197,10 @@ function ProjectGroup(props: {
                   ? {}
                   : { onRenameThread: props.onRenameThread })}
                 collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                // Only Code threads carry a checkout, so Chat and Work Projects
-                // never split.
+                // Only Code threads carry a checkout or a coordinator, so Chat
+                // and Work Projects never split.
                 groupByCheckout
+                groupCoordinators
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}
@@ -1249,6 +1268,8 @@ function ProjectActionsMenu(props: {
   readonly onArchive: (projectId: ProjectId) => void;
   readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
+  /** Starts a coordinator in a Code Project (docs/design/coordinator-threads.md). */
+  readonly onNewCoordinator?: (projectId: ProjectId) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
     projectId: ProjectId,
@@ -1264,6 +1285,9 @@ function ProjectActionsMenu(props: {
   const archived = project.lifecycle === "archived";
   // An archived Project is read-only, so its colour is as fixed as its name.
   const onColorChange = archived ? undefined : props.onColorChange;
+  // Coordinators are Code only: Work turns carry no messages for one to follow
+  // up with, and an archived Project starts nothing.
+  const onNewCoordinator = archived || project.type !== "code" ? undefined : props.onNewCoordinator;
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
@@ -1279,6 +1303,11 @@ function ProjectActionsMenu(props: {
             <OctantMenuActionItem onClick={() => props.onOpen(project)}>
               Open Project
             </OctantMenuActionItem>
+            {onNewCoordinator === undefined ? null : (
+              <OctantMenuActionItem onClick={() => onNewCoordinator(project.id)}>
+                New coordinator
+              </OctantMenuActionItem>
+            )}
             <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
               {project.pinned ? "Unpin Project" : "Pin Project"}
             </OctantMenuActionItem>
@@ -1500,6 +1529,11 @@ function ActivityThreadButton(props: {
 }) {
   const shows = useSidebarRowProperties();
   const tabs = useContext(SidebarThreadTabsContext);
+  // A Status row drags into the workspace exactly as a Project tree row does.
+  // Only the tree's rows offered themselves, so in Status, the arrangement the
+  // sidebar opens on, a thread could be opened by a click and never placed.
+  const drag = useContext(SidebarThreadDragContext);
+  const rowId = props.thread.navigationId;
   const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
@@ -1516,16 +1550,38 @@ function ActivityThreadButton(props: {
       data-attention={props.thread.attention}
       data-thread-id={props.thread.threadId}
       onClick={() => {
+        // The click that ends a drag belongs to the drop, not to the row.
+        if (drag?.consumeThreadClickSuppression(rowId) === true) return;
         tabs?.openAsPreview(props.thread.threadId);
         props.onSelectThread(props.thread.navigationId);
       }}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...(drag === null
+        ? {}
+        : {
+            onPointerCancel: drag.onPointerCancel,
+            onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) =>
+              drag.beginThreadDrag(event, {
+                rowId,
+                threadId: props.thread.threadId,
+                title: props.thread.title,
+                ...(props.thread.projectId === undefined
+                  ? {}
+                  : { projectId: props.thread.projectId }),
+              }),
+            onPointerMove: drag.onPointerMove,
+            onPointerUp: drag.onPointerUp,
+          })}
       type="button"
       variant="bare"
     >
       <SidebarThreadRowContent
         {...(age === undefined ? {} : { age })}
         {...(checkout === undefined ? {} : { checkout })}
+        {...(props.thread.coordinator === true ? { coordinator: true } : {})}
+        {...(props.thread.coordinatorTitle === undefined
+          ? {}
+          : { coordinatorName: props.thread.coordinatorTitle })}
         {...(shows.project ? { projectName: props.thread.projectName } : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}

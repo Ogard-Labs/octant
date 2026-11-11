@@ -1903,7 +1903,7 @@ describe("App", () => {
         "false",
       ),
     );
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     const freshWelcome = await screen.findByRole("region", { name: "Chat welcome" });
     await user.type(within(freshWelcome).getByRole("textbox", { name: "First message" }), "Hi");
@@ -2722,7 +2722,7 @@ describe("App", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     await waitFor(() =>
       expect(
         within(screen.getByRole("button", { name: /Controller foundation/ })).queryByText(
@@ -2738,7 +2738,7 @@ describe("App", () => {
     const saved = await screen.findByRole("checkbox", { name: "Branch on Projects rows" });
     expect(saved).not.toBeChecked();
     await user.click(saved);
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     await waitFor(() =>
       expect(
         within(screen.getByRole("button", { name: /Controller foundation/ })).getByText(
@@ -4028,7 +4028,7 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     await screen.findByRole("heading", { level: 1, name: "General" });
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     expect(await screen.findByRole("button", { name: "Project: Octant" })).toBeVisible();
     expect(
@@ -4057,7 +4057,7 @@ describe("App", () => {
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep my unsent draft");
     await openSettingsFromSidebar(user);
     await screen.findByRole("heading", { level: 1, name: "General" });
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
 
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
@@ -4403,26 +4403,34 @@ describe("App", () => {
     );
 
     await openSettingsFromSidebar(user);
+    // Settings is a sheet over the shell, which keeps its frame and material.
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveClass(
-      "shell-frame--standalone",
+      "shell-frame",
       "shell--material-translucent",
     );
+    expect(document.querySelector(".shell")).not.toHaveClass("shell-frame--standalone");
     fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
     await user.click(
       within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Off" }),
     );
     await waitFor(() => expect(setSidebarMaterialPreference).toHaveBeenLastCalledWith("opaque"));
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
 
     await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Host" }));
     await user.click(await screen.findByRole("button", { name: "Reset native window bounds" }));
     expect(hostBridge.resetBounds).toHaveBeenCalledOnce();
+    // The shell stays mounted under the sheet with live regions of its own,
+    // so the announcement is looked for inside Settings.
+    const settings = screen.getByRole("dialog", { name: "Settings" });
     await waitFor(() =>
-      expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
-        "Native window bounds reset.",
-      ),
+      expect(
+        [...settings.querySelectorAll('[aria-live="polite"]')].some((region) =>
+          region.textContent?.includes("Native window bounds reset."),
+        ),
+      ).toBe(true),
     );
   });
 
@@ -4456,7 +4464,7 @@ describe("App", () => {
     expect(await screen.findByText("Everything is optional and kept on this Mac.")).toBeVisible();
   });
 
-  it("uses the CSS translucent sidebar fallback when no native host is available", async () => {
+  it("paints the theme's own opaque surfaces in a browser, where no native host can resolve Glass", async () => {
     render(
       <App
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
@@ -4467,9 +4475,10 @@ describe("App", () => {
     );
 
     await screen.findByRole("button", { name: "Account menu, Set your name" });
-    await waitFor(() =>
-      expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
-    );
+    // The stored preference is Glass (system); with nothing behind the page
+    // the frame and sheet would only be the page colour.
+    expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
+    expect(document.querySelector(".shell")).not.toHaveClass("shell--material-translucent");
   });
 
   it("reserves the native titlebar inset only for a host that hides its own title bar", async () => {
@@ -5235,7 +5244,7 @@ describe("App", () => {
     expect(screen.getByRole("switch", { name: "Enable Work" })).toBeVisible();
     expect(providerApi.bootstrap).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(screen.queryByRole("region", { name: "Settings" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: /Workspace pane:/ })).toHaveAttribute(
       "data-workspace-pane-id",
@@ -5266,12 +5275,16 @@ describe("App", () => {
     // acting on the one the previous search left behind.
     await within(modeListbox).findByRole("option", { name: /Mode switcher/ });
     modeListbox.focus();
-    fireEvent.keyDown(modeListbox, { key: "ArrowDown" });
+    // Home, not ArrowDown: the list pre-selects its top result when results
+    // arrive again after it has opened, and ArrowDown then moves on to the
+    // second. Which of the two happens depends on how fast the host's
+    // entries load, so a slow runner opened the wrong page.
+    fireEvent.keyDown(modeListbox, { key: "Home" });
     fireEvent.keyDown(modeListbox, { key: "Enter" });
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
     await user.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
     await user.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
-    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);
     // The rail shows an icon until search is asked for.
@@ -5283,9 +5296,9 @@ describe("App", () => {
       name: "Settings search results",
     });
     providersListbox.focus();
-    fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
+    fireEvent.keyDown(providersListbox, { key: "Home" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Providers & Models" })).toBeVisible();
     expect(screen.getByLabelText("Permission persistence")).toHaveTextContent(
       "Current session only",
     );
@@ -5294,9 +5307,9 @@ describe("App", () => {
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "OpenCode");
     const openCodeListbox = await screen.findByRole("listbox", { name: "Settings search results" });
     openCodeListbox.focus();
-    fireEvent.keyDown(openCodeListbox, { key: "ArrowDown" });
+    fireEvent.keyDown(openCodeListbox, { key: "Home" });
     fireEvent.keyDown(openCodeListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Providers & Models" })).toBeVisible();
   }, 15_000);
 
   it("renders recovery-required separately from a disconnected shell", async () => {

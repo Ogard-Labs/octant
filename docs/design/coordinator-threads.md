@@ -14,18 +14,15 @@ and its bounds. Architecture owns the boundaries it extends:
 sidebar and board presentation is in
 [Workspace: Coordinators](workspace.md#coordinators).
 
-**Status: approved design 2026-11-10 (maintainer request); partly built.** The
-host side is built: the coordinator role and its commands, worker lineage, the
-read-only gate on a coordinator's own turns, the worker roster, `start` with
-the start setting, its bounds and marks, Propose for approval through the
-planner's proposal path, the **Wake when a message arrives** switch with its
-wake turns, a worker waking for its own coordinator, and state notices. The
-workspace surfaces are in [Workspace: Coordinators](workspace.md#coordinators),
-which says which of them are built. Not built: a proposal card inside the
-coordinator thread (a person approves from the Project overview), workers'
-requests listed in the coordinator's composer, and Needs you rows naming the
-coordinator. None of it has run against a real provider yet; whether each
-runtime's own tools honour the read-only gate is a maintainer live check.
+**Status: approved design 2026-11-10 (maintainer request); built.** The host
+side, the workspace surfaces recorded in
+[Workspace: Coordinators](workspace.md#coordinators), the planner carry-over,
+the proposal card in the coordinator thread, workers' requests in the
+coordinator's composer, the coordinator named on Needs you rows, and the owner
+device's routes for the wake switches are built. An owner device has no screen
+that calls those routes yet. None of it has run against a real provider or on
+the desktop app; whether each runtime's own tools honour the read-only gate is
+a maintainer live check.
 
 ## What a coordinator is
 
@@ -44,12 +41,18 @@ runtime's own tools honour the read-only gate is a maintainer live check.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
-- **It replaces the planner role.** The Project planner is meant to become a
-  coordinator whose starts need approval: the designated planner thread
-  reading as a coordinator, its pending proposals staying pending. That
-  carry-over is not built; today the planner designation and coordinators sit
-  side by side, and the planner's routes, versioned proposals, and **Review
-  and approve** flow are already the coordinator's approval path (below).
+- **It replaces the planner role.** The Project's designated planner reads as a
+  coordinator whose starts always need approval, derived from the designation
+  with no journal change: it takes the read-only gate and the roster, its
+  `start` always proposes whatever the start setting, its pending proposals
+  stay pending, and it counts toward the four per Project. Designating a worker
+  or a fifth coordinator is refused (`thread-is-worker`,
+  `coordinator-limit-reached`). Its role follows the designation, so **Make
+  coordinator** and **Stop coordinating** are not offered on it; removing the
+  designation ends it. Designation does not turn on its **Wake when a message
+  arrives** switch. The planner's `board` read and board offers keep working;
+  since the board leaves coordinators out, that read no longer lists the
+  planner's own card.
 - **Code only.** Work threads neither send nor receive messages, because only
   Code turns carry them, so a Work coordinator could start workers but never
   follow up with them. Work coordinators wait for the rule that lets a Work turn
@@ -161,10 +164,9 @@ restrict that can do it for the whole host or for one Project.
   waiting proposals per Project; the proposal keeps the provider and model the
   call named and the level it resolved, and approving it cannot start the
   worker above that level (`creation-above-proposed-level`). The coordinator is
-  told `proposed`. A person
-  approves or declines it from the Project overview, with the planner's
-  **Review and approve** controls (a card in the coordinator thread is not
-  built); an
+  told `proposed`. A person approves or declines it from a card above the
+  coordinator's composer or from the Project overview, with the same **Review
+  and approve** and versioned decline; an
   approved proposal creates the worker exactly as an unasked start would,
   recorded as that coordinator's worker.
 
@@ -213,7 +215,15 @@ Full access cap keeps that confirmation from being switched off at the start.
   coordinator to drive the threads it starts. A message from any other thread
   wakes the worker only when its switch is on. A person can stop a worker from
   waking for its coordinator with **Wake for coordinator** in the worker's
-  header menu, journaled with its principal.
+  row menu or pane header menu, journaled with its principal.
+- **From an owner device.** An owner device may set **Wake when a message
+  arrives** and **Wake for coordinator** (never the coordinator role) through
+  the owner routes `code-threads/wake/read` and `code-threads/wake/change`. Each
+  change needs its own fresh unlock, is checked against a digest of the current
+  thread and Project, and is journaled as the owner device; refusals are
+  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. A plain paired
+  device and any agent still cannot set them. No owner-device screen calls the
+  routes yet.
 - **Worker to coordinator.** A worker uses `send` to its coordinator. Making a
   thread a coordinator turns on its **Wake when a message arrives** switch, as
   part of the person's journaled change; the person can turn it off as on any
@@ -250,7 +260,52 @@ reaches the person through the coordinator they are already talking to.
   `ask-user`, and `send` the worker what the person decided, but a pending
   approval stays the person's.
 - **Needs you.** A worker's request stays a Needs you row naming the worker,
-  with its coordinator named beside it.
+  with "via" its coordinator beside it, in Needs you and the Inbox. The board's
+  and Review's embedded rows show no thread title, and a board card names the
+  coordinator itself.
+- **Where the composer's list comes from.** The window's existing
+  pending-requests read, filtered to the coordinator's workers in the window's
+  thread list, so a window sees no request it could not already see. It shows
+  one request at a time with a choice between them. A finished turn's decision
+  stays in Needs you and the worker, since it is not the worker waiting.
+
+## Seeing workers' subagents
+
+A coordinator's Agents dock lists its workers and, in Graph, draws each
+worker's subagents under it ([Workspace: Coordinators](workspace.md#coordinators)).
+
+- **The workers come from the window.** The rows are the workers in the
+  window's own thread list, with the state that list shows, so the dock names no
+  thread the sidebar does not.
+- **Their subagents come from one host read.** `GET
+/api/agent-runs/coordinator-graph` answers for one coordinator: per worker,
+  that worker's child runs as facts (task, role, state, the route that ran it,
+  effort, the runs it waits for, the run that started it, and the times it was
+  requested and last changed), at most 24 runs per worker with the newest kept
+  and truncation stated, for the roster's workers that are recorded in the
+  coordinator's own Project, under the roster's bound. A worker with no runs is
+  left out.
+- **Who may read it.** A window that holds the coordinator on its Project, by
+  the rule every read of a thread's child runs takes, and only while that thread
+  reads as a coordinator. A window that does not hold it, a thread that is not a
+  coordinator, and a thread that stopped coordinating are refused alike, with
+  one message and before any worker's run is read.
+- **What it never carries.** A run's reply, its result packets, its recovery
+  text, its live conversation, and the version a control needs. Those stay with
+  the worker thread's own reads, which a window gets only by holding that
+  worker, so a card opens the worker and offers no control. The host does not
+  load a reply to build the answer.
+- **The agent sees none of it.** The read serves a person's window. It is not a
+  tool, it is not offered to the coordinator agent, and it adds nothing to a
+  turn, so it cannot mark the coordinator.
+
+Rationale: a child run's summary carries its full reply, which is why a window
+may read one only for a thread it holds. Workers are almost never open beside
+their coordinator, so that rule alone leaves the coordinator's picture empty
+below the workers. The task of a run is text its worker's agent wrote, as a
+worker's title is, and the window already lists that; what the worker found
+stays behind the worker. Reading facts through the coordinator is the smallest
+widening that shows the orchestration (maintainer request, 2026-11-11).
 
 ## Not in this design
 
@@ -272,5 +327,9 @@ device; a marked coordinator's worker starting marked, and a mark that cannot be
 journaled refusing the start; the open-worker and hourly bounds; state notices
 not marking the coordinator; the hop count stopping a coordinator and worker
 after three rounds; and a coordinator's own write, shell, and Git actions
-refused by the read-only gate. Rendered checks cover the sidebar section, the
-folded workers, and the composer's worker requests.
+refused by the read-only gate. For the workers' subagents: the graph read
+refused for a window that does not hold the coordinator and for a thread that is
+not a coordinator, before any run is read; and its answer carrying no reply,
+result, recovery text or version. Rendered checks cover the sidebar section, the
+folded workers, the composer's worker requests, and the dock's worker rows and
+graphs.

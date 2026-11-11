@@ -44,7 +44,7 @@ import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import type { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
-import { TestCredentialBroker, TestPostureHost } from "./hubOwner.test-support";
+import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
@@ -230,6 +230,8 @@ export interface HubTestHost {
   readonly credentials: TestCredentialBroker;
   /** This host's Code postures, as the owner posture routes read and change them. */
   readonly postures: TestPostureHost;
+  /** This host's Code wake switches, as the owner wake routes read and change them. */
+  readonly threadWakes: TestThreadWakeHost;
   readonly listener: PrivateListenerHostStatus;
   /** Every request this host's listener answered, as `METHOD path`. */
   readonly requests: string[];
@@ -681,6 +683,7 @@ export async function startHubTestHost(input: {
   });
   const credentials = new TestCredentialBroker();
   const postures = new TestPostureHost();
+  const threadWakes = new TestThreadWakeHost();
   const credentialCopy = new OwnerCredentialCopyService({
     broker: credentials,
     identity: () => identity,
@@ -782,6 +785,7 @@ export async function startHubTestHost(input: {
     spoke,
     unlock: ownerUnlock,
     postures,
+    threadWakes,
     credentials: credentialCopy,
     threadMoves,
     phoneMoves: threadMovesFromWindow,
@@ -931,6 +935,7 @@ export async function startHubTestHost(input: {
     delegating,
     credentials,
     postures,
+    threadWakes,
     listener,
     requests,
     hubLink,

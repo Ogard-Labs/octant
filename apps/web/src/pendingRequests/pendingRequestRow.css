@@ -39,6 +39,16 @@
   text-underline-offset: 3px;
 }
 
+/* The coordinator yields width before the worker's own title does. */
+.pending-request__via {
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pending-request__wait {
   display: inline-flex;
   flex: 0 0 auto;

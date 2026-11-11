@@ -1,5 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
@@ -27,6 +27,7 @@ export function ContextMenuContent({
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
         <ContextMenuPrimitive.Popup
+          data-slot="context-menu-content"
           className={cn(
             "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
@@ -71,6 +72,26 @@ export function ContextMenuItem({
   );
 }
 
+export function ContextMenuCheckboxItem({
+  className,
+  children,
+  closeOnClick = true,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.CheckboxItem>) {
+  return (
+    <ContextMenuPrimitive.CheckboxItem
+      className={cn(contextMenuItemClassName, className)}
+      closeOnClick={closeOnClick}
+      {...props}
+    >
+      {children}
+      <ContextMenuPrimitive.CheckboxItemIndicator className="ml-auto pl-2 text-foreground">
+        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+      </ContextMenuPrimitive.CheckboxItemIndicator>
+    </ContextMenuPrimitive.CheckboxItem>
+  );
+}
+
 export function ContextMenuSub(props: ComponentProps<typeof ContextMenuPrimitive.SubmenuRoot>) {
   return <ContextMenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />;
 }
@@ -105,6 +126,7 @@ export function ContextMenuSubContent({
         sideOffset={0}
       >
         <ContextMenuPrimitive.Popup
+          data-slot="context-menu-content"
           className={cn(
             "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,

@@ -62,6 +62,8 @@ export interface SettingsContainerProps {
   readonly settings: NonNullable<ReturnType<typeof useShellController>["settings"]>;
   /** Which standalone surface covers the workspace. */
   readonly surface: "settings" | "usage";
+  /** `"sheet"` when Settings floats over the workspace instead of covering it. */
+  readonly presentation?: "page" | "sheet";
   readonly sidebarVibrancySupported: boolean;
   readonly themeController: ReturnType<typeof useThemeController>;
   readonly typography?: ThemeTypography;
@@ -259,6 +261,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       isNarrow={isNarrow}
       nativeBoundsAvailable={nativeBoundsAvailable}
       reservesTitlebarInset={hostReservesTitlebarInset}
+      {...(props.presentation === undefined ? {} : { presentation: props.presentation })}
       onBack={controller.closeSettings}
       onDeepLinkApplied={controller.clearPendingSettingsDeepLink}
       onResetLayout={controller.resetActiveLayout}

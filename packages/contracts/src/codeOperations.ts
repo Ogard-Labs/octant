@@ -2841,6 +2841,8 @@ export const CodeBoardQuery = Schema.Struct({
   pullRequest: Schema.optional(CodeBoardPullRequestFilter),
   checks: Schema.optional(CodeBoardCheckFilter),
   followUp: Schema.optional(CodeBoardFollowUpFilter),
+  /** Keeps only the workers one coordinator started (docs/design/coordinator-threads.md). */
+  coordinatorThreadId: Schema.optional(CodeThreadId),
 }).annotations(strict);
 export type CodeBoardQuery = typeof CodeBoardQuery.Type;
 
@@ -2892,6 +2894,12 @@ export const CodeBoardCard = Schema.Struct({
    * asks or blocks.
    */
   outsideContent: Schema.optional(Schema.Literal("read", "flagged")),
+  /**
+   * The coordinator that started this worker, as the host recorded it at
+   * creation. Absent on a thread no coordinator started. A coordinator itself
+   * is never a card.
+   */
+  coordinatorThreadId: Schema.optional(CodeThreadId),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 

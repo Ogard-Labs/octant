@@ -1,5 +1,6 @@
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
+import type { SubagentWorkerThread } from "../agents/AgentHierarchyPanel";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -46,6 +47,12 @@ export interface ThreadUtilityDockContentProps {
   readonly requestedAgentView?: AgentRunViewRequest;
   /** Clears that request when the reader returns from a child's detail. */
   readonly onAgentViewRequestHandled?: () => void;
+  /**
+   * On a coordinator thread's dock: the workers it started, as this window's
+   * own thread list names them, for the Agents tool.
+   */
+  readonly coordinatorWorkers?: ReadonlyArray<SubagentWorkerThread>;
+  readonly onOpenCoordinatorWorker?: (threadId: string) => void;
   readonly requestedAgentReview?: AgentResultReviewRequest;
   readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly onAgentReviewBack?: () => void;

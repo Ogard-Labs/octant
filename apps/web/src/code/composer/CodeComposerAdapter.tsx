@@ -960,19 +960,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             }
             row={{
               className: "code-composer-adapter__composer-bar",
+              attach: (
+                <ComposerAttachButton
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  busy={props.creating === true}
+                  refusedReason={
+                    imageSupport === false
+                      ? "The selected model does not accept images. Choose an image-capable model."
+                      : undefined
+                  }
+                  onRefused={images.refuse}
+                  onFileSelected={(file) => images.attach([file])}
+                />
+              ),
               leading: (
                 <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={props.creating === true}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
-                  />
                   <PermissionModePicker
                     autoSupported={props.autoSupported === true}
                     autoReview={props.autoReview}

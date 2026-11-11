@@ -223,6 +223,48 @@ export const OwnerPostureChangeRequest = Schema.Union(
 export type OwnerPostureChangeRequest = typeof OwnerPostureChangeRequest.Type;
 export const decodeOwnerPostureChangeRequest = Schema.decodeUnknownSync(OwnerPostureChangeRequest);
 
+/**
+ * A Code thread's wake switches as a host reports them to an owner device.
+ * `coordinatorWake` is present only on a worker, which has a coordinator to
+ * wake for. `version` binds the thread and its Project, so a change made
+ * against an earlier reading is refused.
+ */
+export const OwnerThreadWake = Schema.Struct({
+  threadId: CodeThreadId,
+  messageWake: Schema.Boolean,
+  coordinatorWake: Schema.optional(Schema.Boolean),
+  version: digest,
+}).annotations(strict);
+export type OwnerThreadWake = typeof OwnerThreadWake.Type;
+export const decodeOwnerThreadWake = Schema.decodeUnknownSync(OwnerThreadWake);
+
+export const OwnerThreadWakeReadRequest = Schema.Struct({
+  threadId: CodeThreadId,
+}).annotations(strict);
+export type OwnerThreadWakeReadRequest = typeof OwnerThreadWakeReadRequest.Type;
+export const decodeOwnerThreadWakeReadRequest = Schema.decodeUnknownSync(
+  OwnerThreadWakeReadRequest,
+);
+
+/**
+ * One wake switch an owner device may set: Wake when a message arrives, or a
+ * worker's Wake for coordinator. Making or stopping a coordinator is not one
+ * of them; that stays a person's choice at a window on the host.
+ */
+export const OwnerThreadWakeSwitch = Schema.Literal("message-wake", "coordinator-wake");
+export type OwnerThreadWakeSwitch = typeof OwnerThreadWakeSwitch.Type;
+
+export const OwnerThreadWakeChangeRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  expectedVersion: digest,
+  switch: OwnerThreadWakeSwitch,
+  wake: Schema.Boolean,
+}).annotations(strict);
+export type OwnerThreadWakeChangeRequest = typeof OwnerThreadWakeChangeRequest.Type;
+export const decodeOwnerThreadWakeChangeRequest = Schema.decodeUnknownSync(
+  OwnerThreadWakeChangeRequest,
+);
+
 const credentialName = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(128),
   Schema.pattern(/^[A-Za-z0-9._:-]+$/),

@@ -413,6 +413,18 @@ describe("CodeService reads", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("names the visible threads that are their Project's designated planner", async () => {
+    const planner = thread();
+    const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [planner, other] });
+    Object.assign(fixture.persistence, {
+      readCodePlannerThreadId: (projectId: unknown) =>
+        String(projectId) === String(ids.project) ? planner.id : undefined,
+    });
+    const navigation = await fixture.service.navigation(ids.window);
+    expect(navigation.plannerThreadIds).toEqual([planner.id]);
+  });
+
   it("carries a thread's linked pull requests onto its navigation row from the cached snapshot", async () => {
     const linked = thread();
     const quiet = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
@@ -2261,6 +2273,35 @@ describe("CodeService commands", () => {
       fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
     expect("coordinator" in after).toBe(false);
     expect(after.messageWake).toBe(true);
+  });
+
+  it("counts the designated planner toward the Project's four coordinators", async () => {
+    const others = [1, 2, 3, 4].map((index) =>
+      thread({ id: decodeCodeThreadId(`20000000-0000-4000-8000-00000000010${String(index)}`) }),
+    );
+    const [planner, ...rest] = others;
+    if (planner === undefined) throw new Error("expected a planner thread");
+    const fixture = serviceFixture({
+      project: rememberedFullAccessProject,
+      threads: [
+        thread(),
+        planner,
+        ...rest.map((other) => ({ ...other, coordinator: true as const })),
+      ],
+    });
+    const make = () =>
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        coordinator: true,
+      });
+    Object.assign(fixture.persistence, { readCodePlannerThreadId: () => planner.id });
+    await expect(make()).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringContaining("at most 4 coordinators") },
+    });
+    Object.assign(fixture.persistence, { readCodePlannerThreadId: () => undefined });
+    await expect(make()).resolves.toMatchObject({ kind: "thread-updated" });
   });
 
   it("answers setting the role a thread already has without appending anything", async () => {

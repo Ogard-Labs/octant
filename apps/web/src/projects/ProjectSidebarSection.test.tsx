@@ -6,6 +6,10 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import {
+  SidebarThreadDragContext,
+  type SidebarThreadDragTargets,
+} from "../shell/useWorkspaceTabDrag";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
 
 // Status is the default arrangement, so tests that read the Project tree choose it first.
@@ -778,6 +782,75 @@ describe("ProjectSidebarSection threads filed in no Project", () => {
 });
 
 describe("ProjectSidebarSection activity view", () => {
+  it("offers a Status row to the workspace as a drag, and does not open it on the click that ends one", () => {
+    window.localStorage.clear();
+    const onSelectThread = vi.fn();
+    let suppressNextClick = false;
+    const drag: SidebarThreadDragTargets = {
+      beginThreadDrag: vi.fn(),
+      onPointerMove: vi.fn(),
+      onPointerUp: vi.fn(),
+      onPointerCancel: vi.fn(),
+      consumeThreadClickSuppression: vi.fn(() => suppressNextClick),
+    };
+
+    try {
+      render(
+        <SidebarThreadDragContext.Provider value={drag}>
+          <ProjectSidebarSection
+            archivedProjects={[]}
+            availabilityByProject={new Map()}
+            now={new Date("2026-08-14T15:00:00.000Z")}
+            onArchive={vi.fn()}
+            onMove={vi.fn()}
+            onProjectOpen={vi.fn()}
+            onReorder={vi.fn()}
+            onRestore={vi.fn()}
+            onSelectThread={onSelectThread}
+            projects={[chatProjectA]}
+            threads={[
+              {
+                projectId: String(chatProjectA.id),
+                threadId: "thread-idle-a",
+                title: "Estimate app rebrand effort",
+                updatedAt: "2026-08-13T18:00:00.000Z",
+              },
+            ]}
+          />
+        </SidebarThreadDragContext.Provider>,
+      );
+      // Status is the arrangement the sidebar opens on.
+      expect(screen.getByRole("button", { name: "Status" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      const row = screen.getByRole("button", { name: /Estimate app rebrand effort/ });
+
+      fireEvent.pointerDown(row, { button: 0, pointerId: 1 });
+      expect(drag.beginThreadDrag).toHaveBeenCalledWith(expect.anything(), {
+        rowId: "thread-idle-a",
+        threadId: "thread-idle-a",
+        title: "Estimate app rebrand effort",
+        projectId: String(chatProjectA.id),
+      });
+      fireEvent.pointerMove(row, { pointerId: 1 });
+      fireEvent.pointerUp(row, { pointerId: 1 });
+      expect(drag.onPointerMove).toHaveBeenCalledTimes(1);
+      expect(drag.onPointerUp).toHaveBeenCalledTimes(1);
+
+      // The click a completed drag ends with belongs to the drop.
+      suppressNextClick = true;
+      fireEvent.click(row);
+      expect(onSelectThread).not.toHaveBeenCalled();
+
+      suppressNextClick = false;
+      fireEvent.click(row);
+      expect(onSelectThread).toHaveBeenCalledWith("thread-idle-a");
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
   it("opens on Status with threads grouped under counted headings when no arrangement is stored", () => {
     window.localStorage.clear();
 

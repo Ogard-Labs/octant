@@ -31,10 +31,17 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, FileOutput, X } from "lucide-react";
+import { ChevronDown, CirclePause, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
@@ -273,6 +280,11 @@ export interface CodeThreadWorkspaceProps {
   ) => void;
   /** Starts a new Code thread in the same Project, such as when this one's provider session cannot be resumed. */
   readonly onNewThreadInProject?: (projectId: CodeThread["projectId"]) => void;
+  /**
+   * A coordinator's proposed workers, shown above the composer with the other
+   * prompts that wait for the person's decision. Absent on any other thread.
+   */
+  readonly coordinatorProposals?: ReactNode;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -2286,6 +2298,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={busy}
         />
+        {props.coordinatorProposals}
         <ImageGenerationOfferPrompt
           className="thread-column"
           client={props.imageGenerationClient}
@@ -2341,9 +2354,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   selectionMode="action"
                   trigger={
                     <>
-                      <FileOutput aria-hidden="true" size={14} strokeWidth={1.7} />
-                      <span>
-                        Documents:{" "}
+                      <span>Documents</span>
+                      <span className="thread-info__value">
                         {thread.documentDelivery === "native-artifacts"
                           ? "Claude artifacts"
                           : "Canvas"}
@@ -2626,21 +2638,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }
           row={{
             ariaLabel: "Thread context",
+            attach: (
+              <ComposerAttachButton
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                busy={attachments.busy}
+                refusedReason={
+                  props.attachmentClient === undefined
+                    ? "Image attachments are unavailable on this host."
+                    : boundModelReadsImages(providerGroups, thread) === false
+                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                      : undefined
+                }
+                onRefused={attachments.refuse}
+                onFileSelected={(file) => void attachments.attach([file])}
+              />
+            ),
             leading: (
               <>
-                <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  busy={attachments.busy}
-                  refusedReason={
-                    props.attachmentClient === undefined
-                      ? "Image attachments are unavailable on this host."
-                      : boundModelReadsImages(providerGroups, thread) === false
-                        ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
-                        : undefined
-                  }
-                  onRefused={attachments.refuse}
-                  onFileSelected={(file) => void attachments.attach([file])}
-                />
                 {props.imageGenerationClient === undefined ||
                 props.imageGenerationProfiles === undefined ? null : (
                   <ImageGenerationAction

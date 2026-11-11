@@ -71,6 +71,45 @@
 
 /* ── Floating surfaces ─────────────────────────────────────────────── */
 
+/* Every floating surface re-bases the fills and lines of what it holds on
+   its own lifted fill. A custom property that names another is resolved
+   where it is declared, so the recipes' aliases are restated here. */
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"],
+[data-slot="popover-content"],
+[data-slot="select-content"],
+[data-slot="combobox-content"],
+.octant-menu__popup,
+.octant-dialog__popup,
+.octant-sheet__popup,
+.octant-preview-card,
+.octant-tooltip--card,
+.window-chrome__disclosure,
+.workspace-disclosure,
+.workspace-drag-preview,
+.project-dialog,
+.folder-picker,
+.thread-info__panel,
+.chat-composer__command-typeahead,
+.code-board__view-popover,
+.code-board__filters-panel,
+.menu,
+.palette,
+.toast {
+  /* A surface that paints the card colour paints the float here, and an
+     outline button rests clear on it, not in the page's colour. */
+  --oct-surface: var(--octant-float);
+  --octant-outline-rest: transparent;
+  --octant-control: var(--octant-float-control);
+  --octant-control-hover: var(--octant-float-hover);
+  --octant-control-pressed: var(--octant-float-pressed);
+  --secondary: var(--octant-float-control);
+  --muted: var(--octant-float-control);
+  --accent: var(--octant-float-hover);
+  --border: var(--octant-float-line);
+  --oct-border: var(--octant-float-line);
+}
+
 /* Product menus and dialogs use the opaque shadcn popover recipe. */
 .octant-menu__popup,
 .octant-dialog__popup,
@@ -78,7 +117,9 @@
 .project-dialog,
 .folder-picker {
   background: var(--popover);
-  border: 1px solid var(--border);
+  /* The edge is the light rim of a floating surface; the dark line outside
+     it and the lift are the shadow's. */
+  border: 1px solid var(--octant-bevel);
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: none;
 }
@@ -945,9 +986,12 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   content: "";
 }
 
+/* A done mark draws the accent ink, so it sits on the accent fill that ink is
+   paired with: on accent text, a swatch with white ink (Slate, Graphite) left
+   white checks on the preset blue at 2.8:1 in dark mode. */
 .thread-task-viewer__steps > li[data-step-status="done"] .thread-task-viewer__mark {
-  border-color: var(--octant-accent-text);
-  background: var(--octant-accent-text);
+  border-color: var(--octant-accent);
+  background: var(--octant-accent);
 }
 
 .thread-task-viewer__steps > li[data-step-status="dropped"] .thread-task-viewer__mark::after {
