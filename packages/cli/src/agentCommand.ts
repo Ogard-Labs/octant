@@ -117,8 +117,8 @@ function isAgentAccessMode(value: string): value is AgentAccessMode {
   return (AGENT_ACCESS_MODES as ReadonlyArray<string>).includes(value);
 }
 
-/** Flags that take no value. */
-const AGENT_SWITCHES = ["json", "plain", "last", "quiet", "sandbox"] as const;
+/** `octant agent`'s flags that take no value, so the word after one stays in the prompt. */
+export const AGENT_SWITCHES: ReadonlyArray<string> = ["json", "plain", "last", "quiet", "sandbox"];
 
 const AGENT_FLAGS: ReadonlyArray<string> = [
   "prompt",
@@ -143,18 +143,12 @@ export function resolveAgentCliCommand(
 ): AgentCliCommand | undefined {
   if (command === "agent") {
     if (Object.keys(flags).some((flag) => !AGENT_FLAGS.includes(flag))) return undefined;
-    // The argument parser hands the word after any flag to that flag, so
-    // `octant --last fix the tests` arrives as last="fix". A switch takes no
-    // value; the word goes back to the prompt it began.
-    const words = [...positional];
-    const switches: Record<string, true> = {};
-    for (const flag of AGENT_SWITCHES) {
-      const value = flags[flag];
-      if (value === undefined) continue;
-      switches[flag] = true;
-      if (typeof value === "string") words.unshift(value);
+    // The argument parser never gives a switch a value, so the prompt's
+    // words arrive in order around them; a value here is a caller's mistake.
+    if (AGENT_SWITCHES.some((flag) => flags[flag] !== undefined && flags[flag] !== true)) {
+      return undefined;
     }
-    const openingPrompt = words.join(" ").trim();
+    const openingPrompt = positional.join(" ").trim();
     const text = (flag: string) =>
       typeof flags[flag] === "string" ? String(flags[flag]) : undefined;
     const prompt = text("prompt");
@@ -168,7 +162,7 @@ export function resolveAgentCliCommand(
     if (access !== undefined && !isAgentAccessMode(access)) return undefined;
     // The sandbox only exists at Full access, so asking for it with any other
     // level (or none) is refused rather than quietly ignored.
-    if (switches.sandbox === true && access !== "full-access") return undefined;
+    if (flags.sandbox === true && access !== "full-access") return undefined;
     // `--prompt` runs one turn and exits; a bare prompt opens the session with it.
     if (prompt !== undefined && openingPrompt.length > 0) return undefined;
     const mode = text("mode") ?? "auto";
@@ -182,11 +176,11 @@ export function resolveAgentCliCommand(
       ...(title === undefined ? {} : { title }),
       ...(model === undefined ? {} : { model }),
       ...(access === undefined ? {} : { access }),
-      ...(switches.sandbox === true ? { sandbox: true } : {}),
-      json: switches.json === true,
-      plain: switches.plain === true,
-      last: switches.last === true,
-      quiet: switches.quiet === true,
+      ...(flags.sandbox === true ? { sandbox: true } : {}),
+      json: flags.json === true,
+      plain: flags.plain === true,
+      last: flags.last === true,
+      quiet: flags.quiet === true,
       mode,
       ...(theme === undefined ? {} : { theme }),
     };

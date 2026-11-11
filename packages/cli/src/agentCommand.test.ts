@@ -562,11 +562,8 @@ describe("octant agent command line", () => {
     expect(resolveAgentCliCommand("agent", ["fix", "the", "tests"], {})).toMatchObject({
       openingPrompt: "fix the tests",
     });
-    // The parser gave the prompt's first word to a switch; it goes back to the prompt.
-    expect(resolveAgentCliCommand("agent", ["the", "tests"], { last: "fix" })).toMatchObject({
-      last: true,
-      openingPrompt: "fix the tests",
-    });
+    // A switch takes no value; one handed a value is refused rather than guessed at.
+    expect(resolveAgentCliCommand("agent", ["the", "tests"], { last: "fix" })).toBeUndefined();
     // One turn and exit, or a session opened with a prompt: never both.
     expect(resolveAgentCliCommand("agent", ["more"], { prompt: "hi" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { bogus: true })).toBeUndefined();

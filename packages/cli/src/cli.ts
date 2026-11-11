@@ -38,7 +38,12 @@ import {
   runPluginCliCommand,
 } from "./pluginCommand";
 import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
-import { isAgentFlag, resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import {
+  AGENT_SWITCHES,
+  isAgentFlag,
+  resolveAgentCliCommand,
+  runAgentCliCommand,
+} from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
   readAllStdin,
@@ -68,9 +73,16 @@ interface ParsedArgs {
   readonly positional: readonly string[];
 }
 
+/**
+ * Each flag takes the next word as its value unless that word starts with
+ * `--`; a command's switches never take one. `octant agent` names its
+ * switches so the words around them stay in the prompt, in order:
+ * `octant agent compare A --plain B` is the prompt "compare A B".
+ */
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs | undefined {
   const [command, ...rest] = argv;
   if (command === undefined) return undefined;
+  const switches = command === "agent" ? AGENT_SWITCHES : [];
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];
   for (let i = 0; i < rest.length; i += 1) {
@@ -79,7 +91,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs | undefined {
     if (arg.startsWith("--")) {
       const name = arg.slice(2);
       const next = rest[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (next !== undefined && !next.startsWith("--") && !switches.includes(name)) {
         flags[name] = next;
         i += 1;
       } else {

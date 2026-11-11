@@ -7,6 +7,16 @@ import { hasInvalidLifecyclePositionals, parseArgs } from "./bin";
 import { agentShorthand } from "./cli";
 
 describe("starting the agent without a subcommand", () => {
+  it("keeps the prompt's words in order around the agent's switches", () => {
+    expect(parseArgs(["agent", "compare", "A", "--plain", "B", "--last", "C"])).toEqual({
+      command: "agent",
+      flags: { plain: true, last: true },
+      positional: ["compare", "A", "B", "C"],
+    });
+    // Other commands keep the general rule: a flag takes the next word.
+    expect(parseArgs(["web", "--port", "4000"])?.flags).toEqual({ port: "4000" });
+  });
+
   it("opens the agent for a bare command at a terminal and prints the usage without one", () => {
     expect(agentShorthand([], true)).toEqual(["agent"]);
     expect(agentShorthand([], false)).toEqual([]);
