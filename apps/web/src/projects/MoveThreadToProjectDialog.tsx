@@ -9,6 +9,8 @@ import { useId, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { Folder } from "lucide-react";
+import { ProjectIcon } from "./ProjectIcon";
 
 export type MoveThreadOutcome =
   | { readonly status: "ok" }
@@ -134,7 +136,14 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
                   type="button"
                   variant="outline"
                 >
-                  <span className="move-thread__name">{project.name}</span>
+                  <span className="move-thread__title">
+                    <ProjectIcon
+                      fallback={<Folder aria-hidden="true" size={14} strokeWidth={1.8} />}
+                      projectId={String(project.id)}
+                      size={14}
+                    />
+                    <span className="move-thread__name">{project.name}</span>
+                  </span>
                   <span className="move-thread__folder">{bound(project)}</span>
                 </OctantButton>
                 {reason === undefined ? null : (

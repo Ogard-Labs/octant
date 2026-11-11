@@ -24,6 +24,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { ProjectIcon } from "../projects/ProjectIcon";
 import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 
 export type OverviewSectionStatus =
@@ -217,7 +218,15 @@ export function WorkOverview(props: WorkOverviewProps) {
           />
           {props.projectName === undefined ? null : (
             <span className="work-overview__context-item">
-              <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              {props.projectId === undefined ? (
+                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              ) : (
+                <ProjectIcon
+                  fallback={<FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />}
+                  projectId={String(props.projectId)}
+                  size={12}
+                />
+              )}
               <span>{props.projectName}</span>
             </span>
           )}
