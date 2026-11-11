@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,10 +20,9 @@ import { useMobileSession } from "../session/MobileSessionContext";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme, type ThemeColors } from "../../design-system";
-import { IconButton } from "../ui/IconButton";
+import { ListRow, ListSection, NavBar, SegmentedControl, ToolbarButton } from "../ui/NativeChrome";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { HomeComposerSheet } from "./HomeComposerSheet";
-import { InboxComposerDock } from "./InboxComposerDock";
 import { sectionForAgentRow } from "./agentsListPresentation";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
@@ -34,6 +33,7 @@ export interface AgentsListScreenProps {
   readonly onBack: () => void;
   readonly onOpenThread: (row: MobileInboxRow) => void;
   readonly view: AgentListView;
+  readonly onSelectView: (view: AgentListView) => void;
 }
 
 function statusTone(status: string, colors: ThemeColors): string {
@@ -44,6 +44,11 @@ function statusTone(status: string, colors: ThemeColors): string {
   if (lower.includes("merge") || lower.includes("done")) return colors.merged;
   if (lower.includes("wait") || lower.includes("approval")) return colors.warning;
   return colors.textSecondary;
+}
+
+/** Host lifecycle words arrive lower-case ("active"); labels are sentence case. */
+function sentenceCase(value: string): string {
+  return value.length === 0 ? value : `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
 export function AgentsListScreen(props: AgentsListScreenProps) {
@@ -62,6 +67,9 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The filter switches in place, and the navigator holds the choice, so the
+  // list comes back on the same view after a thread is opened and closed.
+  const view = props.view;
 
   const requestGuard = useRef(createRequestGuard()).current;
   const {
@@ -161,11 +169,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     return { attention, working, review, read };
   }, [rows]);
 
-  const listData = useMemo(() => {
-    const items: Array<
-      | { readonly kind: "header"; readonly id: string; readonly title: string }
-      | { readonly kind: "row"; readonly row: MobileInboxRow }
-    > = [];
+  const sections = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const searchedRows = (sectionRows: ReadonlyArray<MobileInboxRow>) =>
       normalizedQuery.length === 0
@@ -175,225 +179,190 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
               value.toLowerCase().includes(normalizedQuery),
             ),
           );
-    const pushSection = (title: string, sectionRows: ReadonlyArray<MobileInboxRow>) => {
-      const visibleRows = searchedRows(sectionRows);
-      if (visibleRows.length === 0) return;
-      items.push({ kind: "header", id: `h-${title}`, title });
-      for (const row of visibleRows) items.push({ kind: "row", row });
-    };
-    if (props.view === "all") {
-      pushSection(MOBILE_COPY.needsAttention, grouped.attention);
-      pushSection(MOBILE_COPY.working, grouped.working);
-      pushSection(MOBILE_COPY.inReview, grouped.review);
-      pushSection(MOBILE_COPY.read, grouped.read);
-    } else {
-      pushSection("Recents", grouped[props.view]);
-    }
-    return items;
-  }, [grouped, hostLabel, props.view, query]);
+    const all: ReadonlyArray<{
+      readonly title: string;
+      readonly rows: ReadonlyArray<MobileInboxRow>;
+    }> =
+      view === "all"
+        ? [
+            { title: MOBILE_COPY.needsAttention, rows: grouped.attention },
+            { title: MOBILE_COPY.working, rows: grouped.working },
+            { title: MOBILE_COPY.inReview, rows: grouped.review },
+            { title: MOBILE_COPY.read, rows: grouped.read },
+          ]
+        : [{ title: MOBILE_COPY.homeRecent, rows: grouped[view] }];
+    return all
+      .map((section) => ({ title: section.title, rows: searchedRows(section.rows) }))
+      .filter((section) => section.rows.length > 0);
+  }, [grouped, hostLabel, query, view]);
 
-  const title =
-    props.view === "all"
-      ? MOBILE_COPY.allAgents
-      : props.view === "attention"
-        ? MOBILE_COPY.needsAttention
-        : props.view === "working"
-          ? MOBILE_COPY.working
-          : MOBILE_COPY.inReview;
+  const viewOptions: ReadonlyArray<{ readonly id: AgentListView; readonly label: string }> = [
+    { id: "all", label: MOBILE_COPY.statusAllShort },
+    { id: "attention", label: MOBILE_COPY.needsAttention },
+    { id: "working", label: MOBILE_COPY.working },
+    { id: "review", label: MOBILE_COPY.inReview },
+  ];
+
+  const modeLabel = (mode: MobileInboxRow["mode"]) =>
+    mode === "code" ? "Code" : mode === "work" ? "Work" : "Chat";
+  const modeIcon = (mode: MobileInboxRow["mode"]) =>
+    mode === "code" ? "code-slash" : mode === "work" ? "briefcase-outline" : "chatbubble-outline";
 
   const styles = useMemo(
     () =>
       StyleSheet.create({
         shell: { flex: 1, backgroundColor: "transparent" },
-        topBar: {
-          flexDirection: "row",
-          justifyContent: "space-between",
-          paddingHorizontal: mobileSpacing.md,
-          paddingTop: mobileSpacing.sm,
-        },
-        topActions: { flexDirection: "row", gap: mobileSpacing.sm },
-        hero: {
-          color: colors.textPrimary,
-          fontSize: mobileTypography.title.fontSize,
-          fontWeight: mobileTypography.title.fontWeight,
-          paddingHorizontal: mobileSpacing.md,
-          marginTop: mobileSpacing.sm,
-          marginBottom: mobileSpacing.md,
-        },
+        controls: { paddingHorizontal: mobileSpacing.md, gap: 10, marginBottom: mobileSpacing.md },
         search: {
-          marginHorizontal: mobileSpacing.md,
-          marginBottom: mobileSpacing.md,
-          minHeight: 44,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.separator,
+          height: 36,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingHorizontal: 8,
+          borderRadius: 10,
+          backgroundColor: colors.control,
+        },
+        searchInput: {
+          flex: 1,
+          height: 36,
           color: colors.textPrimary,
-          fontSize: mobileTypography.body.fontSize,
+          fontSize: 17,
           outlineColor: "transparent",
           outlineStyle: "solid",
           outlineWidth: 0,
         },
-        filters: {
-          flexDirection: "row",
-          flexWrap: "wrap",
-          gap: mobileSpacing.xs,
-          paddingHorizontal: mobileSpacing.md,
-          marginBottom: mobileSpacing.md,
-        },
+        filters: { gap: mobileSpacing.sm },
         chip: {
-          backgroundColor: colors.surface,
+          height: 30,
+          justifyContent: "center",
+          paddingHorizontal: 12,
           borderRadius: 999,
-          paddingHorizontal: mobileSpacing.sm,
-          paddingVertical: mobileSpacing.xs,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
+          backgroundColor: colors.control,
         },
-        chipActive: {
-          backgroundColor: colors.surfaceElevated,
-          borderColor: colors.separator,
-        },
+        chipActive: { backgroundColor: colors.accent },
         chipLabel: {
           color: colors.textPrimary,
-          fontSize: mobileTypography.caption.fontSize,
-        },
-        list: { paddingHorizontal: mobileSpacing.md, paddingBottom: 126 },
-        section: {
-          color: colors.textSecondary,
-          fontSize: mobileTypography.caption.fontSize,
-          marginTop: mobileSpacing.md,
-          marginBottom: mobileSpacing.sm,
-        },
-        sectionRow: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 4,
-        },
-        row: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: mobileSpacing.sm,
-          paddingVertical: mobileSpacing.md,
-          paddingHorizontal: mobileSpacing.xs,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.separator,
-        },
-        dot: {
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-        },
-        rowBody: { flex: 1, gap: 6 },
-        metaRow: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: mobileSpacing.sm,
-          flexWrap: "wrap",
-        },
-        statusPill: {
-          fontSize: 12,
-          fontWeight: "500",
-          textTransform: "capitalize",
-        },
-        rowTitle: {
-          color: colors.textPrimary,
-          fontSize: mobileTypography.body.fontSize,
+          fontSize: mobileTypography.detail.fontSize,
           fontWeight: "500",
         },
-        rowMeta: {
-          fontSize: mobileTypography.caption.fontSize,
-          color: colors.textSecondary,
-        },
+        chipLabelActive: { color: colors.sendLabel },
+        list: { paddingBottom: mobileSpacing.xl },
         help: {
           color: colors.textSecondary,
+          fontSize: mobileTypography.detail.fontSize,
+          lineHeight: 18,
           paddingHorizontal: mobileSpacing.md,
-          lineHeight: 20,
+          paddingVertical: mobileSpacing.md,
+          textAlign: "center",
         },
-        warn: {
-          color: colors.textSecondary,
-          paddingHorizontal: mobileSpacing.md,
-        },
-        failureRow: { paddingBottom: mobileSpacing.sm },
-        retry: {
-          color: colors.accent,
-          paddingHorizontal: mobileSpacing.md,
-          fontSize: mobileTypography.caption.fontSize,
-          fontWeight: "500",
-        },
+        warn: { color: colors.warning, fontSize: mobileTypography.detail.fontSize, lineHeight: 18 },
         error: {
           color: colors.danger,
+          fontSize: mobileTypography.detail.fontSize,
           paddingHorizontal: mobileSpacing.md,
+          marginBottom: mobileSpacing.sm,
         },
-        stale: { paddingBottom: mobileSpacing.xs },
+        stale: { paddingTop: mobileSpacing.xs },
+        failureRow: {
+          paddingHorizontal: mobileSpacing.md,
+          paddingBottom: mobileSpacing.sm,
+          gap: 2,
+        },
+        retry: {
+          color: colors.accent,
+          fontSize: mobileTypography.detail.fontSize,
+          fontWeight: "500",
+        },
       }),
     [colors],
   );
 
+  const title = viewOptions.find((option) => option.id === view)?.label ?? MOBILE_COPY.allAgents;
+
   return (
     <View style={styles.shell} testID="mobile-agents-list">
-      <View style={styles.topBar}>
-        <IconButton
-          accessibilityLabel="Back"
-          name="chevron-back"
-          onPress={props.onBack}
-          size={44}
-          testID="mobile-agents-back"
-        />
-        <View style={styles.topActions}>
-          <IconButton
-            accessibilityLabel={searchOpen ? "Close search" : "Search agent work"}
-            name={searchOpen ? "close-outline" : "search-outline"}
-            onPress={() => {
-              setSearchOpen((open) => !open);
-              if (searchOpen) setQuery("");
-            }}
-            size={44}
-            testID="mobile-agents-search"
-          />
-          <IconButton
-            accessibilityLabel="Filter hosts"
-            name="options-outline"
-            onPress={() => setFiltersOpen((open) => !open)}
-            size={44}
-            testID="mobile-agents-filter"
-          />
-        </View>
-      </View>
-      <Text style={styles.hero}>{title}</Text>
+      <NavBar
+        backLabel={MOBILE_COPY.inboxTitle}
+        backTestID="mobile-agents-back"
+        onBack={props.onBack}
+        title={view === "all" ? MOBILE_COPY.allAgents : title}
+        trailing={
+          <>
+            <ToolbarButton
+              accessibilityLabel={searchOpen ? "Close search" : "Search agent work"}
+              icon={searchOpen ? "close-circle" : "search"}
+              onPress={() => {
+                setSearchOpen((open) => !open);
+                if (searchOpen) setQuery("");
+              }}
+              testID="mobile-agents-search"
+            />
+            <ToolbarButton
+              accessibilityLabel="Filter hosts"
+              icon={inboxHostFilter === "all" ? "filter-circle-outline" : "filter-circle"}
+              onPress={() => setFiltersOpen((open) => !open)}
+              testID="mobile-agents-filter"
+            />
+            <ToolbarButton
+              accessibilityLabel="New Chat thread"
+              icon="create-outline"
+              onPress={() => setComposerOpen(true)}
+              testID="mobile-agents-compose"
+            />
+          </>
+        }
+      />
 
-      {searchOpen ? (
-        <TextInput
-          autoFocus
-          onChangeText={setQuery}
-          placeholder="Search work"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.search}
-          testID="mobile-agents-search-input"
-          value={query}
+      <View style={styles.controls}>
+        {searchOpen ? (
+          <View style={styles.search}>
+            <Ionicons color={colors.textTertiary} name="search" size={16} />
+            <TextInput
+              autoFocus
+              onChangeText={setQuery}
+              placeholder="Search"
+              placeholderTextColor={colors.textTertiary}
+              style={styles.searchInput}
+              testID="mobile-agents-search-input"
+              value={query}
+            />
+          </View>
+        ) : null}
+        <SegmentedControl
+          onSelect={props.onSelectView}
+          optionTestID={(id) => `mobile-agents-view-${id}`}
+          options={viewOptions}
+          selected={view}
+          testID="mobile-agents-views"
         />
-      ) : null}
-
-      {filtersOpen ? (
-        <View style={styles.filters} testID="mobile-inbox-host-filters">
-          <Pressable
-            onPress={() => setInboxHostFilter("all")}
-            style={[styles.chip, inboxHostFilter === "all" ? styles.chipActive : null]}
-            testID="mobile-inbox-filter-all"
+        {filtersOpen ? (
+          <ScrollView
+            contentContainerStyle={styles.filters}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            testID="mobile-inbox-host-filters"
           >
-            <Text style={styles.chipLabel}>{MOBILE_COPY.allHosts}</Text>
-          </Pressable>
-          {hosts.map((host) => (
-            <Pressable
-              key={host.hostId}
-              onPress={() => setInboxHostFilter(host.hostId)}
-              style={[styles.chip, inboxHostFilter === host.hostId ? styles.chipActive : null]}
-              testID={`mobile-inbox-filter-${host.hostId}`}
-            >
-              <Text style={styles.chipLabel}>{host.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
+            {[{ hostId: "all", label: MOBILE_COPY.allHosts }, ...hosts].map((host) => {
+              const active = inboxHostFilter === host.hostId;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  key={host.hostId}
+                  onPress={() => setInboxHostFilter(host.hostId)}
+                  style={[styles.chip, active ? styles.chipActive : null]}
+                  testID={`mobile-inbox-filter-${host.hostId}`}
+                >
+                  <Text style={[styles.chipLabel, active ? styles.chipLabelActive : null]}>
+                    {host.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+      </View>
 
-      {loading ? <ActivityIndicator color={colors.accent} /> : null}
       {failures.map((failure) => {
         const label = hostLabel(failure.hostId);
         const message =
@@ -422,71 +391,38 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         </Text>
       ) : null}
 
-      <FlatList
-        contentInsetAdjustmentBehavior="automatic"
-        data={listData}
-        keyExtractor={(item) =>
-          item.kind === "header"
-            ? item.id
-            : `${item.row.hostId}:${item.row.mode}:${item.row.threadId}`
-        }
-        ListEmptyComponent={
-          !loading ? (
-            <Text style={styles.help}>
-              {transports.length === 0 ? MOBILE_COPY.inboxEmpty : "No threads on these hosts yet."}
-            </Text>
-          ) : null
-        }
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => {
-          if (item.kind === "header") {
-            return (
-              <View style={styles.sectionRow}>
-                <Text style={styles.section}>{item.title}</Text>
-                <Ionicons color={colors.textTertiary} name="chevron-down" size={13} />
-              </View>
-            );
-          }
-          const row = item.row;
-          const section = sectionForAgentRow(row);
-          const tone =
-            section === "attention"
-              ? colors.attention
-              : section === "working"
-                ? colors.accent
-                : section === "review"
-                  ? colors.merged
-                  : colors.separator;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => props.onOpenThread(row)}
-              style={styles.row}
-              testID={`mobile-inbox-row-${row.mode}-${row.threadId}`}
-            >
-              <View style={[styles.dot, { backgroundColor: tone }]} />
-              <View style={styles.rowBody}>
-                <Text style={styles.rowTitle}>{formatScreenshotSafeLabel(row.title)}</Text>
-                <View style={styles.metaRow}>
-                  <Text style={[styles.statusPill, { color: statusTone(row.status, colors) }]}>
-                    {row.status}
-                  </Text>
-                  <Text style={styles.rowMeta}>
-                    {hostLabel(row.hostId)} · {row.mode}
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          );
-        }}
-      />
+      <ScrollView contentContainerStyle={styles.list} contentInsetAdjustmentBehavior="automatic">
+        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        {!loading && sections.length === 0 ? (
+          <Text style={styles.help}>
+            {transports.length === 0 ? MOBILE_COPY.inboxEmpty : "No threads here yet"}
+          </Text>
+        ) : null}
+        {sections.map((section) => (
+          <ListSection key={section.title} title={section.title}>
+            {section.rows.map((row, index) => (
+              <ListRow
+                accessory="none"
+                detail={`${hostLabel(row.hostId)} · ${modeLabel(row.mode)}`}
+                icon={modeIcon(row.mode)}
+                key={`${row.hostId}:${row.mode}:${row.threadId}`}
+                label={formatScreenshotSafeLabel(row.title)}
+                last={index === section.rows.length - 1}
+                onPress={() => props.onOpenThread(row)}
+                testID={`mobile-inbox-row-${row.mode}-${row.threadId}`}
+                value={sentenceCase(row.status)}
+                valueTone={statusTone(row.status, colors)}
+              />
+            ))}
+          </ListSection>
+        ))}
+      </ScrollView>
 
       {!staleGate.allowProductMutations ? (
         <Text style={[styles.error, styles.stale]} testID="mobile-agents-stale-gate">
           {staleGate.message}
         </Text>
       ) : null}
-      <InboxComposerDock onOpen={() => setComposerOpen(true)} />
       <HomeComposerSheet
         availableModes={["chat"]}
         busy={creating}

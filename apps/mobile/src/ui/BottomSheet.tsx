@@ -42,28 +42,31 @@ export function BottomSheet(props: BottomSheetProps) {
         sheetContent: {
           paddingBottom: space.xl,
         },
+        // The system sheet's grabber: 36 by 5, in the muted ink.
         handle: {
           alignSelf: "center",
-          width: 40,
+          width: 36,
           height: 5,
           borderRadius: radii.pill,
-          backgroundColor: colors.glassHighlight,
-          marginTop: space.sm,
-          marginBottom: space.sm,
+          backgroundColor: colors.hairlineStrong,
+          marginTop: 6,
+          marginBottom: space.xs,
         },
         header: {
+          minHeight: 44,
           flexDirection: "row",
           alignItems: "center",
-          paddingHorizontal: space.md,
-          marginBottom: space.md,
+          paddingHorizontal: space.sm,
+          marginBottom: space.xs,
         },
         headerSpacer: { width: 34 },
         title: {
           flex: 1,
           textAlign: "center",
           color: colors.textPrimary,
-          fontSize: typography.title.fontSize,
-          fontWeight: typography.title.fontWeight,
+          fontSize: typography.pageTitle.fontSize,
+          fontWeight: typography.pageTitle.fontWeight,
+          letterSpacing: typography.pageTitle.letterSpacing,
         },
       }),
     [colors],
@@ -76,7 +79,7 @@ export function BottomSheet(props: BottomSheetProps) {
         <GlassSurface
           contentStyle={[styles.sheetContent, props.contentStyle]}
           material="thick"
-          radius={radii.composer}
+          radius={radii.sheet}
           style={[styles.sheet, props.sheetStyle]}
           testID={props.testID ?? "mobile-bottom-sheet"}
         >
@@ -85,11 +88,11 @@ export function BottomSheet(props: BottomSheetProps) {
             <View style={styles.header}>
               <IconButton
                 accessibilityLabel="Close"
+                iconSize={17}
                 name="close"
                 onPress={props.onClose}
-                size={34}
+                size={30}
                 testID="mobile-sheet-close"
-                variant="ghost"
               />
               <Text style={styles.title}>{props.title}</Text>
               <View style={styles.headerSpacer} />

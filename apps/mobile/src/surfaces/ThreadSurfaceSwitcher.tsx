@@ -1,7 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
-import { GlassChip } from "../../design-system";
-import { mobileSpacing } from "../theme/tokens";
+import { space } from "../../design-system";
+import { SegmentedControl } from "../ui/NativeChrome";
 import type { MobileThreadSurfaceOption } from "./threadSurfacePresentation";
 
 export interface ThreadSurfaceSwitcherProps {
@@ -11,7 +11,7 @@ export interface ThreadSurfaceSwitcherProps {
 }
 
 /**
- * The row that flips one thread between the conversation and the product it is
+ * The control that flips one thread between the conversation and the product it is
  * building. It offers only the surfaces the host would answer for, so choosing
  * one never lands on a refusal — and with nothing to switch between it shows
  * nothing at all.
@@ -20,25 +20,18 @@ export function ThreadSurfaceSwitcher(props: ThreadSurfaceSwitcherProps) {
   if (props.surfaces.length < 2) return null;
 
   return (
-    <View style={styles.row} testID="mobile-thread-surface-switcher">
-      {props.surfaces.map((surface) => (
-        <GlassChip
-          active={surface.id === props.active}
-          key={surface.id}
-          label={surface.label}
-          onPress={() => props.onSelect(surface.id)}
-          testID={`mobile-thread-surface-${surface.id}`}
-        />
-      ))}
+    <View style={styles.wrap}>
+      <SegmentedControl
+        onSelect={props.onSelect}
+        optionTestID={(id) => `mobile-thread-surface-${id}`}
+        options={props.surfaces}
+        selected={props.active}
+        testID="mobile-thread-surface-switcher"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    gap: mobileSpacing.xs,
-    paddingHorizontal: mobileSpacing.md,
-    paddingBottom: mobileSpacing.xs,
-  },
+  wrap: { paddingHorizontal: space.md, paddingBottom: space.sm },
 });

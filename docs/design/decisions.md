@@ -2128,8 +2128,9 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
+- The phone app reads as a native app, not a web page: a bottom tab bar for its top places, large titles on tab roots, a centred nav bar on pushed screens, inset grouped lists, the system segmented control and sheets with a grabber. It uses the product radius scale with one 20px sheet, three count tiles that take the desktop tiles' hues and marks, and the transcript recipe: bare prose replies and a control-fill bubble for the person's message.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character) and [Voice](../../DESIGN.md#voice).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), and the [mobile design system](../../apps/mobile/design-system/README.md).
 
 ### One theme authority and shared controls
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
 export interface ToolPartCardProps {
@@ -53,33 +53,36 @@ export function ToolPartCard(props: ToolPartCardProps) {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        wrap: { marginBottom: space.sm },
-        pad: {
-          paddingHorizontal: space.md,
-          paddingVertical: space.sm,
-          gap: 6,
-        },
+        wrap: { marginBottom: space.xs },
+        pad: { gap: 2 },
         top: {
+          minHeight: 32,
           flexDirection: "row",
           alignItems: "center",
           gap: space.sm,
         },
         name: {
-          flex: 1,
+          flexShrink: 1,
           color: colors.textPrimary,
-          fontSize: typography.caption.fontSize,
+          fontSize: typography.detail.fontSize,
           fontWeight: "500",
           fontFamily: typography.mono.fontFamily,
         },
         badge: {
+          marginLeft: "auto",
           color: tone,
-          fontSize: 12,
+          fontSize: typography.meta.fontSize,
           fontWeight: "500",
         },
         summary: {
+          marginLeft: 7,
+          paddingLeft: space.md,
+          paddingVertical: space.xs,
+          borderLeftWidth: 2,
+          borderLeftColor: colors.hairline,
           color: colors.textSecondary,
-          fontSize: typography.body.fontSize,
-          lineHeight: 20,
+          fontSize: typography.detail.fontSize,
+          lineHeight: 19,
         },
       }),
     [colors, tone],
@@ -87,7 +90,7 @@ export function ToolPartCard(props: ToolPartCardProps) {
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-tool-part"}>
-      <GlassSurface contentStyle={styles.pad} material="thin" radius={radii.sm}>
+      <View style={styles.pad}>
         <Pressable
           accessibilityRole={collapsible ? "button" : "text"}
           accessibilityState={collapsible ? { expanded: open } : {}}
@@ -96,7 +99,7 @@ export function ToolPartCard(props: ToolPartCardProps) {
           style={styles.top}
           testID="mobile-tool-part-toggle"
         >
-          <Ionicons color={tone} name={statusIcon(props.status)} size={16} />
+          <Ionicons color={tone} name={statusIcon(props.status)} size={15} />
           <Text style={styles.name} numberOfLines={1}>
             {props.name}
           </Text>
@@ -104,13 +107,13 @@ export function ToolPartCard(props: ToolPartCardProps) {
           {collapsible ? (
             <Ionicons
               color={colors.textTertiary}
-              name={open ? "chevron-up" : "chevron-down"}
-              size={16}
+              name={open ? "chevron-down" : "chevron-forward"}
+              size={14}
             />
           ) : null}
         </Pressable>
         {showSummary ? <Text style={styles.summary}>{props.summary}</Text> : null}
-      </GlassSurface>
+      </View>
     </View>
   );
 }

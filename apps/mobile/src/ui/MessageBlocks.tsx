@@ -28,17 +28,18 @@ export function MessageBlocks(props: MessageBlocksProps) {
         paragraph: {
           color: textColor,
           fontSize: typography.body.fontSize,
-          lineHeight: 21,
+          lineHeight: 22,
         },
         heading: {
           color: textColor,
-          fontWeight: "500",
-          letterSpacing: -0.3,
+          fontWeight: "600",
+          letterSpacing: -0.2,
+          marginTop: 2,
         },
         listItem: {
           color: textColor,
           fontSize: typography.body.fontSize,
-          lineHeight: 21,
+          lineHeight: 22,
         },
         codeWrap: {
           borderRadius: radii.sm,
@@ -117,7 +118,8 @@ function BlockView(props: {
         <Text
           style={[
             styles.heading,
-            { fontSize: block.level === 1 ? 22 : block.level === 2 ? 18 : 16 },
+            // Headings inside a reply are labels, not page titles (DESIGN.md › Transcript).
+            { fontSize: block.level === 1 ? 17 : 15 },
           ]}
         >
           {block.text}
