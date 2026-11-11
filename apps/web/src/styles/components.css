@@ -1625,6 +1625,57 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   list-style: none;
 }
 
+.turn-activity__routines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.routine-receipt-card {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
+  color: var(--oct-fg);
+}
+
+.routine-receipt-card__icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.routine-receipt-card__text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.routine-receipt-card__label,
+.routine-receipt-card__detail {
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.routine-receipt-card__title {
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .published-page-card {
   display: flex;
   align-items: center;

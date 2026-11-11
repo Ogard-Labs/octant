@@ -586,6 +586,7 @@ async function projectConversationTurns(
           ...(step.summary === undefined ? {} : { summary: step.summary }),
           ...(step.published === undefined ? {} : { published: step.published }),
           ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
+          ...(step.routine === undefined ? {} : { routine: step.routine }),
         });
         continue;
       }

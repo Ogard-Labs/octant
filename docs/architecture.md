@@ -3366,6 +3366,14 @@ the thread it came from.
   result. A suggestion the agent makes on its own, a follow-up (a paused one
   would never fire), and a turn in Plan (which changes nothing) still wait for
   the card.
+  **Receipt.** A call that created a routine, either way, keeps a receipt on its
+  tool step (the routine's id, name, schedule, first run, and whether it is
+  paused), in a Work thread's recorded steps and a Code thread's operation
+  events alike, and nowhere else: no tool input or output is captured. Every
+  client draws the same **Created automation** card under the turn from it,
+  saying paused or scheduled and opening the routine in Automation Center
+  where the host can. The thread's Environment lists the routine in its
+  Routines row, paused or not, as it lists any routine made from the thread.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with

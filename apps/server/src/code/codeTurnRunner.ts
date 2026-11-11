@@ -13,6 +13,7 @@ import {
   type ProviderResumeCursor,
   type ProviderUsageLimit,
   type ThreadPublishedPage,
+  type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
   type TurnStopReason,
   type UsageCost,
@@ -151,6 +152,8 @@ export interface CodeTurnEvent {
   readonly published?: ThreadPublishedPage;
   /** The finished call's result brought outside content into the thread. */
   readonly outsideContent?: ToolOutsideContentMark;
+  /** The routine the finished call created. */
+  readonly routine?: ThreadRoutineReceipt;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -681,6 +684,9 @@ export class CodeTurnRunner {
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
                         : "App-managed action completed.",
+                      ...(answer.isError || execution.routine === undefined
+                        ? {}
+                        : { routine: execution.routine }),
                       // A refused call carries a mark only when it reached
                       // for a protected secret, which its row then shows.
                       ...(execution.outsideContent === undefined

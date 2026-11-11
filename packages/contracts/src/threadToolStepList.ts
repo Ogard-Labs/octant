@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ShieldDecision } from "./shield";
 import { ToolOutsideContentMark } from "./shieldWatcherMark";
+import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import {
   MAX_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
@@ -39,6 +40,8 @@ export const ThreadToolStep = Schema.Struct({
   shield: Schema.optional(ShieldDecision),
   /** The call's result brought outside content into the thread, and what the Watcher found in it. */
   outsideContent: Schema.optional(ToolOutsideContentMark),
+  /** The routine the call set up, when it was the call that created one. */
+  routine: Schema.optional(ThreadRoutineReceipt),
 }).annotations(strict);
 export type ThreadToolStep = typeof ThreadToolStep.Type;
 

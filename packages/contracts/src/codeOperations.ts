@@ -14,6 +14,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1762,6 +1763,8 @@ const ToolEvent = Schema.Struct({
   published: Schema.optional(ThreadPublishedPage),
   /** The call's result brought outside content into the thread; the row carries the mark. */
   outsideContent: Schema.optional(ToolOutsideContentMark),
+  /** The routine the call set up; the transcript shows what was created. */
+  routine: Schema.optional(ThreadRoutineReceipt),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -2235,6 +2238,7 @@ export const CodeConversationStep = Schema.Union(
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
+    routine: Schema.optional(ThreadRoutineReceipt),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),

@@ -332,6 +332,12 @@ describe("routine proposals from a thread", () => {
       inputJson: JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true }),
     });
     expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+    // The tool row carries what was created, so the transcript can show a receipt.
+    expect(outcome.routine).toMatchObject({
+      name: "Monday report",
+      paused: true,
+      trigger: { kind: "weekly-local" },
+    });
     expect(await listed(h.handler)).toEqual([]);
     const items = h.projection.listSummaries({
       hostId: "local" as never,
@@ -457,6 +463,7 @@ describe("routine proposals from a thread", () => {
       status: "confirmed",
       routineId: String(routine.id),
     });
+    expect(outcome.routine).toMatchObject({ routineId: String(routine.id), paused: false });
     expect(routine.createdBy).toEqual({
       kind: "local-window",
       windowId: String(windowId),

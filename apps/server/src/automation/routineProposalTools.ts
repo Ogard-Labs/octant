@@ -5,11 +5,13 @@ import {
   MAX_AUTOMATION_DISPLAY_NAME_LENGTH,
   MAX_AUTOMATION_TASK_PROMPT_LENGTH,
   ROUTINE_PROPOSAL_TOOL_NAME,
+  type AutomationId,
   type AutomationMissedRunPolicy,
   type OctantMode,
   type AutomationScheduledTrigger,
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
+  type ThreadRoutineReceipt,
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
@@ -128,6 +130,13 @@ export function createRoutineProposalTools(input: {
       // so the routine it creates is paused and takes only the authority a
       // confirmed proposal gets. A follow-up stays on the card because a
       // paused one would never fire, and Plan changes nothing.
+      const receipt = (id: AutomationId, paused: boolean): ThreadRoutineReceipt => ({
+        routineId: String(id),
+        name: parsed.name,
+        trigger: parsed.trigger,
+        firstRunAt: parsed.firstRunAt,
+        paused,
+      });
       const outcome =
         parsed.requestedByPerson && !parsed.followUp && input.readPosture?.() !== "plan"
           ? input.proposals.createRequested({ windowId: input.windowId, proposal })
@@ -147,6 +156,7 @@ export function createRoutineProposalTools(input: {
               message:
                 "The routine was created paused because the person asked for it. It is shown in Automation Center and runs only after the person enables it; tell them it is paused.",
             },
+            routine: receipt(outcome.automationId, true),
           };
         case "confirmed":
           return {
@@ -157,6 +167,7 @@ export function createRoutineProposalTools(input: {
               message:
                 "The person confirmed it. The routine exists and is shown in Automation Center and this thread's Environment.",
             },
+            routine: receipt(outcome.automationId, false),
           };
         case "declined":
           return {
