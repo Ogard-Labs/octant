@@ -16,6 +16,7 @@ import { RightUtilityDockSurface, type DockTileControls } from "./RightUtilityDo
 import {
   addUtilityTabState,
   closeUtilityTabState,
+  hideUtilityCard,
   hideUtilityTile,
   minimiseUtilityTool,
   openUtilityTabBesideState,
@@ -494,16 +495,12 @@ describe("tool tiles in the right sidebar", () => {
         }
         shelf={{
           entries: cards,
-          renderCard: (entry) => (
+          onHide: (id) => setState((current) => hideUtilityCard(current, id)),
+          onShow: (id) => setState((current) => selectUtilityTabState(current, id)),
+          renderCard: (entry, controls) => (
             <DockMiniCard
-              onClose={() =>
-                setState((current) =>
-                  current.tabs
-                    .filter((tab) => tab.surface === entry.surface)
-                    .reduce((next, tab) => closeUtilityTabState(next, tab.id), current),
-                )
-              }
-              onExpand={() => setState((current) => selectUtilityTabState(current, entry.tabId))}
+              onHide={controls.onHide}
+              onExpand={controls.onShow}
               previewLabel={`Show ${surface(entry.surface).label}, live preview`}
               surface={entry.surface}
               title={surface(entry.surface).label}
@@ -1239,13 +1236,71 @@ describe("tool tiles in the right sidebar", () => {
       expect(screen.getByText("Live terminal")).toBeVisible();
     });
 
-    it("closes the tool's tabs from the card's close control", async () => {
+    it("takes only the card away from its hide control: the tool stays an open tab, not shown, and nothing is closed", async () => {
       const user = userEvent.setup();
       render(<TiledDock initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")} />);
-      await user.click(screen.getByRole("button", { name: "Close Terminal" }));
-      expect(shelf()).not.toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Files" })).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Hide Terminal card" }));
+      expect(shelf()).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Terminal" })).toBeVisible();
+      expect(screen.getByRole("tab", { name: "Terminal" })).not.toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByText("Thread overview")).toBeVisible();
+      expect(screen.queryByText("Live terminal")).not.toBeInTheDocument();
+    });
+
+    it("moves the keyboard to the restored tool when Show is pressed on a card", async () => {
+      const user = userEvent.setup();
+      render(<TiledDock initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")} />);
+      screen.getByRole("button", { name: "Show Terminal" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole("region", { name: "Terminal" })),
+      );
+    });
+
+    it("hands the keyboard to the strip when a card is hidden and no tab is selected", () => {
+      const focused: Array<string | null> = [];
+      const focus = vi
+        .spyOn(HTMLElement.prototype, "focus")
+        .mockImplementation(function (this: HTMLElement) {
+          focused.push(this.getAttribute("aria-label"));
+        });
+      try {
+        render(
+          <TiledDock
+            initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")}
+            launchable={[surface("plan")]}
+          />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Hide Terminal card" }));
+        // The overview is showing, so no tab is selected: the strip's overflow
+        // count (here the hidden tool does not fit), else the Add tool control.
+        expect(focused).toHaveLength(1);
+        expect(["1 more open tab", "Add tool"]).toContain(focused[0]);
+      } finally {
+        focus.mockRestore();
+      }
+    });
+
+    it("moves the keyboard to the selected tab when a card is hidden beside a shown tool", async () => {
+      const user = userEvent.setup();
+      let state = opened("terminal", "files");
+      state = minimiseUtilityTool(state, "terminal");
+      render(<TiledDock initial={state} />);
+      screen.getByRole("button", { name: "Hide Terminal card" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Files" })),
+      );
+    });
+
+    it("lists the strip without a minimised tool, which its card stands for", () => {
+      render(<TiledDock initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")} />);
+      expect(screen.queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+      expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Files"]);
     });
 
     it("lists a minimised tool among the open tools in Show another tool and restores it beside", async () => {
@@ -1281,11 +1336,16 @@ describe("tool tiles in the right sidebar", () => {
       );
     });
 
+    it("names the shelf's group Minimised tools", () => {
+      render(<TiledDock initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")} />);
+      expect(screen.getByRole("group", { name: "Minimised tools" })).toBeVisible();
+    });
+
     it("names the card's controls and gives them roles", () => {
       render(<TiledDock initial={minimiseUtilityTool(opened("files", "browser"), "browser")} />);
       const card = within(shelf()!).getByRole("region", { name: "Minimised Browser" });
       expect(within(card).getByRole("button", { name: "Show Browser" })).toBeVisible();
-      expect(within(card).getByRole("button", { name: "Close Browser" })).toBeVisible();
+      expect(within(card).getByRole("button", { name: "Hide Browser card" })).toBeVisible();
       expect(
         within(card).getByRole("button", { name: "Show Browser, live preview" }),
       ).toBeVisible();

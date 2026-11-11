@@ -48,17 +48,17 @@ function renderCard(
   extra: { readonly pollIntervalMs?: number } = {},
 ) {
   const onExpand = vi.fn();
-  const onClose = vi.fn();
+  const onHide = vi.fn();
   const view = render(
     <DockBrowserCard
       client={client}
-      onClose={onClose}
+      onHide={onHide}
       onExpand={onExpand}
       pollIntervalMs={extra.pollIntervalMs ?? 60_000}
       threadId={threadId as never}
     />,
   );
-  return { ...view, onClose, onExpand };
+  return { ...view, onHide, onExpand };
 }
 
 describe("DockBrowserCard", () => {
@@ -70,18 +70,18 @@ describe("DockBrowserCard", () => {
     );
     expect(within(card).getByText("Your account")).toBeVisible();
     expect(within(card).getByRole("button", { name: "Show Browser" })).toBeVisible();
-    expect(within(card).getByRole("button", { name: "Close Browser" })).toBeVisible();
+    expect(within(card).getByRole("button", { name: "Hide Browser card" })).toBeVisible();
   });
 
-  it("expands and closes from its controls, and expands from the preview itself", async () => {
+  it("expands and hides from its controls, and expands from the preview itself", async () => {
     const user = userEvent.setup();
-    const { onClose, onExpand } = renderCard(clientOf(() => snapshot()));
+    const { onHide, onExpand } = renderCard(clientOf(() => snapshot()));
     await screen.findByText("Your account");
     await user.click(screen.getByRole("button", { name: "Show Browser" }));
     await user.click(screen.getByRole("button", { name: /^Show Browser, live preview/ }));
     expect(onExpand).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole("button", { name: "Close Browser" }));
-    expect(onClose).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Hide Browser card" }));
+    expect(onHide).toHaveBeenCalledOnce();
   });
 
   it("asks for a picture only while the card is shown", async () => {

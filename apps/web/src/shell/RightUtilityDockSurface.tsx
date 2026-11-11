@@ -70,6 +70,12 @@ export interface DockTileControls {
   readonly onShowBeside: (tabId: string) => void;
 }
 
+/** What a card does with the dock around it, so the keyboard never falls to the page. */
+export interface DockCardControls {
+  readonly onHide: () => void;
+  readonly onShow: () => void;
+}
+
 export interface RightUtilityDockSurfaceProps {
   readonly activeTabId?: string;
   readonly agents?: ReactNode;
@@ -105,7 +111,12 @@ export interface RightUtilityDockSurfaceProps {
    */
   readonly shelf?: {
     readonly entries: ReadonlyArray<DockShelfEntry>;
-    readonly renderCard: (entry: DockShelfEntry) => ReactNode;
+    /** The surface hands each card controls that keep the keyboard's place. */
+    readonly renderCard: (entry: DockShelfEntry, controls: DockCardControls) => ReactNode;
+    /** Brings the card's tool back as the focused tile's tool. */
+    readonly onShow: (tabId: string) => void;
+    /** Takes the card away, leaving the tool open in the strip. */
+    readonly onHide: (tabId: string) => void;
   };
   readonly sideChat?: ReactNode;
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
@@ -218,7 +229,8 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         ? undefined
         : tabs.find((tab) => tab.dataset.dockTab === refocus.tab)) ??
       tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ??
-      root.current?.querySelector<HTMLElement>(".dock-tool-strip__more");
+      root.current?.querySelector<HTMLElement>(".dock-tool-strip__more") ??
+      root.current?.querySelector<HTMLElement>('[aria-label="Add tool"]');
     target?.focus();
     setRefocus(undefined);
   }, [refocus]);
@@ -441,7 +453,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         open={[
           ...stripTabs.filter((tab) => !onScreenInStrip.has(tab.id)),
           // A minimised tool is open but out of view, like a hidden tab.
-          ...minimisedRepresentatives(props.tabs, minimisedIds),
+          ...minimisedRepresentatives(props.tabs, minimisedIds, props.lastBrowserTabId),
         ].map((tab) => ({ id: tab.id, label: tab.label, surface: dockTabSurface(tab).id }))}
       />
     );
@@ -585,7 +597,24 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           </div>
         ) : null}
         {shelfEntries.length === 0 || props.shelf === undefined ? null : (
-          <DockShelf entries={shelfEntries} renderCard={props.shelf.renderCard} />
+          <DockShelf
+            entries={shelfEntries}
+            renderCard={(entry) =>
+              props.shelf?.renderCard(entry, {
+                // The card unmounts as the tool is restored, so the tool takes
+                // the focus the card held, as a tool opened from the strip does.
+                onShow: () => {
+                  focusOpenedTool.current = true;
+                  props.shelf?.onShow(entry.tabId);
+                },
+                // A card that goes away hands the keyboard to the strip.
+                onHide: () => {
+                  setRefocus({});
+                  props.shelf?.onHide(entry.tabId);
+                },
+              })
+            }
+          />
         )}
       </div>
     </div>
@@ -596,14 +625,20 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
 function minimisedRepresentatives(
   tabs: RightUtilityDockSurfaceProps["tabs"],
   minimised: ReadonlySet<string>,
+  lastBrowser: string | undefined,
 ): RightUtilityDockSurfaceProps["tabs"] {
   const seen = new Set<RightUtilityDockSurfaceId>();
-  return tabs.filter((tab) => {
+  // The Browser stands for the page it last showed.
+  const ordered = [...tabs].sort(
+    (left, right) => Number(right.id === lastBrowser) - Number(left.id === lastBrowser),
+  );
+  const chosen = ordered.filter((tab) => {
     const surface = dockTabSurface(tab).id;
     if (!minimised.has(tab.id) || seen.has(surface)) return false;
     seen.add(surface);
     return true;
   });
+  return tabs.filter((tab) => chosen.includes(tab));
 }
 
 function dockTabSurface(

@@ -5,7 +5,9 @@ import {
   closeThreadUtilityTab,
   changeDisplayedUtilityState,
   closeUtilityTabState,
+  hideUtilityCard,
   hideUtilityTile,
+  isUtilityToolMinimised,
   minimiseUtilityTool,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
@@ -846,6 +848,45 @@ describe("minimised dock tools", () => {
     const both = minimiseUtilityTool(minimised, shellTab);
     expect(minimisedUtilityTabIds(both)).toEqual([pageOne, pageTwo, shellTab]);
     holdsInvariants(both);
+  });
+
+  it("takes a card away without showing or closing its tool", () => {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = openUtilityTabState(state, "files");
+    const parked = minimiseUtilityTool(state, pageOne);
+    const hidden = hideUtilityCard(parked, pageTwo);
+    expect(hidden.minimised).toBeUndefined();
+    expect(hidden.tabs).toEqual(state.tabs);
+    expect(hidden.active).toBe(state.active);
+    expect(shownUtilityTabIds(hidden)).toEqual(["files"]);
+    holdsInvariants(hidden);
+    expect(hideUtilityCard(hidden, pageOne)).toBe(hidden);
+    expect(hideUtilityCard(state, "files")).toBe(state);
+
+    // With nothing shown the overview stays, and the tool waits in the strip.
+    const overview = minimiseUtilityTool(opened("files", "terminal"), "terminal");
+    const away = hideUtilityCard(overview, "terminal");
+    expect(away.active).toBeUndefined();
+    expect(away.tabs.map((tab) => tab.id)).toEqual(["files", "terminal"]);
+    expect(away.minimised).toBeUndefined();
+  });
+
+  it("says whether the person has a tool minimised, which a newly announced session must leave alone", () => {
+    const state = minimiseUtilityTool(opened("files", "browser"), "browser");
+    expect(isUtilityToolMinimised(state, "browser")).toBe(true);
+    expect(isUtilityToolMinimised(state, "terminal")).toBe(false);
+    expect(isUtilityToolMinimised(restoreUtilityTool(state, "browser"), "browser")).toBe(false);
+  });
+
+  it("remembers the Browser page last shown through a minimise", () => {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    const parked = minimiseUtilityTool(state, pageTwo);
+    expect(parked.lastBrowser).toBe(pageTwo);
+    expect(restoreUtilityTool(parked, parked.lastBrowser ?? pageOne).active).toBe(pageTwo);
   });
 
   it("restores a tool as the one tool shown, or as the focused tile's tool", () => {

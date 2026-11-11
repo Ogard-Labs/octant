@@ -394,7 +394,9 @@ import {
   addUtilityTabState,
   changeDisplayedUtilityState,
   closeUtilityTabState,
+  hideUtilityCard,
   hideUtilityTile,
+  isUtilityToolMinimised,
   minimiseUtilityTool,
   openThreadUtilityTab,
   openUtilityTabBesideState,
@@ -814,7 +816,7 @@ function LaunchedShell(
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
-    openDockBrowser: ({ threadId }) => {
+    openDockBrowser: ({ threadId, offered }) => {
       // The dock is thread-scoped: a Browser session belongs in it only when
       // the announcing thread is the subject the dock already describes.
       if (
@@ -825,6 +827,10 @@ function LaunchedShell(
       ) {
         return false;
       }
+      // A session announced while the person has the Browser minimised leaves
+      // it minimised: its card, or the dock toggle's dot, is the sign. What the
+      // person asked for, such as the page handed over to sign in, restores it.
+      if (offered && isUtilityToolMinimised(displayedDockState, "browser")) return true;
       openDockTab("browser");
       return true;
     },
@@ -4256,6 +4262,9 @@ function LaunchedShell(
   function hideDockTile(tabId: string) {
     changeDockTiles((state) => hideUtilityTile(state, tabId));
   }
+  function hideDockCard(tabId: string) {
+    changeDockTiles((state) => hideUtilityCard(state, tabId));
+  }
   function minimiseDockTool(tabId: string) {
     changeDockTiles((state) => minimiseUtilityTool(state, tabId));
   }
@@ -5165,6 +5174,7 @@ function LaunchedShell(
       selectChatThread,
       selectCodeThread,
       selectDockTab,
+      hideDockCard,
       hideDockTile,
       minimiseDockTool,
       openDockTabBeside,

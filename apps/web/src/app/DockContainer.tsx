@@ -32,6 +32,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { DockBrowserCard } from "../shell/DockBrowserCard";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
+import type { DockCardControls } from "../shell/RightUtilityDockSurface";
 import { DockTerminalCard } from "../shell/DockTerminalCard";
 import { dismissLiveBrowserCard, useAgentBrowserCard } from "../threadActivity/browserCardActivity";
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
@@ -75,6 +76,7 @@ export interface DockContainerProps {
     | "closeBottomPanelTab"
     | "closeDock"
     | "closeDockTab"
+    | "hideDockCard"
     | "hideDockTile"
     | "minimiseDockTool"
     | "openDockTabBeside"
@@ -596,16 +598,19 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   );
   const agentBrowserLive = agentBrowserContext !== undefined;
   const shelfEntries = useMemo(
-    () => dockShelfEntries(displayedDockState, agentBrowserLive),
-    [agentBrowserLive, displayedDockState],
+    () =>
+      dockShelfEntries(displayedDockState, {
+        agentBrowserLive,
+        terminalPossible: activeMode === "code",
+      }),
+    [activeMode, agentBrowserLive, displayedDockState],
   );
 
-  function closeTool(entry: DockShelfEntry) {
-    // Closing a card does what closing the tool's strip tab does: every page of
-    // the Browser, and a Terminal's tabs while its shell keeps running.
-    for (const tab of displayedDockState.tabs) {
-      if (tab.surface === entry.surface) actions.closeDockTab(tab.id);
-    }
+  function hideCard(entry: DockShelfEntry) {
+    // The card goes and nothing else: the tool stays an open tab in the strip,
+    // and no page or shell is closed or stopped. A card that showed because the
+    // agent's session is live is also dismissed for that session.
+    actions.hideDockCard(entry.tabId);
     if (entry.surface === "browser" && dockThread !== undefined) {
       dismissLiveBrowserCard(dockThread.threadId);
     }
@@ -719,20 +724,29 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           : {
               shelf: {
                 entries: shelfEntries,
-                renderCard: (entry: DockShelfEntry) =>
+                onHide: (tabId: string) => {
+                  const entry = shelfEntries.find((candidate) => candidate.tabId === tabId);
+                  if (entry !== undefined) hideCard(entry);
+                },
+                onShow: actions.selectDockTab,
+                // Keyed by thread and checkout: a card belongs to one shell and
+                // never shows another thread's under its own name.
+                renderCard: (entry: DockShelfEntry, controls: DockCardControls) =>
                   entry.surface === "browser" ? (
                     <DockBrowserCard
                       client={browserAutomationClient}
-                      onClose={() => closeTool(entry)}
-                      onExpand={() => actions.selectDockTab(entry.tabId)}
+                      key={`browser:${dockThread.threadId}`}
+                      onExpand={controls.onShow}
+                      onHide={controls.onHide}
                       threadId={decodeBrowserThreadId(dockThread.threadId)}
                     />
                   ) : dockThread.mode === "code" ? (
                     <DockTerminalCard
                       checkoutId={dockThread.checkoutId}
                       client={codeClient}
-                      onClose={() => closeTool(entry)}
-                      onExpand={() => actions.selectDockTab(entry.tabId)}
+                      key={`terminal:${dockThread.threadId}:${String(dockThread.checkoutId)}`}
+                      onExpand={controls.onShow}
+                      onHide={controls.onHide}
                       threadId={decodeCodeThreadId(dockThread.threadId)}
                     />
                   ) : null,

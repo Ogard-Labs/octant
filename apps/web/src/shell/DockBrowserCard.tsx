@@ -13,7 +13,7 @@ import { DockMiniCard } from "./DockShelf";
  */
 export function DockBrowserCard(props: {
   readonly client: BrowserAutomationClient | undefined;
-  readonly onClose: () => void;
+  readonly onHide: () => void;
   readonly onExpand: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
@@ -41,7 +41,7 @@ export function DockBrowserCard(props: {
   return (
     <DockMiniCard
       {...(detail === "" ? {} : { detail })}
-      onClose={props.onClose}
+      onHide={props.onHide}
       onExpand={props.onExpand}
       previewLabel={`Show Browser, live preview${
         title === "Browser" ? "" : `: ${title}`

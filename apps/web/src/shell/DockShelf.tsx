@@ -17,19 +17,29 @@ export interface DockShelfEntry {
  * The cards a dock state asks for: one for each minimised tool, Browser first,
  * and one for the Browser while the agent has a live session and the Browser is
  * out of sight, whether or not the person minimised it, as long as it has a tab.
+ * A tool the thread cannot have gets none.
  */
 export function dockShelfEntries(
   state: ThreadUtilityDockState,
-  agentBrowserLive: boolean,
+  options: {
+    readonly agentBrowserLive: boolean;
+    /** Whether the thread can have a Terminal at all: only a Code thread can. */
+    readonly terminalPossible: boolean;
+  },
 ): ReadonlyArray<DockShelfEntry> {
   const minimised = new Set(state.minimised);
   const entries: DockShelfEntry[] = [];
-  const browser = state.tabs.find((tab) => tab.surface === "browser");
-  if (browser !== undefined && (minimised.has(browser.id) || agentBrowserLive)) {
+  const browsers = state.tabs.filter((tab) => tab.surface === "browser");
+  // The card stands for the page the Browser last showed, which is what
+  // showing the Browser returns to.
+  const browser = browsers.find((tab) => tab.id === state.lastBrowser) ?? browsers[0];
+  if (browser !== undefined && (minimised.has(browser.id) || options.agentBrowserLive)) {
     entries.push({ tabId: browser.id, surface: "browser" });
   }
   const terminal = state.tabs.find((tab) => tab.surface === "terminal" && minimised.has(tab.id));
-  if (terminal !== undefined) entries.push({ tabId: terminal.id, surface: "terminal" });
+  if (terminal !== undefined && options.terminalPossible) {
+    entries.push({ tabId: terminal.id, surface: "terminal" });
+  }
   return entries;
 }
 
@@ -66,7 +76,8 @@ export function DockMiniCard(props: {
   readonly detail?: string | undefined;
   /** Output arrived while nobody was looking; a quiet dot says so to every reader. */
   readonly newOutput?: boolean;
-  readonly onClose: () => void;
+  /** Takes the card away; the tool stays open, in the strip, and nothing is closed or stopped. */
+  readonly onHide: () => void;
   /**
    * Whether the pointer or the keyboard is on the card, so what it shows is
    * being seen. Told when either arrives and when both have left.
@@ -126,8 +137,8 @@ export function DockMiniCard(props: {
         <IconButton
           className="dock-mini-card__action text-muted-foreground"
           icon={X}
-          label={`Close ${props.toolLabel}`}
-          onClick={props.onClose}
+          label={`Hide ${props.toolLabel} card`}
+          onClick={props.onHide}
         />
       </div>
       <div className="dock-mini-card__preview">

@@ -1112,12 +1112,17 @@ one.
   there the minimised tool's tab stays in the strip so nothing leads nowhere.
   Otherwise a minimised tool leaves the strip, since its card stands for it.
 - **A card** is one of the dock's cards: the tool's icon, a title, **Show
-  <tool>** (expand) and **Close <tool>** controls, and a live preview that is
+  <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
-  Close does what closing the tool's strip tab does: for the Browser every page,
-  for a Terminal only its tabs, since the shell keeps running on the host. A
-  card never starts a process, never writes to the journal and never sends input
+  Show brings the tool back as the focused tile's tool (the Browser as the page
+  it last showed) and puts the keyboard in it. Hide card removes the card and
+  nothing else: the tool goes back to being an ordinary open tab in the strip,
+  not shown, and no page or shell is closed or stopped (closing a tab with its
+  own browser context ends that context, which a card that only previews must
+  never do; the floating preview it replaces only hid itself). The keyboard goes
+  to the strip, the selected tab, else Add tool. Closing the tool stays the strip
+  tab's own close. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
 - **The Browser card** shows the page's title, or its host, with the profile's
@@ -1137,22 +1142,33 @@ one.
   link or local server is a page of its own and does not count). A card is only a
   preview, so it is never what "in sight" means: it does not stop the Browser
   being brought forward when the agent hands the page over to sign in, and it
-  does not stop a new session opening the Browser tool once. Closing the card, or
-  the Browser's tab, dismisses it for that session, kept for the life of the page
+  does not stop a new session opening the Browser tool once, except that a
+  session announced while the person has the Browser minimised leaves it
+  minimised, its card or the dock toggle's dot being the sign (the sign-in
+  hand-over, which the person has to act on, still restores it). Hiding the card,
+  or closing the Browser's tab, dismisses it for that session, kept for the life of the page
   because the dock remounts; a later session shows it again. A Browser whose
   session is not live is a card only if the person minimised it. The thread pane
   keeps polling for the session without asking for a picture, and tells the dock.
 - **The dock toggle.** The dock is closed on a thread whose agent Browser is live
   and has a tab: its card cannot be seen, so the window's dock toggle carries one
   quiet dot described as "Browser is active". It is a dot, never a count or an
-  accent ring.
+  accent ring, and the modal dock, which draws no shelf, shows none.
 - **The Terminal card** shows the shell's current tail, live, in a read-only
   instance of the terminal engine at the smallest type the terminal settings
   allow, about six rows, with no input, no focus and no resize sent to the shell.
-  It reads the shell's state once and follows the host's live stream, whose first
-  frame is the tail, and stops it when the card goes away; it respects the stream
-  limits, and a host that refuses the stream makes the card say "Preview
-  unavailable" and stay usable. It never attaches, because attaching is a
+  It reads the shell's state and follows the host's live stream, whose first
+  frame is the tail, and stops it when the card goes away; it keeps only a few
+  KiB of tail, drawn at most once an animation frame and appended to the terminal
+  rather than rewritten, with a cut only at a line start, so a chatty shell is
+  not redrawn every frame. It respects the stream limits: a host that refuses the
+  stream makes the card say "Preview unavailable" and stay usable. A stream that
+  ends or is refused, or a shell that starts later, is read again after 5 s,
+  doubling to 60 s, up to six tries (the count starts over when frames flow
+  again), paused while the window is hidden, and the card says "Preview ended"
+  when it gives up. A card belongs to one thread: it starts from nothing for
+  another thread's shell and never shows the previous thread's text. A thread
+  that cannot have a Terminal gets no Terminal card. It never attaches, because attaching is a
   journaled operation and a card that did so on a timer once wrote thousands of
   entries for one thread; it never starts a shell. A thread with no shell running
   says "No terminal running", and expanding opens the tool, where the person may

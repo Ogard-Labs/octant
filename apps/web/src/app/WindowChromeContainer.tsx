@@ -61,7 +61,9 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
       bottomPanelExpanded={bottomPanelPresentedOpen}
       dockAvailable={dockAvailable}
-      dockBrowserActive={dockBrowserActive && !dockPresentedOpen}
+      // The modal dock draws no shelf, so a dot there would promise a card
+      // that cannot be shown.
+      dockBrowserActive={dockBrowserActive && !dockPresentedOpen && !isNarrow}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

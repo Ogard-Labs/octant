@@ -212,7 +212,8 @@ export function closeUtilityTabState(
       lastBrowser: state.lastBrowser,
     });
   }
-  if (state.active !== tabId) return settle(tabs, undefined, state.active, { minimised, lastBrowser: state.lastBrowser });
+  if (state.active !== tabId)
+    return settle(tabs, undefined, state.active, { minimised, lastBrowser: state.lastBrowser });
   // The shown tool went: the next one that is not a card takes its place.
   const cards = new Set(minimised);
   const before = state.tabs.slice(0, closedIndex).filter((tab) => !cards.has(tab.id)).length;
@@ -369,6 +370,29 @@ export function minimiseUtilityTool(
     minimised: cards,
     lastBrowser: state.lastBrowser,
   });
+}
+
+/** Whether the person has this tool minimised. */
+export function isUtilityToolMinimised(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+): boolean {
+  const cards = new Set(state.minimised);
+  return state.tabs.some((tab) => tab.surface === surface && cards.has(tab.id));
+}
+
+/**
+ * Takes a minimised tool's card away and nothing else: the tool goes back to
+ * being an ordinary open tab in the strip, not shown, and nothing is closed or
+ * stopped. What was shown stays shown.
+ */
+export function hideUtilityCard(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined || state.minimised?.includes(tabId) !== true) return state;
+  return withMinimised(state, withoutMinimisedTool(state, tab.surface));
 }
 
 /**

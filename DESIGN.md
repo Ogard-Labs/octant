@@ -2300,8 +2300,9 @@ frosted parts and no new fill: a head with the tool's icon, a title (the page's
 title or host with the profile name beside it where the page lives in one, or
 "Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
 output" for a shell that printed while nobody looked, an expand icon button
-(**Show Browser**, **Show Terminal**) and a close icon button (**Close Browser**,
-**Close Terminal**), then a preview that is itself the expand button (named
+(**Show Browser**, **Show Terminal**) and a hide icon button (**Hide Browser card**,
+**Hide Terminal card**, which removes the card and closes or stops nothing: the
+tool stays an open tab in the strip), then a preview that is itself the expand button (named
 "Show Browser, live preview"). The Browser's picture is fitted to the card's
 width, top aligned, at 9:5, a neutral skeleton while stale or missing; the
 Terminal shows about six rows of the smallest terminal type, read-only, or "No
@@ -2312,7 +2313,8 @@ on screen. A Browser or Terminal tab's menu offers **Minimise**, and a tile
 caption offers a **Minimise <tool>** icon button before **Hide <tool> from view**.
 While an agent's Browser session is live and the thread's Browser is out of sight
 the Browser shows as a card without being minimised; with the dock closed, the
-window's dock toggle carries one quiet dot described as "Browser is active". The
+window's dock toggle (not in the modal dock, which has no shelf) carries one quiet
+dot described as "Browser is active". The
 rules, reads and limits are in [Workspace](docs/design/workspace.md#tool-lifecycles).
 
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
