@@ -1013,7 +1013,9 @@ describe("the public-block visual language", () => {
       const palette = readFileSync(join(webRoot, "styles", "palette.css"), "utf8");
       const chat = readFileSync(join(webRoot, "styles", "chat.css"), "utf8");
       const rule = (source: string, selector: string) =>
-        source.match(new RegExp(`${selector.replace(/[.>]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+        source.match(
+          new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\>]/g, "\\$&")} \\{([^}]*)\\}`),
+        )?.[1] ?? "";
       for (const body of [
         rule(components, ".octant-popover-option"),
         rule(palette, ".command-palette__result"),
