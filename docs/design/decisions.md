@@ -852,6 +852,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
 - Wake, start and hop counts are held in host memory; a restart starts them again.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
+- A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
 Status: Built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
 
@@ -2133,6 +2134,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](.
 Every list, board, reader and preference page is one `Surface`. Settings groups its pages by what they change.
 
 - A setting lives on the page of the thing it changes, and a moved setting keeps answering links to its old page.
+- In a wide window Settings is a sheet over the app, which stays mounted and drawn behind a light scrim, so a change to how the app looks is seen as it is made. It closes from its own corner, with Escape, or with a press outside it. In a narrow window it covers the window and offers Back to app.
 - A page names its scope once, under its title. A page header holds one creation action and Back; filters sit in the toolbar.
 - A destination opens on one toolbar row at the Settings page title's size, pinned while the body scrolls, with an icon Back at the leading edge that does not move on press. It carries no description; its one line of detail is only a fact that changes and that a person needs. An empty page is the empty state alone, centred, with search and filters back once there is something to search.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
@@ -2349,6 +2351,7 @@ Agents may propose routines and delegate work, but only a person creates a routi
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
 - The Agents dock shows and controls subagents without starting them. A provider-observed child is labelled observation-only and has no managed controls.
+- The Agents dock draws a thread's subagents as a list or as a graph of which runs each one waits for; a graph card opens the page a list row opens, and the host names a dependency only when the window may read that run.
 
 Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) and [Subagents](workspace.md#subagents).
 

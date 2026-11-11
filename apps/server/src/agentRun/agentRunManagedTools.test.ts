@@ -528,6 +528,7 @@ describe("agents managed tools", () => {
           result: {} as never,
           resultText: "child reply",
           version: 1 as never,
+          createdAt: "2026-07-19T22:10:00.000Z" as never,
           updatedAt: "2026-07-19T22:10:00.000Z" as never,
         } as AgentRunParentSummaryEntry,
       ],
@@ -575,6 +576,7 @@ describe("agents managed tools", () => {
       result: { reference: `octant://agent-run/${run.id}/result/2`, truncated: false },
       resultText: "reply".repeat(3000),
       version: run.version,
+      createdAt: run.createdAt,
       updatedAt: run.updatedAt,
     }));
     const subject = tool({ runs, summary });
@@ -754,6 +756,7 @@ describe("agents managed tools", () => {
           usageLimit,
           usageResume: { status: "scheduled" } as never,
           version: 3 as never,
+          createdAt: "2026-07-19T22:10:00.000Z" as never,
           updatedAt: "2026-07-19T22:10:00.000Z" as never,
         } as AgentRunParentSummaryEntry,
       ],

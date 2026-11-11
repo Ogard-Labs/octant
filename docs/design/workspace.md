@@ -326,6 +326,20 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   per coordinator**, and a Code Project's overview holds its own **Starting
   workers** choice (Use Settings, Start without asking, Propose for approval)
   after the Project planner section.
+- **Agents dock.** A coordinator's Agents dock has a **Workers** section under
+  its own subagents: one row per worker in the window's thread list, with the
+  provider's mark, the title, the thread's state in words (Working, Needs
+  attention, Done, Idle), and how many subagents it handed off and how many of
+  them are working. A row opens the worker. In Graph, each worker's subagents
+  are drawn under its row as the same cards and arrows a thread's own graph
+  uses, and a card there opens the worker, since its subagents' pages and
+  controls are the worker's. The List and Graph switch is offered when the
+  coordinator or any worker has subagents. When the coordinator has more workers
+  than the host reads, the section says subagents are shown for the most
+  recently changed workers only, since an older worker's row cannot otherwise
+  tell "not read" from "handed off nothing". When the host refuses the read, the
+  rows stay and the section says the workers' subagents cannot be read here
+  ([Coordinator threads: Seeing workers' subagents](coordinator-threads.md#seeing-workers-subagents)).
 - **Requests.** A coordinator's composer lists its workers' pending approvals
   and questions in the same bounded region as its child runs' requests, each
   naming its worker, with an Open worker action. The rows come from the
@@ -1111,9 +1125,20 @@ Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
 rows newest first and an unreviewed result marked "Needs review" unless the
-parent already received it. A row opens
+parent already received it. On a thread with at least one subagent, a List and
+Graph switch sits beside the title. **Graph** arranges the same subagents by
+what waits for what: a run sits below every run it runs after and below the run
+that started it, with an arrow from each run it waits for and a dashed line
+from the run that started it, and a row keeps the order its runs were requested
+in. A card carries the task, the provider's mark and the model, the effort and
+role, and the state in words, which reads "Waiting on N" while the host holds
+the run for N unfinished runs; it opens the page a row opens, and Back returns
+to the graph. A row of cards wider than the dock scrolls sideways.
+Provider-observed children have no such links and stay a list above the graph.
+The host names a run another run waits for only when the window may read that
+run. A row opens
 that subagent's page in place of the list, with a back control: its task as
-the title, a status line, and a small transcript that starts with the task as
+the title, a status line, the runs it runs after, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
@@ -1125,7 +1150,7 @@ scheduled resume while it is armed; the row never presents that wait as a
 finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes for the threads this window holds (the thread in each mode's panes, pinned ones included), because the host
-authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project; on a wide window it can draw the current query as a
+authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project (a coordinator's window may also read its workers' runs as facts, without replies or controls: [Coordinator threads](coordinator-threads.md#seeing-workers-subagents)); on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
