@@ -229,8 +229,12 @@ The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
 `--oct-radius-sm` less 2px, so `rounded-lg` lands on the control's 8px and
 `rounded-xl` on the card's 12px, and a menu shares a corner with the popover
-beside it. Phone-only surfaces use the mobile radii
-(`--oct-radius-bubble`, `--oct-radius-card-m`, `--oct-radius-sheet`).
+beside it. Phone-only surfaces in the web renderer use the mobile radii
+(`--oct-radius-bubble`, `--oct-radius-card-m`, `--oct-radius-sheet`). The
+native phone app follows this table and adds only a 20px bottom sheet, and it
+draws its chrome with the system's own patterns (tab bar, large titles, inset
+grouped lists, segmented controls); `apps/mobile/design-system/README.md`
+holds that projection.
 
 A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely

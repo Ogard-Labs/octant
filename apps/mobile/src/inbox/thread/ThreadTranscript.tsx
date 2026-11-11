@@ -49,8 +49,8 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         },
         emptyTitle: {
           color: colors.textPrimary,
-          fontSize: 22,
-          fontWeight: "400",
+          fontSize: 20,
+          fontWeight: "600",
           letterSpacing: -0.4,
           textAlign: "center",
         },

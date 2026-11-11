@@ -55,6 +55,20 @@ export type ThemeColors = {
   onBubbleFill: string;
   onBubbleStroke: string;
   assistantBubble: string;
+  /** Control fills: a secondary button, a segmented track, a person's message. */
+  control: string;
+  controlHover: string;
+  controlPressed: string;
+  /** Ink on a solid palette face (a count tile in the light theme). */
+  primaryForeground: string;
+  /** The colour a raised control casts its shadow in. */
+  shadow: string;
+  /** Palette hues for the places that name something: count tiles, marks. */
+  paletteBlue: string;
+  paletteOrange: string;
+  palettePurple: string;
+  paletteGreen: string;
+  paletteTeal: string;
   accent: string;
   accentMuted: string;
   danger: string;
@@ -122,12 +136,22 @@ export const lightColors: ThemeColors = {
   textTertiary: shared("text-muted", "light"),
   send: shared("accent", "light"),
   sendLabel: shared("accent-foreground", "light"),
-  userBubble: shared("accent", "light"),
-  userBubbleText: shared("accent-foreground", "light"),
-  onBubbleMuted: "rgba(255, 255, 255, 0.72)",
-  onBubbleFill: "rgba(255, 255, 255, 0.12)",
-  onBubbleStroke: "rgba(255, 255, 255, 0.18)",
+  userBubble: shared("control", "light"),
+  userBubbleText: shared("text-primary", "light"),
+  onBubbleMuted: shared("text-secondary", "light"),
+  onBubbleFill: "rgba(20, 20, 20, 0.06)",
+  onBubbleStroke: "rgba(20, 20, 20, 0.10)",
   assistantBubble: "rgba(255, 255, 255, 0.68)",
+  control: shared("control", "light"),
+  controlHover: shared("control-hover", "light"),
+  controlPressed: shared("control-pressed", "light"),
+  primaryForeground: shared("primary-foreground", "light"),
+  shadow: "#000000",
+  paletteBlue: shared("palette-blue", "light"),
+  paletteOrange: shared("palette-orange", "light"),
+  palettePurple: shared("palette-purple", "light"),
+  paletteGreen: shared("palette-green", "light"),
+  paletteTeal: shared("palette-teal", "light"),
   accent: shared("accent", "light"),
   accentMuted: shared("text-secondary", "light"),
   danger: shared("danger-text", "light"),
@@ -189,12 +213,22 @@ export const darkColors: ThemeColors = {
   textTertiary: shared("text-muted", "dark"),
   send: shared("accent", "dark"),
   sendLabel: shared("accent-foreground", "dark"),
-  userBubble: shared("accent", "dark"),
-  userBubbleText: shared("accent-foreground", "dark"),
-  onBubbleMuted: "rgba(23, 23, 23, 0.66)",
-  onBubbleFill: "rgba(23, 23, 23, 0.08)",
-  onBubbleStroke: "rgba(23, 23, 23, 0.16)",
+  userBubble: shared("control", "dark"),
+  userBubbleText: shared("text-primary", "dark"),
+  onBubbleMuted: shared("text-secondary", "dark"),
+  onBubbleFill: "rgba(245, 245, 247, 0.07)",
+  onBubbleStroke: "rgba(245, 245, 247, 0.12)",
   assistantBubble: "rgba(35, 35, 35, 0.70)",
+  control: shared("control", "dark"),
+  controlHover: shared("control-hover", "dark"),
+  controlPressed: shared("control-pressed", "dark"),
+  primaryForeground: shared("primary-foreground", "dark"),
+  shadow: "#000000",
+  paletteBlue: shared("palette-blue", "dark"),
+  paletteOrange: shared("palette-orange", "dark"),
+  palettePurple: shared("palette-purple", "dark"),
+  paletteGreen: shared("palette-green", "dark"),
+  paletteTeal: shared("palette-teal", "dark"),
   accent: shared("accent", "dark"),
   accentMuted: shared("text-secondary", "dark"),
   danger: shared("danger-text", "dark"),
@@ -237,14 +271,16 @@ export const space = {
   xxl: 48,
 } as const;
 
-// Compact, continuous corners: the design system's principle is card 16 and
-// composer about 20. Larger radii made every panel read as a soft tile.
+// One radius per role, the product scale (DESIGN.md › Shapes and depth): a
+// control or row 8, a card or a person's message 12, a composer or dialog 14.
+// The sheet is the phone's own: it rises from the screen's rounded bottom.
 export const radii = {
-  sm: 10,
-  md: 16,
-  lg: 18,
-  composer: 22,
-  bubble: 20,
+  sm: 8,
+  md: 12,
+  lg: 14,
+  composer: 14,
+  bubble: 12,
+  sheet: 20,
   pill: 999,
   circle: 999,
 } as const;
@@ -257,33 +293,63 @@ export const fonts = {
   sans: undefined as string | undefined,
 } as const;
 
+/**
+ * The product's type roles (DESIGN.md › Scale) at phone sizes. Hierarchy is
+ * size first, then weight on the one ladder: 400 reading, 500 names and
+ * controls, 600 emphasis and section labels, 700 only for the large title.
+ */
 export const typography = {
+  /** A page about one thing, such as a pairing step. */
   hero: {
     fontSize: 28,
-    fontWeight: "500" as const,
+    fontWeight: "700" as const,
     letterSpacing: -0.7,
+  },
+  /** The title on a screen's toolbar row. */
+  pageTitle: {
+    fontSize: 17,
+    fontWeight: "600" as const,
+    letterSpacing: -0.4,
   },
   brand: {
     fontSize: 17,
-    fontWeight: "500" as const,
-    letterSpacing: -0.2,
-  },
-  title: {
-    fontSize: 20,
     fontWeight: "600" as const,
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
+  /** A card or panel title: the system's headline step, not a page heading. */
+  title: {
+    fontSize: 18,
+    fontWeight: "600" as const,
+    letterSpacing: -0.3,
+  },
+  /** A list row's name or a setting's label. */
+  rowLabel: {
+    fontSize: 15,
+    fontWeight: "500" as const,
+  },
+  /** Reading text: the transcript and interface prose. */
   body: {
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: "400" as const,
+  },
+  /** A row's description or detail line, in the secondary ink. */
+  detail: {
+    fontSize: 13,
     fontWeight: "400" as const,
   },
   caption: {
     fontSize: 13,
     fontWeight: "400" as const,
   },
+  /** Timestamps, counts, and hints, in the muted ink. */
+  meta: {
+    fontSize: 12,
+    fontWeight: "400" as const,
+  },
+  /** A sentence-case group heading over a list, in the secondary ink. */
   section: {
-    fontSize: 14,
-    fontWeight: "500" as const,
+    fontSize: 13,
+    fontWeight: "600" as const,
     letterSpacing: -0.1,
   },
   mono: {

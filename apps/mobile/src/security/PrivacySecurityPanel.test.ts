@@ -9,6 +9,7 @@ import { createUnavailableKeyStorageProtectionPort } from "./keyStorageProtectio
 import { createUnavailableScreenshotPrivacyPort } from "./screenshotPrivacyPort";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
+vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),

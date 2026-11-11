@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import {
   createMobileCodeFromPrompt,
   createMobileWorkFromPrompt,
@@ -25,27 +24,23 @@ import { mobileCreateModePresentation, type MobileCreateMode } from "./createMod
 import type { MobileHomeView } from "./homeView";
 import { inboxPriorityRows, inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import { HomeComposerSheet } from "./HomeComposerSheet";
-import { HomeNavigationSheet } from "./HomeNavigationSheet";
-import { InboxComposerDock } from "./InboxComposerDock";
 import { inboxEmptyState } from "./inboxEmptyState";
 import { FloatingComposer } from "../ui/FloatingComposer";
-import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { appendTranscript } from "../voice/voiceDictation";
 import { CodeDeliveryTargetSheet } from "./CodeDeliveryTargetSheet";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
-import { StatusPill } from "../ui/StatusPill";
+import { CountTile } from "../ui/CountTile";
+import { LargeTitle, ListRow, ListSection, ToolbarButton } from "../ui/NativeChrome";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import type { AgentListView } from "./AgentsListScreen";
 import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
 
 export interface InboxHomeScreenProps {
   readonly homeMode: MobileHomeView;
-  readonly onSelectHomeMode: (mode: MobileHomeView) => void;
   readonly onOpenAgents: (view: AgentListView) => void;
-  readonly onOpenHosts: () => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
   /** Opens the pairing screen with the QR scanner already open. */
@@ -64,8 +59,8 @@ const VIEW_TITLES: Record<Exclude<MobileHomeView, "inbox">, string> = {
 
 function modeIcon(
   mode: MobileInboxRow["mode"],
-): "chatbubble-outline" | "folder-outline" | "code-slash" {
-  if (mode === "work") return "folder-outline";
+): "chatbubble-outline" | "briefcase-outline" | "code-slash" {
+  if (mode === "work") return "briefcase-outline";
   if (mode === "code") return "code-slash";
   return "chatbubble-outline";
 }
@@ -84,7 +79,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [composerError, setComposerError] = useState<string | undefined>();
   const [modelOpen, setModelOpen] = useState(false);
   const [composerSheetOpen, setComposerSheetOpen] = useState(false);
-  const [navigationOpen, setNavigationOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<MobileCreateMode>("chat");
   const [workProjects, setWorkProjects] = useState<ReadonlyArray<MobileWorkProjectOption>>([]);
   const [codeProjects, setCodeProjects] = useState<ReadonlyArray<MobileCodeProjectOption>>([]);
@@ -353,193 +347,101 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     () =>
       StyleSheet.create({
         shell: { flex: 1, backgroundColor: "transparent" },
-        topBar: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.sm,
-          paddingHorizontal: space.md,
-          paddingTop: process.env.EXPO_OS === "web" ? 50 : space.xs,
-          paddingBottom: space.xs,
-        },
-        content: { paddingHorizontal: space.md, paddingBottom: space.xl, flexGrow: 1 },
-        hero: {
-          flex: 1,
-          color: colors.textPrimary,
-          fontSize: typography.brand.fontSize,
-          fontWeight: "600",
-          letterSpacing: typography.brand.letterSpacing,
-        },
+        content: { paddingBottom: space.xl, flexGrow: 1 },
         subhero: {
           color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
-          lineHeight: 20,
-          marginTop: space.sm,
+          fontSize: typography.detail.fontSize,
+          lineHeight: 18,
+          paddingHorizontal: space.md,
           marginBottom: space.md,
         },
-        pillRow: { marginHorizontal: -space.md, marginTop: space.sm, marginBottom: space.lg },
-        pillRowContent: { gap: space.sm, paddingHorizontal: space.md, paddingVertical: 2 },
-        homeSection: { marginBottom: space.lg },
-        sectionHeader: {
+        tiles: {
           flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-        },
-        seeAll: {
-          color: colors.accent,
-          fontSize: typography.caption.fontSize,
-          fontWeight: "500",
-          marginBottom: space.xs,
-        },
-        addLabel: { color: colors.accent },
-        section: {
-          color: colors.textTertiary,
-          fontSize: 12,
-          fontWeight: "600",
-          letterSpacing: 0.2,
-          marginBottom: space.xs,
-        },
-        workspaceRow: {
-          minHeight: 48,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.md,
-          paddingHorizontal: space.xs,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.glassStroke,
-        },
-        workspaceRowPressed: { backgroundColor: colors.glassFillThin },
-        workspaceLabel: {
-          flex: 1,
-          color: colors.textPrimary,
-          fontSize: typography.body.fontSize,
-          fontWeight: "500",
-        },
-        workspaceHealth: {
-          flex: 1,
-          color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
-        },
-        workspaceCount: {
-          color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
-          fontVariant: ["tabular-nums"],
+          gap: 10,
+          paddingHorizontal: space.md,
+          marginTop: space.xs,
+          marginBottom: space.lg,
         },
         projectLabel: {
           color: colors.textSecondary,
           fontSize: typography.section.fontSize,
           fontWeight: typography.section.fontWeight,
-          letterSpacing: typography.section.letterSpacing,
-          marginBottom: space.sm,
+          paddingHorizontal: space.md,
+          marginBottom: 6,
         },
         projectScroll: { marginBottom: space.lg },
-        projectScrollContent: { gap: space.sm },
+        projectScrollContent: { gap: space.sm, paddingHorizontal: space.md },
         projectChip: {
-          minHeight: 40,
+          height: 32,
           justifyContent: "center",
-          paddingHorizontal: space.md,
+          paddingHorizontal: 14,
           borderRadius: radii.pill,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.glassStroke,
-          backgroundColor: colors.glassFillThin,
+          backgroundColor: colors.control,
         },
-        projectChipSelected: {
-          borderColor: colors.glassStrokeStrong,
-          backgroundColor: colors.glassFillThick,
-        },
+        projectChipSelected: { backgroundColor: colors.accent },
         projectName: {
           color: colors.textPrimary,
-          fontSize: typography.caption.fontSize,
+          fontSize: typography.detail.fontSize,
           fontWeight: "500",
         },
-        workFeed: { gap: space.lg },
-        workSection: { gap: space.sm },
-        workSectionHeader: {
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
-        },
-        workSectionTitle: {
+        projectNameSelected: { color: colors.sendLabel },
+        empty: {
           color: colors.textSecondary,
-          fontSize: typography.section.fontSize,
-          fontWeight: typography.section.fontWeight,
-          letterSpacing: typography.section.letterSpacing,
+          fontSize: typography.detail.fontSize,
+          lineHeight: 18,
+          paddingHorizontal: space.md,
+          paddingVertical: space.md,
         },
-        workSectionCount: {
-          color: colors.textTertiary,
-          fontSize: typography.caption.fontSize,
-          fontVariant: ["tabular-nums"],
-        },
-        threadList: {},
-        threadRow: {
-          minHeight: 52,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.md,
-          paddingHorizontal: space.xs,
-          paddingVertical: space.sm,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: colors.glassStroke,
-        },
-        threadRowPressed: { backgroundColor: colors.glassFillThin },
-        threadBody: { flex: 1, gap: 2 },
-        threadTitle: {
-          color: colors.textPrimary,
-          fontSize: typography.body.fontSize,
-          fontWeight: "500",
-        },
-        threadMeta: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
-        status: {
-          fontSize: 12,
-          fontWeight: "500",
-          textAlign: "right",
-        },
-        empty: { color: colors.textSecondary, lineHeight: 20, paddingVertical: space.md },
         firstRun: {
           gap: space.md,
           padding: space.lg,
-          borderRadius: radii.lg,
+          marginHorizontal: space.md,
+          borderRadius: radii.md,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.glassStroke,
-          backgroundColor: colors.glassFillThin,
+          borderColor: colors.hairline,
+          backgroundColor: colors.surfaceElevatedSolid,
         },
         firstRunTitle: {
           color: colors.textPrimary,
           fontSize: typography.title.fontSize,
           fontWeight: typography.title.fontWeight,
+          letterSpacing: typography.title.letterSpacing,
         },
         firstRunBody: {
           color: colors.textSecondary,
           fontSize: typography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 21,
         },
         firstRunButton: {
           backgroundColor: colors.accent,
-          paddingVertical: 14,
+          height: 50,
           alignItems: "center",
-          borderRadius: radii.pill,
+          justifyContent: "center",
+          borderRadius: radii.md,
         },
         firstRunButtonLabel: {
           color: colors.sendLabel,
-          fontWeight: "500",
-          fontSize: typography.body.fontSize,
+          fontWeight: "600",
+          fontSize: 17,
         },
-        loader: { marginTop: space.md },
+        loader: { marginVertical: space.md },
         composerError: {
           color: colors.danger,
           paddingHorizontal: space.md,
           paddingBottom: space.xs,
-          fontSize: typography.caption.fontSize,
+          fontSize: typography.detail.fontSize,
         },
         transportError: {
           color: colors.danger,
-          fontSize: typography.caption.fontSize,
-          lineHeight: 20,
-          marginBottom: space.md,
+          fontSize: typography.detail.fontSize,
+          lineHeight: 18,
+          paddingHorizontal: space.md,
+          marginBottom: space.sm,
         },
         failureRow: { paddingBottom: space.sm },
         retry: {
           color: colors.accent,
-          fontSize: typography.caption.fontSize,
+          fontSize: typography.detail.fontSize,
           fontWeight: "500",
           paddingHorizontal: space.md,
         },
@@ -555,57 +457,55 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     return colors.textTertiary;
   };
 
-  const threadRow = (row: MobileInboxRow, showMode: boolean) => (
-    <Pressable
-      accessibilityRole="button"
+  const threadRow = (row: MobileInboxRow, showMode: boolean, last: boolean) => (
+    <ListRow
+      detail={`${showMode ? `${row.mode === "code" ? "Code" : "Work"} · ` : ""}${
+        hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)
+      }`}
+      icon={modeIcon(row.mode)}
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
+      label={formatScreenshotSafeLabel(row.title)}
+      last={last}
       onPress={() => props.onOpenThread(row)}
-      style={({ pressed }) => [styles.threadRow, pressed ? styles.threadRowPressed : null]}
       testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
-    >
-      <Ionicons color={colors.textSecondary} name={modeIcon(row.mode)} size={18} />
-      <View style={styles.threadBody}>
-        <Text numberOfLines={1} style={styles.threadTitle}>
-          {formatScreenshotSafeLabel(row.title)}
-        </Text>
-        <Text numberOfLines={1} style={styles.threadMeta}>
-          {showMode ? `${row.mode === "code" ? "Code" : "Work"} · ` : ""}
-          {hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}
-        </Text>
-      </View>
-      {showMode ? (
-        <Text style={[styles.status, { color: statusColor(row) }]}>
-          {inboxWorkStatus(row.status, row.reviewState)}
-        </Text>
-      ) : (
-        <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
-      )}
-    </Pressable>
+      {...(showMode
+        ? {
+            value: inboxWorkStatus(row.status, row.reviewState),
+            valueTone: statusColor(row),
+            accessory: "none" as const,
+          }
+        : {})}
+    />
   );
 
   return (
     <View style={styles.shell} testID="mobile-inbox-home">
-      <View style={styles.topBar}>
-        <IconButton
-          accessibilityLabel="Open navigation menu"
-          iconSize={19}
-          name="menu-outline"
-          onPress={() => setNavigationOpen(true)}
-          size={36}
-          testID="mobile-home-menu"
-        />
-        <Text accessibilityRole="header" numberOfLines={1} style={styles.hero}>
-          {props.homeMode === "inbox" ? "Inbox" : VIEW_TITLES[props.homeMode]}
-        </Text>
-        <IconButton
-          accessibilityLabel="Search threads"
-          iconSize={18}
-          name="search-outline"
-          onPress={() => props.onOpenAgents("all")}
-          size={36}
-          testID="mobile-home-search"
-        />
-      </View>
+      <LargeTitle
+        title={props.homeMode === "inbox" ? "Inbox" : VIEW_TITLES[props.homeMode]}
+        trailing={
+          <>
+            <ToolbarButton
+              accessibilityLabel="Search threads"
+              icon="search"
+              onPress={() => props.onOpenAgents("all")}
+              testID="mobile-home-search"
+            />
+            {props.homeMode === "inbox" && emptyState === undefined ? (
+              <ToolbarButton
+                accessibilityLabel="New thread"
+                icon="create-outline"
+                onPress={() => {
+                  setComposerMode("chat");
+                  setComposerError(undefined);
+                  setCodeRetry(undefined);
+                  setComposerSheetOpen(true);
+                }}
+                testID="mobile-home-compose"
+              />
+            ) : null}
+          </>
+        }
+      />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -676,7 +576,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                       style={[styles.projectChip, selected ? styles.projectChipSelected : null]}
                       testID={`mobile-home-project-${project.projectId}`}
                     >
-                      <Text style={styles.projectName}>
+                      <Text
+                        style={[styles.projectName, selected ? styles.projectNameSelected : null]}
+                      >
                         {formatScreenshotSafeLabel(project.name)}
                       </Text>
                     </Pressable>
@@ -702,132 +604,106 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           </View>
         ) : props.homeMode === "inbox" ? (
           <View>
-            <ScrollView
-              contentContainerStyle={styles.pillRowContent}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.pillRow}
-              testID="mobile-home-status-pills"
-            >
-              <StatusPill
+            <View style={styles.tiles} testID="mobile-home-count-tiles">
+              <CountTile
                 count={counts.needsAttention}
-                emphasized={counts.needsAttention > 0}
+                hue={colors.paletteBlue}
+                icon="file-tray"
                 label={MOBILE_COPY.needsAttention}
                 onPress={() => props.onOpenAgents("attention")}
-                testID="mobile-status-attention"
-                tone={colors.warning}
+                testID="mobile-tile-attention"
               />
-              <StatusPill
+              <CountTile
                 count={counts.working}
+                hue={colors.paletteOrange}
+                icon="play-circle"
                 label={MOBILE_COPY.working}
                 onPress={() => props.onOpenAgents("working")}
-                testID="mobile-status-working"
-                tone={colors.attention}
+                testID="mobile-tile-working"
               />
-              <StatusPill
+              <CountTile
                 count={counts.inReview}
+                hue={colors.palettePurple}
+                icon="eye"
                 label={MOBILE_COPY.inReview}
                 onPress={() => props.onOpenAgents("review")}
-                testID="mobile-status-review"
-                tone={colors.merged}
+                testID="mobile-tile-review"
               />
-            </ScrollView>
+            </View>
 
             {priorityRows.length > 0 ? (
-              <View style={styles.homeSection} testID="mobile-home-recent">
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.section}>{MOBILE_COPY.homeRecent}</Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    hitSlop={12}
-                    onPress={() => props.onOpenAgents("all")}
-                    testID="mobile-home-see-all"
-                  >
-                    <Text style={styles.seeAll}>{MOBILE_COPY.homeSeeAll}</Text>
-                  </Pressable>
-                </View>
-                {priorityRows.map((row) => threadRow(row, true))}
-              </View>
+              <ListSection
+                action={{
+                  label: MOBILE_COPY.homeSeeAll,
+                  onPress: () => props.onOpenAgents("all"),
+                  testID: "mobile-home-see-all",
+                }}
+                testID="mobile-home-recent"
+                title={MOBILE_COPY.homeRecent}
+              >
+                {priorityRows.map((row, index) =>
+                  threadRow(row, true, index === priorityRows.length - 1),
+                )}
+              </ListSection>
             ) : null}
 
-            <Text style={styles.section}>{MOBILE_COPY.workspaces}</Text>
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
-            {hosts.map((host) => {
-              const hostWorkCount = rows.filter(
-                (row) => row.hostId === host.hostId && row.mode !== "chat",
-              ).length;
-              const hostHealth = health.find((entry) => entry.hostId === host.hostId);
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  key={host.hostId}
-                  onPress={() => props.onOpenWorkspace(host.hostId)}
-                  style={({ pressed }) => [
-                    styles.workspaceRow,
-                    pressed ? styles.workspaceRowPressed : null,
-                  ]}
-                  testID={`mobile-workspace-${host.hostId}`}
-                >
-                  <Ionicons
-                    color={hostToneColor(hostHealth?.kind ?? "idle")}
-                    name="desktop-outline"
-                    size={18}
+            <ListSection title={MOBILE_COPY.workspaces}>
+              {hosts.map((host) => {
+                const hostWorkCount = rows.filter(
+                  (row) => row.hostId === host.hostId && row.mode !== "chat",
+                ).length;
+                const hostHealth = health.find((entry) => entry.hostId === host.hostId);
+                const tone = hostHealthTone(hostHealth?.kind ?? "idle");
+                return (
+                  <ListRow
+                    detail={`${mobileHostHealthLabel(hostHealth?.kind ?? "idle")}${
+                      hostHealth?.detail !== undefined ? ` · ${hostHealth.detail}` : ""
+                    }`}
+                    detailTone={
+                      tone === "neutral" ? undefined : hostToneColor(hostHealth?.kind ?? "idle")
+                    }
+                    icon="desktop"
+                    iconTone={
+                      tone === "neutral"
+                        ? colors.paletteBlue
+                        : hostToneColor(hostHealth?.kind ?? "idle")
+                    }
+                    key={host.hostId}
+                    label={host.label}
+                    onPress={() => props.onOpenWorkspace(host.hostId)}
+                    testID={`mobile-workspace-${host.hostId}`}
+                    value={hostWorkCount > 0 ? String(hostWorkCount) : undefined}
                   />
-                  <View style={styles.threadBody}>
-                    <Text numberOfLines={1} style={styles.workspaceLabel}>
-                      {host.label}
-                    </Text>
-                    <Text numberOfLines={1} style={styles.workspaceHealth}>
-                      {mobileHostHealthLabel(hostHealth?.kind ?? "idle")}
-                      {hostHealth?.detail !== undefined ? ` · ${hostHealth.detail}` : ""}
-                    </Text>
-                  </View>
-                  {hostWorkCount > 0 ? (
-                    <Text style={styles.workspaceCount}>{hostWorkCount}</Text>
-                  ) : null}
-                  <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
-                </Pressable>
-              );
-            })}
-            <Pressable
-              accessibilityRole="button"
-              onPress={props.onAddWorkspace}
-              style={({ pressed }) => [
-                styles.workspaceRow,
-                pressed ? styles.workspaceRowPressed : null,
-              ]}
-              testID="mobile-workspace-add"
-            >
-              <Ionicons color={colors.accent} name="add" size={18} />
-              <Text style={[styles.workspaceLabel, styles.addLabel]}>
-                {MOBILE_COPY.addWorkspace}
-              </Text>
-            </Pressable>
+                );
+              })}
+              <ListRow
+                accessory="none"
+                icon="add"
+                iconTone={colors.textTertiary}
+                label={MOBILE_COPY.addWorkspace}
+                labelTone={colors.accent}
+                last
+                onPress={props.onAddWorkspace}
+                testID="mobile-workspace-add"
+              />
+            </ListSection>
           </View>
         ) : (
-          <View style={styles.threadList} testID="mobile-home-thread-list">
+          <View testID="mobile-home-thread-list">
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
             {!loading && modeRows.length === 0 && transportError === undefined ? (
               <Text style={styles.empty}>{MOBILE_COPY.inboxNoThreads}</Text>
             ) : modeRows.length > 0 ? (
-              modeRows.map((row) => threadRow(row, false))
+              <ListSection title={MOBILE_COPY.homeRecent}>
+                {modeRows.map((row, index) => threadRow(row, false, index === modeRows.length - 1))}
+              </ListSection>
             ) : null}
           </View>
         )}
       </ScrollView>
 
-      {props.homeMode === "inbox" ? (
-        emptyState === undefined ? (
-          <InboxComposerDock
-            onOpen={() => {
-              setComposerMode("chat");
-              setComposerError(undefined);
-              setCodeRetry(undefined);
-              setComposerSheetOpen(true);
-            }}
-          />
-        ) : null
-      ) : (
+      {props.homeMode === "inbox" ? null : (
         <>
           {composerError !== undefined ? (
             <Text style={styles.composerError} testID="mobile-home-composer-error">
@@ -877,17 +753,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         prompt={prompt}
         visible={composerSheetOpen}
         voice={voice}
-      />
-      <HomeNavigationSheet
-        activeView={props.homeMode}
-        onClose={() => setNavigationOpen(false)}
-        onOpenHosts={props.onOpenHosts}
-        onSelectView={(view) => {
-          setComposerError(undefined);
-          setCodeRetry(undefined);
-          props.onSelectHomeMode(view);
-        }}
-        visible={navigationOpen}
       />
       <ModelPickerSheet
         onClose={() => setModelOpen(false)}
