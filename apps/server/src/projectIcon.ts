@@ -54,8 +54,52 @@ export type ProjectIconLookup =
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 // An icon directory: reserved zero, then type 1 (icon).
 const ICO_SIGNATURE = [0x00, 0x00, 0x01, 0x00];
-const SVG_PROLOGUE =
-  /^(?:\s*(?:<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>[]*(?:\[[\s\S]*?\])?>))*\s*<svg[\s>/]/i;
+function startsWithAt(text: string, at: number, lowerCaseToken: string): boolean {
+  return text.slice(at, at + lowerCaseToken.length).toLowerCase() === lowerCaseToken;
+}
+
+/**
+ * Whether the text opens as an SVG document: any XML declaration, comments and
+ * doctype, then the `<svg` root. It is read in one pass by position, and every
+ * search starts where the last one ended. One pattern for the same grammar
+ * backtracked exponentially on a file of repeated comment or doctype openers,
+ * and this text comes from a Project's folder.
+ */
+function startsAsSvgDocument(text: string): boolean {
+  let at = 0;
+  for (;;) {
+    while (at < text.length && /\s/.test(text.charAt(at))) at += 1;
+    if (startsWithAt(text, at, "<?xml")) {
+      const end = text.indexOf("?>", at + 5);
+      if (end < 0) return false;
+      at = end + 2;
+    } else if (startsWithAt(text, at, "<!--")) {
+      const end = text.indexOf("-->", at + 4);
+      if (end < 0) return false;
+      at = end + 3;
+    } else if (startsWithAt(text, at, "<!doctype")) {
+      // A doctype ends at its ">", unless an internal subset in brackets comes
+      // first: the subset may hold ">" of its own.
+      let mark = at + 9;
+      while (mark < text.length && text.charAt(mark) !== ">" && text.charAt(mark) !== "[") {
+        mark += 1;
+      }
+      if (mark >= text.length) return false;
+      if (text.charAt(mark) === "[") {
+        const subsetEnd = text.indexOf("]", mark + 1);
+        if (subsetEnd < 0) return false;
+        mark = text.indexOf(">", subsetEnd + 1);
+        if (mark < 0) return false;
+      }
+      at = mark + 1;
+    } else {
+      break;
+    }
+  }
+  if (!startsWithAt(text, at, "<svg")) return false;
+  const next = text.charAt(at + 4);
+  return next === ">" || next === "/" || /\s/.test(next);
+}
 
 function startsWith(bytes: Uint8Array, signature: ReadonlyArray<number>): boolean {
   return signature.every((value, index) => bytes[index] === value);
@@ -78,7 +122,7 @@ function bytesMatch(mediaType: ProjectIconMediaType, bytes: Uint8Array): boolean
   } catch {
     return false;
   }
-  return SVG_PROLOGUE.test(text);
+  return startsAsSvgDocument(text);
 }
 
 /**
