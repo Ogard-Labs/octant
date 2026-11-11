@@ -186,14 +186,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       root.current?.querySelector<HTMLElement>(".dock-tool-strip__more") ??
       toolPanel.current;
     target?.focus();
-    // A menu returns focus to its trigger on the frame after it closes, and the
-    // trigger may be the tile that just went; focus again once it has.
     // The tool's own tab can appear a beat late (the strip measures its room
-    // after tabs change) and a closing menu returns focus to its trigger, which
-    // may be the tile that just went. Take focus again from the page body, the
-    // stand-in just focused, or outside the dock, never from where the person is.
+    // after tabs change), and a closing menu returns focus to its trigger,
+    // which may be the tile that just went. Focus is taken again only from the
+    // page body, from the stand-in just focused, or from a popup that is
+    // closing; anywhere else it is where the person put it and stays.
     const wanted = refocus.tab;
-    for (const delay of [0, 60, 250]) {
+    const timers = [0, 60, 250].map((delay) =>
       setTimeout(() => {
         const preferred =
           wanted === undefined
@@ -203,12 +202,17 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               );
         const current = document.activeElement;
         const free =
-          current === document.body || current === target || !root.current?.contains(current);
+          current === null ||
+          current === document.body ||
+          current === target ||
+          current.closest('[role="menu"]') !== null;
         const next = preferred ?? target;
         if (next?.isConnected === true && free && current !== next) next.focus();
-      }, delay);
-    }
-    setRefocus(undefined);
+      }, delay),
+    );
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
   }, [refocus]);
   // A drag that ends where no dragend reaches (its source unmounted) must not
   // leave the drop target over the dock.

@@ -322,11 +322,15 @@ export function moveUtilityTile(
     // Past the last column: a new one, only from a column with something left.
     if (layout.columns.length >= MAX_DOCK_TILE_COLUMNS || column.tiles.length < 2) return state;
     const rest = column.tiles.filter((candidate) => candidate.tabId !== tabId);
-    const alone: DockTileColumn = {
-      share: 1 / (layout.columns.length + 1),
-      tiles: [{ tabId, share: 1 }],
+    // An even split, as `place()` makes: the new column takes 1/(n+1) and the
+    // kept ones are scaled by n/(n+1), so their ratio is unchanged.
+    const count = layout.columns.length;
+    const alone: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+    const kept: DockTileColumn = {
+      ...column,
+      tiles: rest,
+      share: (column.share * count) / (count + 1),
     };
-    const kept: DockTileColumn = { ...column, tiles: rest };
     return rebuilt(direction === "left" ? [alone, kept] : [kept, alone]);
   }
   if (target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;

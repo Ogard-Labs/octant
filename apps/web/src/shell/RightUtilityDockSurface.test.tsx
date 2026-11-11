@@ -1117,6 +1117,21 @@ describe("tool tiles in the right sidebar", () => {
     }
   });
 
+  it("leaves focus where the person put it when it moves out of the dock before the retries fire", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <TiledDock initial={tiledState()} />
+        <input aria-label="Composer" />
+      </>,
+    );
+    await arrange(user, "Files", "Hide from view");
+    const composer = screen.getByRole("textbox", { name: "Composer" });
+    composer.focus();
+    await new Promise((done) => setTimeout(done, 400));
+    expect(composer).toHaveFocus();
+  });
+
   it("keeps keyboard focus in the dock when a header choice leaves nothing for the strip or the control", async () => {
     const user = userEvent.setup();
     render(<TiledDock initial={opened("files")} launchable={[surface("terminal")]} />);

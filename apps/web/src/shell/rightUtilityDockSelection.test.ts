@@ -755,6 +755,13 @@ describe("dock tool tiles", () => {
   it("moves a tile to the other column, or makes the second column from a one-column layout", () => {
     const two = showUtilityTabBelow(opened("files", "canvas"), "files");
     expect(columnsOf(moveUtilityTile(two, "files", "right"))).toEqual([["canvas"], ["files"]]);
+    // The second column is an even split, as showing a tool beside makes it.
+    expect(
+      moveUtilityTile(two, "files", "right").layout?.columns.map((column) => column.share),
+    ).toEqual([0.5, 0.5]);
+    expect(
+      moveUtilityTile(two, "files", "left").layout?.columns.map((column) => column.share),
+    ).toEqual([0.5, 0.5]);
     expect(columnsOf(moveUtilityTile(two, "files", "left"))).toEqual([["files"], ["canvas"]]);
     sharesAddUp(moveUtilityTile(two, "files", "right"));
     const sided = twoColumnsForMoves();
