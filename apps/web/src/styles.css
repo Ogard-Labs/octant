@@ -3502,6 +3502,16 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   background: transparent;
 }
 
+/* In a sheet the boundary reports on the sheet, on the sheet's own fill and
+   inside its box. A sheet is drawn outside the shell, so the rule above does
+   not reach it: in the packaged app Settings' sheet was a black panel the
+   height of the window for the moment it took to load. */
+.octant-sheet__popup .shell-boundary {
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+}
+
 .workspace-pane__panel > [data-slot="empty"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }

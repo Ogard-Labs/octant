@@ -625,6 +625,12 @@ describe("WindowChrome", () => {
       expect(overlay).not.toContain("--octant-border-strong");
     }
     expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
+    // A sheet's loading state is on the sheet's own fill and in its own box:
+    // the page colour at the window's height was a black panel in Settings'
+    // sheet while it loaded.
+    const sheetBoundary = cssRule(".octant-sheet__popup .shell-boundary");
+    expect(sheetBoundary).toContain("background: transparent;");
+    expect(sheetBoundary).toContain("min-height: 0;");
     // A feature stylesheet sizes and places a popup; it does not repaint it.
     const branchMenu = cssRule(".code-branch-selector__menu");
     expect(branchMenu).not.toMatch(/(^|\s)border:/);
@@ -850,6 +856,11 @@ describe("WindowChrome", () => {
       )?.[1] ?? "";
     expect(surface).not.toContain("backdrop-filter");
     expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
+    // Under Window glass the card is a clear step over the tray, not the same
+    // grey with a ring.
+    expect(systemStyles).toMatch(
+      /\.shell--material-translucent \.composer-frame \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
+    );
   });
 
   it("clears the workspace, pane, and reader page fills inside the window so the glass shows", () => {

@@ -343,7 +343,8 @@ does for a dialog. It closes with the
 close control in its corner, with Escape, or with a press on the window behind
 it, and focus returns to where it was. It carries no "Back to app": the person
 never left. The presentation is decided when Settings opens and kept until it
-closes. In a window at the narrow breakpoint Settings covers the window, as
+closes. While Settings loads, the sheet shows the loading line on its own
+fill, inside its own box. In a window at the narrow breakpoint Settings covers the window, as
 before, with "Back to app"; a sheet open while the window is made narrow
 fills the window and keeps its page. The Usage page still covers the
 workspace at every width.
@@ -750,7 +751,9 @@ is the raised card, a step lighter than the tray, so the surface a person
 types on is the highest thing in the composer. Over an application ground or
 under Window glass the tray is the glass surface (floor, thick tint, blur and
 stroke) and the card keeps the raised card's fill on it; a card that was glass
-too blurred the tray it stood in and came out darker than the tray. The
+too blurred the tray it stood in and came out darker than the tray. Under
+Window glass the card takes the control tint, a clear step over the tray: at
+the card tint the two read as one grey in the packaged app. The
 figures of the last turn stand on the page under the tray. A held thread has
 no card and draws no tray. (The rows were text standing on the page above and
 below the card, and the composer read as a field with labels around it.)

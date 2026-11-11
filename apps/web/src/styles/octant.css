@@ -6633,6 +6633,16 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
         var(--octant-shadow-md),
         inset 0 0 0 1px var(--oct-glass-stroke);
     }
+    /* Under Window glass the card takes the control tint, a clear step over
+       the tray. The card tint is 4% of the ink and the tray already carries
+       the floor and the thick tint, so on a real window the two read as one
+       grey and the card was told from the tray by its ring alone. */
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--material-translucent
+      .composer-frame
+      .thread-composer__surface {
+      background: var(--octant-control);
+    }
   }
 }
 
