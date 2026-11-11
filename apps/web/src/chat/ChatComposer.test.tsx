@@ -69,7 +69,7 @@ describe("ChatComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("offers dictation in the composer's row only when transcription is ready, and appends the words to the draft", async () => {
+  it("offers dictation in the composer's pill only when transcription is ready, and appends the words to the draft", async () => {
     const user = userEvent.setup();
     renderComposer({ draft: "Please" });
     expect(screen.queryByRole("button", { name: "Dictate message" })).toBeNull();
@@ -106,17 +106,24 @@ describe("ChatComposer", () => {
         </SpeechCapabilityProvider>,
       );
       const toolbar = screen.getAllByRole("toolbar", { name: "Composer controls" })[1]!;
-      const mic = within(toolbar).getByRole("button", { name: "Dictate message" });
-      // Attach rides the card beside the prompt; the row holds the microphone.
       const composer = toolbar.closest<HTMLElement>(".composer");
       expect(composer).not.toBeNull();
-      const attach = within(composer as HTMLElement).getByRole("button", {
-        name: "Add attachment",
-      });
+      // Attach and the microphone ride the pill beside the prompt, with send;
+      // the row under it holds neither.
+      const pill = (composer as HTMLElement).querySelector<HTMLElement>(".composer-field");
+      expect(pill).not.toBeNull();
+      const attach = within(pill as HTMLElement).getByRole("button", { name: "Add attachment" });
+      const mic = within(pill as HTMLElement).getByRole("button", { name: "Dictate message" });
       expect(attach).toBeVisible();
       expect(toolbar).not.toContainElement(attach);
+      expect(toolbar).not.toContainElement(mic);
+      expect(
+        within(composer as HTMLElement).getAllByRole("button", { name: "Dictate message" }),
+      ).toHaveLength(1);
       await user.click(mic);
-      await user.click(await within(toolbar).findByRole("button", { name: "Stop dictating" }));
+      await user.click(
+        await within(pill as HTMLElement).findByRole("button", { name: "Stop dictating" }),
+      );
       await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith("Please fix the flaky test"));
       expect(props.onSend).not.toHaveBeenCalled();
     } finally {

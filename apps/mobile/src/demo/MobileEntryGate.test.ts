@@ -20,14 +20,15 @@ vi.mock("react-native", () => ({
       { "data-testid": props.testID, onClick: props.onPress },
       props.children,
     ),
+  View: (props: ElementProps) => createElement("div", null, props.children),
   ActivityIndicator: () => createElement("span", null, "Checking"),
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
 }));
 vi.mock("../../design-system", () => ({
-  GlassSurface: (props: ElementProps) => createElement("section", null, props.children),
   useTheme: () => ({ colors: {} }),
-  space: { lg: 24, md: 16 },
-  typography: { body: { fontSize: 16 } },
+  radii: { md: 12 },
+  space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 },
+  typography: { meta: { fontSize: 12 } },
 }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;

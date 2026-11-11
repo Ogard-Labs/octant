@@ -14,7 +14,14 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { SettingsPanel, SettingsState } from "./primitives";
+import {
+  SettingsCompactRow,
+  SettingsDisclosure,
+  SettingsPanel,
+  SettingsState,
+  revealSettingsAncestors,
+  revealSettingsWithin,
+} from "./primitives";
 
 export interface ShieldServersSettingsProps {
   /** Absent off this computer: the registry is host authority. */
@@ -276,25 +283,32 @@ function ServerEditor(props: ServerEditorProps) {
         >
           {servers.map((server) => (
             <li className="shield-servers__server" key={String(server.serverId)}>
-              <span className="shield-servers__name">{server.alias}</span>
-              <span className="shield-servers__login">
-                {server.user}@{server.alias}
-              </span>
-              <span className="shield-servers__profile">{PROFILE_LABELS[server.profile]}</span>
-              {server.runbookPath === undefined ? null : (
-                <span className="shield-servers__runbook">{server.runbookPath}</span>
-              )}
-              {server.deployCommands.length === 0 ? null : (
-                <span className="shield-servers__deploys">
-                  {server.deployCommands.length === 1
-                    ? "1 deploy command"
-                    : `${server.deployCommands.length} deploy commands`}
-                </span>
-              )}
-              {server.signIn === "octant-key" ? (
-                <span className="shield-servers__deploys">Key Octant keeps</span>
-              ) : null}
-              <span className="shield-servers__row-actions">
+              <SettingsCompactRow
+                detail={
+                  <>
+                    <span>
+                      {server.user}@{server.alias}
+                    </span>
+                    {server.runbookPath === undefined ? null : (
+                      <span className="shield-servers__runbook">{server.runbookPath}</span>
+                    )}
+                    {server.signIn === "octant-key" ? (
+                      <span className="shield-servers__deploys">Key Octant keeps</span>
+                    ) : null}
+                  </>
+                }
+                label={server.alias}
+                meta={
+                  // What the server may be asked to do reads on the closed row.
+                  server.deployCommands.length === 0
+                    ? PROFILE_LABELS[server.profile]
+                    : `${PROFILE_LABELS[server.profile]} · ${
+                        server.deployCommands.length === 1
+                          ? "1 deploy command"
+                          : `${server.deployCommands.length} deploy commands`
+                      }`
+                }
+              >
                 {server.signIn === "octant-key" ? (
                   <OctantButton
                     aria-label={`Show the key for ${server.alias}${suffix}`}
@@ -341,7 +355,7 @@ function ServerEditor(props: ServerEditorProps) {
                 >
                   Remove
                 </OctantButton>
-              </span>
+              </SettingsCompactRow>
               <ServerKey
                 copied={copiedId === String(server.serverId)}
                 onCopied={() => setCopiedId(String(server.serverId))}
@@ -356,36 +370,39 @@ function ServerEditor(props: ServerEditorProps) {
           ))}
         </ul>
       )}
-      <h3 className="shield-servers__heading">
-        {editing === undefined ? "Add a server" : "Change a server"}
-      </h3>
-      <p className="shield-servers__note">
-        {editing === undefined
-          ? "Use a host alias from your SSH config."
-          : `Changing ${editing.alias}.`}
-      </p>
-      <div data-setting-id={forProject === undefined ? "shield-servers-add" : undefined}>
-        <ServerForm
-          busy={props.busy}
-          editing={editing}
-          forProject={forProject}
-          key={editing === undefined ? `add:${String(formKey)}` : String(editing.serverId)}
-          onCancel={() => {
-            props.onClearProblem();
-            setEditingId(undefined);
-          }}
-          onSubmit={(fields) => {
-            const saved =
-              editing === undefined ? props.onAdd(fields) : props.onChange(editing, fields);
-            void saved.then((ok) => {
-              if (!ok) return;
+      <SettingsDisclosure
+        defaultOpen={editing !== undefined}
+        title={editing === undefined ? "Add a server" : "Change a server"}
+        variant="inline"
+      >
+        <p className="shield-servers__note">
+          {editing === undefined
+            ? "Use a host alias from your SSH config."
+            : `Changing ${editing.alias}.`}
+        </p>
+        <div data-setting-id={forProject === undefined ? "shield-servers-add" : undefined}>
+          <ServerForm
+            busy={props.busy}
+            editing={editing}
+            forProject={forProject}
+            key={editing === undefined ? `add:${String(formKey)}` : String(editing.serverId)}
+            onCancel={() => {
+              props.onClearProblem();
               setEditingId(undefined);
-              setFormKey((key) => key + 1);
-            });
-          }}
-          problem={props.problem}
-        />
-      </div>
+            }}
+            onSubmit={(fields) => {
+              const saved =
+                editing === undefined ? props.onAdd(fields) : props.onChange(editing, fields);
+              void saved.then((ok) => {
+                if (!ok) return;
+                setEditingId(undefined);
+                setFormKey((key) => key + 1);
+              });
+            }}
+            problem={props.problem}
+          />
+        </div>
+      </SettingsDisclosure>
     </>
   );
 }
@@ -459,11 +476,30 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
 
   const focused = props.focusedSetting?.startsWith("shield-servers") === true;
+  // The panel is drawn only once the registry has been read. A link followed
+  // before that found nothing to open, and nothing ran it again afterwards, so
+  // the add form stayed folded.
+  const loaded = view !== undefined;
   useEffect(() => {
-    if (!focused || root.current === null) return;
-    root.current.focus();
-    root.current.scrollIntoView?.({ block: "center" });
-  }, [focused]);
+    const panel = root.current;
+    if (!focused || !loaded || panel === null) return;
+    // The add form is folded under its own disclosure; a link to it opens it.
+    const form = panel.querySelector<HTMLElement>('[data-setting-id="shield-servers-add"]');
+    const opened =
+      (props.focusedSetting === "shield-servers-add" && form !== null
+        ? revealSettingsAncestors(form)
+        : false) || revealSettingsWithin(panel);
+    const land = () => {
+      panel.focus();
+      panel.scrollIntoView?.({ block: "center" });
+    };
+    if (!opened) {
+      land();
+      return;
+    }
+    const frame = requestAnimationFrame(land);
+    return () => cancelAnimationFrame(frame);
+  }, [focused, loaded, props.focusedSetting]);
 
   const load = useCallback(
     async (chosen: string) => {
@@ -601,13 +637,15 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
         {view.sshAgent === "missing" ? (
           <SettingsState kind="empty">{SHIELD_SSH_AGENT_MISSING_NOTE}</SettingsState>
         ) : null}
-        <ul className="shield-servers__profiles">
-          {PROFILE_ORDER.map((id) => (
-            <li key={id}>
-              <strong>{PROFILE_LABELS[id]}:</strong> {PROFILE_EXPLANATIONS[id]}
-            </li>
-          ))}
-        </ul>
+        <SettingsDisclosure title="What each profile allows" variant="inline">
+          <ul className="shield-servers__profiles">
+            {PROFILE_ORDER.map((id) => (
+              <li key={id}>
+                <strong>{PROFILE_LABELS[id]}:</strong> {PROFILE_EXPLANATIONS[id]}
+              </li>
+            ))}
+          </ul>
+        </SettingsDisclosure>
         <p className="shield-servers__note">{SHIELD_SERVERS_ALWAYS_ASK_NOTE}</p>
         <ServerEditor
           busy={busy}
@@ -624,7 +662,19 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
           servers={view.servers}
         />
       </SettingsPanel>
-      <SettingsPanel description={SHIELD_PROJECT_SERVERS_NOTE} title="Project">
+      <SettingsPanel
+        collapse={{
+          open: override !== null,
+          summary:
+            projectView === undefined
+              ? "Choose a Project to see or give it servers of its own"
+              : override === null
+                ? `${projectName} uses the account's servers`
+                : `${projectName} has its own servers`,
+        }}
+        description={SHIELD_PROJECT_SERVERS_NOTE}
+        title="Project"
+      >
         <div className="host-settings__field">
           <label htmlFor={pickerId}>Project</label>
           <OctantSelectField

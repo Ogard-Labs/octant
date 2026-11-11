@@ -2524,169 +2524,40 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-variant-numeric: tabular-nums;
 }
 
-.code-project-pull-requests__groups {
-  display: grid;
-  min-width: 0;
-  gap: var(--oct-space-6);
+/* The page keeps a reading measure of its own and sits at the leading edge: a
+   list a person scans is not centred in a wide window. */
+.code-project-pull-requests-surface {
+  --oct-surface-measure: 720px;
 }
 
-.code-project-pull-requests__project-header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--oct-space-2) var(--oct-space-4);
-  min-height: 40px;
-  padding: 4px 0 2px;
-  border-bottom: 1px solid var(--oct-hairline);
+.code-project-pull-requests-surface > .surface__inner {
+  margin-inline: var(--oct-surface-gutter) auto;
 }
 
-.code-project-pull-requests__project-actions,
-.code-project-pull-requests__auto-refresh {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-}
-
-.code-project-pull-requests__project-actions {
-  flex-wrap: wrap;
-  gap: var(--oct-space-2) var(--oct-space-3);
-}
-.code-project-pull-requests__auto-refresh {
-  gap: var(--oct-space-2);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.code-project-pull-requests__title-line,
-.code-project-pull-requests__meta,
-.code-project-pull-requests__details {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--oct-space-2) var(--oct-space-2);
-}
-
-.code-project-pull-requests__list {
-  display: grid;
-  gap: 0;
+.code-project-pull-requests__empty {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  padding: var(--oct-space-2) 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
-.code-project-pull-requests__row {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  width: 100%;
-  height: auto;
-  gap: var(--oct-space-2);
-  min-height: 64px;
-  padding: var(--oct-space-3) var(--oct-space-2);
-  border: 0;
-  border-bottom: 1px solid var(--oct-border-soft);
-  text-align: left;
+/* A Project that is not on GitHub has nothing to list, so it is one quiet line
+   at the foot, with the names a click away. */
+.code-project-pull-requests__notice {
+  margin: var(--oct-space-3) 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.code-project-pull-requests__notice > summary {
   cursor: default;
 }
 
-.code-project-pull-requests__row[aria-pressed="true"] {
-  background: var(--oct-selection);
-}
-
-.code-project-pull-requests__row:hover,
-.code-project-pull-requests__row:focus-visible {
-  background: var(--octant-surface-muted);
-}
-
-.code-project-pull-requests__icon {
-  margin-top: 2px;
-  color: var(--oct-success-fg);
-}
-
-.code-project-pull-requests__row-content {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, auto);
-  align-content: start;
-  align-items: start;
-  min-width: 0;
-  gap: var(--oct-space-2) var(--oct-space-3);
-}
-
-.code-project-pull-requests__title-line,
-.code-project-pull-requests__details,
-.code-project-pull-requests__branch,
-.code-project-pull-requests__linked {
-  grid-column: 1;
-  min-width: 0;
-}
-
-.code-project-pull-requests__meta {
-  grid-column: 2;
-  grid-row: 1 / span 3;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-content: start;
-  gap: var(--oct-space-1);
-  min-width: 0;
-}
-
-.code-project-pull-requests__title {
-  min-width: 0;
-  overflow: hidden;
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-pull-requests__number,
-.code-project-pull-requests__details,
-.code-project-pull-requests__linked {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.code-project-pull-requests__details {
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
-
-.code-project-pull-requests__branch {
-  overflow: hidden;
-  color: var(--oct-fg-2);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@container pull-requests (max-width: 700px) {
-  .code-project-pull-requests__row-content {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .code-project-pull-requests__meta {
-    grid-column: 1;
-    grid-row: auto;
-    justify-content: flex-start;
-  }
-  .code-project-pull-requests__details {
-    flex-wrap: wrap;
-  }
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__row-content {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {
-  grid-column: 1;
-  grid-row: auto;
-  justify-content: flex-start;
+.code-project-pull-requests__notice > span {
+  display: block;
+  margin-top: var(--oct-space-1);
 }
 
 /* The dock lists one thread's Project under the dock's own head: the same rows
@@ -2701,40 +2572,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-2);
 }
 
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__groups {
-  align-content: start;
-  gap: var(--oct-space-4);
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__project-header {
-  min-height: 32px;
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row {
-  min-height: 0;
-  padding: var(--oct-space-2) var(--oct-space-1);
-}
-
 .code-project-pull-requests[data-presentation="dock"] .surface-toolbar {
-  flex-wrap: wrap;
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row-content {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__meta {
-  grid-column: 1;
-  grid-row: auto;
-  justify-content: flex-start;
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__title {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__details {
   flex-wrap: wrap;
 }
 

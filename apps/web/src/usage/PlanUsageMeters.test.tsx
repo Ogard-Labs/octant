@@ -1,6 +1,8 @@
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerPlanUsage } from "./ComposerPlanUsage";
 import { PlanUsageProvider } from "./PlanUsageContext";
@@ -62,10 +64,34 @@ describe("plan usage above the composer", () => {
     const group = await screen.findByRole("group", { name: "Plan usage left" });
     expect(within(group).getByText("5h")).toBeVisible();
     expect(within(group).getByText("85%")).toBeVisible();
-    expect(within(group).getByText("wk")).toBeVisible();
+    expect(within(group).getByText("week")).toBeVisible();
     expect(within(group).getByText("43%")).toBeVisible();
+    // Each meter says its window and its share in one name.
+    expect(within(group).getByRole("img", { name: /85% left$/ })).toBeVisible();
+    expect(within(group).getByRole("img", { name: /43% left$/ })).toBeVisible();
     // Another account's windows never stand in for the one the thread will use.
     expect(within(group).queryByText("10%")).toBeNull();
+  });
+
+  it("draws a spent window's smooth bar empty", async () => {
+    const client = clientOf([entry(codex, [window("codex:primary_5h", 1)])]);
+    const { container } = render(
+      <PlanUsageProvider barStyle="smooth" client={client}>
+        <ComposerPlanUsage providerInstanceId={codex} />
+      </PlanUsageProvider>,
+    );
+
+    const group = await screen.findByRole("group", { name: "Plan usage left" });
+    expect(within(group).getByText("0%")).toBeVisible();
+    const fill = container.querySelector<HTMLElement>(".plan-usage__bar--smooth > span");
+    expect(fill?.style.width).toBe("0%");
+    // Nothing in the stylesheet may give the fill a floor: with a 6px minimum
+    // a spent window drew a ninth of the track, and every share under that
+    // looked the same.
+    const css = readFileSync(resolve(process.cwd(), "src/usage/plan-usage-meters.css"), "utf8");
+    const rule = css.match(/\.plan-usage__bar--smooth > span \{[^}]*\}/)?.[0] ?? "";
+    expect(rule).not.toBe("");
+    expect(rule).not.toMatch(/min-width/);
   });
 
   it("shows nothing when the provider reports no plan window", async () => {

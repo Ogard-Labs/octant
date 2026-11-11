@@ -5,6 +5,8 @@ import {
 } from "@octant/contracts/protected-files";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PROTECTED_FILES_FACT, ProtectedFilesSettings } from "./ProtectedFilesSettings";
 
@@ -44,10 +46,38 @@ function client(initial: ProtectedFilesSnapshot, answer?: () => ProtectedFilesRe
 describe("ProtectedFilesSettings", () => {
   it("lists the protected groups and says no agent reaches them at any level", async () => {
     const { fake } = client(snapshot());
+    const user = userEvent.setup();
     render(<ProtectedFilesSettings client={fake} />);
     expect(await screen.findByText("SSH private keys")).toBeVisible();
-    expect(screen.getByText("~/.ssh/id_* (not .pub)")).toBeVisible();
+    // A closed row already says it is protected and which paths it guards.
+    expect(screen.getAllByText(/^Protected ·/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/~\/\.ssh\/id_\* \(not \.pub\)/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "SSH private keys" }));
+    expect(screen.getByRole("button", { name: "SSH private keys" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    // The detail holds the full list again, beside the closed row's cut line.
+    expect(screen.getAllByText(/~\/\.ssh\/id_\* \(not \.pub\)/)).toHaveLength(2);
     expect(screen.getByText(PROTECTED_FILES_FACT)).toBeVisible();
+  });
+
+  it("shows a long added path in full, since the row has no detail to open", async () => {
+    const first =
+      "~/Library/Application Support/Some Vendor/Some Product/profiles/work/tokens.json";
+    const second =
+      "~/Library/Application Support/Some Vendor/Some Product/profiles/home/tokens.json";
+    const { fake } = client(snapshot({ added: [first, second] }));
+    render(<ProtectedFilesSettings client={fake} />);
+
+    const row = (await screen.findByText(first)).closest(".crow");
+    expect(screen.getByText(second)).toBeVisible();
+    // The name wraps: cut with an ellipsis, these two could not be told apart.
+    expect(row).toHaveAttribute("data-label", "wrap");
+    const css = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+    expect(css).toMatch(
+      /\.crow\[data-label="wrap"\] \.crow__name \{[^}]*white-space: normal;[^}]*\}/,
+    );
   });
 
   it("asks before removing a built-in group and sends the confirmation", async () => {

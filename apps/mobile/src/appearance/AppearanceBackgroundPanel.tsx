@@ -1,8 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
-  GlassChip,
   EFFECT_MAX,
   EFFECT_MIN,
   radii,
@@ -15,6 +14,7 @@ import {
   type SurfaceStylePreference,
 } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
+import { ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
 import { useAppearance } from "./AppearanceContext";
 import { persistWallpaperFile } from "./wallpaperFile";
 
@@ -88,22 +88,27 @@ function Dial(props: DialProps) {
     () =>
       StyleSheet.create({
         dialRow: {
+          minHeight: 46,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
+          paddingHorizontal: space.md,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.hairline,
         },
-        dialLabel: { color: colors.textPrimary, fontSize: typography.body.fontSize },
+        dialLabel: { color: colors.textPrimary, fontSize: typography.rowLabel.fontSize },
         dialControls: { flexDirection: "row", alignItems: "center", gap: space.sm },
+        // The system stepper: a 32pt-tall control-fill capsule; the slop
+        // keeps each half a 44pt target.
         dialButton: {
-          width: 44,
-          height: 44,
+          width: 46,
+          height: 32,
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: radii.pill,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.glassStroke,
+          borderRadius: radii.sm,
+          backgroundColor: colors.control,
         },
-        dialButtonLabel: { color: colors.textPrimary, fontSize: 20, fontWeight: "500" },
+        dialButtonLabel: { color: colors.textPrimary, fontSize: 20, fontWeight: "400" },
         dialValue: {
           minWidth: 32,
           textAlign: "center",
@@ -121,6 +126,7 @@ function Dial(props: DialProps) {
           accessibilityLabel={`${MOBILE_COPY.backgroundDialLess} ${props.label.toLowerCase()}`}
           accessibilityRole="button"
           disabled={props.value <= EFFECT_MIN}
+          hitSlop={6}
           onPress={() => props.onChange(props.value - 1)}
           style={styles.dialButton}
           testID={`${props.testID}-less`}
@@ -140,6 +146,7 @@ function Dial(props: DialProps) {
           accessibilityLabel={`${MOBILE_COPY.backgroundDialMore} ${props.label.toLowerCase()}`}
           accessibilityRole="button"
           disabled={props.value >= EFFECT_MAX}
+          hitSlop={6}
           onPress={() => props.onChange(props.value + 1)}
           style={styles.dialButton}
           testID={`${props.testID}-more`}
@@ -167,50 +174,15 @@ export function AppearanceBackgroundPanel() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        panel: {
-          marginTop: space.lg,
-          gap: space.sm,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.glassStroke,
-          paddingTop: space.md,
-        },
-        title: {
-          fontSize: typography.title.fontSize,
-          fontWeight: typography.title.fontWeight,
-          color: colors.textPrimary,
-        },
-        help: {
-          fontSize: typography.body.fontSize,
+        panel: { marginTop: space.xs },
+        segmentRow: { padding: 10 },
+        message: {
           color: colors.textSecondary,
-          lineHeight: 20,
+          fontSize: typography.meta.fontSize,
+          paddingHorizontal: space.xl,
+          marginTop: -space.sm,
+          marginBottom: space.md,
         },
-        section: {
-          marginTop: space.sm,
-          fontSize: typography.section.fontSize,
-          fontWeight: typography.section.fontWeight,
-          letterSpacing: typography.section.letterSpacing,
-          color: colors.textTertiary,
-        },
-        themeRow: {
-          flexDirection: "row",
-          flexWrap: "wrap",
-          gap: space.sm,
-        },
-        button: {
-          backgroundColor: colors.accent,
-          paddingVertical: space.md,
-          borderRadius: radii.pill,
-          alignItems: "center",
-        },
-        buttonDisabled: { opacity: 0.45 },
-        buttonLabel: {
-          color: colors.sendLabel,
-          fontWeight: "500",
-          fontSize: typography.body.fontSize,
-        },
-        secondary: { alignItems: "center", paddingVertical: space.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "500" },
-        message: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
       }),
     [colors],
   );
@@ -275,49 +247,40 @@ export function AppearanceBackgroundPanel() {
 
   return (
     <View style={styles.panel} testID="mobile-appearance-panel">
-      <Text style={styles.title}>{MOBILE_COPY.appearanceTitle}</Text>
-      <Text style={styles.help}>{MOBILE_COPY.appearanceHelp}</Text>
-
-      <Text style={styles.section}>{MOBILE_COPY.themeSectionTitle}</Text>
-      <View style={styles.themeRow} testID="mobile-appearance-theme-row">
-        {THEME_OPTIONS.map((option) => (
-          <GlassChip
-            key={option.id}
-            active={themePreference === option.id}
-            label={option.label}
-            onPress={() => {
-              void appearance.setColorSchemePreference(option.id);
-            }}
-            testID={`mobile-appearance-theme-${option.id}`}
+      <ListSection footer={MOBILE_COPY.themeSystemHelp} title={MOBILE_COPY.appearanceTitle}>
+        <View style={styles.segmentRow}>
+          <SegmentedControl
+            onSelect={(id) => void appearance.setColorSchemePreference(id)}
+            optionTestID={(id) => `mobile-appearance-theme-${id}`}
+            options={THEME_OPTIONS}
+            selected={themePreference}
+            testID="mobile-appearance-theme-row"
           />
-        ))}
-      </View>
-      <Text style={styles.help}>{MOBILE_COPY.themeSystemHelp}</Text>
+        </View>
+      </ListSection>
 
-      <Text style={styles.section}>{MOBILE_COPY.surfaceSectionTitle}</Text>
-      <View style={styles.themeRow} testID="mobile-appearance-surface-row">
-        {SURFACE_OPTIONS.map((option) => (
-          <GlassChip
-            key={option.id}
-            active={surfaceStyle === option.id}
-            label={option.label}
-            onPress={() => {
-              void appearance.setSurfaceStyle(option.id);
-            }}
-            testID={`mobile-appearance-surface-${option.id}`}
+      <ListSection footer={MOBILE_COPY.surfaceHelp} title={MOBILE_COPY.surfaceSectionTitle}>
+        <View style={styles.segmentRow}>
+          <SegmentedControl
+            onSelect={(id) => void appearance.setSurfaceStyle(id)}
+            optionTestID={(id) => `mobile-appearance-surface-${id}`}
+            options={SURFACE_OPTIONS}
+            selected={surfaceStyle}
+            testID="mobile-appearance-surface-row"
           />
-        ))}
-      </View>
-      <Text style={styles.help}>{MOBILE_COPY.surfaceHelp}</Text>
+        </View>
+      </ListSection>
 
-      <Text style={styles.section}>{MOBILE_COPY.backgroundSectionTitle}</Text>
-      <Text style={styles.help}>{MOBILE_COPY.backgroundPictureTitle}</Text>
-      <View style={styles.themeRow} testID="mobile-appearance-picture-row">
-        {PICTURE_OPTIONS.map((option) => (
-          <GlassChip
+      <ListSection
+        testID="mobile-appearance-picture-row"
+        title={MOBILE_COPY.backgroundSectionTitle}
+      >
+        {PICTURE_OPTIONS.map((option, index) => (
+          <ListRow
+            accessory={picture === option.id ? "check" : "none"}
             key={option.id}
-            active={picture === option.id}
             label={option.label}
+            last={index === PICTURE_OPTIONS.length - 1 && !custom}
             onPress={() => {
               const id = option.id;
               if (id === "custom") {
@@ -329,72 +292,67 @@ export function AppearanceBackgroundPanel() {
             testID={`mobile-appearance-picture-${option.id}`}
           />
         ))}
-      </View>
-
-      {custom ? (
-        <Pressable
-          disabled={busy}
-          onPress={() => void pickImage()}
-          style={[styles.button, busy ? styles.buttonDisabled : null]}
-          testID="mobile-appearance-pick-image"
-        >
-          {busy ? (
-            <ActivityIndicator color={colors.sendLabel} />
-          ) : (
-            <Text style={styles.buttonLabel}>{MOBILE_COPY.backgroundPickImage}</Text>
-          )}
-        </Pressable>
-      ) : null}
-
-      <Text style={styles.help}>{MOBILE_COPY.backgroundEffectTitle}</Text>
-      <View style={styles.themeRow} testID="mobile-appearance-effect-row">
-        {EFFECT_OPTIONS.map((option) => (
-          <GlassChip
-            key={option.id}
-            active={effect.kind === option.id}
-            label={option.label}
-            onPress={() => {
-              void appearance.setEffect({ ...effect, kind: option.id });
-            }}
-            testID={`mobile-appearance-effect-${option.id}`}
-          />
-        ))}
-      </View>
-      {effect.kind !== "none" ? (
-        <>
-          <Dial
-            label={MOBILE_COPY.backgroundPixelSize}
-            onChange={(cell) => void appearance.setEffect({ ...effect, cell })}
-            testID="mobile-appearance-dial-cell"
-            value={effect.cell}
-          />
-          {effect.kind === "dither" ? (
-            <Dial
-              label={MOBILE_COPY.backgroundColours}
-              onChange={(levels) => void appearance.setEffect({ ...effect, levels })}
-              testID="mobile-appearance-dial-levels"
-              value={effect.levels}
+        {custom ? (
+          <>
+            <ListRow
+              accessory="none"
+              label={busy ? MOBILE_COPY.attachPending : MOBILE_COPY.backgroundPickImage}
+              labelTone={colors.accent}
+              onPress={busy ? undefined : () => void pickImage()}
+              testID="mobile-appearance-pick-image"
             />
-          ) : null}
-        </>
-      ) : null}
-      <Text style={styles.help}>{MOBILE_COPY.backgroundEffectHelp}</Text>
+            <ListRow
+              accessory="none"
+              label={MOBILE_COPY.backgroundClearImage}
+              labelTone={colors.danger}
+              last
+              onPress={
+                busy
+                  ? undefined
+                  : () =>
+                      runBackgroundAction(
+                        appearance.clearCustomBackground,
+                        MOBILE_COPY.backgroundImageCleared,
+                      )
+              }
+              testID="mobile-appearance-clear-image"
+            />
+          </>
+        ) : null}
+      </ListSection>
 
-      {custom ? (
-        <Pressable
-          disabled={busy}
-          onPress={() => {
-            runBackgroundAction(
-              appearance.clearCustomBackground,
-              MOBILE_COPY.backgroundImageCleared,
-            );
-          }}
-          style={[styles.secondary, busy ? styles.buttonDisabled : null]}
-          testID="mobile-appearance-clear-image"
-        >
-          <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundClearImage}</Text>
-        </Pressable>
-      ) : null}
+      <ListSection
+        footer={MOBILE_COPY.backgroundEffectHelp}
+        title={MOBILE_COPY.backgroundEffectTitle}
+      >
+        <View style={styles.segmentRow}>
+          <SegmentedControl
+            onSelect={(kind) => void appearance.setEffect({ ...effect, kind })}
+            optionTestID={(id) => `mobile-appearance-effect-${id}`}
+            options={EFFECT_OPTIONS}
+            selected={effect.kind}
+            testID="mobile-appearance-effect-row"
+          />
+        </View>
+        {effect.kind !== "none" ? (
+          <>
+            <Dial
+              label={MOBILE_COPY.backgroundPixelSize}
+              onChange={(cell) => void appearance.setEffect({ ...effect, cell })}
+              testID="mobile-appearance-dial-cell"
+              value={effect.cell}
+            />
+            {effect.kind === "dither" ? (
+              <Dial
+                label={MOBILE_COPY.backgroundColours}
+                onChange={(levels) => void appearance.setEffect({ ...effect, levels })}
+                testID="mobile-appearance-dial-levels"
+                value={effect.levels}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </ListSection>
 
       {message !== undefined ? (
         <Text style={styles.message} testID="mobile-appearance-message">

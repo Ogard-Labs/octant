@@ -13,7 +13,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow, SettingsPanel, SettingsState } from "./primitives";
+import { SettingRow, SettingsPanel, SettingsState, revealSettingsWithin } from "./primitives";
 
 export interface SafeNetworksSettingsProps {
   /** Absent where the host has no Safe networks route. */
@@ -336,9 +336,18 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
 
   const focused = props.focusedSetting === "safe-networks";
   useEffect(() => {
-    if (!focused || root.current === null) return;
-    root.current.focus();
-    root.current.scrollIntoView?.({ block: "center" });
+    const panel = root.current;
+    if (!focused || panel === null) return;
+    const land = () => {
+      panel.focus();
+      panel.scrollIntoView?.({ block: "center" });
+    };
+    if (!revealSettingsWithin(panel)) {
+      land();
+      return;
+    }
+    const frame = requestAnimationFrame(land);
+    return () => cancelAnimationFrame(frame);
   }, [focused]);
 
   const apply = useCallback(
@@ -564,6 +573,10 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
         />
       </SettingsPanel>
       <SettingsPanel
+        collapse={{
+          summary: "Choose a Project to see or give it a list of its own",
+          open: ownList,
+        }}
         description="A Project follows the every-Project list unless you give it a list of its own."
         title="Project"
       >
@@ -629,6 +642,14 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
         )}
       </SettingsPanel>
       <SettingsPanel
+        collapse={{
+          // A refusal is waiting for a decision, so it is never folded away.
+          open: view.refused.length > 0,
+          summary:
+            view.refused.length === 0
+              ? "Nothing has been refused lately"
+              : `${view.refused.length} refused, waiting for a decision`,
+        }}
         description={
           projectView !== undefined
             ? `Trusting a host adds it to ${projectName}'s own list.`

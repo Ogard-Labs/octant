@@ -25,6 +25,7 @@ import {
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { ProjectIcon } from "./ProjectIcon";
 
 const GitHubRepositoryOnboardingFlow = lazy(() =>
   import("../code/GitHubRepositoryOnboarding").then((module) => ({
@@ -362,7 +363,11 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                         type="button"
                         variant="ghost"
                       >
-                        <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+                        <ProjectIcon
+                          fallback={<FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />}
+                          projectId={String(entry.projectId)}
+                          size={14}
+                        />
                         <span className="composer-folder-selector__option-copy">
                           <span className="composer-folder-selector__option-name">
                             {entry.displayName}

@@ -1,6 +1,7 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import { Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
 import type { ReactNode } from "react";
+import { ProjectIcon } from "./ProjectIcon";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
 
@@ -31,6 +32,8 @@ export function SidebarThreadRowContent(props: {
   /** A worker's coordinator, named as a fact beneath the title. */
   readonly coordinatorName?: string;
   readonly projectName?: string;
+  /** The Project the chip names; absent for "No Project", which keeps the glyph and asks for nothing. */
+  readonly projectId?: string;
   readonly pullRequest?: ThreadRowPullRequest;
   readonly checkout?: ThreadCheckoutChip;
   /** The short age, or the time a snoozed thread returns. */
@@ -86,7 +89,15 @@ export function SidebarThreadRowContent(props: {
             )}
             {props.projectName === undefined ? null : (
               <span className="sidebar-navigation__thread-project">
-                <Folder aria-hidden="true" size={12} strokeWidth={1.8} />
+                {props.projectId === undefined ? (
+                  <Folder aria-hidden="true" size={12} strokeWidth={1.8} />
+                ) : (
+                  <ProjectIcon
+                    fallback={<Folder aria-hidden="true" size={12} strokeWidth={1.8} />}
+                    projectId={props.projectId}
+                    size={12}
+                  />
+                )}
                 <span className="sidebar-navigation__thread-project-label">
                   {props.projectName}
                 </span>

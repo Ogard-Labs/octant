@@ -11,7 +11,7 @@ export const MOBILE_TAB_LABELS = {
   home: "Inbox",
   agents: "Agents",
   thread: "Thread",
-  hosts: "Computers",
+  hosts: "Settings",
 } as const satisfies Record<MobileRouteId, string>;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
@@ -90,6 +90,10 @@ export const MOBILE_COPY = {
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
   allAgents: "Agents",
+  homeRecent: "Recent",
+  statusAllShort: "All",
+  homeSeeAll: "See all",
+  placementSection: "New threads go to",
   workspaces: "Computers",
   addWorkspace: "Add computer",
   composerHome: "Plan, ask, build…",
@@ -190,9 +194,6 @@ export const MOBILE_COPY = {
   revokeDeviceHint:
     "Revoke removes only this phone’s registration. Other paired clients stay connected.",
   appearanceTitle: "Appearance",
-  appearanceHelp:
-    "Choose theme, flat or glass panels, and a picture for the background, printed as it is, pixelated, or dithered.",
-  themeSectionTitle: "Theme",
   themeSystem: "System",
   themeLight: "Light",
   themeDark: "Dark",
@@ -202,7 +203,6 @@ export const MOBILE_COPY = {
   surfaceFlat: "Flat",
   surfaceHelp: "Flat uses solid panels like the desktop. Glass frosts over the canvas.",
   backgroundSectionTitle: "Background",
-  backgroundPictureTitle: "Picture",
   backgroundPictureSoftGlow: "Soft glow",
   backgroundPictureSoftGraphite: "Graphite",
   backgroundPictureSoftSunset: "Sunset",

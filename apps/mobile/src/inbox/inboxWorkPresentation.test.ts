@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { backMobileHomeView } from "./homeView";
-import { inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
+import { inboxPriorityRows, inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import type { MobileInboxRow } from "@octant/client-runtime";
 
 const row = (mode: MobileInboxRow["mode"], status: string, threadId: string): MobileInboxRow => ({
@@ -18,6 +18,20 @@ describe("Inbox work presentation", () => {
     expect(inboxWorkStatus("waiting for approval")).toBe("Needs attention");
     expect(inboxWorkStatus("in review")).toBe("Recent");
     expect(inboxWorkStatus("archived")).toBe("Recent");
+  });
+
+  it("lists what needs the person first on the home, leaving Chat threads to the full list", () => {
+    const ids = inboxPriorityRows(
+      [
+        row("code", "archived", "code-recent"),
+        row("work", "active", "work-working"),
+        row("chat", "waiting for approval", "chat-attention"),
+        row("code", "waiting for approval", "code-attention"),
+        row("work", "archived", "work-recent"),
+      ],
+      3,
+    ).map((entry) => entry.threadId);
+    expect(ids).toEqual(["code-attention", "work-working", "code-recent"]);
   });
 
   it("counts only Work and Code work for the Inbox dashboard", () => {

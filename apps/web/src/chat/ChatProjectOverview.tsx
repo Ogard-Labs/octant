@@ -222,13 +222,15 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                           selectedProviderInstanceId: props.selectedProviderInstanceId,
                         })}
                   />
-                  <ComposerVoiceButton
-                    disabled={!createAvailable || submitting}
-                    onTranscript={(transcript) =>
-                      setDraft((current) => appendTranscript(current, transcript))
-                    }
-                  />
                 </>
+              ),
+              dictate: (
+                <ComposerVoiceButton
+                  disabled={!createAvailable || submitting}
+                  onTranscript={(transcript) =>
+                    setDraft((current) => appendTranscript(current, transcript))
+                  }
+                />
               ),
               actions: {
                 kind: "send",

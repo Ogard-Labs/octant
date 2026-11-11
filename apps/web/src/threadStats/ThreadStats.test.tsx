@@ -143,9 +143,9 @@ describe("the thread stats line", () => {
     const line = screen.getByTestId("thread-stats-line");
     expect(within(line).getByText("5h")).toBeInTheDocument();
     expect(within(line).getByText("88%")).toBeInTheDocument();
-    expect(within(line).getByText("wk")).toBeInTheDocument();
+    expect(within(line).getByText("week")).toBeInTheDocument();
     expect(within(line).getByText("38%")).toBeInTheDocument();
-    expect(line).toHaveTextContent("5h88%wk38%");
+    expect(line).toHaveTextContent("5h88%week38%");
     expect(
       screen.getByRole("button", {
         name: /^Thread stats: 5-hour limit 88% left, 7-day limit 38% left/,
@@ -162,7 +162,11 @@ describe("the thread stats line", () => {
     );
 
     const line = screen.getByTestId("thread-stats-line");
-    expect(within(line).getByText("5h")).toBeInTheDocument();
+    // A meter standing alone carries no name on the row: the bar and its
+    // figure say what it is, and its accessible name says which window.
+    expect(within(line).queryByText("5h")).not.toBeInTheDocument();
+    expect(within(line).getByRole("img", { name: "5-hour limit, 15% left" })).toBeInTheDocument();
+    expect(within(line).getByText("15%")).toBeInTheDocument();
     expect(line.querySelector('[data-level="near"]')).not.toBeNull();
     // No turn means no turn detail to open, so the line must not offer to open it.
     expect(screen.queryByRole("button", { name: /Open turn details/ })).toBeNull();
@@ -315,17 +319,17 @@ describe("the stats line in a thread's composer", () => {
     const under = container.querySelector(".composer-under");
     const line = screen.getByTestId("thread-stats-line");
     expect(container.querySelector(".thread-composer__surface")?.nextElementSibling).toBe(under);
-    // The line of facts is the last row of the tray; the figures stand on the
-    // page under the tray.
-    const tray = under?.parentElement;
-    expect(tray).toHaveClass("composer-frame");
-    expect(tray?.nextElementSibling).toBe(line);
+    // The line of facts is the last row of the composer's frame; the figures
+    // stand on the page under it.
+    const frame = under?.parentElement;
+    expect(frame).toHaveClass("composer-frame");
+    expect(frame?.nextElementSibling).toBe(line);
     expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(within(line).queryByText("5h")).not.toBeInTheDocument();
     expect(under).toHaveTextContent("Project · branch");
     expect(
       within(under as HTMLElement).getByRole("group", { name: "Plan usage left" }),
-    ).toHaveTextContent("5h88%wk38%");
+    ).toHaveTextContent("5h88%week38%");
   });
 
   it("keeps the plan windows under the composer when the stats line is hidden", () => {
@@ -336,7 +340,7 @@ describe("the stats line in a thread's composer", () => {
     );
 
     expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-    expect(container.querySelector(".composer-under")).toHaveTextContent("5h88%wk38%");
+    expect(container.querySelector(".composer-under")).toHaveTextContent("5h88%week38%");
   });
 });
 
