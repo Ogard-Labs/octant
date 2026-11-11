@@ -4420,8 +4420,16 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   line-height: 1.45;
 }
 
+.whats-new-announcement__position {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+}
+
 .whats-new-announcement__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: var(--oct-space-2);
   margin-top: var(--oct-space-2);

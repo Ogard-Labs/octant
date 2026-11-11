@@ -3383,16 +3383,53 @@ the update, so the card shows once. The collapsed icon rail never draws the
 card and does not acknowledge it; it waits for the sidebar to open. A browser
 or remote client has no card.
 
-A release may bundle one announcement beside its notes. It replaces the card as
-a modal dialog laid out as a poster: a 200px picture running to the dialog's
-edges at its top (the aperture band with the mark at 56px when there is none),
-then a title, a body and the two answers, all centred. "Not now" is the quiet
-filled button and the primary button opens the notes, labelled "See what's
-new" unless the release names its own; the dialog opens with focus on the
-primary button. (With the picture inset and the text ranged left it read as a
-settings dialog that happened to hold an image.) Any answer acknowledges the
-update and the card is not shown afterwards. The announcement is a bounded file
-and an optional bundled picture; an invalid one is simply absent. The rule is in
+A release may bundle announcements beside its notes: one to five, shown in a
+row. They replace the card as a modal dialog laid out as a poster: a 200px
+picture running to the dialog's edges at its top (the aperture band with the
+mark at 56px when there is none), then a title, a body and the answers, all
+centred. (With the picture inset and the text ranged left it read as a settings
+dialog that happened to hold an image.) The dialog shows one announcement at a
+time. "Not now" is the quiet filled button on every step, and the primary
+button opens the notes, labelled "See what's new" unless the announcement names
+its own. With a single announcement that is the whole dialog: it opens with
+focus on the primary button and has no paging.
+
+With several, a position line ("2 of 3") sits under the body and is part of the
+dialog's accessible description; it is a polite status, so each step is read
+out. A "Back" button (a ghost button before "Not now") is absent on the first
+announcement. "Next" is the primary button on every announcement but the last;
+on the last the announcement's own button (or "See what's new") takes its
+place. An announcement that names its own action keeps that button, quiet,
+beside "Next" on its step. Left and Right arrow move between announcements
+unless focus is in a field or widget that uses them, and stop at the ends;
+Escape closes. Focus stays in the dialog and lands on the primary button after
+each step. The step changes with no animation of its own, so reduced motion
+needs nothing extra; the dialog's open and close follow the overlay rules.
+
+The set is acknowledged once, however it ends: closing at any step, pressing an
+action, or finishing the last announcement acknowledges the update, and neither
+the dialog nor the card is shown afterwards. The acknowledgement is the app
+version, which names the whole bundle, so changing, adding or removing an
+announcement means a new release and the set shows again. Reason: a row of
+announcements is one message from one release, and asking again for each one
+would turn a courtesy into a chore.
+
+The announcements are one bounded file and optional bundled pictures; none of
+them can run code or name anything outside the resources folder. The file is
+`{ "schemaVersion": 2, "announcements": [ ... ] }` with entries of `title` (80
+characters), `body` (600), and optionally `actionLabel` (32), `picture` (a bare
+png, jpg or webp name, 524,288 bytes at most, whose bytes must match its
+name) and `pictureAlt` (160). The file is at most 16,384 characters: five full
+entries, pretty-printed and escaped, come to about 3,000 characters each. A
+version 1 file (one announcement object) still works as a list of one. A file
+that is not valid as a whole (bad JSON, an unknown top-level field, a wrong
+shape) shows nothing. Inside a valid version 2 file an entry that is invalid by
+itself, including one whose picture is missing, too large or the wrong format,
+is skipped and the others still show in order; beyond five, the first five
+valid ones show. Pictures are read only for entries that will be shown, and all
+of them cross to the renderer together as data URLs (at most about 3.5 MB, once
+per launch, only when the notes are due), because a second round trip would
+make the Next button wait on disk. The rule is in
 [Decisions and requirements](docs/design/decisions.md#whats-new-after-an-update).
 
 ### Mode-specific utility chrome

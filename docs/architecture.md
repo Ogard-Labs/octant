@@ -16185,7 +16185,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
-  bundled file read from disk (with an optional bundled announcement and picture read the same way), so What's New never adds a request.
+  bundled file read from disk (with optional bundled announcements, one to five, and their pictures read the same way), so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
   relaunch they start, and install waits while agents are active (a thread
   parked on an approval or question is still an active agent) or while the
