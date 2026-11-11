@@ -267,6 +267,8 @@ describe("octantSettingsRegistry", () => {
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",
+      "host-worktrees",
+      "xcode-build-data",
       "open-in-applications",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");

@@ -3011,6 +3011,22 @@ still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device sees the section as managed on the host machine
 ([rules](docs/architecture.md#modes-chat-work-and-code)).
+**Worktrees on this computer** follows it: a first row says when the host last
+scanned ("Not scanned since Octant started" until then) and how many it found,
+with **Scan** and, when any qualify, **Remove N merged or gone**, which asks
+once in the destructive role (ignored files go with each folder), then removes
+each and reports how many stayed because they need a look. Worktrees are
+grouped under their repository's path in mono; each row is the branch (or
+"Detached HEAD"), then a line of facts (Folder is gone, Locked by Git, Merged
+or pushed, or Has commits only here; size; last used) and the folder in mono,
+with **Remove** (**Forget** when the folder is gone; disabled when locked).
+Remove asks once in the destructive role; when the host answers that commits
+exist only on the branch it asks again listing up to ten of them, and when the
+worktree was used in the last 15 minutes it asks once more (**Remove anyway**).
+**Xcode builds**, on a Mac only, lists DerivedData folders whose project is
+gone or that Xcode has not opened for 30 days, largest first, each with its
+state, size and workspace path in mono, a **Remove** per row and **Remove N
+whose project is gone**, both asking once.
 A Code, Chat, or Work tool row whose result was outside content carries an
 "Outside content" tag, followed by what Octant Shield's Watcher found in it in
 the warning role, and a Code thread's board card a small mark; at Full access
