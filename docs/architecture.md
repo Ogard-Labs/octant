@@ -1772,6 +1772,31 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+Archiving a Code thread, by a person or the host's completed-thread timer,
+keeps the thread and tells the host once the journal records it. The host then
+asks `ManagedWorktreeService.cleanup` to remove the thread's managed worktree
+with `onArchive`, which stands in for a person's confirmation only when the
+worktree has no uncommitted or untracked changes and its commit is delivered:
+contained in a remote-tracking branch (pushed) or in a local branch other than
+its own (merged), as `git for-each-ref --contains HEAD` reports. Anything else
+is refused before anything is touched and the worktree stays. Archiving does
+not stop a turn that is starting, running, or waiting on the person, and its
+commands still use the folder, so while the runtime reports one
+(`turnInProgress`) the host skips the removal and the worktree stays listed.
+Removal keeps the
+branch, so committed work is never lost; a squash or rebase merge leaves the
+original commit uncontained, and that worktree stays for a person to remove.
+Settings › Code › Worktrees lists the managed worktrees archived threads still
+keep, largest first, with the Project, branch, folder, and a bounded size
+(200,000 entries, then "more than"). Remove asks once and runs the same
+cleanup as a confirmed local-user request: it refuses uncommitted changes, an
+active thread, and a thread whose turn is still in progress, and keeps the
+branch. Listing and removing are a local
+window's alone, because the list names folders on this computer and removal
+deletes from its disk; a paired device is refused both. The receipt's
+`cleanup-pending` and `removed` states record each removal, as they do for the
+other cleanup callers.
+
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
 resolves itself: the client names the source thread and a finished turn, and
 the host picks the files from its own record — the checkpoint the next writing
@@ -12597,7 +12622,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
-  results also land inside it. Simulator captures remain isolated in their own
+  results also land inside it. The action removes that directory however it
+  ends: a run's app is already installed in the Simulator and every action
+  builds into its own directory, so nothing reads it again and keeping it would
+  leave a full build tree per action. A test run's result bundle first moves out
+  to the action's `apple-xcresult-<action>` artifact, and only a real directory
+  moves, never a link a build script planted. At start, before it serves
+  requests, the host removes any derived-data directory a stopped host or an
+  outlived build process left. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
 
 - **Provider capability matrix ("degraded on").** Claude Code, Codex, Mistral

@@ -1606,6 +1606,7 @@ describe("extensions marketplace integrated exit gate", () => {
     const artifactDirectory = await mkdtemp(join(tmpdir(), "octant-phase10-apple-"));
     directories.push(artifactDirectory);
     const artifactRoot = join(artifactDirectory, "artifacts");
+    const derivedModes: number[] = [];
     const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
       const command = input.argv.join(" ");
       if (command === "xcode-select -p") {
@@ -1649,6 +1650,8 @@ describe("extensions marketplace integrated exit gate", () => {
       }
       // A build command succeeds.
       if (command.includes("xcodebuild") && command.includes("build")) {
+        const derived = input.argv[input.argv.indexOf("-derivedDataPath") + 1];
+        if (derived !== undefined) derivedModes.push((await stat(derived)).mode & 0o777);
         return processResult("** BUILD SUCCEEDED **\n");
       }
       // A test command succeeds.
@@ -1709,8 +1712,10 @@ describe("extensions marketplace integrated exit gate", () => {
     };
     const build = await service.execute(buildRequest, executionContext);
     expect(build.outcome).toBe("succeeded");
+    // The build wrote into a private directory, which is gone once it ends.
+    expect(derivedModes).toEqual([0o700]);
     const derivedRoot = join(artifactRoot, `derived-${buildRequest.actionId}`);
-    expect((await stat(derivedRoot)).mode & 0o777).toBe(0o700);
+    await expect(stat(derivedRoot)).rejects.toThrow();
 
     // Core test succeeds with no extension installed.
     const testRequest: AppleBuildRequest = {

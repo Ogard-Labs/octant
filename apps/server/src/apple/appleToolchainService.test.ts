@@ -7,7 +7,7 @@ import type {
   ToolActionAuthority,
   ToolActionCancellation,
 } from "@octant/contracts";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -596,8 +596,10 @@ describe("AppleToolchainService lifecycle", () => {
     expect(execute.mock.calls.map(([input]) => input.argv.join(" ")).join("\n")).toContain(
       `xcrun simctl launch --terminate-running-process ${ids.simulator} app.octant.fixture`,
     );
+    // The app was copied into the Simulator, so the build's derived data is
+    // gone once the action ends rather than piling up per action.
     const derivedRoot = join(context.artifactRoot, `derived-${ids.action}`);
-    expect(existsSync(derivedRoot)).toBe(true);
+    expect(existsSync(derivedRoot)).toBe(false);
     const buildLaunches = execute.mock.calls.filter(([input]) =>
       input.argv.includes("-derivedDataPath"),
     );
@@ -619,6 +621,45 @@ describe("AppleToolchainService lifecycle", () => {
         bundleIdentifier: "app.octant.fixture",
       }),
     ]);
+  });
+
+  it("keeps a test run's result bundle as evidence and removes the rest of its build tree", async () => {
+    const execute = discoveryExecutor();
+    execute.mockImplementation(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const command = input.argv.join(" ");
+      const discovered = await discoveryExecutor()(input);
+      if (!String(new TextDecoder().decode(discovered.stderr)).startsWith("unexpected"))
+        return discovered;
+      if (command.startsWith("xcodebuild ")) {
+        const derived = input.argv[input.argv.indexOf("-derivedDataPath") + 1] ?? "";
+        mkdirSync(join(derived, "Build", "Products"), { recursive: true });
+        writeFileSync(join(derived, "Build", "Products", "Fixture.app"), "binary");
+        const bundle = input.argv[input.argv.indexOf("-resultBundlePath") + 1];
+        if (input.argv.includes("-resultBundlePath") && bundle !== undefined) {
+          mkdirSync(bundle, { recursive: true });
+          writeFileSync(join(bundle, "Info.plist"), "verdict");
+        }
+        return processResult("ok\n");
+      }
+      return discovered;
+    });
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(buildRequest({ kind: "test" }), context);
+
+    expect(evidence).toMatchObject({ kind: "test", outcome: "succeeded" });
+    expect(existsSync(join(context.artifactRoot, `derived-${ids.action}`))).toBe(false);
+    expect(
+      readFileSync(
+        join(context.artifactRoot, `apple-xcresult-${ids.action}`, "Info.plist"),
+        "utf8",
+      ),
+    ).toBe("verdict");
   });
 
   it("confines only the test session launch to the measured grant set it asks for", async () => {

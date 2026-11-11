@@ -19,6 +19,9 @@ const technicalMonoSelectors = new Set([
   // A suggested server is named by its host and port, which the Browser opens
   // verbatim: an address, set in mono like the paths and branches above.
   ".browser-workspace__server-address",
+  // An archived thread's worktree row names its branch and its folder on
+  // disk: the same code values, set in mono so a person can tell them apart.
+  ".archived-worktrees__mono",
 ]);
 
 describe("interface typography contract", () => {

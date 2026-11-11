@@ -16,6 +16,10 @@ import {
   type ProtectedFilesClient,
 } from "@octant/client-runtime/protected-files-client";
 import {
+  createArchivedWorktreesClient,
+  type ArchivedWorktreesClient,
+} from "@octant/client-runtime/archived-worktrees-client";
+import {
   createPersonMemoryClient,
   type PersonMemoryClient,
 } from "@octant/client-runtime/person-memory-client";
@@ -225,6 +229,7 @@ export interface LaunchedShellClients {
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
+  readonly archivedWorktreesClient: ArchivedWorktreesClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
@@ -394,6 +399,7 @@ export function createLaunchedShellClients(
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
+    archivedWorktreesClient: createArchivedWorktreesClient(port),
     personMemoryClient: createPersonMemoryClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),

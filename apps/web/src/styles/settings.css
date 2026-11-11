@@ -3743,6 +3743,11 @@ html[data-octant-increased-contrast="true"]
   overflow-wrap: anywhere;
 }
 
+.archived-worktrees__mono {
+  font-family: var(--oct-font-mono);
+  overflow-wrap: anywhere;
+}
+
 .skill-folder-settings__added {
   display: grid;
   gap: var(--oct-space-3);

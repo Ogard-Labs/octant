@@ -581,6 +581,7 @@ Apple development is simulator-only. Physical devices and store upload, submissi
 - Journals with earlier device or distribution validation events replay unchanged; leftover files and the stored store key are left in place and nothing reads them.
 - Apple discovery is derived and refreshable from the checkout; Octant never rewrites projects, schemes, build settings or manifests to make discovery pass. _Here only._
 - A test run preserves its result bundle and logs as evidence and reports a structured verdict. If parsing fails it keeps the raw artifact and reports the verdict incomplete. _Here only._
+- A build's derived data is private to its action and removed when the action ends; a test run's result bundle is kept as its artifact first, and the host clears any leftover derived data at start (maintainer request, 2026-11-10). _Here only._
 - After a restart, ambiguous device work is waiting or inconclusive, never verified. _Here only._
 
 Status: Built. Since: 2026-10-29. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence) and [Device workbench](device-workbench.md).
@@ -699,7 +700,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A repository is identified by an opaque digest of its canonical Git common directory, not a path. File, terminal, test and Git operations are server-owned services; panes are clients, never owners.
 
-- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset, pruned or reused. _Here only._
+- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
+- Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
