@@ -1061,9 +1061,9 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   decides whether the partial answer shows, at every level.
 
 The thread's own choice is a row of the thread's
-[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
-trigger writes the level in effect ("Reply detail: Low") beside the
-`ListCollapse` glyph, and its name also says whose the level is ("Reply
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. The
+row reads "Reply detail" with the level in effect ("Low") at its trailing
+edge, and its accessible name also says whose the level is ("Reply
 detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**

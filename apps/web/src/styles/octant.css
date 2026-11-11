@@ -4867,9 +4867,9 @@ input.switch:checked::after {
   display: none;
 }
 /* The thread's info panel: a quiet icon button at the end of the row and one
-   floating card above it. What it holds (access level, credential commands,
-   provider cloud sessions, continuing elsewhere) used to sit at four places
-   on the thread page, two of them outside the reading column. */
+   menu above it. What it holds (access level, credential commands, provider
+   cloud sessions, continuing elsewhere) used to sit at four places on the
+   thread page, two of them outside the reading column. */
 .thread-info {
   position: relative;
   display: inline-flex;
@@ -4878,6 +4878,9 @@ input.switch:checked::after {
 .thread-info__attention {
   color: var(--oct-warn-fg);
 }
+/* The panel is the menu every other control in the line opens: the same
+   edge, corner, inset and row. As a padded card of loose text links it read
+   as a piece of a web page, not as part of the window. */
 .thread-info__panel {
   position: absolute;
   right: 0;
@@ -4887,66 +4890,184 @@ input.switch:checked::after {
   /* Never wider than the line it opens from: it is anchored to that line's
      trailing edge, and at a phone's width a card measured against the pane
      ran off the leading edge and lost the start of every row. */
-  width: min(440px, 100cqi);
+  width: min(288px, 100cqi);
   max-height: min(60vh, 520px);
   overflow-y: auto;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: var(--oct-radius-md);
+  padding: var(--oct-space-1);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-floating);
   box-shadow: var(--octant-shadow-overlay);
-  color: var(--oct-fg-2);
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   line-height: var(--oct-leading-snug);
 }
 .thread-info__panel[hidden] {
   display: none;
 }
-/* Each row is one fact or one action; a hairline separates them. */
+/* A row opened in place (the access details) needs room for its facts. */
+.thread-info__panel:has(> .task-access-details > section) {
+  width: min(440px, 100cqi);
+}
 .thread-info__panel > * {
   min-width: 0;
   margin: 0;
-  padding-block: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
 }
-.thread-info__panel > :first-child {
-  border-top: 0;
-}
-.thread-info__panel > button {
-  justify-self: start;
-  margin-block: var(--oct-space-1);
-  padding-block: 0;
-  border-top: 0;
-}
-/* An action row's words start on the panel's text edge, where the fact rows
-   start. A ghost button's own inset had them 8px in and a leading icon a
-   further 16px, so four rows began at three places; the hover tile reaches
-   into the panel's padding instead, and the rows are their words alone. */
+/* One row: its name leading, its value and its arrow at the trailing edge,
+   the whole width answering the pointer. */
 .thread-info__panel > button,
-.thread-info__panel > .task-access-details > button {
-  margin-inline-start: calc(var(--oct-space-2) * -1 - 1px);
+.thread-info__panel > .task-access-details > button,
+.thread-info__panel > details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: auto;
+  min-height: 30px;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+  text-align: start;
+  cursor: default;
 }
-.thread-info__panel > button > svg:first-child:not(:only-child) {
-  display: none;
+/* A summary has no edge of its own; the button rows carry a 1px clear one. */
+.thread-info__panel > details > summary {
+  border: 1px solid transparent;
 }
-/* The access level's details continue the level's own line, in the panel's
-   ink; the hairline comes after the pair, not through it. */
+.thread-info__panel > details > summary:hover {
+  background: var(--octant-control-hover);
+}
+.thread-info__panel > button > svg:last-child,
+.thread-info__panel > .task-access-details > button > svg:last-child {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+}
+.thread-info__value {
+  overflow: hidden;
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-info__panel .thread-info__value + svg:last-child {
+  margin-inline-start: 0;
+}
+.thread-info__panel > .task-access-details > button > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+.thread-info__panel > .task-access-details > button[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+/* The level in force heads the menu: its name, and under it where it came
+   from. Its details are the row below, and a hairline closes the group. */
+.thread-info__panel > .guardrail-level {
+  display: grid;
+  gap: 1px;
+  padding: var(--oct-space-2) calc(var(--oct-space-2) + 1px) var(--oct-space-1);
+}
+.thread-info__panel .guardrail-level__mode {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
 .thread-info__panel > .task-access-details {
-  padding-top: 0;
-  border-top: 0;
   color: inherit;
 }
-.thread-info__panel > .task-access-details:not(:last-child) {
-  border-bottom: 1px solid var(--oct-hairline);
+/* The access report opens under its row as part of the menu, not as a
+   bordered box inside it: each fact is its name leading and its value
+   trailing, and the prose around them is the small muted note it is. */
+.task-access-details__report {
+  margin: 0;
+  padding: var(--oct-space-1) calc(var(--oct-space-2) + 1px) var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
-/* A row that opens in place reads as the action rows do while closed, and
-   takes the heading's ink once its content is under it. */
-.thread-info__panel details[open] > summary {
+.task-access-details__report:focus {
+  outline: none;
+}
+.task-access-details__report ul {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-access-details__facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--oct-space-1) var(--oct-space-4);
+  margin: 0;
+  font-size: var(--oct-text-sm);
+}
+.task-access-details__facts dt {
+  color: var(--oct-muted);
+}
+.task-access-details__facts dd {
+  margin: 0;
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+.task-access-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+.thread-info__panel > .task-access-details:not(:last-child)::after {
+  display: block;
+  height: 1px;
+  margin: var(--oct-space-1) var(--oct-space-2);
+  background: var(--oct-hairline);
+  content: "";
+}
+/* A row that opens in place draws the arrow the other rows carry, and turns
+   it when its content is under it. */
+.thread-info__panel > details > summary {
+  list-style: none;
+}
+.thread-info__panel > details > summary::-webkit-details-marker {
+  display: none;
+}
+.thread-info__panel > details > summary::after {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-inline: auto var(--oct-space-1);
+  border-block-end: 1px solid var(--oct-muted);
+  border-inline-end: 1px solid var(--oct-muted);
+  transform: rotate(-45deg);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+  content: "";
+}
+.thread-info__panel > details[open] > summary::after {
+  transform: rotate(45deg);
+}
+.thread-info__panel > details > :not(summary) {
+  margin-inline: calc(var(--oct-space-2) + 1px);
+}
+.thread-info__panel > details > p {
+  font-size: var(--oct-text-xs);
+}
+/* A row is its summary alone while closed, whatever block the surface that
+   owns it draws elsewhere. */
+.thread-info__panel > details {
+  padding: 0;
+}
+.thread-info__panel > details[open] {
+  padding-bottom: var(--oct-space-2);
 }
 .thread-info__panel p {
   margin-block: var(--oct-space-1);
   color: var(--oct-muted);
+}
+.thread-info__panel > .guardrail-level {
+  margin: 0;
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
@@ -7434,7 +7555,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   display: none;
 }
 .thinking > summary .chev {
-  transition: transform var(--oct-motion-fast) ease;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .thinking[open] > summary .chev {
   transform: rotate(90deg);
@@ -8875,7 +8996,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   display: none;
 }
 .mreason .chev {
-  transition: transform var(--oct-motion-fast) ease;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .mreason[open] .chev {
   transform: rotate(90deg);

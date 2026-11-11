@@ -72,8 +72,8 @@ export function ThreadReplyDetailMenu(props: {
       trigger={
         props.labelled === true ? (
           <>
-            <ListCollapse aria-hidden="true" size={14} strokeWidth={1.7} />
-            <span>Reply detail: {levelLabel}</span>
+            <span>Reply detail</span>
+            <span className="thread-info__value">{levelLabel}</span>
             <ChevronDown aria-hidden="true" size={12} />
           </>
         ) : (

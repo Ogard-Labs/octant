@@ -71,9 +71,18 @@ What is true about a thread but is not part of its conversation has one home:
 a quiet icon button named **Thread info** at the end of the line under the
 follow-up composer, after the plan meters and the model. Its name is its
 tooltip and its accessible name; written out, its two words wrapped the line in
-a split pane and left the button on a line of its own. It opens one floating
-card above the line, at most 440px wide and never wider than the line, whose
-rows start on one text edge and are, in order and each only where it applies:
+a split pane and left the button on a line of its own. It opens one menu above
+the line, drawn as every other menu the line opens: the same edge, corner and
+4px inset, 288px wide and never wider than the line, with rows 30px tall that
+answer the pointer across their whole width. A row is its name leading, and at
+the trailing edge its current value in muted ink and its arrow. The level in
+force heads the menu, its name over where it came from ("Matches your
+default"), and a hairline closes that group. A row that opens in place
+(**Access details**, **Credential commands**, **Provider cloud sessions**)
+turns its arrow and puts its content under it; the access report is a list of
+facts, each name leading and its value trailing, and the menu widens to 440px
+while it is open. As a padded card of loose text links the panel read as a
+piece of a web page. Its rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),

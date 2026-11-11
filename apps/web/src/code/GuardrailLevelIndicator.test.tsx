@@ -50,7 +50,7 @@ describe("thread guardrail level", () => {
       }),
     );
     expect(screen.getByText("Auto")).toBeVisible();
-    expect(screen.getByText(/set by this Project/)).toBeVisible();
+    expect(screen.getByText(/Set by this Project/)).toBeVisible();
   });
 
   it("says the level is the person's default when no Project sets one", () => {
@@ -62,7 +62,7 @@ describe("thread guardrail level", () => {
         projects: [workProject()],
       }),
     );
-    expect(screen.getByText(/set by your default/)).toBeVisible();
+    expect(screen.getByText(/Set by your default/)).toBeVisible();
   });
 
   it("says the thread set its own level when it differs from the defaults", () => {
@@ -75,7 +75,7 @@ describe("thread guardrail level", () => {
       }),
     );
     expect(screen.getByText("Full access")).toBeVisible();
-    expect(screen.getByText(/set by this thread/)).toBeVisible();
+    expect(screen.getByText(/Set by this thread/)).toBeVisible();
   });
 
   it("names Ask first for a thread stored at Auto when no reviewer can run", () => {
