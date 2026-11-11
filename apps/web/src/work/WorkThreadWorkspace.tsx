@@ -2916,23 +2916,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             )
           }
           row={{
+            attach:
+              props.turnClient === undefined ? undefined : (
+                <ComposerAttachButton
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  busy={creating || completionLocked}
+                  refusedReason={
+                    imageSupport === false
+                      ? "The selected model does not accept images. Choose an image-capable model."
+                      : undefined
+                  }
+                  onRefused={images.refuse}
+                  onFileSelected={(file) => images.attach([file])}
+                />
+              ),
             leading: (
               <>
-                {props.turnClient === undefined ? null : (
-                  <>
-                    <ComposerAttachButton
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      busy={creating || completionLocked}
-                      refusedReason={
-                        imageSupport === false
-                          ? "The selected model does not accept images. Choose an image-capable model."
-                          : undefined
-                      }
-                      onRefused={images.refuse}
-                      onFileSelected={(file) => images.attach([file])}
-                    />
-                  </>
-                )}
                 {props.imageGenerationClient === undefined ||
                 props.imageGenerationProfiles === undefined ? null : (
                   <ImageGenerationAction

@@ -710,6 +710,33 @@ export function useShellController(options: ShellControllerOptions) {
     });
   }
 
+  /**
+   * Hands a pane to another of its tabs so its open one can be placed
+   * elsewhere, and says whether the pane now shows something else.
+   *
+   * A tab the row remembers may since have been opened in another pane.
+   * Activating that one only focuses the other pane and leaves this pane as
+   * it was, so the open tab would then be placed while still shown here and
+   * the host would move the whole pane, its row with it. Such a tab is passed
+   * over; with no other tab to show, nothing is handed over.
+   */
+  async function showAnotherContentTab(paneId: PaneId, tabId: WorkspaceTabId): Promise<boolean> {
+    const entries = contentTabs.get(paneId) ?? [];
+    const index = entries.findIndex((entry) => entry.id === tabId);
+    if (index < 0) return false;
+    const shell = committedShell.current;
+    const layout =
+      shell === undefined ? undefined : shell.workspace.layouts[shell.workspace.activeMode];
+    const shownElsewhere = (entry: WorkspaceTab): boolean => {
+      const shownIn = layout === undefined ? undefined : findVisibleSurfacePane(layout, entry);
+      return shownIn !== undefined && String(shownIn.paneId) !== String(paneId);
+    };
+    // The neighbour a close would show first, then the rest of the row.
+    const candidates = [...entries.slice(0, index).toReversed(), ...entries.slice(index + 1)];
+    const next = candidates.find((entry) => !shownElsewhere(entry));
+    return next === undefined ? false : activateContentTab(paneId, next.id);
+  }
+
   async function closeContentTab(paneId: PaneId, tabId: WorkspaceTabId): Promise<void> {
     const entries = contentTabs.get(paneId) ?? [];
     const index = entries.findIndex((entry) => entry.id === tabId);
@@ -1284,6 +1311,7 @@ export function useShellController(options: ShellControllerOptions) {
     closePane,
     contentTabs,
     activateContentTab,
+    showAnotherContentTab,
     closeContentTab,
     commitSplitResize,
     crossContextOffer,
