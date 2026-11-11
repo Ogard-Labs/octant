@@ -4540,10 +4540,9 @@ input.switch:checked::after {
   min-width: 0;
   padding-inline: var(--oct-space-2);
 }
-/* The prompt keeps room for a few words whatever stands beside it. */
 .composer-field__prompt {
   flex: 1 1 auto;
-  min-width: 96px;
+  min-width: 0;
 }
 .composer-field__prompt > label {
   display: block;
@@ -4580,6 +4579,12 @@ input.switch:checked::after {
 .composer-field__actions .composer-voice__error {
   flex: 0 1 auto;
   min-width: 0;
+}
+/* While a failure is said, the prompt keeps room for a few words. The floor
+   holds only then: as a standing rule it pushed send out of a narrow pill
+   when Stop and Force stop stood beside it. */
+.composer-field:has(.composer-voice__error) > .composer-field__prompt {
+  min-width: 96px;
 }
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
