@@ -67,6 +67,7 @@ export interface ShellSettingsSurfaceProps {
   readonly isNarrow: boolean;
   readonly nativeBoundsAvailable: boolean;
   readonly reservesTitlebarInset?: boolean;
+  readonly presentation?: "page" | "sheet";
   readonly onBack: () => void;
   readonly onDeepLinkApplied: () => void;
   readonly onResetLayout: () => void;
@@ -166,6 +167,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.reservesTitlebarInset === undefined
               ? {}
               : { reservesTitlebarInset: props.reservesTitlebarInset })}
+            {...(props.presentation === undefined ? {} : { presentation: props.presentation })}
             onBack={props.onBack}
             onDeepLinkApplied={props.onDeepLinkApplied}
             onResetLayout={props.onResetLayout}

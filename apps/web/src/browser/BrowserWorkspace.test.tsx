@@ -1398,7 +1398,12 @@ describe("BrowserWorkspace", () => {
     });
   });
 
-  it.each(["workspace-drag-preview", "workspace-drop-overlay", "octant-dialog__backdrop"])(
+  it.each([
+    "workspace-drag-preview",
+    "workspace-drop-overlay",
+    "octant-dialog__backdrop",
+    "octant-sheet__backdrop",
+  ])(
     "detaches the native surface while the .%s renderer overlay is present",
     async (overlayClass) => {
       const restoreDom = stubNativeSurfaceDom();

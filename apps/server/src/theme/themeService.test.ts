@@ -147,4 +147,22 @@ describe("ThemeService", () => {
     ).toThrowError(ThemeServiceError);
     expect(test.append).not.toHaveBeenCalled();
   });
+
+  it("refuses an override scoped to the mode the theme is not showing when it fails contrast", () => {
+    const test = fixture();
+    expect(() =>
+      test.service.execute({
+        kind: "update-theme-settings",
+        settings: {
+          ...DEFAULT_THEME_SETTINGS,
+          mode: "system",
+          semanticOverrides: [
+            { role: "accent", color: "#ffffff", mode: "dark" },
+            { role: "accent-foreground", color: "#f5f5f5", mode: "dark" },
+          ],
+        },
+      }),
+    ).toThrowError(ThemeServiceError);
+    expect(test.append).not.toHaveBeenCalled();
+  });
 });

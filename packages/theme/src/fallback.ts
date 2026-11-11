@@ -59,14 +59,14 @@ export function validateOverride(
 export function applySemanticOverrides(
   base: Readonly<Record<string, string>>,
   overrides: ReadonlyArray<ThemeSemanticOverrideEntry>,
-  _mode: "light" | "dark",
+  mode: "light" | "dark",
 ): {
   tokens: Readonly<Record<string, string>>;
   droppedOverrides: ReadonlyArray<DroppedOverride>;
 } {
   const tokens: Record<string, string> = { ...base };
   const dropped: DroppedOverride[] = [];
-  for (const entry of overrides) {
+  for (const entry of inApplyOrder(overrides, mode)) {
     const result = validateOverride(entry.role, entry.color, tokens);
     if (result.ok) {
       tokens[entry.role] = entry.color;
@@ -75,6 +75,33 @@ export function applySemanticOverrides(
     }
   }
   return { tokens, droppedOverrides: dropped };
+}
+
+// Only the override that wins a role in this mode is applied: one scoped to
+// the mode replaces a shared one, which is never checked, or a shared ink
+// meant for the other mode was refused here. Text roles are checked against
+// the surface they sit on, so every surface lands first; array order alone
+// checked a shared accent-foreground against the preset accent when a
+// dark-only accent came after it.
+function inApplyOrder(
+  overrides: ReadonlyArray<ThemeSemanticOverrideEntry>,
+  mode: "light" | "dark",
+): ReadonlyArray<ThemeSemanticOverrideEntry> {
+  const rank = (entry: ThemeSemanticOverrideEntry): number => {
+    const level = isKnownThemeTokenRole(entry.role)
+      ? getRoleDefinition(entry.role).contrastLevel
+      : undefined;
+    const text = level === "normal-text" || level === "large-text";
+    return text ? 1 : 0;
+  };
+  const scopedRoles = new Set(
+    overrides.filter((entry) => entry.mode === mode).map((entry) => entry.role),
+  );
+  return overrides
+    .filter((entry) =>
+      entry.mode === undefined ? !scopedRoles.has(entry.role) : entry.mode === mode,
+    )
+    .toSorted((a, b) => rank(a) - rank(b));
 }
 
 export function resolveEffectiveTokens(

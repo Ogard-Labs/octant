@@ -171,8 +171,10 @@ describe("the public-block visual language", () => {
 
     expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
-    expect(darkShadow).toMatch(/0 10px 18px -8px/);
-    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 10px 15px -3px/s);
+    // A raised step is light on its top edge, then the shadow that lifts it.
+    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-bevel\)/);
+    expect(darkShadow).toMatch(/0 12px 24px -8px/);
+    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 12px 24px -8px/s);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
@@ -268,6 +270,11 @@ describe("the public-block visual language", () => {
     expect(withoutComments).toMatch(
       /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{]*\{[^}]*--oct-focus-edge-on-accent/,
     );
+    // A control filled with the primary text colour would do the same, so it
+    // draws the edge in the page colour.
+    expect(withoutComments).toMatch(
+      /\[data-slot="button"\]\[data-variant="solid"\]:focus-visible\s*\{[^}]*outline-color:[^;]*--octant-workspace/,
+    );
 
     // A feature stylesheet may move the edge (an inline link, a drawn mark)
     // but may not suppress it, colour it, or draw a second ring of its own.
@@ -300,6 +307,7 @@ describe("the public-block visual language", () => {
       ".zen-surface",
       ".browser-workspace__remote",
       ".octant-dialog__popup",
+      ".octant-sheet__popup",
       ".folder-picker__search input",
       ".octant-popover-search input",
       ".artifact-library__search-input",

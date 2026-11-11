@@ -741,6 +741,297 @@ describe("CanvasWorkspaceTab", () => {
     expect(marker).toHaveFocus();
   });
 
+  function commentingClient(comment = vi.fn()) {
+    const comments = vi.fn(async () => ({
+      kind: "ready" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 3,
+      threads: [],
+    }));
+    return createCanvasClient(readyVersion, undefined, {
+      comments,
+      comment,
+    } as unknown as Partial<CanvasClient>);
+  }
+
+  function inDocument(selector: string): Element {
+    const element = document.querySelector(selector);
+    if (element === null) throw new Error(`Nothing matches ${selector}`);
+    return element;
+  }
+
+  // The document's renderers load on demand, so a block arrives after the
+  // rail that is drawn beside it.
+  const findInDocument = (selector: string) => waitFor(() => inDocument(selector));
+  const boardNode = (nodeId: string) =>
+    findInDocument(`[data-block-id="diagram-1"] [data-node-id="${nodeId}"]`);
+
+  it("opens comments on the board node a person points at with the Comment tool", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    expect(await screen.findByRole("button", { name: "Select" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Comment: click a part" }));
+    // `detail` is what tells a pointer's click from a key's.
+    fireEvent.click(await boardNode("b"), { detail: 1 });
+
+    expect(screen.getByRole("complementary", { name: "Comments" })).toBeVisible();
+    expect(screen.getByText("On Board · Report")).toBeInTheDocument();
+  });
+
+  it("shows no tools on a Canvas that takes no comments here", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
+
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+    expect(screen.queryByRole("group", { name: "Canvas tools" })).toBeNull();
+  });
+
+  it("returns focus to the tool after a second pick, when the drawer already held focus", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    const tool = await screen.findByRole("button", { name: "Comment: click a part" });
+    tool.focus();
+    fireEvent.click(tool);
+    fireEvent.click(await boardNode("b"), { detail: 1 });
+    const close = screen.getByRole("button", { name: "Close comments" });
+    await waitFor(() => expect(close).toHaveFocus());
+    fireEvent.click(await boardNode("a"), { detail: 1 });
+    expect(screen.getByText("On Board · Ingest")).toBeInTheDocument();
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(tool).toHaveFocus();
+  });
+
+  it("marks nothing for an area drag the browser cancelled", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comment on an area: drag a box" }));
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(block, { button: 0, clientX: 200, clientY: 250, pointerId: 1 });
+    fireEvent.pointerCancel(block, { clientX: 0, clientY: 0, pointerId: 1 });
+
+    expect(document.querySelector(".canvas-block__area")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+  });
+
+  it("holds a block's own controls still under the Hand tool, and gives them back on Escape", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    const hand = await screen.findByRole("button", { name: "Hand: drag to move the page" });
+    fireEvent.click(hand);
+    const marker = await screen.findByRole("button", { name: "Comment on Q3 Overview" });
+    fireEvent.click(marker, { detail: 1 });
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+
+    fireEvent.keyDown(hand, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Select" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(marker, { detail: 1 });
+    expect(screen.getByRole("complementary", { name: "Comments" })).toBeVisible();
+  });
+
+  it("lets a click made from the keyboard through while a tool holds the pointer", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hand: drag to move the page" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Comment on Q3 Overview" }), {
+      detail: 0,
+    });
+    expect(screen.getByRole("complementary", { name: "Comments" })).toBeVisible();
+  });
+
+  it("lands a comment on the area a person drags over a block", async () => {
+    const comment = vi.fn(async () => ({
+      kind: "accepted" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 4,
+    }));
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient(comment)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comment on an area: drag a box" }));
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(block, { button: 0, clientX: 200, clientY: 250, pointerId: 1 });
+    fireEvent.pointerMove(block, { clientX: 300, clientY: 350, pointerId: 1 });
+    fireEvent.pointerUp(block, { clientX: 300, clientY: 350, pointerId: 1 });
+
+    // The marked area waits on the block, washed, until it has its comment.
+    const mark = inDocument('section[data-block-id="chart-1"] > .canvas-block__area');
+    expect(mark).toHaveAttribute("data-draft", "true");
+    expect(mark).toHaveStyle({ left: "25%", top: "25%", width: "25%", height: "50%" });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "New comment" }), {
+      target: { value: "This dip looks wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(comment).toHaveBeenCalledTimes(1));
+    expect(comment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "canvas-comment-add",
+        body: "This dip looks wrong",
+        anchor: expect.objectContaining({
+          kind: "region",
+          blockId: "chart-1",
+          x: 25,
+          y: 25,
+          width: 25,
+          height: 50,
+        }),
+      }),
+    );
+    await waitFor(() => expect(document.querySelector(".canvas-block__area")).toBeNull());
+  });
+
+  it("lands a comment on the line a person draws over a block with the Pen", async () => {
+    const comment = vi.fn(async () => ({
+      kind: "accepted" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 4,
+    }));
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient(comment)} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pen: draw on a block, then comment" }),
+    );
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(block, { button: 0, clientX: 200, clientY: 250, pointerId: 1 });
+    fireEvent.pointerMove(block, { clientX: 300, clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(block, { clientX: 400, clientY: 250, pointerId: 1 });
+
+    const line = inDocument('section[data-block-id="chart-1"] > .canvas-block__stroke');
+    expect(line).toHaveAttribute("data-draft", "true");
+    expect(line.querySelector("polyline")).toHaveAttribute("points", "25,25 50,50 75,25");
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "New comment" }), {
+      target: { value: "Why does it peak here?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(comment).toHaveBeenCalledTimes(1));
+    expect(comment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "canvas-comment-add",
+        anchor: expect.objectContaining({
+          kind: "stroke",
+          blockId: "chart-1",
+          points: [
+            { x: 25, y: 25 },
+            { x: 50, y: 50 },
+            { x: 75, y: 25 },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("pins a note where a person clicks with the Text tool and draws its words there", async () => {
+    const author = readyVersion.version.createdBy;
+    const threads: Array<unknown> = [];
+    const comment = vi.fn(async (command: { anchor: unknown; body: string; commentId: string }) => {
+      threads.push({
+        comment: {
+          commentId: command.commentId,
+          anchor: command.anchor,
+          author,
+          origin: { kind: "host" as const },
+          body: command.body,
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        replies: [],
+      });
+      return { kind: "accepted" as const, canvasId: quarterlyCanvasId, sequence: 4 };
+    });
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments: vi.fn(async () => ({
+        kind: "ready" as const,
+        canvasId: quarterlyCanvasId,
+        sequence: 3,
+        threads: [...threads],
+      })),
+      comment,
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Text: click a spot to pin a note" }),
+    );
+    const block = await findInDocument('section[data-block-id="chart-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    fireEvent.click(block, { detail: 1, clientX: 200, clientY: 300 });
+
+    const pin = inDocument('section[data-block-id="chart-1"] > .canvas-block__note');
+    expect(pin).toHaveAttribute("data-draft", "true");
+    expect(pin).toHaveStyle({ left: "25%", top: "50%" });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "New comment" }), {
+      target: { value: "Label this axis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(comment).toHaveBeenCalledTimes(1));
+    expect(comment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        anchor: expect.objectContaining({ kind: "region", x: 25, y: 50, width: 0, height: 0 }),
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        inDocument('section[data-block-id="chart-1"] > .canvas-block__note[data-draft="false"]'),
+      ).toHaveTextContent("Label this axis"),
+    );
+  });
+
+  it("keeps a finger's drag for the Area and Pen tools alone, so the page does not scroll under a mark", () => {
+    for (const tool of ["area", "pen"]) {
+      expect(cssDeclarations(`.canvas-tool-surface[data-tool="${tool}"] *`)["touch-action"]).toBe(
+        "none",
+      );
+    }
+    expect(
+      cssDeclarations('.canvas-tool-surface[data-tool="hand"] *')["touch-action"],
+    ).toBeUndefined();
+  });
+
+  it("takes no area on a board, whose picture moves under its block", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={commentingClient()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comment on an area: drag a box" }));
+    const block = await findInDocument('section[data-block-id="diagram-1"]');
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    const board = await findInDocument('section[data-block-id="diagram-1"] .canvas-board__svg');
+    fireEvent.pointerDown(board, { button: 0, clientX: 50, clientY: 50, pointerId: 1 });
+    fireEvent.pointerUp(board, { clientX: 250, clientY: 150, pointerId: 1 });
+
+    expect(document.querySelector(".canvas-block__area")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+  });
+
   it("opens a table row's comments from its marker and returns focus there on Escape", async () => {
     const author = readyVersion.version.createdBy;
     const onRow = (commentId: string, rowId: string, body: string) => ({

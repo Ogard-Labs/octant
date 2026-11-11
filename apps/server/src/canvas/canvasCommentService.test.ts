@@ -177,6 +177,36 @@ describe("CanvasCommentService", () => {
     });
   });
 
+  it("journals a comment on a drawn line and rebuilds the line after a restart, and refuses a line that leaves its block", () => {
+    const { service } = fixture();
+    const points = [
+      { x: 10, y: 20 },
+      { x: 42.5, y: 61 },
+    ];
+    const onLine = (to: { readonly x: number; readonly y: number }) => ({
+      ...add(0, "Why does it peak here?"),
+      anchor: {
+        kind: "stroke",
+        blockId: "block-1",
+        strokeId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        points: [points[0], to],
+      },
+    });
+    const first = service();
+    expect(
+      first.comment(onLine({ x: 140, y: 61 }), context, project, { kind: "host" }),
+    ).toMatchObject({ kind: "denied" });
+    expect(
+      first.comment(onLine({ x: 42.5, y: 61 }), context, project, { kind: "host" }),
+    ).toMatchObject({ kind: "accepted", sequence: 1 });
+
+    const outcome = service().comments(canvasId, context, project);
+    expect(outcome.kind).toBe("ready");
+    if (outcome.kind !== "ready") return;
+    expect(outcome.threads).toHaveLength(1);
+    expect(outcome.threads[0]?.comment.anchor).toMatchObject({ kind: "stroke", points });
+  });
+
   it("journals a comment and its resolution as the host's person even when the request names an agent", () => {
     const { service } = fixture();
     const comments = service();

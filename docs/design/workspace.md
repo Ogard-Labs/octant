@@ -68,15 +68,27 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the strip above the follow-up
-composer, after the plan meters. It opens one floating card above the strip,
-at most 440px wide, whose rows are, in order and each only where it applies:
+a quiet icon button named **Thread info** at the end of the line under the
+follow-up composer, after the plan meters and the model. Its name is its
+tooltip and its accessible name; written out, its two words wrapped the line in
+a split pane and left the button on a line of its own. It opens one menu above
+the line, drawn as every other menu the line opens: the same edge, corner and
+4px inset, 288px wide and never wider than the line, with rows 30px tall that
+answer the pointer across their whole width. A row is its name leading, and at
+the trailing edge its current value in muted ink and its arrow. The level in
+force heads the menu, its name over where it came from ("Matches your
+default"), and a hairline closes that group. A row that opens in place
+(**Access details**, **Credential commands**, **Provider cloud sessions**)
+turns its arrow and puts its content under it; the access report is a list of
+facts, each name leading and its value trailing, and the menu widens to 440px
+while it is open. As a padded card of loose text links the panel read as a
+piece of a web page. Its rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
-here, not in the composer's toolbar: the toolbar holds what a person changes
+here, not in the composer's row: the row holds what a person changes
 from one message to the next (attach, access, model) and had grown to eleven
 controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
@@ -85,8 +97,8 @@ places, two of them outside the reading column.
 
 The rows stay mounted while the card is closed, so a read or a review in one
 of them does not restart when it opens. A row that waits for the person (a
-credential command awaiting review) marks the button "Review required" in the
-warning ink. A control elsewhere that leads to a row (the access shortcut)
+credential command awaiting review) writes "Review required" on the button in
+the warning ink, the one thing the button says in words. A control elsewhere that leads to a row (the access shortcut)
 opens the card. Escape or a press outside closes it and returns focus to the
 button; a dialog or menu a row opened does not count as outside, and Escape
 inside one closes only that. While a move holds the thread and its composer
@@ -314,6 +326,20 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   per coordinator**, and a Code Project's overview holds its own **Starting
   workers** choice (Use Settings, Start without asking, Propose for approval)
   after the Project planner section.
+- **Agents dock.** A coordinator's Agents dock has a **Workers** section under
+  its own subagents: one row per worker in the window's thread list, with the
+  provider's mark, the title, the thread's state in words (Working, Needs
+  attention, Done, Idle), and how many subagents it handed off and how many of
+  them are working. A row opens the worker. In Graph, each worker's subagents
+  are drawn under its row as the same cards and arrows a thread's own graph
+  uses, and a card there opens the worker, since its subagents' pages and
+  controls are the worker's. The List and Graph switch is offered when the
+  coordinator or any worker has subagents. When the coordinator has more workers
+  than the host reads, the section says subagents are shown for the most
+  recently changed workers only, since an older worker's row cannot otherwise
+  tell "not read" from "handed off nothing". When the host refuses the read, the
+  rows stay and the section says the workers' subagents cannot be read here
+  ([Coordinator threads: Seeing workers' subagents](coordinator-threads.md#seeing-workers-subagents)).
 - **Requests.** A coordinator's composer lists its workers' pending approvals
   and questions in the same bounded region as its child runs' requests, each
   naming its worker, with an Open worker action. The rows come from the
@@ -483,7 +509,7 @@ faster, with no fixed floor so a narrow pane keeps its status pill); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval, or on a question the turn asked, is not running: the pill reads
@@ -491,11 +517,11 @@ approval, or on a question the turn asked, is not running: the pill reads
 With content tabs open the bar holds the drag handle and the tabs alone: the
 Project and the Running or Needs you pill leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
-· Drag to move or split"), and the composer's strip still names it; each tab
+· Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
 it runs and a small warning dot after its title while it waits on the person.
 At phone width (680px and below) the title row drops both chips so the title
-stays readable; the composer's context strip below the thread names the
+stays readable; the line under the composer names the
 Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
@@ -1099,9 +1125,20 @@ Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
 rows newest first and an unreviewed result marked "Needs review" unless the
-parent already received it. A row opens
+parent already received it. On a thread with at least one subagent, a List and
+Graph switch sits beside the title. **Graph** arranges the same subagents by
+what waits for what: a run sits below every run it runs after and below the run
+that started it, with an arrow from each run it waits for and a dashed line
+from the run that started it, and a row keeps the order its runs were requested
+in. A card carries the task, the provider's mark and the model, the effort and
+role, and the state in words, which reads "Waiting on N" while the host holds
+the run for N unfinished runs; it opens the page a row opens, and Back returns
+to the graph. A row of cards wider than the dock scrolls sideways.
+Provider-observed children have no such links and stay a list above the graph.
+The host names a run another run waits for only when the window may read that
+run. A row opens
 that subagent's page in place of the list, with a back control: its task as
-the title, a status line, and a small transcript that starts with the task as
+the title, a status line, the runs it runs after, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
@@ -1113,7 +1150,7 @@ scheduled resume while it is armed; the row never presents that wait as a
 finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes for the threads this window holds (the thread in each mode's panes, pinned ones included), because the host
-authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project; on a wide window it can draw the current query as a
+authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project (a coordinator's window may also read its workers' runs as facts, without replies or controls: [Coordinator threads](coordinator-threads.md#seeing-workers-subagents)); on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
@@ -1301,7 +1338,7 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: its turns, input and output tokens,
 thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the strip above the box, right of
+cost. The provider's account limit windows stand in the row under the box, right of
 the thread's context, one bar per window showing the share left; the stats line's
 switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and

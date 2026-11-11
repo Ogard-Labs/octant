@@ -269,15 +269,14 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               ) : undefined
             }
             row={{
-              leading: (
-                <>
-                  <ComposerAttachButton
-                    refusedReason="Attachments can be added once the chat starts."
-                    onRefused={setAttachmentNotice}
-                    onFileSelected={() => undefined}
-                  />
-                </>
+              attach: (
+                <ComposerAttachButton
+                  refusedReason="Attachments can be added once the chat starts."
+                  onRefused={setAttachmentNotice}
+                  onFileSelected={() => undefined}
+                />
               ),
+              leading: <></>,
               trailing: (
                 <>
                   <ComposerModelPicker

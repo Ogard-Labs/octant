@@ -896,11 +896,12 @@ them on every Nightly run:
 
 ### The usable-client preflight
 
-`Release (preview)` runs two preflight jobs before a Nightly build, on the
+`Release (nightly)` runs two preflight jobs before a Nightly build, on the
 source it will build (a rollback's tag, or `main`). Neither has an environment
 or a secret; the macOS job reads releases with the run's read-only
 `GITHUB_TOKEN`. The build and feed jobs of a Nightly run need both to succeed;
-a dispatched Octant candidate skips them and builds as before.
+Octant's Preview channel is a separate, manual workflow (`Release (preview)`)
+that has no preflight and builds as before.
 
 `bun run nightly:preflight` (`scripts/nightly-preflight.ts`) checks:
 
@@ -1593,7 +1594,7 @@ remain separate packaged acceptance.
 **Rollback is a roll-forward.** Every updater accepts only a strictly newer
 version, so a bad Nightly cannot be withdrawn by republishing an older one:
 installs that took it would call the older one not newer and stay. A
-maintainer instead dispatches `Release (preview)` from `main` with
+maintainer instead dispatches `Release (nightly)` from `main` with
 `rollback_ref` set to a known-good Nightly tag. The run builds that tag as
 Octant Nightly on `preview` under a new version made from the dispatching
 workflow's declared version, today's date and the run number, so it is newer

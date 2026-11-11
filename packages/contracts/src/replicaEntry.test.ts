@@ -486,6 +486,30 @@ describe("canvas comment entries", () => {
     );
   });
 
+  it("carries a comment on a drawn line between computers, hashed the same whatever order a point's keys arrived in", () => {
+    const strokeId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const onLine = (points: ReadonlyArray<unknown>) => ({
+      ...added,
+      anchor: { kind: "stroke", blockId: "d1", strokeId, points },
+    });
+    const drawn = onLine([
+      { x: 10, y: 20 },
+      { x: 42.5, y: 61 },
+    ]);
+    const decoded = decodeReplicaEntry(commentEntry(drawn));
+    expect(encodeReplicaEntry(decodeReplicaEntryText(encodeReplicaEntry(decoded)))).toBe(
+      encodeReplicaEntry(decoded),
+    );
+    const shuffled = onLine([
+      { y: 20, x: 10 },
+      { y: 61, x: 42.5 },
+    ]);
+    expect(replicaCommentContentPreimage(shuffled as never)).toBe(
+      replicaCommentContentPreimage(drawn as never),
+    );
+    expect(() => decodeReplicaEntry(commentEntry(onLine([{ x: 10, y: 20 }])))).toThrow();
+  });
+
   it("carries a deletion as a tombstone, and refuses a comment that names the device it came through", () => {
     expect(
       decodeReplicaEntry(

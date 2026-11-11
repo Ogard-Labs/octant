@@ -2147,6 +2147,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       : folder === undefined || folder === "."
         ? root
         : `${root.replace(/[/\\]+$/, "")}/${folder}`;
+  const folderLabel = folderUnavailable
+    ? "Working folder unavailable"
+    : folder === undefined || folder === "."
+      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
+      : folder;
+  // A Project made from a folder carries that folder's name, so the line read
+  // "Downloads Downloads". The name is said once; its path stays on hover. A
+  // subfolder that happens to share the Project's name is still named.
+  const folderRepeatsProject =
+    path !== undefined && (folder === undefined || folder === ".") && folderLabel === projectLabel;
   // The transcript draws the inline Canvases and the card list the rest.
   const threadCanvases = useThreadCanvasCards({
     client: props.canvasClient,
@@ -2765,17 +2775,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
               <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
               {projectLabel === undefined ? null : (
-                <span className="work-folder-bar__project" title={projectLabel}>
+                <span
+                  className="work-folder-bar__project"
+                  title={folderRepeatsProject ? path : projectLabel}
+                >
                   {projectLabel}
                 </span>
               )}
-              {path === undefined ? null : (
+              {path === undefined || folderRepeatsProject ? null : (
                 <span className="work-folder-bar__folder" title={path}>
-                  {folderUnavailable
-                    ? "Working folder unavailable"
-                    : folder === undefined || folder === "."
-                      ? (root?.split(/[/\\]/).filter(Boolean).at(-1) ?? "Project folder")
-                      : folder}
+                  {folderLabel}
                 </span>
               )}
             </div>
@@ -2916,23 +2925,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             )
           }
           row={{
+            attach:
+              props.turnClient === undefined ? undefined : (
+                <ComposerAttachButton
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  busy={creating || completionLocked}
+                  refusedReason={
+                    imageSupport === false
+                      ? "The selected model does not accept images. Choose an image-capable model."
+                      : undefined
+                  }
+                  onRefused={images.refuse}
+                  onFileSelected={(file) => images.attach([file])}
+                />
+              ),
             leading: (
               <>
-                {props.turnClient === undefined ? null : (
-                  <>
-                    <ComposerAttachButton
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      busy={creating || completionLocked}
-                      refusedReason={
-                        imageSupport === false
-                          ? "The selected model does not accept images. Choose an image-capable model."
-                          : undefined
-                      }
-                      onRefused={images.refuse}
-                      onFileSelected={(file) => images.attach([file])}
-                    />
-                  </>
-                )}
                 {props.imageGenerationClient === undefined ||
                 props.imageGenerationProfiles === undefined ? null : (
                   <ImageGenerationAction

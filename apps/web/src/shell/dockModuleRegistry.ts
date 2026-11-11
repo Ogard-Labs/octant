@@ -41,10 +41,13 @@ export const dockModuleInputs = {
   agents: [
     "agentRunClient",
     "agentRunSettingsClient",
+    "coordinatorWorkers",
     "nativeHarnessClient",
     "onAgentViewRequestHandled",
+    "onOpenCoordinatorWorker",
     "requestedAgentView",
     "onReviewAgentChanges",
+    "providerController",
     "subject",
   ],
   "side-chat": [

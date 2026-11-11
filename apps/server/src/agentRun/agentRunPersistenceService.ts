@@ -492,6 +492,17 @@ export class AgentRunPersistenceService {
       });
   }
 
+  /**
+   * A parent thread's runs as the projection holds them. No reply text is
+   * read: this serves the coordinator graph, which may show that a worker's
+   * run exists and where it stands, never what it said.
+   */
+  parentRunFacts(
+    parentThreadId: AgentRunParentThreadId,
+  ): ReadonlyArray<AgentRunParentSummaryEntry> {
+    return this.#projection.parentSummary(decodeAgentRunParentThreadId(parentThreadId));
+  }
+
   listCenterCandidates(
     input: ListAgentRunCenterCandidatesInput,
   ): ReadonlyArray<AgentRunCenterCandidate> {

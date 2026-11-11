@@ -291,6 +291,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     AgentRunsWiring,
     | "agentsManagedToolsFor"
+    | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
@@ -393,6 +394,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     agentMessageService,
     agentRunPersistence,
     agentsManagedToolsFor,
+    coordinatorWorkersHolder,
     androidInputGrants,
     androidToolchainService,
     appleToolchainService,
@@ -1723,6 +1725,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const unsubscribeCoordinator = persistence.journal.subscribeCommitted((append) =>
       coordinatorService.onCommittedEvents(append.events),
     );
+    coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
     coordinatorService.startSweeping();
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

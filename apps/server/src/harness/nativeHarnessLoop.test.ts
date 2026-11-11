@@ -1646,6 +1646,117 @@ describe("fitting a request to the endpoint", () => {
   });
 });
 
+describe("an agent's text across the requests of one turn", () => {
+  type Step = {
+    readonly says: ReadonlyArray<string | { readonly thinks: string }>;
+    readonly callsTool?: string;
+  };
+
+  /** An endpoint that streams each scripted step's text and then asks for its tool, if any. */
+  function streamingTransport(script: Step[]): NativeHarnessTransport {
+    return {
+      open: async () => ({
+        fits: () => true,
+        send: async (_request, stream) => {
+          const step = script.shift();
+          if (step === undefined) throw new Error("The script ran out of steps.");
+          let text = "";
+          for (const part of step.says) {
+            if (typeof part === "string") {
+              text += part;
+              stream.onEvent({ kind: "text-delta", text: part });
+            } else stream.onEvent({ kind: "reasoning-delta", text: part.thinks });
+          }
+          return {
+            text,
+            toolCalls:
+              step.callsTool === undefined
+                ? []
+                : [{ toolCallId: step.callsTool, toolName: "read", argumentsJson: "{}" }],
+          };
+        },
+        release: () => undefined,
+      }),
+    };
+  }
+
+  // The text a turn's consumers would join: every text delta of the turn,
+  // with each tool the agent asks for answered at once.
+  function turnText(connection: ProviderConnection, prompt: string) {
+    return Effect.gen(function* () {
+      const collected = yield* Effect.fork(
+        Stream.runCollect(
+          (yield* connection.subscribe).pipe(
+            Stream.tap((event) =>
+              event.kind === "tool-request"
+                ? connection.answerTool({
+                    sessionId,
+                    requestId: event.requestId,
+                    resultJson: "{}",
+                    isError: false,
+                  })
+                : Effect.void,
+            ),
+            Stream.takeUntil(isTerminal),
+          ),
+        ),
+      );
+      yield* connection.send({ sessionId, prompt, context: [], attachments: [], tools });
+      return Array.from(yield* Fiber.join(collected))
+        .flatMap((event) => (event.kind === "text-delta" ? [event.text] : []))
+        .join("");
+    });
+  }
+
+  it("keeps a paragraph break between an agent's note and the text that follows a tool step", async () => {
+    const text = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            streamingTransport([
+              { says: ["I'll inspect ", "the repository."], callsTool: "call-1" },
+              { says: ["Let me", " read the entry point."], callsTool: "call-2" },
+              { says: ["Done."] },
+            ]),
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* turnText(connection, "look");
+        }),
+      ),
+    );
+
+    expect(text).toBe("I'll inspect the repository.\n\nLet me read the entry point.\n\nDone.");
+  });
+
+  it("adds no break where no agent message ended, where the text already has one, or at a new turn", async () => {
+    const turns = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            streamingTransport([
+              { says: [], callsTool: "call-1" },
+              { says: ["Reading", { thinks: "Hm" }, " the file.\n"], callsTool: "call-2" },
+              { says: ["It exports one function."], callsTool: "call-3" },
+              { says: ["\nNothing else."] },
+              { says: ["Second turn."] },
+            ]),
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const first = yield* turnText(connection, "look");
+          return [first, yield* turnText(connection, "again")];
+        }),
+      ),
+    );
+
+    expect(turns).toEqual([
+      "Reading the file.\nIt exports one function.\nNothing else.",
+      "Second turn.",
+    ]);
+  });
+});
+
 /** An endpoint whose `fits` always passes, so only the endpoint itself can refuse a size. */
 /**
  * An endpoint whose own size estimate is `fits`, recording every request it

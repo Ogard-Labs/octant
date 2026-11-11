@@ -14,6 +14,7 @@ import {
   decodeAgentRunCommand,
   decodeAgentRunCenterQuery,
   decodeAgentRunCenterResponse,
+  decodeAgentRunCoordinatorGraph,
   decodeAgentRunConversationResponse,
   decodeAgentRunLifecycleStatus,
   decodeAgentRunRoutingReceipt,
@@ -554,6 +555,42 @@ describe("agentRun pool-derived route receipts", () => {
       ],
     });
     expect(response.items).toHaveLength(1);
+  });
+
+  it("carries a worker's runs to its coordinator as facts, and refuses a reply or a control beside them", () => {
+    const fact = {
+      runId: ids.run,
+      role: "implementation",
+      task: "Implement feature",
+      lifecycleStatus: "waiting",
+      executionKind: "octant-managed",
+      route: {
+        requestedProviderInstanceId: ids.provider,
+        requestedModelId: "gpt-4o",
+        executionProviderInstanceId: ids.provider,
+        executionModelId: "gpt-4o",
+        poolDerived: false,
+      },
+      heldForDependencies: true,
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-01T10:00:00.000Z",
+    };
+    const graph = (run: Record<string, unknown>) => ({
+      coordinatorThreadId: ids.thread,
+      workers: [{ threadId: ids.thread, runs: [run], runsTruncated: false }],
+      workersTruncated: false,
+    });
+
+    expect(decodeAgentRunCoordinatorGraph(graph(fact)).workers[0]?.runs).toHaveLength(1);
+    // The read is for a picture: nothing a run said and nothing to act with
+    // may ride along, even if a host were to send it.
+    for (const extra of [
+      { result: { reference: "octant://agent-run/x/result", truncated: false } },
+      { recoveryReason: "provider said something" },
+      { version: 3 },
+    ]) {
+      expect(() => decodeAgentRunCoordinatorGraph(graph({ ...fact, ...extra }))).toThrow();
+    }
   });
 });
 

@@ -332,10 +332,8 @@
 }
 
 /* Reply prose, in every mode. Body and lists read at the transcript size.
-   The markdown headings a reply carries scale down to labels (14/13/13 at
-   weight 500) rather than page titles, so a plan with three headings does
-   not outrank the question it answers; before this a `#` heading was the
-   20px page-title size. */
+   The markdown headings a reply carries are a scale of their own under the
+   page's titles (see the heading rules below). */
 .chat-rich-text {
   display: grid;
   gap: var(--oct-space-3);
@@ -349,6 +347,7 @@
    the divider, the bubble and the composer on the same page, and the setting
    only ever moved tables. */
 
+.chat-rich-text h1,
 .chat-rich-text h2,
 .chat-rich-text h3,
 .chat-rich-text h4,
@@ -360,27 +359,42 @@
   margin: 0;
 }
 
+/* A heading in a reply is a heading: larger and heavier than the text under
+   it, with more room above it than below, so a long answer can be scanned by
+   its sections. As labels at the body's size and medium weight (15/14/14)
+   they were told from a bold phrase only by standing on a line of their own.
+   The sizes are the type scale's own steps (20, 17, 15), over a 14px body. */
+.chat-rich-text h1,
 .chat-rich-text h2,
 .chat-rich-text h3,
 .chat-rich-text h4 {
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.35;
+  line-height: 1.3;
+}
+
+.chat-rich-text :is(h1, h2, h3, h4):not(:first-child) {
+  margin-top: var(--oct-space-3);
+}
+
+.chat-rich-text h1 {
+  font-size: var(--oct-text-xl);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .chat-rich-text h2 {
-  font-size: var(--oct-text-base);
+  font-size: var(--oct-text-lg);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .chat-rich-text h3 {
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-base);
 }
 
 .chat-rich-text h4 {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-transcript-font-size);
 }
 
 /* Tailwind preflight strips list markers; restore them for message content. */

@@ -14655,7 +14655,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   release names, before any other field is believed. Stable trusts only the
   stable key (`OCTANT_UPDATE_PUBLIC_KEY`); preview and candidate trust the
   preview key (`OCTANT_UPDATE_PREVIEW_PUBLIC_KEY`) and the stable key. The
-  preview workflow builds unreviewed `main` without an approval gate, so
+  nightly and preview release workflows build unreviewed code without an approval gate, so
   anything merged there can read the key it signs with; a shared key would let
   that code sign a `ring: "stable"` feed and make the stable approval
   meaningless. The stable key may sign previews because its holder can already
@@ -16013,7 +16013,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   the owning [fixed-entry rules](design/nightly-app.md#fixed-packaged-entry)
   preserve authenticated registration and the functional publication gate.
 - Rollback is a roll-forward. The updater accepts only a strictly newer
-  version, so a bad Nightly is replaced by dispatching the preview workflow
+  version, so a bad Nightly is replaced by dispatching `Release (nightly)`
   from `main` with `rollback_ref`: it rebuilds a published `v*-preview.*` tag
   whose commit is on `main` as Nightly under a new version from the workflow's
   own date and run number. Any other ref is refused before checkout, because

@@ -590,6 +590,26 @@ process supervisor, protocol client, or event mapper. Claude Code (Agent SDK), C
 their own runtimes and do not move onto this stack, although the registry
 lists ACP wrappers for them.
 
+### Where an agent message ends
+
+ACP gives an agent message no ID and no end, and a turn's text is stored as
+one string. The mapper takes a tool call or tool call update as the end of
+the agent's message: the first text after one starts a new paragraph, unless
+the text so far ends in a line break or the new text starts with one.
+Thought, plan, and usage updates end nothing. Rationale: without the break,
+an agent's note before a tool step and its text after it read as one
+sentence. Turns recorded before this rule keep their text as stored.
+
+Claude Code and OpenCode follow the same rule from their own signals, because
+neither puts a break between one agent message and the next. For Claude Code
+a tool-use block or a tool result ends the agent's message. For OpenCode a
+tool part or a tool event ends it, and text that continues a part already
+streaming is never broken. Codex names each agent message, so its mapper
+breaks between any two. The Octant Harness sends one request per agent
+message, so the first text of a later request in a turn starts a new
+paragraph, under the same line-break exception; the history the model reads
+keeps each message as sent. Pi passes an agent's text on as sent.
+
 ### What an ACP agent cannot do
 
 The protocol leaves three things to the agent, and the driver reports them as

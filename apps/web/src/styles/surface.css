@@ -488,7 +488,7 @@
   margin: 0;
 }
 
-/* Where the thread runs is one quiet row on the page above the card, so the
+/* Where the thread runs is one quiet row in the tray above the card, so the
    card holds only the prompt and its toolbar. The row wraps rather than
    grows, and a control that opens a list floats over the page. Inside the
    card the row stood between the person and the prompt; an in-card band read

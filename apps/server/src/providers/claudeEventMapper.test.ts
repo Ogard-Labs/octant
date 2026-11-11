@@ -131,6 +131,109 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(result)).not.toContain(claudeSessionId);
   });
 
+  // The text a turn's consumers would join, from messages in the shape the
+  // runtime sends them: decoded, mapped, and every text delta kept in order.
+  function transcript(raw: ReadonlyArray<unknown>): string {
+    const ctx = context();
+    const input: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "approval-gated",
+      tools: ["Read"],
+      canUseTool: async () => ({ behavior: "allow" }),
+      preToolUse: async () => ({ behavior: "allow" }),
+    };
+    let text = "";
+    for (const message of raw) {
+      const decoded = decodeMessage(message, input, { kind: "active", sessionId: claudeSessionId });
+      for (const result of mapped(ctx, decoded)) {
+        expect(result.kind).not.toBe("failure");
+        if (result.kind === "event" && result.event.kind === "text-delta") {
+          text += result.event.text;
+        }
+      }
+    }
+    return text;
+  }
+  const streams = (event: unknown) => ({
+    type: "stream_event",
+    session_id: claudeSessionId,
+    parent_tool_use_id: null,
+    event,
+  });
+  const opensText = (index: number) =>
+    streams({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+  const says = (index: number, text: string) =>
+    streams({ type: "content_block_delta", index, delta: { type: "text_delta", text } });
+  const thinks = (index: number, thinking: string) =>
+    streams({
+      type: "content_block_delta",
+      index,
+      delta: { type: "thinking_delta", thinking, estimated_tokens: null },
+    });
+  const closes = (index: number) => streams({ type: "content_block_stop", index });
+  const callsTool = (index: number, id: string) =>
+    streams({
+      type: "content_block_start",
+      index,
+      content_block: { type: "tool_use", id, name: "Read", input: {} },
+    });
+  const toolReturns = (id: string) => ({
+    type: "user",
+    session_id: claudeSessionId,
+    parent_tool_use_id: null,
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: id }] },
+  });
+
+  it("keeps a paragraph break between an agent's note and the text that follows a tool step", () => {
+    expect(
+      transcript([
+        opensText(0),
+        says(0, "I'll inspect "),
+        says(0, "the repository."),
+        closes(0),
+        callsTool(1, "sdk-tool-1"),
+        closes(1),
+        toolReturns("sdk-tool-1"),
+        opensText(0),
+        says(0, "Let me"),
+        says(0, " read the entry point."),
+        closes(0),
+        callsTool(1, "sdk-tool-2"),
+        closes(1),
+        toolReturns("sdk-tool-2"),
+        opensText(0),
+        says(0, "Done."),
+      ]),
+    ).toBe("I'll inspect the repository.\n\nLet me read the entry point.\n\nDone.");
+  });
+
+  it("adds no break where no agent message ended or the text already has one", () => {
+    expect(
+      transcript([
+        callsTool(0, "sdk-tool-1"),
+        closes(0),
+        toolReturns("sdk-tool-1"),
+        opensText(0),
+        says(0, "Reading"),
+        thinks(1, "Hm"),
+        says(0, " the file.\n"),
+        callsTool(2, "sdk-tool-2"),
+        closes(2),
+        toolReturns("sdk-tool-2"),
+        opensText(0),
+        says(0, "It exports one function."),
+        callsTool(1, "sdk-tool-3"),
+        closes(1),
+        toolReturns("sdk-tool-3"),
+        opensText(0),
+        says(0, "\nNothing else."),
+      ]),
+    ).toBe("Reading the file.\nIt exports one function.\nNothing else.");
+  });
+
   it.each(["text-delta", "reasoning-delta"] as const)(
     "chunks %s at Unicode code-point boundaries without loss",
     (kind) => {

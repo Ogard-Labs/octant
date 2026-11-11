@@ -381,6 +381,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   useLayoutEffect(() => {
     followingRef.current =
       follows &&
+      !awaitingSavedView &&
       (restored?.following === true ||
         restored === undefined ||
         (savedView?.kind === "transcript" &&

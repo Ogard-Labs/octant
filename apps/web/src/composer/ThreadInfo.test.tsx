@@ -25,7 +25,10 @@ describe("ThreadInfo", () => {
     );
 
     expect(screen.getByText("Saved commands")).not.toBeVisible();
-    expect(screen.getByRole("button", { name: "Thread info, review required" })).toBeVisible();
+    // The button is an icon; a waiting review is the one thing it says in words.
+    expect(screen.getByRole("button", { name: "Thread info, review required" })).toHaveTextContent(
+      "Review required",
+    );
 
     rerender(
       <ThreadInfo>
@@ -33,7 +36,7 @@ describe("ThreadInfo", () => {
       </ThreadInfo>,
     );
 
-    expect(screen.getByRole("button", { name: "Thread info" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Thread info" })).toHaveTextContent("");
   });
 
   it("keeps its rows mounted while closed and closes on a press outside it", () => {
