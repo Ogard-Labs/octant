@@ -52,6 +52,54 @@ struct Observation: Codable {
     let nativeText: String?
 }
 
+// An icon-only control has no text for the OCR pass to read; its accessible
+// name is the button's description. This finds the owned process's buttons
+// whose description equals the label and keeps those whose centre lies inside
+// the owned window, so the caller applies the same uniqueness, window and
+// hit-owner checks it applies to an OCR target. The tree walk is bounded.
+func describedButtons(_ pid: pid_t, _ bounds: CGRect, _ description: String) -> [TextTarget] {
+    let root = AXUIElementCreateApplication(pid)
+    _ = AXUIElementSetAttributeValue(root, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    func text(_ node: AXUIElement, _ attribute: String) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(node, attribute as CFString, &value) == .success else { return nil }
+        return value as? String
+    }
+    var found: [TextTarget] = []
+    var queue: [(AXUIElement, Int)] = [(root, 0)]
+    var visited = 0
+    while !queue.isEmpty && visited < 6000 {
+        let (node, depth) = queue.removeFirst()
+        visited += 1
+        if text(node, kAXRoleAttribute as String) == kAXButtonRole,
+           text(node, kAXDescriptionAttribute as String) == description {
+            var position: CFTypeRef?
+            var size: CFTypeRef?
+            var origin = CGPoint.zero
+            var extent = CGSize.zero
+            if AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position) == .success,
+               AXUIElementCopyAttributeValue(node, kAXSizeAttribute as CFString, &size) == .success,
+               let position, let size,
+               CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID(),
+               AXValueGetValue(position as! AXValue, .cgPoint, &origin),
+               AXValueGetValue(size as! AXValue, .cgSize, &extent),
+               extent.width > 0, extent.height > 0 {
+                let centre = CGPoint(x: origin.x + extent.width / 2, y: origin.y + extent.height / 2)
+                if bounds.contains(centre) {
+                    found.append(TextTarget(text: description, x: Double(centre.x), y: Double(centre.y)))
+                }
+            }
+        }
+        guard depth < 40 else { continue }
+        var children: CFTypeRef?
+        if AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children) == .success,
+           let list = children as? [AXUIElement] {
+            queue.append(contentsOf: list.map { ($0, depth + 1) })
+        }
+    }
+    return found
+}
+
 guard CommandLine.arguments.count >= 2 else { refuse("Supply preflight, observe, click or settings.") }
 let mode = CommandLine.arguments[1]
 if mode == "preflight" {
@@ -69,7 +117,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -110,7 +158,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 var pointerProof: String?
 var nativeText: String?
-if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
     let observedRows = (request.results ?? []).filter { result in
@@ -131,7 +179,12 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         return matches
     }
     let exactMatches = targets.filter { $0.text.caseInsensitiveCompare(expected) == .orderedSame && (rowContext == nil || $0.text == rowContext) }
-    let matches = exactMatches.isEmpty ? partialMatches : exactMatches
+    if mode == "click-described" && !AXIsProcessTrusted() {
+        refuse("Native accessibility is not already trusted; no permission was requested.")
+    }
+    let matches = mode == "click-described"
+        ? describedButtons(pid, owned.bounds, expected)
+        : (exactMatches.isEmpty ? partialMatches : exactMatches)
     guard matches.count == 1, let match = matches.first else { refuse("The current owned image has no unique exact text target: " + expected) }
     let current = window(pid)
     guard current.id == owned.id, current.bounds == owned.bounds else { refuse("The owned window moved after its capture.") }
