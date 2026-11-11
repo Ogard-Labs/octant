@@ -10,8 +10,10 @@ type Props = Pick<
   ThreadUtilityDockContentProps,
   | "agentRunClient"
   | "agentRunSettingsClient"
+  | "coordinatorWorkers"
   | "nativeHarnessClient"
   | "onAgentViewRequestHandled"
+  | "onOpenCoordinatorWorker"
   | "requestedAgentView"
   | "onReviewAgentChanges"
   | "providerController"
@@ -62,6 +64,10 @@ export default function AgentsModule(props: Props) {
           ? {}
           : { onRequestedViewHandled: props.onAgentViewRequestHandled })}
         {...(providers === undefined ? {} : { providers })}
+        {...(props.coordinatorWorkers === undefined ? {} : { workers: props.coordinatorWorkers })}
+        {...(props.onOpenCoordinatorWorker === undefined
+          ? {}
+          : { onOpenWorker: props.onOpenCoordinatorWorker })}
         {...(props.agentRunSettingsClient === undefined
           ? {}
           : { settingsClient: props.agentRunSettingsClient })}

@@ -852,6 +852,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
 - Wake, start and hop counts are held in host memory; a restart starts them again.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
+- A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
 Status: Built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
 

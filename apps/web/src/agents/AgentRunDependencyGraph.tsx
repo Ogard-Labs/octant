@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
-import type { AgentHierarchyRow } from "./buildAgentHierarchyModel";
+import type { AgentRunGraphRow } from "./buildAgentHierarchyModel";
 import { layoutAgentRunLayers, type AgentRunLayerEdge } from "./layoutAgentRunLayers";
 import {
   SubagentStatusIcon,
@@ -28,9 +28,11 @@ export interface SubagentProviderIdentity {
  * second place to control a run.
  */
 export function AgentRunDependencyGraph(props: {
-  readonly rows: ReadonlyArray<AgentHierarchyRow>;
+  readonly rows: ReadonlyArray<AgentRunGraphRow>;
   readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
   readonly onOpen?: (runId: string) => void;
+  /** Names the graph when a surface shows more than one; "Subagent graph" otherwise. */
+  readonly label?: string;
 }) {
   const markerId = useId();
   // Requested order, which never moves: the list's own order follows each
@@ -75,7 +77,7 @@ export function AgentRunDependencyGraph(props: {
   return (
     <div className="agent-run-graph__scroll" ref={setScroller}>
       <div
-        aria-label="Subagent graph"
+        aria-label={props.label ?? "Subagent graph"}
         className="agent-run-graph"
         role="group"
         style={{ width: layout.width, height: layout.height }}
@@ -140,7 +142,7 @@ export function AgentRunDependencyGraph(props: {
 }
 
 function GraphCard(props: {
-  readonly row: AgentHierarchyRow;
+  readonly row: AgentRunGraphRow;
   readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
   readonly onOpen?: (runId: string) => void;
 }) {
@@ -189,7 +191,7 @@ function GraphCard(props: {
 }
 
 /** "Waiting on 2", "Needs review", or the state and how long ago it changed. */
-function stateLine(row: AgentHierarchyRow): string {
+function stateLine(row: AgentRunGraphRow): string {
   if (row.waitingOn !== undefined && row.waitingOn > 0) return `Waiting on ${row.waitingOn}`;
   if (row.needsReview) return "Needs review";
   return `${subagentStatusWord(row.lifecycleStatus)} · ${relativeTimeLabel(row.updatedAt)}`;

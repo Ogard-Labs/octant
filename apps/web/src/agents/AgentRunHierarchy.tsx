@@ -1,5 +1,6 @@
 import {
   decodeAgentRunId,
+  type AgentRunCoordinatorGraph,
   type AgentRunCreationPosture,
   type AgentRunParentThreadId,
 } from "@octant/contracts";
@@ -15,17 +16,30 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
-import { AgentHierarchyPanel, type AgentHierarchyView } from "./AgentHierarchyPanel";
+import {
+  AgentHierarchyPanel,
+  type AgentHierarchyView,
+  type SubagentWorker,
+  type SubagentWorkerThread,
+} from "./AgentHierarchyPanel";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import { ObservedChildDetail, observedChildSelectionId } from "./ObservedChildActivity";
 import { AgentRunDetail } from "./AgentRunDetail";
-import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
+import {
+  buildAgentHierarchyModel,
+  buildWorkerRunGraphRows,
+  isActiveAgentHierarchyStatus,
+} from "./buildAgentHierarchyModel";
 import { useAgentRunControlCommands } from "./useAgentRunControlCommands";
 import { useAgentRunConversation } from "./useAgentRunConversation";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 
 const ACTIVE_CHILD_REFRESH_MS = 2_000;
+// A worker's runs are context beside the coordinator's own, read for every
+// worker at once, so they are refreshed less often than the thread's own list.
+const ACTIVE_WORKER_REFRESH_MS = 5_000;
+const IDLE_REFRESH_MS = 30_000;
 
 export type AgentRunViewRequest =
   | { readonly kind: "list" }
@@ -46,6 +60,12 @@ export function AgentRunHierarchy(props: {
   readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
   /** Provider instances by id, for the mark on each graph card. */
   readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
+  /**
+   * On a coordinator: the workers it started, as the window's thread list
+   * names them. Their runs are read from the host and drawn under each.
+   */
+  readonly workers?: ReadonlyArray<SubagentWorkerThread>;
+  readonly onOpenWorker?: (threadId: string) => void;
 }) {
   const [read, setRead] = useState<AgentRunParentSummaryResponse>();
   // Kept here, above the list and a subagent's page, so Back from a page
@@ -150,9 +170,82 @@ export function AgentRunHierarchy(props: {
       () => {
         void readSummary().catch(() => setSummaryReconnecting(true));
       },
-      anyActive ? ACTIVE_CHILD_REFRESH_MS : 30_000,
+      anyActive ? ACTIVE_CHILD_REFRESH_MS : IDLE_REFRESH_MS,
     );
   }, [anyActive, readSummary]);
+
+  // The workers' runs, for a coordinator. The thread list changes identity on
+  // every navigation poll, so the read is keyed on who the workers are, not on
+  // the list.
+  const workerThreads = props.workers;
+  const workerKey = (workerThreads ?? []).map((worker) => worker.threadId).join(",");
+  const anyWorkerWorking = (workerThreads ?? []).some((worker) => worker.state === "working");
+  const [workerRead, setWorkerRead] = useState<
+    | { readonly status: "read"; readonly graph: AgentRunCoordinatorGraph }
+    | { readonly status: "refused"; readonly coordinatorThreadId: string }
+  >();
+  useEffect(() => {
+    const client = props.client;
+    const coordinatorThreadId = String(props.parentThreadId);
+    if (workerKey === "" || client.coordinatorGraph === undefined) {
+      setWorkerRead(undefined);
+      return;
+    }
+    let current = true;
+    let issued = 0;
+    let shown = 0;
+    const read = async () => {
+      const mine = ++issued;
+      try {
+        const graph = await client.coordinatorGraph?.(coordinatorThreadId);
+        if (!current || mine < shown || graph === undefined) return;
+        shown = mine;
+        setWorkerRead({ status: "read", graph });
+      } catch {
+        // A refusal is an answer: the rows stay, and the panel says their
+        // runs are not available here. A read that already succeeded stands
+        // through a dropped connection, as the thread's own list does.
+        if (!current || mine < shown) return;
+        setWorkerRead((previous) =>
+          previous?.status === "read" &&
+          String(previous.graph.coordinatorThreadId) === coordinatorThreadId
+            ? previous
+            : { status: "refused", coordinatorThreadId },
+        );
+      }
+    };
+    void read();
+    const stop = scheduleVisibleInterval(
+      () => void read(),
+      anyWorkerWorking ? ACTIVE_WORKER_REFRESH_MS : IDLE_REFRESH_MS,
+    );
+    return () => {
+      current = false;
+      stop();
+    };
+  }, [props.client, props.parentThreadId, workerKey, anyWorkerWorking]);
+  const workerGraph =
+    workerRead?.status === "read" &&
+    String(workerRead.graph.coordinatorThreadId) === String(props.parentThreadId)
+      ? workerRead.graph
+      : undefined;
+  const workerRunsRefused =
+    workerRead?.status === "refused" &&
+    workerRead.coordinatorThreadId === String(props.parentThreadId);
+  const workers = useMemo(
+    (): ReadonlyArray<SubagentWorker> | undefined =>
+      workerThreads?.map((worker) => {
+        const facts = workerGraph?.workers.find(
+          (candidate) => String(candidate.threadId) === worker.threadId,
+        );
+        return {
+          ...worker,
+          runs: facts === undefined ? [] : buildWorkerRunGraphRows(facts.runs),
+          runsTruncated: facts?.runsTruncated === true,
+        };
+      }),
+    [workerThreads, workerGraph],
+  );
 
   useEffect(() => {
     const settingsClient = props.settingsClient;
@@ -356,7 +449,12 @@ export function AgentRunHierarchy(props: {
         observations={observations}
         observationsTruncated={currentRead?.observationsTruncated === true}
         onOpen={setSelectedRunId}
+        {...(props.onOpenWorker === undefined ? {} : { onOpenWorker: props.onOpenWorker })}
         onViewChange={setView}
+        {...(workers === undefined ? {} : { workers })}
+        {...(workerRunsRefused
+          ? { workersNotice: "This window cannot read the workers' subagents." }
+          : {})}
         {...(props.providers === undefined ? {} : { providers: props.providers })}
         reconnecting={status === "refreshing"}
         view={view}

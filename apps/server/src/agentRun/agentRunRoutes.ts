@@ -15,9 +15,13 @@ import {
   decodeAgentRunRetryRequest,
   decodeAgentRunSteerRequest,
   decodeAgentRunConversationStreamFrame,
+  decodeCodeThreadId,
   MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
+  MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS,
   type AgentRunConversationResponse,
+  type AgentRunCoordinatorGraph,
+  type AgentRunGraphFact,
   type AgentRunConversationStreamFrame,
   type AgentRun,
   type AgentRunCanvasSnapshotResult,
@@ -41,6 +45,7 @@ import {
 } from "@octant/domain/agent-run-control-policy";
 import { resolveAgentRunConversationDisclosure } from "@octant/domain/agent-run-conversation-policy";
 import {
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
   agentRunForestCanvasTitle,
   buildAgentRunForest,
   buildAgentRunForestCanvasBlocks,
@@ -109,6 +114,17 @@ export interface AgentRunRouteDependencies {
     readonly parentThreadId: AgentRunParentThreadId;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
+  /**
+   * The workers a coordinator thread started, or `undefined` when the thread
+   * does not read as a coordinator. Absent on a host without coordinators,
+   * which then serves no coordinator graph.
+   */
+  readonly coordinatorWorkers?: (coordinatorThreadId: string) =>
+    | {
+        readonly workers: ReadonlyArray<CodeThreadId>;
+        readonly truncated: boolean;
+      }
+    | undefined;
   /**
    * Resolves display facts for one center row after authorization. Parent
    * titles come from this host's thread stores; child thread ids are derived
@@ -257,6 +273,58 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         200,
         origin,
       );
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/coordinator-graph") {
+      let coordinatorThreadId: AgentRunParentThreadId;
+      try {
+        coordinatorThreadId = decodeAgentRunParentThreadId(
+          url.searchParams.get("coordinatorThreadId") ?? "",
+        );
+      } catch {
+        return failure("coordinatorThreadId is invalid.", 400, origin);
+      }
+      // The window must hold the coordinator itself, by the rule every other
+      // read of a thread's runs takes, and the thread must still read as a
+      // coordinator. Both refusals say the same thing, so a window learns
+      // nothing about a thread it does not hold.
+      const refusal = "The coordinator graph is not authorized for this thread.";
+      if (
+        !(await dependencies.authorizeParentThread({
+          parentThreadId: coordinatorThreadId,
+          windowId: authenticatedWindowId,
+        }))
+      ) {
+        return failure(refusal, 403, origin);
+      }
+      const roster = dependencies.coordinatorWorkers?.(String(coordinatorThreadId));
+      if (roster === undefined) return failure(refusal, 403, origin);
+      const graph: AgentRunCoordinatorGraph = {
+        coordinatorThreadId: decodeCodeThreadId(String(coordinatorThreadId)),
+        workers: roster.workers.flatMap((threadId) => {
+          const runs = dependencies.persistence
+            .parentRunFacts(decodeAgentRunParentThreadId(String(threadId)))
+            .toSorted((left, right) =>
+              left.createdAt === right.createdAt
+                ? String(left.runId).localeCompare(String(right.runId))
+                : left.createdAt < right.createdAt
+                  ? -1
+                  : 1,
+            );
+          if (runs.length === 0) return [];
+          const kept = runs.slice(-MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS);
+          const listed = new Set(kept.map((run) => String(run.runId)));
+          return [
+            {
+              threadId,
+              runs: kept.map((run) => graphFact(run, listed)),
+              runsTruncated: kept.length < runs.length,
+            },
+          ];
+        }),
+        workersTruncated: roster.truncated,
+      };
+      return json(graph, 200, origin);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/review") {
@@ -1100,6 +1168,47 @@ async function mutateLiveRun(
  * stored immutable route was decided from; otherwise the receipt would claim
  * a decision the caller never requested.
  */
+/**
+ * One run as a coordinator's window may see it: what it is, where it stands,
+ * and what orders it. Built field by field so a new summary field never
+ * reaches this read by default; the reply, the recovery text and the version a
+ * control needs are left out on purpose.
+ */
+function graphFact(
+  run: AgentRunParentSummaryEntry,
+  listed: ReadonlySet<string>,
+): AgentRunGraphFact {
+  const dependsOn = (run.dependsOn ?? []).filter((runId) => listed.has(String(runId)));
+  return {
+    runId: run.runId,
+    ...(run.parentRunId === undefined || !listed.has(String(run.parentRunId))
+      ? {}
+      : { parentRunId: run.parentRunId }),
+    ...(dependsOn.length === 0 ? {} : { dependsOn }),
+    role: run.role,
+    task: run.task,
+    lifecycleStatus: run.lifecycleStatus,
+    executionKind: run.executionKind,
+    route: {
+      requestedProviderInstanceId: run.route.requestedProviderInstanceId,
+      requestedModelId: run.route.requestedModelId,
+      executionProviderInstanceId: run.route.executionProviderInstanceId,
+      executionModelId: run.route.executionModelId,
+      poolDerived: run.route.poolDerived,
+      ...(run.route.selectionKind === undefined ? {} : { selectionKind: run.route.selectionKind }),
+    },
+    ...(run.normalizedReasoning === undefined
+      ? {}
+      : { normalizedReasoning: run.normalizedReasoning }),
+    ...(run.lifecycleStatus === "waiting" &&
+    run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON
+      ? { heldForDependencies: true as const }
+      : {}),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  };
+}
+
 function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
   // A dependency is named only when the same response carries it: the caller
   // already filtered out the runs this window may not read, and a run that

@@ -1,4 +1,4 @@
-import type { AgentRunResultPacket } from "@octant/contracts";
+import type { AgentRunGraphFact, AgentRunResultPacket } from "@octant/contracts";
 import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
 
 export interface AgentHierarchyInputRoute {
@@ -104,6 +104,24 @@ export interface AgentHierarchyRow {
   readonly updatedAt: string;
 }
 
+/** What a graph card shows of a run. The list's row carries more, for its page and controls. */
+export type AgentRunGraphRow = Pick<
+  AgentHierarchyRow,
+  | "runId"
+  | "parentRunId"
+  | "role"
+  | "task"
+  | "lifecycleStatus"
+  | "needsReview"
+  | "model"
+  | "providerInstanceId"
+  | "effort"
+  | "runsAfter"
+  | "waitingOn"
+  | "createdAt"
+  | "updatedAt"
+>;
+
 export interface AgentHierarchyModel {
   readonly creationPosture: "off" | "ask" | "automatic";
   /** Queued, starting, running, and waiting subagents, in the host's order. */
@@ -178,15 +196,12 @@ function toRow(
   byId: ReadonlyMap<string, AgentHierarchyInputEntry>,
 ): AgentHierarchyRow {
   const bucket = ACTIVE.has(entry.lifecycleStatus) ? "active" : "history";
-  // Only a listed run is named: the host leaves out one this window may not
-  // read, and a reader cannot open what is not in the list.
-  const awaited = (entry.dependsOn ?? []).flatMap((runId) => {
-    const run = runId === entry.runId ? undefined : byId.get(runId);
-    return run === undefined ? [] : [run];
-  });
-  const heldForDependencies =
+  const links = runLinks(
+    entry,
     entry.lifecycleStatus === "waiting" &&
-    entry.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON;
+      entry.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON,
+    byId,
+  );
   return {
     runId: entry.runId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
@@ -217,16 +232,71 @@ function toRow(
           routeLabel: routeLabel(entry.route),
         }),
     ...(entry.normalizedReasoning === undefined ? {} : { effort: entry.normalizedReasoning }),
-    runsAfter: awaited.map((run) => ({ runId: run.runId, task: run.task })),
-    ...(heldForDependencies
-      ? { waitingOn: awaited.filter((run) => run.lifecycleStatus !== "completed").length }
-      : {}),
+    ...links,
     ...(entry.route?.routingReason === undefined ? {} : { routeReason: entry.route.routingReason }),
     nativeReadOnly: entry.executionKind === "provider-native",
     version: entry.version,
     ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
     updatedAt: entry.updatedAt,
   };
+}
+
+/**
+ * The runs a run waits for, by task, and how many of them it is still held
+ * for. Only a listed run is named: the host leaves out one this window may not
+ * read, and a reader cannot open what is not in the list.
+ */
+function runLinks<
+  Run extends { readonly runId: string; readonly task: string; readonly lifecycleStatus: string },
+>(
+  run: { readonly runId: string; readonly dependsOn?: ReadonlyArray<string> },
+  heldForDependencies: boolean,
+  byId: ReadonlyMap<string, Run>,
+): Pick<AgentHierarchyRow, "runsAfter" | "waitingOn"> {
+  const awaited = (run.dependsOn ?? []).flatMap((runId) => {
+    const other = runId === run.runId ? undefined : byId.get(runId);
+    return other === undefined ? [] : [other];
+  });
+  return {
+    runsAfter: awaited.map((other) => ({ runId: other.runId, task: other.task })),
+    ...(heldForDependencies
+      ? { waitingOn: awaited.filter((other) => other.lifecycleStatus !== "completed").length }
+      : {}),
+  };
+}
+
+/**
+ * A worker's runs as its coordinator's graph draws them. The host sends facts
+ * only (no reply, no review state, nothing to act with), so a card here never
+ * asks for review and opens the worker, not a run.
+ */
+export function buildWorkerRunGraphRows(
+  runs: ReadonlyArray<AgentRunGraphFact>,
+): ReadonlyArray<AgentRunGraphRow> {
+  const byId = new Map(
+    runs.map((run) => [
+      String(run.runId),
+      { runId: String(run.runId), task: run.task, lifecycleStatus: run.lifecycleStatus },
+    ]),
+  );
+  return runs.map((run) => ({
+    runId: String(run.runId),
+    ...(run.parentRunId === undefined ? {} : { parentRunId: String(run.parentRunId) }),
+    role: run.role,
+    task: run.task,
+    lifecycleStatus: run.lifecycleStatus,
+    needsReview: false,
+    model: String(run.route.executionModelId),
+    providerInstanceId: String(run.route.executionProviderInstanceId),
+    ...(run.normalizedReasoning === undefined ? {} : { effort: run.normalizedReasoning }),
+    ...runLinks(
+      { runId: String(run.runId), dependsOn: (run.dependsOn ?? []).map(String) },
+      run.heldForDependencies === true,
+      byId,
+    ),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  }));
 }
 
 /**

@@ -136,6 +136,32 @@ export class CoordinatorService {
     return this.levelOf(threadId) !== undefined;
   }
 
+  /**
+   * The workers a thread started, while that thread reads as a coordinator;
+   * `undefined` for any other thread, so a caller that asks about a thread
+   * that never coordinated, or stopped, learns nothing about its lineage.
+   * The same workers and the same bound as the roster a coordinator's turn
+   * carries, most recently changed first.
+   */
+  workersOf(
+    threadId: string,
+  ):
+    | { readonly workers: ReadonlyArray<CodeThread["id"]>; readonly truncated: boolean }
+    | undefined {
+    const coordinator = this.#ports.readThread(threadId);
+    if (coordinator === undefined || !this.#readsAsCoordinator(coordinator)) return undefined;
+    // A worker is created in its coordinator's Project. This answer lets a
+    // window read through the coordinator, so a thread recorded anywhere else
+    // is left out rather than trusted on its lineage alone.
+    const workers = this.#rosterOf(coordinator).filter(
+      (worker) => String(worker.projectId) === String(coordinator.projectId),
+    );
+    return {
+      workers: workers.slice(0, MAX_COORDINATOR_ROSTER_ROWS).map((worker) => worker.id),
+      truncated: workers.length > MAX_COORDINATOR_ROSTER_ROWS,
+    };
+  }
+
   /** One `start` call from a coordinator's turn. */
   async start(input: {
     readonly callerThreadId: string;
@@ -231,14 +257,7 @@ export class CoordinatorService {
   contextFor(threadId: string): string | undefined {
     const coordinator = this.#ports.readThread(threadId);
     if (coordinator === undefined || !this.#readsAsCoordinator(coordinator)) return undefined;
-    const workers = this.#ports
-      .readThreads()
-      .filter(
-        (thread) =>
-          String(thread.coordinatorThreadId) === String(coordinator.id) &&
-          thread.lifecycle !== "archived",
-      )
-      .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    const workers = this.#rosterOf(coordinator);
     const rows = workers.slice(0, MAX_COORDINATOR_ROSTER_ROWS).map((worker) => {
       const state = this.#workerState(worker);
       return `- ${String(worker.id)}@${String(worker.projectId)}: ${state ?? "unknown"} (updated ${worker.updatedAt})`;
@@ -492,6 +511,18 @@ export class CoordinatorService {
     const hostTurn = this.#hostTurns.get(threadId);
     if (hostTurn === undefined) return 0;
     return this.#ports.latestTurnId(threadId) === hostTurn.operationId ? hostTurn.hop + 1 : 0;
+  }
+
+  /** A coordinator's workers that are not archived, most recently changed first. */
+  #rosterOf(coordinator: CodeThread): ReadonlyArray<CodeThread> {
+    return this.#ports
+      .readThreads()
+      .filter(
+        (thread) =>
+          String(thread.coordinatorThreadId) === String(coordinator.id) &&
+          thread.lifecycle !== "archived",
+      )
+      .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   }
 
   #isPlanner(thread: CodeThread): boolean {

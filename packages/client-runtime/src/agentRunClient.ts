@@ -12,6 +12,7 @@ import {
   AgentRunCanvasSnapshotResult,
   type AgentRunCenterQuery,
   AgentRunCenterResponse,
+  AgentRunCoordinatorGraph,
   AgentRunConversationResponse,
   AgentRunConversationStreamFrame,
   AgentRunCommandResult,
@@ -146,6 +147,12 @@ export interface AgentRunClient {
     signal: AbortSignal,
   ): AsyncGenerator<AgentRunConversationStreamFrame>;
   parentSummary(parentThreadId: AgentRunParentThreadId): Promise<AgentRunParentSummaryResponse>;
+  /**
+   * The child runs of the workers a coordinator thread started, as facts for
+   * a picture: no reply and nothing to act with. The host refuses it for a
+   * thread this window does not hold or that is not a coordinator.
+   */
+  coordinatorGraph?(coordinatorThreadId: string): Promise<AgentRunCoordinatorGraph>;
   /** Persist the parent thread's AgentRun forest as a Canvas document. */
   snapshotCanvas(parentThreadId: AgentRunParentThreadId): Promise<AgentRunCanvasSnapshotResult>;
   acknowledge(input: {
@@ -336,6 +343,21 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         };
       } catch {
         throw new AgentRunClientFailure("unavailable", "AgentRun parent summary is malformed.");
+      }
+    },
+    async coordinatorGraph(coordinatorThreadId) {
+      const validated = decodeAgentRunParentThreadId(coordinatorThreadId);
+      const url = new URL("/api/agent-runs/coordinator-graph", options.baseUrl);
+      url.searchParams.set("coordinatorThreadId", String(validated));
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        const graph = decodeHostAnswer(AgentRunCoordinatorGraph)(body);
+        if (String(graph.coordinatorThreadId) !== String(validated)) {
+          throw new Error("Coordinator identity mismatch");
+        }
+        return graph;
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun coordinator graph is malformed.");
       }
     },
     async acknowledge(input) {

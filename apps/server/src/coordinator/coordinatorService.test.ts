@@ -355,6 +355,62 @@ describe("waking for messages and worker state", () => {
   });
 });
 
+describe("naming a coordinator's workers", () => {
+  it("lists the workers a coordinator started, leaving out archived ones and other threads", () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    const elsewhere = "20000000-0000-4000-8000-0000000000bb";
+    h.threads.set(
+      elsewhere,
+      codeThread(elsewhere, {
+        coordinatorThreadId: COORDINATOR,
+        projectId: "40000000-0000-4000-8000-000000000002",
+      }),
+    );
+    h.threads.set(
+      NEW_WORKER,
+      codeThread(NEW_WORKER, { coordinatorThreadId: COORDINATOR, lifecycle: "archived" }),
+    );
+    h.threads.set(OTHER, codeThread(OTHER));
+
+    expect(h.service.workersOf(COORDINATOR)).toEqual({ workers: [WORKER], truncated: false });
+  });
+
+  it("names nothing for a worker, an ordinary thread, or a thread that stopped coordinating", () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    h.threads.set(OTHER, codeThread(OTHER));
+
+    expect(h.service.workersOf(WORKER)).toBeUndefined();
+    expect(h.service.workersOf(OTHER)).toBeUndefined();
+    expect(h.service.workersOf("20000000-0000-4000-8000-0000000000ff")).toBeUndefined();
+
+    // The lineage stays on the worker as history, but the former coordinator
+    // no longer reads through it.
+    h.threads.set(COORDINATOR, codeThread(COORDINATOR));
+    expect(h.service.workersOf(COORDINATOR)).toBeUndefined();
+  });
+
+  it("names the newest workers and says so when there are more than the roster holds", () => {
+    const h = harness();
+    for (let index = 0; index < 34; index += 1) {
+      const id = `20000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
+      h.threads.set(
+        id,
+        codeThread(id, {
+          coordinatorThreadId: COORDINATOR,
+          updatedAt: new Date(Date.parse(now) + index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const roster = h.service.workersOf(COORDINATOR);
+    expect(roster?.workers).toHaveLength(32);
+    expect(roster?.truncated).toBe(true);
+    expect(roster?.workers[0]).toBe("20000000-0000-4000-8000-000000000133");
+  });
+});
+
 describe("after a coordinator stops coordinating", () => {
   it("no longer wakes its former workers without their own switch", async () => {
     const h = harness();

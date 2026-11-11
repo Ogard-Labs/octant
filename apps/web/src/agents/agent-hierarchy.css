@@ -117,6 +117,22 @@
   font-weight: normal;
 }
 
+/* A worker's row and, in Graph, its subagents under it, set off from the next
+   worker so each graph reads as belonging to the row above it. */
+.agent-hierarchy__worker {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.agent-hierarchy__worker + .agent-hierarchy__worker {
+  margin-top: var(--oct-space-2);
+}
+
+.agent-hierarchy__worker-mark {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 /* The graph is the same list arranged by what waits for what. A row wider
    than the dock scrolls sideways: shrinking the cards would cut the task to a
    word. */
