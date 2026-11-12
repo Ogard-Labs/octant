@@ -825,14 +825,20 @@ describe("the public-block visual language", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
-    // A rail group heading is the Section label role: its type is defined once,
-    // in the base rule, and the rail's rule only sets its room.
+    // A rail group label is the Navigation group label role: its type is
+    // defined once, in `oct-nav-group`, and neither rule here sets any.
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    const groupRole = surface.match(/(?:^|\n)\.oct-nav-group\s*\{[^}]+\}/)?.[0] ?? "";
     const sectionLabel = system.match(/(?:^|\n)\.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(sectionLabel).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
-    expect(sectionLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
-    expect(sectionLabel).toMatch(/letter-spacing:\s*var\(--oct-tracking-snug\)/);
+    expect(groupRole).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(groupRole).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(groupRole).toMatch(/letter-spacing:\s*0/);
+    expect(sectionLabel).not.toMatch(/font-size|font-weight|letter-spacing/);
+    expect(readFileSync(join(webRoot, "shell/SettingsNavigation.tsx"), "utf8")).toContain(
+      "oct-nav-group setnav-section",
+    );
     expect(navigation).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     // The desktop rail shows its group labels; a quiet label is what separates

@@ -88,8 +88,15 @@ function readSystemPrefersDark(): boolean {
 
 export function ThemeSettingsProvider(props: {
   readonly settings?: ThemeSettings;
+  /**
+   * Whether the mode is written to the app's first-paint storage key. On by
+   * default; a page that is not the app (the component gallery) turns it off so
+   * it cannot change what the next app window paints first.
+   */
+  readonly rememberMode?: boolean;
   readonly children: ReactNode;
 }) {
+  const rememberMode = props.rememberMode ?? true;
   const followsSystem = props.settings?.mode === "system";
   // Only a theme that follows the system listens, so a live light/dark switch
   // repaints without a reload while a fixed mode ignores the system entirely.
@@ -188,7 +195,7 @@ export function ThemeSettingsProvider(props: {
         }
       }
       root.dataset.octantThemeMode = resolved.mode;
-      rememberThemeMode(accessible.mode);
+      if (rememberMode) rememberThemeMode(accessible.mode);
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
       // Increased contrast keeps the monochrome chrome: colour as decoration is
@@ -228,7 +235,7 @@ export function ThemeSettingsProvider(props: {
       leave(mountedPaints, paint);
       mountedPaints.at(-1)?.();
     };
-  }, [applied, increasedContrast]);
+  }, [applied, increasedContrast, rememberMode]);
   const resolved = applied?.resolved;
   const editorColors = useMemo(
     () =>

@@ -1521,7 +1521,7 @@ function ActivityThreadList(props: {
         return (
           <section aria-label={group.label} className="activity-nav__group" key={group.id}>
             {folds ? (
-              <h2 className="sidebar-section">
+              <h2 className="oct-nav-group sidebar-section">
                 <OctantButton
                   aria-controls={threadsId}
                   aria-expanded={shown}
@@ -1538,7 +1538,7 @@ function ActivityThreadList(props: {
                 </OctantButton>
               </h2>
             ) : (
-              <h2 className="sidebar-section">{group.label}</h2>
+              <h2 className="oct-nav-group sidebar-section">{group.label}</h2>
             )}
             <div className="activity-nav__threads" id={folds ? threadsId : undefined}>
               {threads.map((thread) => (

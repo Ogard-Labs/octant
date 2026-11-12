@@ -136,31 +136,48 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                                     |
-| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                   |
-| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                     |
-| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, and a thread's title in the title band (`oct-page-title`)                                 |
-| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)     |
-| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                         |
-| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), a Settings section's label, a sidebar or Settings rail group heading |
-| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option, sidebar row and thread title, an empty state's title                                      |
-| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                                            |
-| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                           |
-| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, a turn's time and "Worked for" (`oct-meta`)                |
-| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                   |
+| Role                   | Size            | Weight | Leading | Colour      | Where                                                                                                                                                                                                         |
+| ---------------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hero                   | 26              | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                                                                                                       |
+| Title                  | 28              | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                                                                                                         |
+| Page title             | 14              | 600    | 1.35    | primary     | A destination or Settings page (`oct-page-title`)                                                                                                                                                             |
+| Dialog title           | 17              | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)                                                                                         |
+| Reply heading          | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                                                                                                             |
+| Section label          | 14              | 600    | 1.3     | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
+| Row label              | 14              | 500    | 1.35    | primary     | A setting's row, a file row, an empty state's title                                                                                                                                                           |
+| Navigation name        | 13              | 400    | 1.35    | primary     | A thread's title in the sidebar and in the title band, the account row's name, a Settings rail item and "Back to app" (`oct-nav-name`; a Settings item rests in the muted ink until hovered, focused or open) |
+| Navigation group label | 12              | 400    | 1.3     | muted       | A sidebar group heading and a Settings rail group label, in sentence case (`oct-nav-group`; a group's count stays Meta)                                                                                       |
+| Menu option            | 13              | 500    | 1.35    | primary     | Every menu's option row: dropdown, context menu, select and combobox options, the model menu's model names (`oct-menu-option`)                                                                                |
+| Body                   | 13              | 400    | 1.5     | primary     | Interface text (the interface size, `body`)                                                                                                                                                                   |
+| Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
+| Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
+| Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
+| Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's pill (`oct-meta`)                                                                                         |
+| Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
-for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
-labels, controls, and every name in navigation (thread titles, sidebar rows,
-Settings sections), so a name stands apart from the facts under it by weight
-rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, `strong`, the app's name, a destination's page title), and
-700 (`--oct-weight-title`) only for the large title. A count beside a label
-is Meta at 400; the one count at medium weight is a plan meter's figure, which
-stands with no label of its own (see Plan meters). The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
-weight above 600 outside the title roles in `styles/surface.css` as a
-`heavy-weight` finding and ratchets it against the baseline.
+for reading text and every name in navigation (thread titles, sidebar and
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`,
+`--oct-weight-display`) for labels, controls, a setting's row and a menu's
+options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
+`strong`, the app's name, a destination's page title), and 700
+(`--oct-weight-title`) only for the large title. A count beside a label is Meta
+at 400; the one count at medium weight is a plan meter's figure, which stands
+with no label of its own (see Plan meters). The welcome question is a prompt to
+answer, so it is regular weight. `bun run ui:check` counts a weight above 600
+outside the title roles in `styles/surface.css` as a `heavy-weight` finding and
+ratchets it against the baseline.
+
+_Rationale for the calm navigation._ Names in navigation at 14px and weight
+500 to 600 read louder than the rest of the app, not clearer. At the interface
+size and regular weight they read as a calm list, and the selected row's fill
+carries selection, not its weight. A group label is a quiet caption (12px,
+regular, muted), not a heading, so the rows it names stay the first thing read.
+An activity line in a thread ("Worked for", the turn's time) is the size of the
+text it sits between and is told apart by its muted ink, so it no longer reads
+as a smaller second voice. A reply's lines take 1.6 leading and its lists a
+16px indent so long answers breathe; the reply's size stays the person's own
+setting.
 
 A title is never the size and the weight of the text it heads. It is
 larger, heavier, or both, and has more room above it than below, so a reader
@@ -634,8 +651,8 @@ keep the bare recipe. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
-computer, cloud for another host), the thread title at the sm step in medium
-weight, a pill chip naming the Project in meta ink, and in Code a second
+computer, cloud for another host), the thread title as a navigation name (13px,
+regular weight), a pill chip naming the Project in meta ink, and in Code a second
 chip naming the checkout's branch in the mono identifier face — no provider
 mark. The two chips shrink before the title does. While the host projects the
 thread as executing, a "Running" pill with a small spinner follows the chips.
@@ -3036,6 +3053,27 @@ and Tooltip. Composition rules:
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
+
+### Component gallery
+
+A development-only gallery draws the system in one place: the type roles with
+the size, weight and leading the browser computes for them, the semantic colour
+roles, the spacing and radius tokens, the icon scale, every shared `Octant*`
+adapter in its variants, sizes and states, and a few patterns composed only
+from those pieces (a sidebar slice, a Settings row group, a card, an empty
+state, the title band's buttons). It mounts the real adapters under the real
+stylesheet entry and the real theme provider, with no host, thread or server
+behind it, so what it shows is what the app ships. It has controls for dark
+and light, the glass material, and the interface size. Read it to judge
+whether controls, fields, menus and rows agree before a change to any of them.
+
+The gallery is `apps/web/component-gallery.html` with its source in
+`apps/web/src/gallery/`. The page is not an input of the production build, so
+it is served by the Vite dev server only (`/component-gallery.html`) and is
+absent from the packaged app. It is not a product surface: it has no entry in
+navigation, Settings or the command palette. A new shared adapter in
+`apps/web/src/ui/base/` must appear in it, or be named in the test's
+not-shown list with a reason; `Gallery.test.tsx` fails otherwise.
 
 ### Product-owned surfaces
 

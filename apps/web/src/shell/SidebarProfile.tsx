@@ -88,7 +88,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
           className="sidebar-item window-no-drag justify-start"
         >
           <UserAvatar profile={props.profile} size={20} />
-          <span className="sidebar-label">{label}</span>
+          <span className="oct-nav-name sidebar-label">{label}</span>
           <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
         </OctantMenuTrigger>
         <OctantMenuPortal>

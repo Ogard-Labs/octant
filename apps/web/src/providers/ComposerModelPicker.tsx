@@ -482,7 +482,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             />
           ) : null}
           <span className="composer-model-picker__model-copy">
-            <span className="composer-model-picker__model-name">
+            <span className="oct-menu-option composer-model-picker__model-name">
               {presentedModelName(picker.model)}
             </span>
             {detail === "" ? null : (

@@ -675,7 +675,7 @@ export function SettingsView(props: SettingsViewProps) {
             {props.onBack === undefined || sheet ? null : (
               <footer className="settings-view__sidebar-footer">
                 <OctantButton
-                  className="setnav-item window-no-drag settings-view__back justify-start rounded-lg"
+                  className="oct-nav-name setnav-item window-no-drag settings-view__back justify-start rounded-lg"
                   onClick={props.onBack}
                   type="button"
                   variant="bare"
