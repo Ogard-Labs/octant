@@ -271,14 +271,14 @@ describe("the library view", () => {
     });
     await user.click(screen.getByRole("button", { name: "Review Lint Pack" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).queryByRole("button", { name: "Install" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Install/ })).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Review before installing" }));
     expect(onInspect).toHaveBeenCalledWith(expect.objectContaining({ name: "Lint Pack" }));
     expect(props.onTrust).not.toHaveBeenCalled();
     expect(props.onPluginDesired).not.toHaveBeenCalled();
   });
 
-  it("installs a reviewed plugin with one Install, leaving Trust and Turn on as later steps", async () => {
+  it("installs, trusts and turns on a reviewed plugin with one confirmation, and keeps Install only as its own step", async () => {
     const user = userEvent.setup();
     const found = {
       extensionId: "ext-9",
@@ -311,10 +311,18 @@ describe("the library view", () => {
     await user.click(screen.getByRole("button", { name: "Review Lint Pack" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Lint rules")).toBeTruthy();
-    expect(within(dialog).getByText(/You trust it and turn it on as separate steps/)).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: /Trust|Turn on/ })).toBeNull();
-    await user.click(within(dialog).getByRole("button", { name: "Install" }));
-    expect(onInstall).toHaveBeenCalledWith(expect.objectContaining({ name: "Lint Pack" }));
+    expect(within(dialog).getByText(/does all three after this one confirmation/)).toBeTruthy();
+    expect(within(dialog).getByText(/you trust it and turn it on as separate steps/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Install, trust and turn on" }));
+    expect(onInstall).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: "Lint Pack" }),
+      "turn-on",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Install only" }));
+    expect(onInstall).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: "Lint Pack" }),
+      "install",
+    );
     expect(props.onTrust).not.toHaveBeenCalled();
     expect(props.onPluginDesired).not.toHaveBeenCalled();
   });

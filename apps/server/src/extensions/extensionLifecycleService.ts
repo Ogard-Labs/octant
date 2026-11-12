@@ -105,13 +105,15 @@ export class ExtensionLifecycleService {
 
   /**
    * Installs a package. With `trust`, the person's one confirmation also
-   * trusts its source: the journal holds the install and the trust as two
-   * events, and enabling stays its own switch. If the trust is refused (a
-   * driver whose publisher changed), the package stays installed untrusted.
+   * trusts its source, and with `enable` beside it also turns the package
+   * and each of its components on. The journal holds the install, the trust,
+   * and each switch as their own events. If the trust is refused (a driver
+   * whose publisher changed), the package stays installed untrusted and
+   * nothing is turned on; `enable` without `trust` turns nothing on either.
    */
   async install(
     inspection: InspectedExtensionPackage,
-    options: { readonly trust?: boolean } = {},
+    options: { readonly trust?: boolean; readonly enable?: boolean } = {},
   ): Promise<ExtensionSnapshot> {
     const existing = readExtensionRecord(this.#connection, inspection.manifest.extensionId);
     if (existing?.current !== undefined && !existing.tombstoned) {
@@ -124,17 +126,42 @@ export class ExtensionLifecycleService {
     if (options.trust !== true) return installed;
     const record = this.#installedRecord(inspection.manifest.extensionId);
     try {
-      return await this.setSourceTrust({
+      const trusted = await this.setSourceTrust({
         extensionId: inspection.manifest.extensionId as never,
         expectedStateVersion: record.aggregateVersion as never,
         trusted: true,
       });
+      if (options.enable !== true) return trusted;
+      return this.#turnOn(inspection.manifest.extensionId);
     } catch (error) {
       // A refused trust leaves the install in place, untrusted, as the person
       // would have it after Confirm install; they trust it from Installed.
       if (error instanceof ExtensionLifecycleServiceError) return this.snapshot();
       throw error;
     }
+  }
+
+  /**
+   * Turns a trusted package and every one of its components on, as the
+   * separate switches would. A component held for review or admission stays
+   * held: a switch never lifts a hold.
+   */
+  #turnOn(extensionId: string): ExtensionSnapshot {
+    const record = this.#installedRecord(extensionId);
+    if (!record.trusted) return this.snapshot();
+    this.#append(extensionId, [
+      ...(record.pluginDesired
+        ? []
+        : [{ kind: "plugin-desired-state-changed" as const, desired: true }]),
+      ...installedManifest(record)
+        .components.filter((component) => record.componentDesired[component.id] !== true)
+        .map((component) => ({
+          kind: "component-desired-state-changed" as const,
+          componentId: component.id,
+          desired: true,
+        })),
+    ]);
+    return this.snapshot();
   }
 
   async update(inspection: InspectedExtensionPackage): Promise<ExtensionSnapshot> {

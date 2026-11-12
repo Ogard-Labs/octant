@@ -414,9 +414,16 @@ describe("extension inspection and lifecycle API service", () => {
     } as never);
     const target = { extensionId, packageId, version: "1.0.0", digest: resolved.expectedDigest };
     await service.execute({ kind: "install-package", ...target } as never);
-    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false });
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false, enable: false });
     await service.execute({ kind: "install-package", ...target, trust: true } as never);
-    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true });
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true, enable: false });
+    await service.execute({
+      kind: "install-package",
+      ...target,
+      trust: true,
+      enable: true,
+    } as never);
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true, enable: true });
   });
 
   it("fails closed when lifecycle targets were not inspected or source resolution throws private details", async () => {

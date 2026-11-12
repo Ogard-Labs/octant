@@ -569,14 +569,20 @@ export const ExtensionCommand = Schema.Union(
     expectedDigest: Schema.optional(ExtensionContentDigest),
   }).annotations(strict),
   /**
-   * `trust` installs and trusts in one confirmed step, journaled as both.
-   * Enabling stays its own switch. Left out, the package installs untrusted.
+   * `trust` installs and trusts in one confirmed step, and `enable` with it
+   * also turns the package and its components on; each step is journaled as
+   * its own event. Left out, the package installs untrusted and switched
+   * off, and trusting and turning on stay separate commands. Nothing is
+   * turned on without trust, so `enable` alone is refused.
    */
   Schema.Struct({
     kind: Schema.Literal("install-package"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+    enable: Schema.optional(Schema.Boolean),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
   Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("rollback-package"), ...versionedTarget }).annotations(
     strict,

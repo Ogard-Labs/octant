@@ -503,6 +503,34 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(journaled).not.toContain("plugin-desired-changed");
   });
 
+  it("installs, trusts and turns on a plugin and its components in one step, journaled as separate events", async () => {
+    const context = await setup();
+    const snapshot = await context
+      .makeService()
+      .install(inspection(), { trust: true, enable: true });
+    expect(snapshot.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: true, pluginDesired: true },
+      components: [{ activation: { componentDesired: true } }],
+    });
+    expect(lifecycleKinds(context)).toEqual([
+      "install-prepared",
+      "install-committed",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+      "component-desired-state-changed",
+    ]);
+  });
+
+  it("turns nothing on when the one step was not asked to trust", async () => {
+    const context = await setup();
+    const snapshot = await context.makeService().install(inspection(), { enable: true });
+    expect(snapshot.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: false, pluginDesired: false },
+      components: [{ activation: { componentDesired: false } }],
+    });
+    expect(lifecycleKinds(context)).toEqual(["install-prepared", "install-committed"]);
+  });
+
   it("installs untrusted when trust is not asked for", async () => {
     const context = await setup();
     const snapshot = await context.makeService().install(inspection());

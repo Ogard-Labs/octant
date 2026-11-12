@@ -328,7 +328,10 @@ export class ExtensionApiService {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
           return await this.#stateUpdated(
-            await this.#lifecycle.install(inspection, { trust: command.trust === true }),
+            await this.#lifecycle.install(inspection, {
+              trust: command.trust === true,
+              enable: command.enable === true,
+            }),
             command,
           );
         }

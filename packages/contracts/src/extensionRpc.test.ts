@@ -133,6 +133,16 @@ describe("extension RPC contracts", () => {
       expect(() => decodeMcpReportedAccount(value)).toThrow();
   });
 
+  it("lets one install command also trust and turn the package on, and refuses turning on without trust", () => {
+    const install = { kind: "install-package", extensionId, packageId, version: "1.0.0", digest };
+    expect(decodeExtensionCommand({ ...install, trust: true, enable: true })).toMatchObject({
+      trust: true,
+      enable: true,
+    });
+    expect(() => decodeExtensionCommand({ ...install, enable: true })).toThrow();
+    expect(() => decodeExtensionCommand({ ...install, trust: false, enable: true })).toThrow();
+  });
+
   it("keeps completed sign-out recovery bounded and free of credential fields", () => {
     expect(
       decodeMcpServerSignInView({ kind: "sign-out-pending", message: "Finish signing out." }),

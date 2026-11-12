@@ -1105,6 +1105,33 @@ describe("ExtensionsSettingsView", () => {
     expect(c.calls.filter((command) => command.kind === "set-source-trust")).toHaveLength(0);
   });
 
+  it("installs, trusts and turns on with one confirmation, sent as one install command", async () => {
+    const c = client();
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(viewButton(/marketplace/i));
+    const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
+    fireEvent.change(search, { target: { value: "build" } });
+    fireEvent.click(screen.getByRole("button", { name: /run search/i }));
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /inspect build helper/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install, trust and turn on" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "install-package" && command.trust === true && command.enable === true,
+        ),
+      ).toBe(true),
+    );
+    expect(
+      c.calls.filter(
+        (command) => command.kind === "set-source-trust" || command.kind === "set-plugin-desired",
+      ),
+    ).toHaveLength(0);
+  });
+
   it("clears stale catalog cards before a later marketplace search fails", async () => {
     let searches = 0;
     const c = client();

@@ -424,6 +424,9 @@ const DEFAULT_EXTENSION_SETTINGS_SCOPE: ExtensionActivationScope = {
 const COMMAND_VERSION = 1 as never;
 const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 
+/** What one install confirmation covers; the host journals each step by itself. */
+type InstallSteps = "install" | "trust" | "turn-on";
+
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
@@ -816,14 +819,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   /**
-   * Installs the inspected entry. `plainInstall` is the Library's: it never
-   * turns into an npm update that Marketplace left pending, and it leaves
-   * Marketplace's own review state alone. Returns the failure message, if any.
+   * Installs the inspected entry. `steps` is what the one confirmation
+   * covers: the install alone, the install and trust, or those and turning
+   * the plugin on; the host journals each step by itself. `plainInstall` is
+   * the Library's: it never turns into an npm update that Marketplace left
+   * pending, and it leaves Marketplace's own review state alone. Returns the
+   * failure message, if any.
    */
   const confirmInstall = useCallback(
     async (
       entry: ExtensionCatalogEntry,
-      trust = false,
+      steps: InstallSteps = "install",
       plainInstall = false,
     ): Promise<string | undefined> => {
       if (installing) return "An install is already running.";
@@ -837,7 +843,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           packageId: entry.packageId,
           version: entry.version,
           digest: entry.digest,
-          ...(trust && !updating ? { trust: true } : {}),
+          ...(steps !== "install" && !updating ? { trust: true } : {}),
+          ...(steps === "turn-on" && !updating ? { enable: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
@@ -1054,11 +1061,12 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       });
     }
   };
-  // Install adds the package and nothing more: no trust, nothing turned on.
-  const installLibraryItem = async (item: LibraryItem) => {
+  // One confirmation installs, trusts and turns the plugin on; Install only
+  // adds the package and nothing more.
+  const installLibraryItem = async (item: LibraryItem, steps: "install" | "turn-on") => {
     const entry = libraryInspection?.preview?.entry ?? marketplaceEntryOf(item);
     if (entry === undefined) return;
-    const failed = await confirmInstall(entry, false, true);
+    const failed = await confirmInstall(entry, steps, true);
     setLibraryInspection(
       failed === undefined ? undefined : { itemId: item.id, status: "failed", message: failed },
     );
@@ -1159,7 +1167,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             void reload();
           }}
           onInspect={(item) => void inspectLibraryItem(item)}
-          onInstall={(item) => void installLibraryItem(item)}
+          onInstall={(item, steps) => void installLibraryItem(item, steps)}
           loading={status === "loading" && snapshot.packages.length === 0}
           marketplaceFetchesEnabled={marketplaceFetchesEnabled}
           onOpen={(target) => setView(target)}
@@ -1829,10 +1837,21 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                 variant="secondary"
                                 aria-label="Install and trust"
                                 disabled={installing}
-                                onClick={() => void confirmInstall(preview.entry, true)}
+                                onClick={() => void confirmInstall(preview.entry, "trust")}
                                 type="button"
                               >
                                 Install and trust
+                              </OctantButton>
+                            )}
+                            {npmUpdateOf === entry.extensionId ? null : (
+                              <OctantButton
+                                variant="secondary"
+                                aria-label="Install, trust and turn on"
+                                disabled={installing}
+                                onClick={() => void confirmInstall(preview.entry, "turn-on")}
+                                type="button"
+                              >
+                                Install, trust and turn on
                               </OctantButton>
                             )}
                           </div>
@@ -1956,16 +1975,28 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         variant="secondary"
                         aria-label="Install and trust"
                         disabled={installing}
-                        onClick={() => void confirmInstall(localPreview.entry, true)}
+                        onClick={() => void confirmInstall(localPreview.entry, "trust")}
                         type="button"
                       >
                         Install and trust
                       </OctantButton>
                     )}
                     {npmUpdateOf !== undefined ? null : (
+                      <OctantButton
+                        variant="secondary"
+                        aria-label="Install, trust and turn on"
+                        disabled={installing}
+                        onClick={() => void confirmInstall(localPreview.entry, "turn-on")}
+                        type="button"
+                      >
+                        Install, trust and turn on
+                      </OctantButton>
+                    )}
+                    {npmUpdateOf !== undefined ? null : (
                       <p className="extensions-settings__state">
                         Confirm install adds it untrusted and switched off; Install and trust also
-                        trusts it, and it stays switched off. Octant ran nothing from the package.
+                        trusts it, and it stays switched off; Install, trust and turn on does all
+                        three. Octant ran nothing from the package.
                       </p>
                     )}
                   </div>
