@@ -1,6 +1,7 @@
 import { lstat, realpath, rm } from "node:fs/promises";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import { readWorktreeStatus, parseWorktreeList, runHostGit } from "./hostGitReads";
+import { sameHostPath } from "./hostPaths";
 import { worktreeAdminDirectory } from "./hostWorktreeDiscovery";
 
 /** A worktree changed this recently may have a program working in it now. */
@@ -54,6 +55,8 @@ export interface HostWorktreeRemovalRequest {
 export interface HostWorktreeRemovalDependencies {
   readonly ownedWorktreePaths: () => Promise<ReadonlySet<string>>;
   readonly now: () => number;
+  /** Override for tests; production uses `process.platform`. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -77,17 +80,21 @@ export async function removeHostWorktree(
   const listed = await runHostGit(["-C", common, "worktree", "list", "--porcelain", "-z"], signal);
   if (listed.exitCode !== 0) return refused("unreadable", firstLine(listed.stderr));
   const entries = parseWorktreeList(listed.stdout);
-  const wanted = resolve(request.worktreePath);
-  const index = entries.findIndex((entry) => resolve(entry.path) === wanted);
+  const platform = dependencies.platform ?? process.platform;
+  const index = entries.findIndex((entry) =>
+    sameHostPath(entry.path, request.worktreePath, platform),
+  );
   const entry = entries[index];
   if (entry === undefined) return refused("not-found");
   if (index === 0) return refused("main-worktree");
   if (entry.bare) return refused("bare");
   if (entry.locked !== undefined) return refused("locked", entry.locked || undefined);
   const owned = await dependencies.ownedWorktreePaths();
-  if ([...owned].some((path) => resolve(path) === wanted)) return refused("owned-by-octant");
+  if ([...owned].some((path) => sameHostPath(path, request.worktreePath, platform))) {
+    return refused("owned-by-octant");
+  }
 
-  const admin = await worktreeAdminDirectory(common, entry.path);
+  const admin = await worktreeAdminDirectory(common, entry.path, platform);
   const folder = await lstat(entry.path).catch(() => undefined);
   if (folder === undefined) {
     // Git's record of a worktree whose folder is gone: removing that one
