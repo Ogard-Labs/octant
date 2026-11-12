@@ -3174,6 +3174,12 @@ export function useCodeController(options: CodeControllerOptions) {
         setCancellationError(result.failure.message);
         return false;
       }
+      // The host answers a Stop its runtime has not confirmed within its bound
+      // with the turn still running and a reason; without showing it, a turn
+      // the host holds until its runtime really ends just looks stuck.
+      if (result.kind === "provider-turn-state" && result.failure !== undefined) {
+        setCancellationError(result.failure.message);
+      }
       return true;
     } catch (error) {
       setCancellationError(codeFailure(error).message);
