@@ -1035,11 +1035,14 @@ means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
 Start-screen composers ask in plain words ("Ask anything…"); a thread's
 follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
-tip. When the latest reply suggested a next message for this thread ("Next
-step here"), the empty follow-up composer shows it in place of "Reply…", with a
-quiet Tab key cap at its top-right, and a bare Tab puts it in the draft and
-marks the suggestion used; once anything is typed, or with a modifier held,
-Tab keeps its ordinary meaning.
+tip. When the latest reply predicted the person's next message, or suggested a
+next message for this thread ("Next step here"), the empty follow-up composer
+shows it in place of "Reply…", with a quiet Tab key cap at its top-right, and a
+bare Tab puts it in the draft (a "Next step here" suggestion is then marked
+used). The prediction leads when there are both, because it is written as the
+person would type it; it has no card, and it leaves the composer once the
+person sends anything. Once anything is typed, or with a modifier held, Tab
+keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name

@@ -689,6 +689,11 @@ export function wireHarness(deps: HarnessDependencies) {
     turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
       nativeHarnessObserver.turnStarted(scope);
       nativeHarnessLeadFallback.turnStarted(scope);
+      try {
+        threadFollowUpSuggestions.spendNextMessage(scope.threadId);
+      } catch {
+        // A spend the journal refused leaves an offer up; the turn still runs.
+      }
     },
     // The session view carries the retry notice the terminal footer and the
     // phone panel read; the transcript has its own copy from the turn stream.
@@ -723,16 +728,18 @@ export function wireHarness(deps: HarnessDependencies) {
     },
     turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
       try {
+        const offered = parseFollowUpSuggestions({
+          text: input.text,
+          turnId: decodeNativeHarnessTurnId(randomUUID()),
+          uuid: randomUUID,
+        });
         threadFollowUpSuggestions.recordReply({
           threadId: input.threadId,
           mode: input.mode,
           projectId: input.projectId,
           suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
-          followUps: parseFollowUpSuggestions({
-            text: input.text,
-            turnId: decodeNativeHarnessTurnId(randomUUID()),
-            uuid: randomUUID,
-          }),
+          followUps: offered.followUps,
+          nextMessage: offered.nextMessage,
         });
       } catch {
         // A set the journal refused leaves the reply itself untouched.
