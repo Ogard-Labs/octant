@@ -12494,6 +12494,7 @@ describe("continuing a Chat answer a restart cut off", () => {
     const releaseQueue = vi.fn(async (_threadId: string) => {});
     const recovery = await continueChatTurns({
       cutOff,
+      quitByPerson: false,
       chat: fixture.service,
       enabled: () => true,
       connection: fixture.persistence.connection,
@@ -12537,6 +12538,7 @@ describe("continuing a Chat answer a restart cut off", () => {
     // The first start's recovery run again lands on the turn it already made.
     await continueChatTurns({
       cutOff: first.cutOff,
+      quitByPerson: false,
       chat: fixture.service,
       enabled: () => true,
       connection: fixture.persistence.connection,
@@ -12557,6 +12559,28 @@ describe("continuing a Chat answer a restart cut off", () => {
       { mode: "chat", threadId: String(thread.id), reason: "turned-off" },
     ]);
     expect(recovery.continued).toEqual([]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(fixture.service.read(thread.id).turns).toHaveLength(1);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("holds a cut-off answer for its person after a person quit Octant, and sends nothing", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const { recovery, releaseQueue } = await restart(fixture, { quitByPerson: true });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "chat",
+          threadId: String(thread.id),
+          reason: "quit",
+          detail: "Octant was quit while this thread was working, so it waits for you.",
+        },
+      ],
+    });
     expect(releaseQueue).not.toHaveBeenCalled();
     expect(fixture.service.read(thread.id).turns).toHaveLength(1);
     expect(continuationTurns(fixture)).toHaveLength(0);

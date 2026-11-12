@@ -1403,7 +1403,7 @@ thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
-(`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
+(`STOP_CONFIRMATION_MS`, shared with Chat) for the runtime to answer its interrupt, then
 answers `interrupted` with "Stop was not confirmed. The provider may still be
 running this turn." The turn stays live and holds its thread until the
 runtime itself reports how it ended: its tool activity meanwhile is still
@@ -5132,6 +5132,29 @@ or .zip>` write the same files, built by one host command
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
+  The host does not wait for those looks. Once restart reconciliation has run,
+  it settles every thread's unconfirmed push and pull request steps once, in the
+  background, with the same reads the Git and pull request tabs make, so the
+  person who reopens the app finds them settled and a thread held only by one
+  is released when the remote proves how it ended. Start-up never waits on it:
+  at most three threads are read at a time, each step's reads stop after 20
+  seconds (the checkout-root probe included: its Git is killed and nothing
+  after an in-flight filesystem read starts), and server shutdown stops the
+  pass. It runs as the host (the scope
+  a routine runs under) and looks only at an active thread whose Project the
+  host still holds, through the thread's own checkout root, re-resolved and
+  re-checked against the Project binding, and its own remote, and at the pull
+  request a comment recorded. A restart marks every checkout waiting until a
+  window looks at it again, and settling only reads the remote, so a waiting
+  checkout is read; one recorded as gone, an archived thread, or a root that
+  no longer resolves is skipped. An unreachable remote, a read that times out,
+  or any failure leaves the step unconfirmed; nothing is marked failed without
+  the remote's answer. It reaches no destination the tabs do not: `git
+ls-remote` against the thread's remote and the GitHub reads they already
+  make. A person's look at the Git or pull request tab, and a push or comment
+  retried on the thread, waits for the host's pass on that thread first, so
+  the same comments are never counted around a new post.
+
   The same uncertainty can arise without a restart. A push that fails without
   Git reporting the remote's answer (a dropped connection, a `[remote failure]`
   the remote never confirmed, a timeout) carries `unconfirmed` on its result
@@ -5195,6 +5218,54 @@ or .zip>` write the same files, built by one host command
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
+
+  A person who quits Octant while turns run chose to stop them, so the next
+  start holds those threads instead of continuing them (maintainers decided on
+  2026-11-12). Restart recovery in all three modes holds each cut-off thread
+  with the `quit` reason ("Octant was quit while this thread was working, so
+  it waits for you."), checked after the setting, the thread's switch and, in
+  Code, an unknown push or pull request step, which keep their own reasons. A
+  quit hold starts nothing, lifts no queue and leaves the crash-loop count
+  alone. The window's notice then reads "Octant was quit while threads were
+  working. N threads wait for you." and links the first thread; the person
+  continues it with that thread's ordinary Resume or next message. No
+  per-thread continue action exists for a held thread.
+
+  The hold is server-enforced; the desktop only reports how it is quitting.
+  Once a quit is accepted, and before it stops the host, the desktop calls
+  `POST /api/desktop/person-quit` on the loopback listener when, and only
+  when, all of these are true: the quit was interactive (the app menu's Quit,
+  ⌘Q, or closing the last window where that quits, the same quits that may
+  ask before stopping running work); no system shutdown was announced; and
+  the host is one this desktop owns and stops. The route admits only the
+  desktop bridge secret: a request with an Origin, a forwarded remote request
+  (it carries a principal route context), a Nightly main token and a
+  non-loopback host are refused, and `/api/desktop` is local-only on the
+  private listener, so a paired device or remote client reaches it on no
+  path. The host writes `person-quit.json` beside its store; the next start
+  reads it and removes it before restart recovery runs, whether or not
+  anything was cut off, so it answers for that one start. With no file
+  (a crash, a force quit, a signal, a report that did not land within its
+  one-second bound) the start continues as before; a file that cannot be
+  removed is read as no quit, so it never holds threads after a later crash.
+  The report waits for nothing else, and a quit with no turn running writes a
+  file that holds nothing.
+
+  A system restart or shutdown continues, like a crash. The desktop latches
+  Electron's `powerMonitor` `shutdown` event (macOS and Linux; it fires before
+  the system quits apps) and each window's `query-session-end` and
+  `session-end` (Windows, where the session end reaches windows, not the app).
+  A macOS restart, shutdown or logout also quits the app with an Apple event,
+  which is not an interactive quit, so it continues even if the event came
+  late. With the Background service on, the host is not this desktop's to
+  stop: quitting closes the windows, the host keeps running and its turns keep
+  going, so nothing is reported and nothing is held. Limits: the Dock's Quit
+  and an AppleScript `quit` arrive as the same Apple event a shutdown sends,
+  so they continue rather than hold; a Linux session that ends without
+  logind's shutdown signal, after closing the last window, reads as a
+  person's quit; an update's relaunch is not interactive and continues. A
+  native quit, a system shutdown and the Windows session end are maintainer
+  live checks.
 
 - **Fast thread reads.** A window owns Code navigation bootstrap and the
   follow-up navigation list. Its open thread controllers consume that metadata
