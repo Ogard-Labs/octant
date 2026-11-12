@@ -296,6 +296,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
         hostOwnedTurn: false,
         pairedDeviceTurn: false,
         planTurn: false,
+        fullAccessTurn: false,
         threadTainted: taint.externalContentIngested,
         reach: "network",
         offered: binding,

@@ -10193,8 +10193,7 @@ that is not yet effective for the thread is refused and never reaches the model.
   trusted and enabled server runs without asking, on a thread marked by
   outside content too
   ([the Full access rule](#security-and-authority); maintainer request,
-  2026-11-12). Not built yet: today every call asks at every level unless a
-  remembered approval covers it. Who may answer:
+  2026-11-12); a Plan turn on such a thread still asks. Who may answer:
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
     may drive (bound to the Project the prompt recorded).

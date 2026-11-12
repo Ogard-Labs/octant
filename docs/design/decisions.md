@@ -1536,7 +1536,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Extensions and skills](
 
 Below Full access every MCP tool call waits for an approval in the turn's window unless a remembered approval covers it; at Full access a tool of a trusted and enabled server runs without asking, on a thread that has taken in outside content too (maintainer request, 2026-11-12). At most 32 approvals wait at once host-wide.
 
-- Not built yet: today an MCP tool call asks at Full access as at every other level.
+- Built: a Work or Code thread at Full access runs an MCP tool unasked, with or without a window, and records no grant for it; a Plan turn on such a thread still asks.
 - A paired device answers only prompts its own turns raised, and an unanswered approval waits in Needs you until a person answers it (maintainer request, 2026-11-12); not built yet: today it expires after five minutes.
 - A turn the host runs with no window (a routine, a goal loop) waits in Needs you for its approval instead of being refused (maintainer request, 2026-11-12); not built yet: today such a call is refused.
 - A remembered approval covers one tool in one Project, bound to a digest of its listing. The person can also allow all tools of one server at once, and a Chat thread outside a Project can remember a grant for the account (maintainer request, 2026-11-12); not built yet: today a grant covers one tool in one Project and nothing wider. It grows only through the local window answering its own turn's prompt, and any mismatch asks again.

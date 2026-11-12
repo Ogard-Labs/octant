@@ -26,6 +26,11 @@ export interface ExtensionToolGrantFacts {
   /** A paired device sent this turn, from its own scope rather than a local window's. */
   readonly pairedDeviceTurn: boolean;
   readonly planTurn: boolean;
+  /**
+   * The turn's thread runs at Full access, where no approval is asked. Plan
+   * on such a thread still asks.
+   */
+  readonly fullAccessTurn: boolean;
   /** The thread has taken in outside content: a tool result or external text. */
   readonly threadTainted: boolean;
   readonly reach: ExtensionToolReach;
@@ -52,8 +57,8 @@ export type ExtensionToolGrantDecision =
     };
 
 /**
- * Whether a remembered approval covers this MCP tool call, or a person must
- * be asked. A grant never widens what a call may do: it only spares the
+ * Whether this MCP tool call runs unasked, because the thread is at Full
+ * access or a remembered approval covers it, or a person must be asked. A grant never widens what a call may do: it only spares the
  * prompt for the exact tool, package, and listing the person already approved.
  */
 export function decideExtensionToolGrant(
@@ -63,6 +68,13 @@ export function decideExtensionToolGrant(
   // Plan is the read-only posture: nothing runs unasked under it, and an
   // answer given there approves that call alone.
   if (facts.planTurn) return { kind: "ask", reason: "plan-turn", rememberable: false };
+  // Full access rule. The person chose a level where nothing prompts, and the
+  // same agent already holds an unwrapped shell and an open network, so an
+  // ask here protects nothing that level does not already reach. A tool is
+  // only offered from a trusted and enabled server, and outside content is
+  // recorded on the thread without gating the call. This branch is the whole
+  // rule.
+  if (facts.fullAccessTurn) return { kind: "covered" };
   // Taint rule. Outside content on the thread may be steering the model, and
   // a network tool can carry what the thread has read out in its arguments,
   // so each such call is confirmed and the answer is single use. A confined

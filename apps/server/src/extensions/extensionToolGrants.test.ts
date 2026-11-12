@@ -219,6 +219,7 @@ function openHost(
     readonly projectId?: string;
     readonly tool?: string;
     readonly planTurn?: boolean;
+    readonly fullAccessTurn?: boolean;
     /** The window the turn was sent from; `"none"` is a turn nobody sits at. */
     readonly from?: WindowId | "none";
   }) {
@@ -237,6 +238,7 @@ function openHost(
         id: input.threadId,
         ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
         ...(input.planTurn === undefined ? {} : { planTurn: input.planTurn }),
+        ...(input.fullAccessTurn === undefined ? {} : { fullAccessTurn: input.fullAccessTurn }),
       },
       name: definition.name,
       inputJson: '{"q":"plan"}',
@@ -591,6 +593,16 @@ describe("an MCP tool a person always allows in a Project", () => {
     expect(await host.prompt()).toMatchObject({ mcpToolName: "search", rememberable: false });
     expect(await host.answer(false)).toBe(true);
     await planned;
+  });
+
+  it("runs a tool unasked on a Full access thread, with no window and no grant, and records none", async () => {
+    const host = openHost(temporaryDirectory());
+
+    await expect(
+      host.call({ threadId: threadOne, projectId: projectA, fullAccessTurn: true, from: "none" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    expect(host.approvals.list(atWindow)).toEqual([]);
+    expect(host.grants.list()).toEqual([]);
   });
 
   it("refuses to remember an answer on a thread with no Project and keeps the call waiting", async () => {

@@ -9,9 +9,9 @@ import type { ExtensionToolApprovalService } from "./extensionToolApprovalServic
 import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
 
 /**
- * Decides whether an MCP tool call may run: a remembered approval for exactly
- * this tool in this Project covers it, and otherwise a person is asked in the
- * turn's window. A grant is recorded only from inside that prompt's answer,
+ * Decides whether an MCP tool call may run: a thread at Full access runs it
+ * unasked, a remembered approval for exactly this tool in this Project covers
+ * it, and otherwise a person is asked in the turn's window. A grant is recorded only from inside that prompt's answer,
  * so nothing a model, a tool, or a route sends can create one.
  */
 export function createExtensionToolCallAuthorizer(options: {
@@ -58,6 +58,7 @@ export function createExtensionToolCallAuthorizer(options: {
         hostOwnedTurn: call.windowId !== undefined && options.isHostScope(call.windowId),
         pairedDeviceTurn: call.windowId !== undefined && options.isPairedDeviceScope(call.windowId),
         planTurn: call.thread.planTurn === true,
+        fullAccessTurn: call.thread.fullAccessTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,
         offered: offeredBinding(call),
