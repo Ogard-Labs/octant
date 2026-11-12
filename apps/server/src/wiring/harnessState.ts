@@ -26,7 +26,7 @@ import type { FoundationsWiring } from "./foundations";
 export type HarnessStateDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
-    "agentRunParentAuthority" | "agentRunPersistence" | "agentRunRequestOwner"
+    "agentRunParentAuthority" | "agentRunPersistence" | "agentRunRequestOwner" | "onThreadArchived"
   > &
   Pick<FoundationsWiring, "workThreadProjection">;
 
@@ -42,6 +42,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     agentRunParentAuthority,
     agentRunPersistence,
     agentRunRequestOwner,
+    onThreadArchived,
     persistence,
     workThreadProjection,
   } = deps;
@@ -93,6 +94,10 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
     outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
+  });
+  onThreadArchived((threadId) => {
+    nativeHarnessApprovals.withdrawThread(threadId);
+    nativeHarnessQuestions.withdrawThread(threadId);
   });
   // Octant Shield is built with the harness, after these stores; a child
   // asks through it once it exists.

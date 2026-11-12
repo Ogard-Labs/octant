@@ -156,14 +156,6 @@ export function createProjectMemoryTools(input: {
                 message: "The person declined. Project memory is unchanged. Do not ask again.",
               },
             };
-          case "expired":
-            return {
-              result: {
-                status: "expired",
-                message:
-                  "Nobody answered in time. Project memory is unchanged; mention the change in your reply instead.",
-              },
-            };
           case "cancelled":
             return refused("tool-interrupted", "The turn was cancelled while waiting.");
           case "not-applied":

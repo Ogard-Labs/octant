@@ -173,13 +173,6 @@ export function createRoutineProposalTools(input: {
           return {
             result: { status: "declined", message: "The person declined. No routine was created." },
           };
-        case "expired":
-          return {
-            result: {
-              status: "expired",
-              message: "The person did not answer in time. No routine was created.",
-            },
-          };
         case "cancelled":
           return {
             result: {

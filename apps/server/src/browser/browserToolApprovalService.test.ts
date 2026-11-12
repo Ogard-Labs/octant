@@ -203,7 +203,7 @@ describe("BrowserToolApprovalService", () => {
     expect(remembered).toEqual([["https://example.com", windowId]]);
   });
 
-  it("never remembers an origin from the answer to a sign-in request, and waits longer for it", async () => {
+  it("never remembers an origin from the answer to a sign-in request, and waits for it a day later", async () => {
     vi.useFakeTimers();
     try {
       const remembered: Array<unknown> = [];
@@ -223,8 +223,8 @@ describe("BrowserToolApprovalService", () => {
       expect(service.list(windowId)).toEqual([
         expect.objectContaining({ signIn: { reason: "The dashboard needs your account." } }),
       ]);
-      // Past the ordinary five minutes, a sign-in is still waiting.
-      vi.advanceTimersByTime(6 * 60_000);
+      // A site approval has run out long before; the sign-in card has no expiry.
+      vi.advanceTimersByTime(24 * 60 * 60_000);
       expect(service.list(windowId)).toHaveLength(1);
       expect(
         service.decide(windowId, {
@@ -335,7 +335,7 @@ describe("BrowserToolApprovalService", () => {
     service.close();
   });
 
-  it("cancels pending approvals on abort and window revocation", async () => {
+  it("cancels pending approvals on abort, window revocation, and the thread's archive", async () => {
     const service = new BrowserToolApprovalService({
       uuid: () => crypto.randomUUID(),
       now: Date.now,
@@ -359,6 +359,17 @@ describe("BrowserToolApprovalService", () => {
     });
     service.revokeWindow(windowId);
     await expect(revoked).resolves.toBe("cancelled");
+    const archived = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+      signIn: {},
+    });
+    service.withdrawThread("50000000-0000-4000-8000-000000000009");
+    expect(service.list(windowId)).toHaveLength(1);
+    service.withdrawThread("50000000-0000-4000-8000-000000000001");
+    await expect(archived).resolves.toBe("cancelled");
   });
 
   it("denies a pending approval when its window loses Project scope", async () => {

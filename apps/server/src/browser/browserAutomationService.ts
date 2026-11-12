@@ -311,7 +311,11 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
-/** A sign-in waits up to 10 minutes; the page is kept a little longer. */
+/**
+ * How long a take-over keeps the page without person input. A sign-in ask has
+ * no such window: its card waits until the person answers, and the page waits
+ * with it.
+ */
 const HAND_OFF_KEEP_MS = 11 * 60_000;
 /** After the hand-off ends, the agent has this long to read the page. */
 const AFTER_HAND_OFF_KEEP_MS = 2 * 60_000;
@@ -2977,7 +2981,10 @@ export class BrowserAutomationService {
     owned.waitingForPerson = kind;
     // The page outlives the hand-off: a person signing in near the end of the
     // session must not lose the page under them, and the agent gets a moment
-    // after Continue to read it.
+    // after Continue to read it. A sign-in ask holds the page for as long as
+    // its card waits (see #expired); the release below, which the card's
+    // answer, its turn's stop, and its window's or the host's end all reach,
+    // puts the page back on a finite deadline.
     owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
     this.#scheduleExpiry(owned);
     const release = () => {
@@ -3352,6 +3359,12 @@ export class BrowserAutomationService {
 
   #scheduleExpiry(owned: OwnedContext): void {
     if (owned.record.state !== "active" && owned.record.state !== "creating") return;
+    if (owned.waitingForPerson === "sign-in") {
+      // Nothing to wait for: the hold's release schedules the next deadline.
+      owned.cancelExpiry?.();
+      owned.cancelExpiry = undefined;
+      return;
+    }
     const deadline = browserContextExpiresAt(owned.record, {
       lastActivityAt: owned.lastActivityAt,
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),
@@ -3404,6 +3417,9 @@ export class BrowserAutomationService {
   }
 
   #expired(owned: OwnedContext): boolean {
+    // A page handed to the person for a sign-in the agent asked for lives as
+    // long as that card waits, and the card has no expiry.
+    if (owned.waitingForPerson === "sign-in") return false;
     return isContextExpired(owned.record, this.#now(), {
       lastActivityAt: owned.lastActivityAt,
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),

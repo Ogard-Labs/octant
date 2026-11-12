@@ -94,6 +94,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     AuthorityWiring,
     | "browserCaptures"
     | "machineChangeFeed"
+    | "onThreadArchived"
     | "onWindowRevoked"
     | "windowAuthorityStore"
     | "codeSessionAuthority"
@@ -119,6 +120,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     externalContentIngestionStore,
     localPluginImportReceipts,
     machineChangeFeed,
+    onThreadArchived,
     onWindowRevoked,
     options,
     persistence,
@@ -236,6 +238,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
+    onThreadArchived((threadId) => browserToolApprovalService.withdrawThread(threadId));
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
     });

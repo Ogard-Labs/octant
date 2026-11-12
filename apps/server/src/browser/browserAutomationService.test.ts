@@ -1779,14 +1779,16 @@ describe("BrowserAutomationService", () => {
     });
   });
 
-  it("keeps a page open while the person signs in past its session limit, one hand-off at a time", async () => {
+  it("keeps a page open for as long as its sign-in card waits, one hand-off at a time", async () => {
     const fixture = harness();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
     const release = fixture.service.holdForPerson(windowId, threadOne);
     expect(release).toBeDefined();
     expect(fixture.service.holdForPerson(windowId, threadOne)).toBeUndefined();
     expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
-    fixture.advance(400_000);
+    // The card has no expiry, so the page it asks the person to use has none
+    // either while the card waits.
+    fixture.advance(24 * 60 * 60_000);
     fixture.expire();
     expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
     release?.();

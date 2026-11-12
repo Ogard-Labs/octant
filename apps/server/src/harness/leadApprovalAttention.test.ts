@@ -63,7 +63,6 @@ const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${(++counter).toString(16).padStart(
 function openStores(
   connection: SqliteConnection,
   options: {
-    readonly timeoutMs?: number;
     readonly runsInRemoteFolder?: (threadId: string) => boolean;
   } = {},
 ) {
@@ -85,23 +84,21 @@ function openStores(
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   const questions = new NativeHarnessQuestionStore({
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   return { sessions, approvals, questions };
 }
 
-function fixture(options: { readonly timeoutMs?: number } = {}) {
+function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "octant-lead-approval-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
-  const stores = openStores(connection, options);
+  const stores = openStores(connection);
   const ask = (
     input: {
       readonly mode?: OctantMode;
@@ -120,7 +117,7 @@ function fixture(options: { readonly timeoutMs?: number } = {}) {
       summary: input.summary ?? "bash: bun run test",
       approvalClass: "shell",
     });
-  return { ...stores, connection, options, ask };
+  return { ...stores, connection, ask };
 }
 
 describe("a pending harness approval needs the person", () => {
@@ -136,7 +133,7 @@ describe("a pending harness approval needs the person", () => {
     expect(awaitsLeadApproval({ approvals, sessions }, thread)).toBe(false);
   });
 
-  it("clears when the person denies it, it expires, or the turn is cancelled", async () => {
+  it("clears when the person denies it or the turn is cancelled", async () => {
     const denied = fixture();
     const deny = denied.ask();
     denied.approvals.decide(
@@ -146,10 +143,6 @@ describe("a pending harness approval needs the person", () => {
     );
     await deny;
     expect(awaitsLeadApproval(denied, thread)).toBe(false);
-
-    const expired = fixture({ timeoutMs: 5 });
-    await expired.ask();
-    expect(awaitsLeadApproval(expired, thread)).toBe(false);
 
     const cancelled = fixture();
     const controller = new AbortController();
@@ -311,7 +304,7 @@ describe("a lead's own pending harness question needs the person", () => {
     });
   });
 
-  it("clears when the turn is cancelled or the question expires", async () => {
+  it("clears when the turn is cancelled", async () => {
     const cancelled = fixture();
     const controller = new AbortController();
     const wait = askQuestion(cancelled, { signal: controller.signal });
@@ -319,10 +312,6 @@ describe("a lead's own pending harness question needs the person", () => {
     controller.abort();
     await expect(wait).resolves.toMatchObject({ status: "cancelled" });
     expect(awaitsLeadQuestion(cancelled, thread)).toBe(false);
-
-    const expired = fixture({ timeoutMs: 5 });
-    await expect(askQuestion(expired)).resolves.toMatchObject({ status: "expired" });
-    expect(awaitsLeadQuestion(expired, thread)).toBe(false);
   });
 
   it("does not count a subagent's question as the thread's own", () => {
@@ -507,7 +496,7 @@ describe("the rows a window lists for a Work lead's waiting question", () => {
     expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
   });
 
-  it("stops listing it when the turn is cancelled or the question expires", async () => {
+  it("stops listing it when the turn is cancelled", async () => {
     const cancelled = fixture();
     const controller = new AbortController();
     const wait = askQuestion(cancelled, { signal: controller.signal });
@@ -515,10 +504,6 @@ describe("the rows a window lists for a Work lead's waiting question", () => {
     controller.abort();
     await wait;
     expect(await listLeadQuestionRequests(rowSources(cancelled), windowId)).toEqual([]);
-
-    const expired = fixture({ timeoutMs: 5 });
-    await askQuestion(expired);
-    expect(await listLeadQuestionRequests(rowSources(expired), windowId)).toEqual([]);
   });
 
   it("lists nothing for a subagent's question, which the subagent rows carry", async () => {

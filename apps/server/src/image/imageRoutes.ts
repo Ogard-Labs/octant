@@ -211,7 +211,7 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         }
         // The window must still be able to open the thread that asked: one
         // that moved to another Project answers nothing there, and the offer
-        // keeps waiting for its turn to end or expire.
+        // keeps waiting for its turn to end or its thread to be archived.
         const waiting = dependencies.offers?.find(windowId, decision.offerId);
         if (waiting === undefined) return answer({ kind: "image-offer-gone" });
         if (!(await dependencies.authorizeScope(windowId, waiting.threadKind, waiting.scopeId))) {
