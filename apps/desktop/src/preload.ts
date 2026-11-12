@@ -2687,15 +2687,26 @@ function decodeBundledWhatsNew(value: unknown): BundledWhatsNew {
   ) {
     throw new TypeError("Invalid What's new document.");
   }
-  const announcement =
-    value.announcement === undefined ? undefined : decodeWhatsNewAnnouncement(value.announcement);
+  const announcements =
+    value.announcements === undefined
+      ? undefined
+      : decodeWhatsNewAnnouncements(value.announcements);
   return Object.freeze({
     kind: "notes",
     version: value.version,
     text: value.text,
     showAfterApply: value.showAfterApply,
-    ...(announcement === undefined ? {} : { announcement }),
+    ...(announcements === undefined ? {} : { announcements }),
   });
+}
+
+function decodeWhatsNewAnnouncements(value: unknown): ReadonlyArray<BundledWhatsNewAnnouncement> {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 5) {
+    throw new TypeError("Invalid What's new announcement.");
+  }
+  return Object.freeze(
+    (value as ReadonlyArray<unknown>).map((entry) => decodeWhatsNewAnnouncement(entry)),
+  );
 }
 
 /**

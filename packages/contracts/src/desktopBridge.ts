@@ -189,7 +189,7 @@ export type AppUpdateInstallOutcome =
 /**
  * One feature announcement a release bundles beside its notes. Desktop reads
  * and bounds it; the picture arrives as a data URL so the renderer never
- * reads disk or fetches anything.
+ * reads disk or fetches anything. A release bundles one to five, in order.
  */
 export interface BundledWhatsNewAnnouncement {
   readonly title: string;
@@ -212,8 +212,13 @@ export type BundledWhatsNew =
       readonly version: string;
       readonly text: string;
       readonly showAfterApply: boolean;
-      /** Present only when notes are due and the release bundles a valid announcement. */
-      readonly announcement?: BundledWhatsNewAnnouncement;
+      /**
+       * Present only when notes are due and the release bundles at least one
+       * valid announcement: one to five, in the order they are shown. All of
+       * their pictures arrive here together, at most about 3.5 MB of data
+       * URLs once per launch.
+       */
+      readonly announcements?: ReadonlyArray<BundledWhatsNewAnnouncement>;
     }
   | {
       readonly kind: "empty";

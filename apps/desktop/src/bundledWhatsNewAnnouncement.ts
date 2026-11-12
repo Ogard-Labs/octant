@@ -3,16 +3,30 @@ import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 /**
- * The one feature announcement a release may bundle beside its notes.
+ * The feature announcements a release may bundle beside its notes: one to five,
+ * shown in a row.
  *
- * Read from disk, never from a network. Anything wrong with it (bad JSON, an
- * unknown field, a name that could leave the folder, a picture that is too
- * large or not the format its name claims) means "no announcement": a release
- * file must never turn into an error dialog.
+ * Read from disk, never from a network. Anything wrong with the file as a whole
+ * (bad JSON, an unknown top-level field, a wrong shape) means "no
+ * announcements". In a version 2 file an entry that is wrong by itself (an
+ * unknown field, a text over its limit, a bad picture name, a picture that is
+ * missing, too large or not the format its name claims) is skipped and the
+ * valid ones still show. A release file must never turn into an error dialog.
+ *
+ * Version 1 is one announcement object and stays valid as a list of one.
  */
 export const BUNDLED_ANNOUNCEMENT_FILENAME = "whats-new-announcement.json" as const;
 
-export const MAX_ANNOUNCEMENT_FILE_CHARS = 8_192;
+/**
+ * Five entries at their limits, pretty-printed, with the worst ordinary JSON
+ * escaping (a quote or a newline costs two characters): about 3,000 characters
+ * an entry, so 16,384 leaves room for the wrapper too. The earlier single
+ * entry was held to 8,192 for the same reasons. It is a ceiling on what is
+ * read, not on what is shown: each field keeps its own limit below.
+ */
+export const MAX_ANNOUNCEMENT_FILE_CHARS = 16_384;
+/** More valid entries than this are not shown; the first five win. */
+export const MAX_ANNOUNCEMENTS = 5;
 export const MAX_ANNOUNCEMENT_TITLE_CHARS = 80;
 export const MAX_ANNOUNCEMENT_BODY_CHARS = 600;
 export const MAX_ANNOUNCEMENT_ACTION_CHARS = 32;
@@ -20,14 +34,15 @@ export const MAX_ANNOUNCEMENT_PICTURE_ALT_CHARS = 160;
 /** Large enough for a screenshot, small enough to cross IPC as a data URL. */
 export const MAX_ANNOUNCEMENT_PICTURE_BYTES = 524_288;
 
-const ALLOWED_KEYS: ReadonlySet<string> = new Set([
-  "schemaVersion",
+const ENTRY_KEYS: ReadonlySet<string> = new Set([
   "title",
   "body",
   "actionLabel",
   "picture",
   "pictureAlt",
 ]);
+const VERSION_1_KEYS: ReadonlySet<string> = new Set(["schemaVersion", ...ENTRY_KEYS]);
+const VERSION_2_KEYS: ReadonlySet<string> = new Set(["schemaVersion", "announcements"]);
 
 /**
  * A bare file name in the resources folder. No separator and no leading dot,
@@ -43,18 +58,47 @@ export interface ParsedAnnouncement {
   readonly pictureAlt?: string;
 }
 
-export function parseAnnouncementFile(raw: string): ParsedAnnouncement | undefined {
-  if (raw.length === 0 || raw.length > MAX_ANNOUNCEMENT_FILE_CHARS) return undefined;
+/**
+ * The announcements a file names, in order, or an empty list when the file is
+ * not valid as a whole. Pictures are not read here, so an entry whose picture
+ * is missing is still listed; the loader skips it. Entries beyond what can be
+ * shown are not trimmed here for the same reason: the fifth valid one is only
+ * known after pictures are read.
+ */
+export function parseAnnouncementFile(raw: string): ReadonlyArray<ParsedAnnouncement> {
+  if (raw.length === 0 || raw.length > MAX_ANNOUNCEMENT_FILE_CHARS) return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return undefined;
+    return [];
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
   const record: Readonly<Record<string, unknown>> = Object.fromEntries(Object.entries(parsed));
-  if (Object.keys(record).some((key) => !ALLOWED_KEYS.has(key))) return undefined;
-  if (record.schemaVersion !== 1) return undefined;
+  if (record.schemaVersion === 1) {
+    if (Object.keys(record).some((key) => !VERSION_1_KEYS.has(key))) return [];
+    const entry = parseEntry(record);
+    return entry === undefined ? [] : [entry];
+  }
+  if (record.schemaVersion === 2) {
+    if (Object.keys(record).some((key) => !VERSION_2_KEYS.has(key))) return [];
+    if (!Array.isArray(record.announcements)) return [];
+    const entries: ParsedAnnouncement[] = [];
+    for (const candidate of record.announcements as ReadonlyArray<unknown>) {
+      if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+      const entryRecord: Readonly<Record<string, unknown>> = Object.fromEntries(
+        Object.entries(candidate),
+      );
+      if (Object.keys(entryRecord).some((key) => !ENTRY_KEYS.has(key))) continue;
+      const entry = parseEntry(entryRecord);
+      if (entry !== undefined) entries.push(entry);
+    }
+    return entries;
+  }
+  return [];
+}
+
+function parseEntry(record: Readonly<Record<string, unknown>>): ParsedAnnouncement | undefined {
   const title = boundedText(record.title, MAX_ANNOUNCEMENT_TITLE_CHARS);
   const body = boundedText(record.body, MAX_ANNOUNCEMENT_BODY_CHARS);
   if (title === undefined || body === undefined) return undefined;
@@ -111,12 +155,18 @@ export async function readAtMost(path: string, maxBytes: number): Promise<Uint8A
   }
 }
 
-export async function loadBundledAnnouncement(options: {
+/**
+ * The announcements to show, in order: at most `MAX_ANNOUNCEMENTS`, each with
+ * its picture already read. Pictures are read one entry at a time and only
+ * until enough entries are ready, so an entry that will not be shown never has
+ * its picture opened. Undefined when nothing is valid.
+ */
+export async function loadBundledAnnouncements(options: {
   readonly announcementPath: string;
   /** Must return at most `maxBytes + 1` bytes; see `readAtMost`. */
   readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
-}): Promise<BundledWhatsNewAnnouncement | undefined> {
-  let parsed: ParsedAnnouncement | undefined;
+}): Promise<ReadonlyArray<BundledWhatsNewAnnouncement> | undefined> {
+  let parsed: ReadonlyArray<ParsedAnnouncement>;
   try {
     // The cap is in bytes of the file; the parser's character cap still holds.
     const bytes = await options.readBounded(options.announcementPath, MAX_ANNOUNCEMENT_FILE_CHARS);
@@ -125,31 +175,44 @@ export async function loadBundledAnnouncement(options: {
   } catch {
     return undefined;
   }
-  if (parsed === undefined) return undefined;
+  const ready: BundledWhatsNewAnnouncement[] = [];
+  for (const entry of parsed) {
+    if (ready.length >= MAX_ANNOUNCEMENTS) break;
+    const loaded = await loadEntry(entry, dirname(options.announcementPath), options.readBounded);
+    if (loaded !== undefined) ready.push(loaded);
+  }
+  return ready.length === 0 ? undefined : ready;
+}
+
+async function loadEntry(
+  entry: ParsedAnnouncement,
+  folder: string,
+  readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>,
+): Promise<BundledWhatsNewAnnouncement | undefined> {
   let picture: BundledWhatsNewAnnouncement["picture"];
-  if (parsed.pictureName !== undefined) {
+  if (entry.pictureName !== undefined) {
     try {
-      const bytes = await options.readBounded(
-        join(dirname(options.announcementPath), parsed.pictureName),
+      const bytes = await readBounded(
+        join(folder, entry.pictureName),
         MAX_ANNOUNCEMENT_PICTURE_BYTES,
       );
       const mediaType =
         bytes.byteLength === 0 || bytes.byteLength > MAX_ANNOUNCEMENT_PICTURE_BYTES
           ? undefined
-          : pictureMediaType(parsed.pictureName, bytes);
+          : pictureMediaType(entry.pictureName, bytes);
       if (mediaType === undefined) return undefined;
       picture = {
         dataUrl: `data:${mediaType};base64,${Buffer.from(bytes).toString("base64")}`,
-        ...(parsed.pictureAlt === undefined ? {} : { alt: parsed.pictureAlt }),
+        ...(entry.pictureAlt === undefined ? {} : { alt: entry.pictureAlt }),
       };
     } catch {
       return undefined;
     }
   }
   return {
-    title: parsed.title,
-    body: parsed.body,
-    ...(parsed.actionLabel === undefined ? {} : { actionLabel: parsed.actionLabel }),
+    title: entry.title,
+    body: entry.body,
+    ...(entry.actionLabel === undefined ? {} : { actionLabel: entry.actionLabel }),
     ...(picture === undefined ? {} : { picture }),
   };
 }
