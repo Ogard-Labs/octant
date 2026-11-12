@@ -155,8 +155,10 @@ for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, counts, `strong`, the app's name, a destination's page title), and
-700 (`--oct-weight-title`) only for the large title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
+card titles, `strong`, the app's name, a destination's page title), and
+700 (`--oct-weight-title`) only for the large title. A count beside a label
+is Meta at 400; the one count at medium weight is a plan meter's figure, which
+stands with no label of its own (see Plan meters). The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
