@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
@@ -942,6 +943,7 @@ export interface CodeOperationReviewFindingPort {
     windowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
     admissionCurrent?: () => boolean,
+    actor?: EventActor,
   ) => Promise<CodeReviewFinding>;
   readonly changeState: (
     windowId: WindowId,
@@ -953,6 +955,7 @@ export interface CodeOperationReviewFindingPort {
       readonly state: CodeReviewFinding["state"];
     },
     admissionCurrent?: () => boolean,
+    actor?: EventActor,
   ) => Promise<CodeReviewFinding>;
 }
 
@@ -1117,6 +1120,12 @@ export type CodeOperationInitiator = "user" | "agent";
 
 export interface CodeOperationExecuteOptions {
   readonly initiator?: CodeOperationInitiator;
+  /**
+   * Who the route resolved the request to. It names the person's own records
+   * an operation writes (a review finding); the operation's own events keep
+   * the runtime's actor. Host-only: the wire command cannot carry it.
+   */
+  readonly actor?: EventActor;
   /**
    * Set by the host's own usage-limit recovery when it dispatches the
    * authorized continuation: the send is not the person re-engaging, so it
@@ -1833,6 +1842,7 @@ export class CodeOperationService {
                         initiator,
                         options.routineRun,
                         initiator === "user" && options.limitRecovery !== true,
+                        options.actor,
                       );
               } catch (error) {
                 const category =
@@ -3402,6 +3412,7 @@ export class CodeOperationService {
     initiator: CodeOperationInitiator = "agent",
     routineRun?: AutomationRunReference,
     includeProductFeedback = false,
+    personActor?: EventActor,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     // A server thread's Git runs on its server; it never reaches this host's.
@@ -4051,6 +4062,7 @@ export class CodeOperationService {
             provenance: { kind: "manual" },
           },
           admissionCurrent,
+          personActor,
         );
         return finding.id === command.findingId
           ? decodeCodeOperationResult({
@@ -4074,6 +4086,7 @@ export class CodeOperationService {
               state: command.state,
             },
             admissionCurrent,
+            personActor,
           ),
         });
       case "start-provider-turn":

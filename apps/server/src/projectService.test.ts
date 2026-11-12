@@ -696,6 +696,53 @@ describe("ProjectService", () => {
     });
   });
 
+  it("says the paired device wrote a memory entry and added a folder, where a local window's still say the local user", async () => {
+    const deviceId = "92000000-0000-4000-8000-0000000000d6";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const namedBy = async (actor?: never) => {
+      const memory = fixtureService({ projects: [chatProject()] });
+      const created = await memory.service.executeMemory(
+        {
+          kind: "create-memory-entry",
+          projectId: chatId,
+          entryId: successorId,
+          memoryKind: "fact",
+          content: "Releases ship from main only.",
+          expectedVersion: 0,
+        },
+        actor,
+      );
+      const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 3));
+      const receipt = receipts.issue({
+        windowId,
+        projectType: "work",
+        canonicalBinding: { canonicalRoot: "/canonical/notes" },
+        now: 0,
+      });
+      const folders = fixtureService({ projects: [workProject()], receipts, nowMs: 1 });
+      const added = await folders.service.executeProject(
+        windowId,
+        {
+          kind: "add-project-extra-folder",
+          projectId: workId,
+          expectedVersion: 1,
+          receiptId: receipt.receiptId,
+        },
+        actor,
+      );
+      return [
+        created.kind === "memory-entry-created" ? created.entry.author : undefined,
+        added.kind === "project-extra-folder-added"
+          ? added.project.extraFolders?.[0]?.addedBy
+          : undefined,
+      ];
+    };
+    const local = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID };
+
+    expect(await namedBy(device)).toEqual([device, device]);
+    expect(await namedBy()).toEqual([local, local]);
+  });
+
   it("creates every explicit memory kind and returns active history separately", async () => {
     const fixture = fixtureService({ projects: [chatProject()] });
     const kinds = ["decision", "fact", "preference", "summary", "outcome"] as const;

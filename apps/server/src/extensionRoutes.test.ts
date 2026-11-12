@@ -1624,7 +1624,12 @@ describe("signing in to a hosted server from Settings", () => {
     expect(signIn.status).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
     const begun = await handler(request("/api/extensions/sign-in", { kind: "begin", ...target }));
     expect(await begun?.json()).toMatchObject({ kind: "awaiting-consent" });
-    expect(signIn.begin).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    expect(signIn.begin).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      "local-window",
+      expect.objectContaining({ kind: "local-user" }),
+    );
     const polled = await handler(
       request("/api/extensions/sign-in", {
         kind: "poll",
@@ -1643,7 +1648,12 @@ describe("signing in to a hosted server from Settings", () => {
     );
     expect(remote?.status).toBe(200);
     expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
-    expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+    expect(signIn.begin).toHaveBeenLastCalledWith(
+      extensionId,
+      "mcp-docs",
+      "remote-device",
+      expect.objectContaining({ kind: "remote-device" }),
+    );
   });
 
   it("accepts safe registered-client setup only from an authorized local window", async () => {

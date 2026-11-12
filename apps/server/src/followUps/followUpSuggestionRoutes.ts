@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   decodeActivateNativeHarnessFollowUp,
   MAX_FOLLOW_UP_LINEAGE_LINKS,
@@ -6,7 +7,8 @@ import {
   type NativeHarnessFollowUpCreation,
   type ThreadFollowUpSuggestions,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import {
@@ -67,6 +69,8 @@ export async function settleFollowUpSuggestion(
     readonly windowId: string;
     readonly action: string;
     readonly body: unknown;
+    /** Who took the suggestion, from the authenticated request. */
+    readonly actor?: EventActor;
   },
 ): Promise<{ readonly status: number; readonly body: unknown }> {
   const view = dependencies.store.read(input.threadId);
@@ -137,7 +141,12 @@ export async function settleFollowUpSuggestion(
   // A later reply may have replaced the set while the thread was being
   // created. The thread exists either way, so the person still gets it; only
   // the record of which chip made it has nowhere to go.
-  dependencies.store.activate(input.threadId, activation.suggestionId, creation.created);
+  dependencies.store.activate(
+    input.threadId,
+    activation.suggestionId,
+    creation.created,
+    input.actor,
+  );
   return { status: 200, body: activated(suggestion.id, creation.created) };
 }
 
@@ -218,6 +227,7 @@ export function createFollowUpSuggestionRouteHandler(
       windowId,
       action,
       body,
+      actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
     });
     return json(settled.body, settled.status, origin);
   };

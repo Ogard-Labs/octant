@@ -409,6 +409,26 @@ describe("Project command contracts", () => {
 });
 
 describe("Project memory contracts", () => {
+  it("names the paired device that wrote an entry, bound a folder or added one, and still reads records that name the local user", () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000db";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as const;
+    expect(decodeMemoryEntry({ ...userMemory, author: device })).toMatchObject({
+      author: device,
+    });
+    expect(
+      decodeProject({
+        ...workProject,
+        bindingHistory: [{ ...initialBindingRevision, actor: device }],
+      }),
+    ).toMatchObject({ bindingHistory: [{ actor: device }] });
+    expect(decodeMemoryEntry(userMemory)).toMatchObject({ author: actor });
+    // A device is named by its id; an actor that only claims the kind is refused.
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, author: { kind: "remote-device", actorId: deviceId } }),
+    ).toThrow();
+    expect(() => decodeMemoryEntry({ ...userMemory, author: { ...actor, deviceId } })).toThrow();
+  });
+
   it.each(["decision", "fact", "preference", "summary", "outcome"] as const)(
     "decodes active %s memory",
     (kind) => expect(decodeMemoryEntry({ ...userMemory, kind })).toMatchObject({ kind }),

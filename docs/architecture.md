@@ -9223,8 +9223,10 @@ listener per confined launch:
   list — never from a model tool call, a tool result, a reviewer, or
   configuration a repository ships. Thread and call rules may be granted by
   anyone who may already answer that thread's approvals, a paired device
-  included under its existing clamps. Project rules need the person at a local
-  window whose workspace holds the Project, like remembered Full access.
+  included under its existing clamps. Project rules need the host's own person:
+  at a local window whose workspace holds the Project, or on a device that
+  person paired, which is journaled as the device that granted (maintainer
+  decision, 2026-11-12).
   [Octant Shield](#octant-shield) may answer a per-call `network-access` prompt on a
   thread that is not tainted. Its answer produces `call` rules for that one
   launch and nothing wider, journaled as `thread.egress-rule-granted@1` with
@@ -9368,8 +9370,8 @@ where it was or narrows it:
   as the harness session's approvals. Like those approvals the route is not in
   the paired-device catalogue today, so a paired device reaches it only once it
   may answer the thread's approvals; the server takes the principal from the
-  authenticated request and refuses a Project rule from a paired device either
-  way.
+  authenticated request and refuses a Project rule from any device the host's
+  own person did not pair either way.
 - _Purge._ A thread purge erases the thread's `thread-egress` aggregate. Project
   rules are the Project's: a thread purge leaves `project-egress` in place,
   including the id of the thread a rule was granted from, and a Project erase
@@ -9571,8 +9573,8 @@ proofs that suite already holds:
    the journal events, run against phase 2 launches with fixture origins so
    commands are not yet on the proxy. Accepted when server integration tests
    show: learn mode refuses and proposes but never connects, however often it
-   is asked; an unanswered or declined proposal grants nothing; a paired
-   device cannot grant a Project rule; a tainted thread can grant only `call`
+   is asked; an unanswered or declined proposal grants nothing; a device the
+   host's own person did not pair cannot grant a Project rule; a tainted thread can grant only `call`
    rules and its standing rules stop applying; a grant that cannot be
    journaled is not in force; output received through the proxy taints the
    thread before the result returns, for a test run as for `bash`; a child of

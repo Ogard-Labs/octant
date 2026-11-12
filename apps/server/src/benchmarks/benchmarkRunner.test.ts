@@ -301,6 +301,28 @@ describe("benchmark runner", () => {
     expect(chat.starts).toHaveLength(0);
   });
 
+  it("journals who cancelled a run: the paired device that asked, or the store's own actor for a local window", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d9";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const cancelledBy = async (actor?: never) => {
+      const { store, runner, journal } = setup();
+      store.runStarted({ run: sampleRun({ repetitions: 3 }) });
+      await runner.tick();
+      const before = journal.headSequence();
+      await runner.cancel(benchmarkIds.run, actor);
+      return journal
+        .replay({ afterSequence: before as never, limit: 100 } as never)
+        .map((event) => event.actor);
+    };
+
+    const byDevice = await cancelledBy(device);
+    expect(byDevice.length).toBeGreaterThan(1);
+    expect(byDevice.every((actor) => actor.kind === "remote-device")).toBe(true);
+    expect(byDevice[0]).toEqual(device);
+    const local = await cancelledBy();
+    expect(local.some((actor) => actor.kind === "remote-device")).toBe(false);
+  });
+
   it("cancels a run: running turns are interrupted, queued cells cancelled, and the run ends cancelled", async () => {
     const { store, chat, runner, projection } = setup();
     const run = sampleRun({ repetitions: 3 });

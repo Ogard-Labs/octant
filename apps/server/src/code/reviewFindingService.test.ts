@@ -196,6 +196,31 @@ describe("ReviewFindingService", () => {
     ).rejects.toMatchObject({ failure: "stale" });
   });
 
+  it("journals a finding a paired device wrote or settled with the device as actor, and a local window's as the local user", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d5";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const { service, persistence, records } = fixture();
+    const created = await service.create(ids.window, input, undefined, device);
+    records.set(String(ids.finding), created);
+    await service.changeState(
+      ids.window,
+      { findingId: ids.finding, expectedVersion: created.version, state: "resolved" },
+      undefined,
+      device,
+    );
+    const local = fixture();
+    await local.service.create(ids.window, input);
+    const actors = (journal: { readonly append: unknown }) =>
+      vi
+        .mocked(journal.append as (input: { events: ReadonlyArray<{ actor: unknown }> }) => void)
+        .mock.calls.map(([appended]) => appended.events[0]?.actor);
+
+    expect(actors(persistence.journal)).toEqual([device, device]);
+    expect(actors(local.persistence.journal)).toEqual([
+      expect.objectContaining({ kind: "local-user" }),
+    ]);
+  });
+
   it("normalizes a journal concurrency race to stale", async () => {
     const { service, persistence, records } = fixture();
     records.set(

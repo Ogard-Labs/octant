@@ -23,6 +23,8 @@ import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import { authenticateProjectRequest } from "../../projectBindingRoutes";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
+import type { EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "../../principalEventActor";
 import { readPrincipalRouteContext } from "../../principalRouteContext";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { HostOAuthService } from "./hostOAuthService";
@@ -162,6 +164,8 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       return json({ kind: "refused", reason: "unavailable" }, 503, origin);
     }
     const principal = principalKind(request);
+    // Who the journal names for this sign-in: the device, when a device asked.
+    const actor = eventActorForPrincipal(readPrincipalRouteContext(request)?.principal);
     const command = readCommand(body);
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
     // A cloud sign-in begins only from the host's terminal; Settings reads
@@ -216,6 +220,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             command: resumed,
             principal,
             actorId: windowId,
+            actor,
           });
         }
         return dispatch({
@@ -225,6 +230,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
           offer,
           principal,
           actorId: windowId,
+          actor,
         });
       };
       const viewPromise = execute();
@@ -263,13 +269,15 @@ async function dispatch(input: {
   readonly offer: SubscriptionOAuthOffer;
   readonly principal: PrincipalKind;
   readonly actorId: string;
+  readonly actor: EventActor;
 }): Promise<ProviderOAuthView> {
-  const { dependencies, command, descriptor, offer, principal, actorId } = input;
+  const { dependencies, command, descriptor, offer, principal, actorId, actor } = input;
   if (command.kind === "status") return signedInOrOut(dependencies, command, offer, principal);
   if (command.kind === "acknowledge") {
     const recorded = dependencies.service.acknowledgeTerms({
       principalKind: principal,
       actorId,
+      actor,
       descriptor,
     });
     if (recorded.kind === "refused") return { kind: "refused", reason: recorded.reason };
@@ -291,6 +299,7 @@ async function dispatch(input: {
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
+      actor,
       descriptor,
       ...(credentialRef === undefined ? {} : { credentialRef }),
     });
@@ -299,6 +308,7 @@ async function dispatch(input: {
   if (command.kind === "poll") {
     const state = await dependencies.service.status({
       principalKind: principal,
+      actor,
       attemptId: command.attemptId,
       descriptor,
     });

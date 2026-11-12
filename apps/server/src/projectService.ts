@@ -26,6 +26,7 @@ import {
   type MemoryCommandResult,
   type MemoryEntry,
   type Project,
+  type ProjectActor,
   type ProjectBootstrap,
   type ProjectCommandResult,
   type ProjectFailure,
@@ -197,6 +198,17 @@ export class ProjectServiceError extends Error {
  * memo, so a relink, archive, or memory edit shows on the very next read.
  */
 const BOOTSTRAP_MAX_AGE_MS = 1_000;
+
+/**
+ * Who a Project record says did it. A paired device's change names the device,
+ * as the event that carries the record does; every other caller is the person
+ * at this host, which is what these records said before a device could act.
+ */
+function personNamedBy(eventActor: EventActor | undefined): ProjectActor {
+  return eventActor?.kind === "remote-device"
+    ? { kind: "remote-device", actorId: eventActor.actorId, deviceId: eventActor.deviceId }
+    : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
+}
 
 export class ProjectService implements ProjectServiceApi {
   readonly #persistence: PersistenceService;
@@ -394,9 +406,11 @@ export class ProjectService implements ProjectServiceApi {
   async executeAgentMemory(
     command: AgentMemoryCommand,
     origin: AgentAuthoredMemoryProvenance,
+    /** The person who approved it, as the route resolved them. */
+    actor?: EventActor,
   ): Promise<MemoryCommandResult> {
     try {
-      return await this.#executeMemory(command, origin);
+      return await this.#executeMemory(command, origin, actor);
     } finally {
       this.#bootstrapMemo = undefined;
     }
@@ -443,7 +457,7 @@ export class ProjectService implements ProjectServiceApi {
       const destinationMemory = this.#persistence.readProjectMemory(destinationProjectId);
       this.#assertMemoryExpectedVersion(destinationMemory, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const actor = personNamedBy(eventActor);
       let result: MemoryCommandResult;
       let eventName: string;
       let payload: unknown;
@@ -645,7 +659,7 @@ export class ProjectService implements ProjectServiceApi {
       const current = this.#persistence.readProject(command.projectId);
       this.#assertExpectedVersion(current, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const actor = personNamedBy(eventActor);
       let project: Project;
       let kind: ProjectCommandResult["kind"];
       let eventName: string;

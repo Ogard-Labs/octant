@@ -1258,9 +1258,9 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.status(extensionId, componentId, principalKind),
           ),
-        begin: (extensionId, componentId, principalKind) =>
+        begin: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.begin(extensionId, componentId, principalKind),
+            signIn.begin(extensionId, componentId, principalKind, actor),
           ),
         poll: (extensionId, componentId, attemptId, principalKind) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>

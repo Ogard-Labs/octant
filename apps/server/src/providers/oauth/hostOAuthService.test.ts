@@ -54,6 +54,62 @@ function chatGptPlan() {
 }
 
 describe("host OAuth service", () => {
+  it("journals a sign-in a paired device started as the device's, through the completion a later status read finds", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000da";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const journal: Array<readonly [string, unknown]> = [];
+    const attemptId = "71000000-0000-4000-8000-0000000000a1";
+    let consented = false;
+    const sample = descriptor("https://issuer.example/authorize", "https://issuer.example/token");
+    const service = createHostOAuthService({
+      journal: { append: (record, actor) => journal.push([record.name, actor]) },
+      broker: {
+        begin: async () => ({
+          kind: "awaiting-consent",
+          attemptId,
+          descriptorId: sample.descriptorId,
+          flow: "authorization-code-pkce",
+          authorizationUrl: "https://issuer.example/authorize?state=s",
+          expiresAt: "2026-11-12T13:00:00.000Z",
+        }),
+        status: async () =>
+          consented
+            ? {
+                kind: "signed-in",
+                attemptId,
+                descriptorId: sample.descriptorId,
+                credentialRef: "71000000-0000-4000-8000-0000000000c1",
+              }
+            : {},
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({}),
+      },
+    });
+    const from = {
+      principalKind: "person-paired-device",
+      actorId: deviceId,
+      descriptor: sample,
+    } as const;
+    expect(service.acknowledgeTerms({ ...from, actor: device }).kind).toBe("recorded");
+    expect((await service.begin({ ...from, actor: device })).kind).toBe("awaiting-consent");
+    consented = true;
+    // The read that finds the consent comes from a local window; the sign-in
+    // is still the device's.
+    const finished = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: sample,
+    });
+    expect(finished.kind).toBe("signed-in");
+    expect(journal).toEqual([
+      ["host-oauth.terms-acknowledged", device],
+      ["host-oauth.sign-in-started", device],
+      ["host-oauth.sign-in-completed", device],
+    ]);
+  });
+
   it.each(["revoked", "unavailable"])(
     "uses runtime retirement for MCP cleanup without claiming issuer revocation (%s)",
     async (kind) => {

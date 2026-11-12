@@ -642,6 +642,53 @@ describe("planner work proposals", () => {
     ]);
   });
 
+  it("journals a designation and a proposal's decline with the paired device that asked as actor, and a local window's as the local user", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d4";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const decidedBy = async (actor?: never) => {
+      const { service, persistence } = fixture();
+      const append = vi.spyOn(persistence.journal, "append");
+      await service.execute(
+        windowId,
+        {
+          kind: "designate-code-planner-thread",
+          projectId: ids.project,
+          threadId: ids.thread,
+          expectedVersion: 0,
+        },
+        actor,
+      );
+      const proposed = service.propose(threadId, draft);
+      if (proposed.status !== "proposed") throw new Error("expected a proposal");
+      await service.resolveProposal(
+        windowId,
+        {
+          kind: "decline-planner-work-proposal",
+          proposalId: String(proposed.proposal.id),
+          expectedVersion: 1,
+        },
+        undefined,
+        actor,
+      );
+      return append.mock.calls.map(
+        ([input]) =>
+          (input as { events: ReadonlyArray<{ actor: { kind: string } }> }).events[0]?.actor,
+      );
+    };
+
+    // The proposal between the two is the planner thread's agent's own.
+    expect(await decidedBy(device)).toEqual([
+      device,
+      expect.objectContaining({ kind: "agent" }),
+      device,
+    ]);
+    expect((await decidedBy()).map((actor) => actor?.kind)).toEqual([
+      "local-user",
+      "agent",
+      "local-user",
+    ]);
+  });
+
   it("journals a pending proposal from the planner thread", async () => {
     const { service } = fixture();
     await designate(service);

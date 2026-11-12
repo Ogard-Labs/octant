@@ -633,9 +633,9 @@ export function wireContext(deps: ContextDependencies) {
       taskAccess: (subject, _principal, windowId) => taskAccessFacts(subject, windowId),
       inspect: (subject, afterSequence, principal) =>
         sessionCompaction.inspect(subject, afterSequence, principal),
-      execute: (command, principal, windowId) =>
+      execute: (command, principal, windowId, deviceActor) =>
         command.kind === "compact-session"
-          ? sessionCompaction.start(command, principal, windowId)
+          ? sessionCompaction.start(command, principal, windowId, undefined, deviceActor)
           : contextHarness.execute(command),
       compactionState: (subject, principal) => sessionCompaction.state(subject, principal),
     },

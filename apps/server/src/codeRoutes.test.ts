@@ -167,7 +167,10 @@ describe("Code routes", () => {
       operationId: operation.operationId,
     });
     // The route speaks for the person at the window, never for an agent.
-    expect(executeOperation).toHaveBeenCalledWith(windowId, operation, { initiator: "user" });
+    expect(executeOperation).toHaveBeenCalledWith(windowId, operation, {
+      initiator: "user",
+      actor: expect.objectContaining({ kind: "local-user" }),
+    });
     expect(execute).not.toHaveBeenCalled();
 
     // The same chain serves the authenticated remote gateway. A paired device
@@ -199,7 +202,10 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledWith(
       remoteDeviceId,
       expect.objectContaining({ kind: "start-terminal" }),
-      { initiator: "agent" },
+      {
+        initiator: "agent",
+        actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+      },
     );
 
     const forged = await route(
@@ -530,7 +536,10 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledWith(
       remoteDeviceId,
       expect.objectContaining({ kind: "start-terminal", browserGrant: "on" }),
-      { initiator: "agent" },
+      {
+        initiator: "agent",
+        actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+      },
     );
   });
 
@@ -994,7 +1003,11 @@ describe("Code routes", () => {
       scope: "checkout",
     });
     expect(approve).toHaveBeenCalledWith(
-      { scopeId: windowId, principal: "local-window" },
+      {
+        scopeId: windowId,
+        principal: "local-window",
+        actor: expect.objectContaining({ kind: "local-user" }),
+      },
       approval,
     );
 
@@ -1051,7 +1064,14 @@ describe("Code routes", () => {
     const answered = await route(post("/api/code/debug/session", call));
     expect(answered?.status).toBe(200);
     await expect(answered?.json()).resolves.toEqual({ status: "refused", reason: "no-session" });
-    expect(session).toHaveBeenCalledWith({ scopeId: windowId, principal: "local-window" }, call);
+    expect(session).toHaveBeenCalledWith(
+      {
+        scopeId: windowId,
+        principal: "local-window",
+        actor: expect.objectContaining({ kind: "local-user" }),
+      },
+      call,
+    );
 
     // No request outside the closed list decodes: `attach`, a memory read, or
     // a window named by the caller.
@@ -1715,14 +1735,18 @@ describe("Code routes", () => {
     );
 
     expect(response?.status).toBe(200);
-    expect(saveFile).toHaveBeenCalledWith(windowId, {
-      threadId,
-      checkoutId,
-      relativePath: "src/file.ts",
-      expectedIdentity: { device: "1", inode: "2" },
-      expectedDigest: digest,
-      text: "hello",
-    });
+    expect(saveFile).toHaveBeenCalledWith(
+      windowId,
+      {
+        threadId,
+        checkoutId,
+        relativePath: "src/file.ts",
+        expectedIdentity: { device: "1", inode: "2" },
+        expectedDigest: digest,
+        text: "hello",
+      },
+      expect.objectContaining({ kind: "local-user" }),
+    );
     expect(JSON.stringify(saveFile.mock.calls[0])).not.toContain("rootPath");
   });
 
@@ -1940,7 +1964,11 @@ describe("Code routes", () => {
     release?.();
 
     expect((await responsePromise)?.status).toBe(200);
-    expect(saveFile.mock.calls[0]).toHaveLength(2);
+    // The window, the save and who saved: no signal travels with them.
+    expect(saveFile.mock.calls[0]).toHaveLength(3);
+    expect((saveFile.mock.calls[0] as ReadonlyArray<unknown> | undefined)?.[2]).toMatchObject({
+      kind: "local-user",
+    });
   });
 });
 
@@ -2077,6 +2105,7 @@ describe("Code planner routes", () => {
       windowId,
       { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 7 },
       expect.anything(),
+      expect.objectContaining({ kind: "local-user" }),
     );
   });
 
@@ -2194,6 +2223,7 @@ describe("Code planner routes", () => {
       windowId,
       { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 1 },
       expect.anything(),
+      expect.objectContaining({ kind: "local-user" }),
     );
   });
 
@@ -2984,6 +3014,7 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "local-window",
+      expect.objectContaining({ kind: "local-user" }),
     );
     expect(setProjectPullRequestMergeWhenReady).toHaveBeenNthCalledWith(
       2,
@@ -2991,8 +3022,18 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "remote-device",
+      expect.objectContaining({
+        kind: "remote-device",
+        deviceId: "00000000-0000-4000-8000-000000000917",
+      }),
     );
     expect(setProjectPullRequestAutoFix).toHaveBeenCalledTimes(1);
+    expect(setProjectPullRequestAutoFix).toHaveBeenCalledWith(
+      windowId,
+      bodies["/api/code/project-pull-requests/auto-fix"],
+      "user",
+      expect.objectContaining({ kind: "local-user" }),
+    );
   });
 });
 

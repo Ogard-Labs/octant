@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { connect as connectSocket, createServer, type Socket } from "node:net";
 import { realpath } from "node:fs/promises";
@@ -145,6 +146,8 @@ export interface CodeDebugAuthority {
 export interface CodeDebugCaller {
   readonly scopeId: WindowId;
   readonly principal: PrincipalKind;
+  /** Who the journal names for what this caller confirms; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
 }
 
 export interface CodeDebugApprovals {
@@ -156,6 +159,7 @@ export interface CodeDebugApprovals {
     readonly configurationDigest: CodeDebugConfigurationDigest;
     readonly adapter: DebugAdapterPackageState;
     readonly scope: CodeDebugApprovalRequest["scope"];
+    readonly actor?: EventActor | undefined;
   }) => "recorded" | "not-recorded";
 }
 
@@ -380,6 +384,7 @@ export class CodeDebugService {
       configurationDigest,
       adapter: adapter.packageState,
       scope: request.scope,
+      actor: caller.actor,
     });
     if (recorded !== "recorded") return { status: "not-recorded" };
     return { status: "approved", configurationDigest, scope: request.scope };

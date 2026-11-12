@@ -725,7 +725,11 @@ describe("Project memory proposal routes", () => {
     );
     expect(answered?.status).toBe(200);
     expect(await answered?.json()).toEqual({ kind: "project-memory-proposal-declined" });
-    expect(decide).toHaveBeenCalledWith(windowId, { proposalId, decision: "decline" });
+    expect(decide).toHaveBeenCalledWith(
+      windowId,
+      { proposalId, decision: "decline" },
+      expect.objectContaining({ kind: "local-user" }),
+    );
   });
 
   it("refuses an unauthenticated, forged, or malformed answer before it reaches a proposal", async () => {

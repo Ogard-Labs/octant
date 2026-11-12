@@ -3,7 +3,7 @@ import { ApprovedWorkingFolders } from "./workingDirectory";
 import { CanvasDesignBrand } from "./canvasBrand";
 import { DesignSystemChoice } from "./designSystems";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
-import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
+import { ActorId, AggregateVersion, EventActor, EventActorDeviceId, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { OctantMode } from "./modes";
@@ -92,9 +92,19 @@ export const DEFAULT_CODE_NEW_THREAD_WORKSPACE: CodeNewThreadWorkspace = "curren
 export const Phase3CodeAccessPersistence = Schema.Literal("current-session");
 export type Phase3CodeAccessPersistence = typeof Phase3CodeAccessPersistence.Type;
 
+/**
+ * Who a Project record says did something: the host itself, the person at
+ * this host, or a device that person paired, named by its id. A record
+ * written before a device could act names only the first two.
+ */
 export const ProjectActor = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("system"), actorId: ActorId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("local-user"), actorId: ActorId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("remote-device"),
+    actorId: ActorId,
+    deviceId: EventActorDeviceId,
+  }).annotations(strict),
 );
 export type ProjectActor = typeof ProjectActor.Type;
 

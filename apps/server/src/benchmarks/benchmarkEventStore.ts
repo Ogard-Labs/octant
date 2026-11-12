@@ -104,8 +104,8 @@ export class BenchmarkEventStore {
     this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellRequeued, payload);
   }
 
-  cellSettled(payload: BenchmarkCellSettled): void {
-    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellSettled, payload);
+  cellSettled(payload: BenchmarkCellSettled, actor?: typeof EventActor.Type): void {
+    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellSettled, payload, actor);
   }
 
   cellJudged(payload: BenchmarkCellJudged): void {
@@ -116,8 +116,8 @@ export class BenchmarkEventStore {
     this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellRated, payload, actor);
   }
 
-  runEnded(payload: BenchmarkRunEnded): void {
-    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.runEnded, payload);
+  runEnded(payload: BenchmarkRunEnded, actor?: typeof EventActor.Type): void {
+    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.runEnded, payload, actor);
   }
 
   runPurged(payload: BenchmarkRunPurged, actor?: typeof EventActor.Type): void {

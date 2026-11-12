@@ -51,6 +51,7 @@ import {
   type ToolEgressRule,
   type ToolEgressRuleScope,
 } from "@octant/domain/tool-egress-policy";
+import { actsAsHostPerson } from "@octant/domain/remote-access-policy";
 import { uptime } from "node:os";
 import { Option, Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -128,14 +129,29 @@ export const EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS = 24 * 3_600_000;
 /** The least time between two sweeps of expired rules, which run when rules are read. */
 const EXPIRED_RULE_SWEEP_INTERVAL_MS = 60_000;
 
-/** Who answered: a person at a local window, a paired device, or the reviewer. */
+/**
+ * Who answered: a person at a local window, a device that person paired (which
+ * grants what a local window grants), any other paired device, or the reviewer.
+ * The journal records both devices as `remote-device` with their id; only the
+ * grant decision tells them apart.
+ */
 export type ToolEgressAnsweringPrincipal =
   | { readonly kind: "local-window" }
+  | { readonly kind: "person-paired-device"; readonly deviceId: string }
   | { readonly kind: "remote-device"; readonly deviceId: string }
   | { readonly kind: "reviewer" };
 
 /** A person who may take a rule away, turn a proposal down, or switch learn mode. */
 export type ToolEgressPerson = Exclude<ToolEgressAnsweringPrincipal, { kind: "reviewer" }>;
+
+/** The principal as a payload names it: a device is a device, whoever paired it. */
+function recordedPrincipal<P extends ToolEgressAnsweringPrincipal>(
+  principal: P,
+): Exclude<P, { kind: "person-paired-device" }> | { kind: "remote-device"; deviceId: string } {
+  return principal.kind === "person-paired-device"
+    ? { kind: "remote-device", deviceId: principal.deviceId }
+    : (principal as Exclude<P, { kind: "person-paired-device" }>);
+}
 
 export type ToolEgressGrantRequest = {
   readonly host: string;
@@ -259,7 +275,7 @@ interface StoredRule {
   readonly scope: ToolEgressRuleScope;
   readonly expiresAt: UtcTimestamp;
   readonly grantedAt: UtcTimestamp;
-  readonly grantedBy: ToolEgressAnsweringPrincipal["kind"];
+  readonly grantedBy: ToolEgressRuleView["grantedBy"];
 }
 
 interface StoredProposal {
@@ -723,7 +739,7 @@ export class ToolEgressRules {
     if (now === undefined) return { kind: "refused", reason: "unavailable" };
     const tainted = this.#tainted(input.threadId);
     const approvalId = decodeApprovalId(input.approvalId ?? this.#options.uuid());
-    const principal = input.principal;
+    const principal = recordedPrincipal(input.principal);
     const threadEvents: AppendEvent[] = [];
     const projectEvents: AppendEvent[] = [];
     const ruleIds: ToolEgressRuleId[] = [];
@@ -807,7 +823,7 @@ export class ToolEgressRules {
           payload: {
             threadId: input.threadId,
             proposalIds: declined,
-            principal: input.principal,
+            principal,
             threadTainted: tainted,
           },
         });
@@ -855,7 +871,7 @@ export class ToolEgressRules {
           payload: {
             threadId: input.threadId,
             proposalIds: declined,
-            principal: input.principal,
+            principal: recordedPrincipal(input.principal),
             threadTainted: this.#tainted(input.threadId),
           },
         },
@@ -888,7 +904,7 @@ export class ToolEgressRules {
             payload: {
               ruleId: input.ruleId,
               threadId: input.threadId,
-              principal: input.principal,
+              principal: recordedPrincipal(input.principal),
               threadTainted: this.#tainted(input.threadId),
             },
           },
@@ -905,7 +921,7 @@ export class ToolEgressRules {
             payload: {
               ruleId: input.ruleId,
               projectId: thread.projectId,
-              principal: input.principal,
+              principal: recordedPrincipal(input.principal),
             },
           },
         ],
@@ -933,7 +949,11 @@ export class ToolEgressRules {
       [
         {
           eventName: TOOL_EGRESS_EVENT_NAMES.learnModeSet,
-          payload: { threadId: input.threadId, enabled: input.enabled, principal: input.principal },
+          payload: {
+            threadId: input.threadId,
+            enabled: input.enabled,
+            principal: recordedPrincipal(input.principal),
+          },
         },
       ],
       this.#actorFor(input.principal),
@@ -985,7 +1005,7 @@ export class ToolEgressRules {
       threadTainted: tainted,
       projectGrant: tainted
         ? "thread-tainted"
-        : caller === "local-window"
+        : actsAsHostPerson(caller)
           ? "allowed"
           : "needs-local-window",
       // An aggregate whose revocations cannot be read shows, and allows, nothing.
@@ -1196,6 +1216,13 @@ export class ToolEgressRules {
     switch (principal.kind) {
       case "local-window":
         return this.#personActor;
+      case "person-paired-device":
+        // The actor every other change this device makes is journaled with.
+        return decodeActor({
+          kind: "remote-device",
+          actorId: principal.deviceId,
+          deviceId: principal.deviceId,
+        });
       case "remote-device":
         return decodeActor({
           kind: "remote-device",

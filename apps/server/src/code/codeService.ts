@@ -3584,6 +3584,8 @@ export class CodeService {
   async saveFile(
     authenticatedWindowId: WindowId,
     input: CodeSaveFileInput,
+    /** Who saved, as the route resolved them; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<CodeFileSaveResultEnvelope> {
     const thread = this.#persistence.readCodeThread(input.threadId);
     if (thread === undefined) throw this.#failure("invalid", "Code thread was not found.");
@@ -3660,10 +3662,14 @@ export class CodeService {
       updatedAt: decodeTimestamp(this.#clock()),
     });
     try {
-      this.#append("code-file", root.fileId, expectedFileVersion, "code.file-reference-updated@1", {
-        kind: "file-reference-updated",
-        file: saving,
-      });
+      this.#append(
+        "code-file",
+        root.fileId,
+        expectedFileVersion,
+        "code.file-reference-updated@1",
+        { kind: "file-reference-updated", file: saving },
+        actor,
+      );
     } catch (error) {
       throw this.#mapFailure(error);
     }
@@ -3718,10 +3724,14 @@ export class CodeService {
       updatedAt: decodeTimestamp(this.#clock()),
     });
     try {
-      this.#append("code-file", root.fileId, saving.version, "code.file-reference-updated@1", {
-        kind: "file-reference-updated",
-        file: terminal,
-      });
+      this.#append(
+        "code-file",
+        root.fileId,
+        saving.version,
+        "code.file-reference-updated@1",
+        { kind: "file-reference-updated", file: terminal },
+        actor,
+      );
     } catch {
       return decodeCodeFileSaveResultEnvelope({
         kind: "code-file-save-result",
