@@ -11,7 +11,7 @@ import {
   BROWSER_DOWNLOAD_PERMISSION_EVENT,
   type BrowserDownloadPermissionChanged,
 } from "@octant/contracts/browser-download-permissions";
-import type { EventActor } from "@octant/contracts";
+import type { EventActor, WindowId } from "@octant/contracts";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { readAggregateVersion } from "../persistence/chatProjection";
@@ -28,6 +28,8 @@ export function browserDownloadPermissionJournal(options: {
   readonly now: () => number;
   readonly personActor: EventActor;
   readonly hostActor: EventActor;
+  /** The paired device a reviewing scope is, when it is one; its record names the device. */
+  readonly deviceActor?: (scopeId: WindowId) => EventActor | undefined;
 }) {
   return (event: BrowserDownloadPermissionChanged): void => {
     const aggregateType = "browser-download-permission";
@@ -43,7 +45,10 @@ export function browserDownloadPermissionJournal(options: {
           eventName: decodeEventName(BROWSER_DOWNLOAD_PERMISSION_EVENT),
           eventVersion: 1,
           correlationId: decodeCorrelationId(event.permission.permissionId),
-          actor: event.windowId === undefined ? options.hostActor : options.personActor,
+          actor:
+            event.windowId === undefined
+              ? options.hostActor
+              : (options.deviceActor?.(event.windowId) ?? options.personActor),
           occurredAt: decodeUtcTimestamp(new Date(options.now()).toISOString()),
           payload: event,
         },
