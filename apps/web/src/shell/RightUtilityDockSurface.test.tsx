@@ -522,19 +522,27 @@ describe("tool tiles in the right sidebar", () => {
     expect(screen.queryByText("Live canvas")).not.toBeInTheDocument();
   });
 
-  it("puts exactly the frame's gap between two tiles and none on the dock's own edges", () => {
+  it("pulls a shared tile edge in by the tile inset, which is 0 where panes share their edges, and leaves the dock's own edges alone", () => {
     render(<TiledDock initial={tiledState()} />);
     const [first, second] = ["Files", "iOS Simulator"].map(
       (name) => screen.getByRole("region", { name }).style,
     );
-    // Each tile gives up half a gap on the edge it shares, so the pair end up
-    // one gap (8px) apart; the outer edges and the full height stay put.
+    // The inset is a stylesheet variable: 4px in a narrow window (an 8px gap
+    // between panels) and 0px from 681px up, where two tiles touch.
+    const inset = "var(--octant-tile-inset, 0px)";
     expect(first?.left).toBe("calc(0% + 0px)");
-    expect(first?.width).toBe("calc(50% - 4px)");
-    expect(second?.left).toBe("calc(50% + 4px)");
-    expect(second?.width).toBe("calc(50% - 4px)");
+    expect(first?.width).toBe(`calc(50% - ${inset})`);
+    expect(second?.left).toBe(`calc(50% + ${inset})`);
+    expect(second?.width).toBe(`calc(50% - ${inset})`);
     expect(first?.top).toBe("calc(0% + 0px)");
     expect(first?.height).toBe("calc(100% - 0px)");
+  });
+
+  it("keeps an 8px divider hit area centred on the edge between two tiles", () => {
+    render(<TiledDock initial={tiledState()} />);
+    const divider = screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }).style;
+    expect(divider.width).toBe("8px");
+    expect(divider.left).toBe("calc(50% - 4px)");
   });
 
   it("replaces only the focused tile when a hidden tab is chosen", async () => {

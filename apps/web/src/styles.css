@@ -134,13 +134,13 @@
   --octant-shadow-well:
     inset 0 1px 2px rgb(0 0 0 / 70%), inset 0 0 0 1px rgb(0 0 0 / 40%),
     0 1px 0 rgb(255 255 255 / 7%);
-  /* Level 1: a panel. Its top is lit twice: a bright band as deep as the
+  /* Level 1: a narrow window's tile panel (a wide window's panes are flat, see
+     shell.css). Its top is lit twice: a bright band as deep as the
      slab's edge, which ends above the first line of anything a panel holds,
      over a long, soft fall of the sheen. Both are fills under the panel's
      content, never over its text. */
-  --octant-panel-sheen:
-    linear-gradient(180deg, var(--octant-edge-light), transparent 7px),
-    linear-gradient(180deg, var(--octant-sheen), transparent 96px);
+  --octant-panel-band: linear-gradient(180deg, var(--octant-edge-light), transparent 7px);
+  --octant-panel-sheen: linear-gradient(180deg, var(--octant-sheen), transparent 96px);
   /* The seat stays inside the 8px gap between two panels (its soft edge ends
      within 8px of the box), so a panel looks the same whatever its neighbour's
      order, and no tile's shadow darkens the top of the one beneath it. */
@@ -1336,11 +1336,7 @@ h6 {
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
-    min(
-      var(--octant-bottom-panel-height, 260px),
-      38vh,
-      max(0px, calc(100% - 320px - var(--octant-sheet-inset, 0px)))
-    );
+    min(var(--octant-bottom-panel-height, 260px), 38vh, max(0px, calc(100% - 320px)));
 }
 
 .workspace-layer > .primary-workspace-layer {

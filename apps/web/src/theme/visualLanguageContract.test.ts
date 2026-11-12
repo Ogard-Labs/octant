@@ -148,35 +148,64 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
-  it("seats the thread, each tool tile and the bottom panel as panels on the frame, with the sidebar on the ground", () => {
+  it("draws the thread, each tool tile and the bottom panel as square panes that share one line, with the sidebar on the ground", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8").replace(/\s+/g, " ");
     const panel = (selector: string) => {
       const start = shell.indexOf(`${selector} {`);
       expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
       return shell.slice(start, shell.indexOf("}", start));
     };
-    // The thread's panel follows its grid column and stops where the bottom
-    // panel starts; both draw the shared panel recipe, never a literal colour.
+    // The thread's pane follows its grid column and stops where the bottom
+    // panel starts; every pane draws the shared fill, never a literal colour.
     const thread = panel(".shell-frame > .workspace-layer::before");
     expect(thread).toMatch(/grid-column:\s*1/);
-    expect(thread).toMatch(/background:\s*var\(--octant-panel-fill\)/);
-    expect(thread).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
+    expect(thread).toMatch(/background:\s*var\(--octant-pane-fill\)/);
     expect(thread).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
     expect(panel(".shell-frame .bottom-utility-panel")).toMatch(
-      /background:\s*var\(--octant-panel-fill\)/,
+      /background:\s*var\(--octant-pane-fill\)/,
     );
-    // The rim is drawn again above the content, since a panel's own children
-    // paint over an inset shadow on its box.
-    expect(panel(".shell-frame > .workspace-layer::after")).toMatch(
-      /box-shadow:\s*var\(--octant-shadow-panel-rim\)/,
+    // A pane is square and flat: no corner, no seat shadow, no rim, and no gap
+    // between it and the window's edges or its neighbours.
+    const framed = shell.indexOf("The frame and its panes.");
+    expect(framed).toBeGreaterThanOrEqual(0);
+    const frame = shell.slice(framed);
+    const inFrame = (selector: string) => {
+      const start = frame.indexOf(`${selector} {`);
+      expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
+      return frame.slice(start, frame.indexOf("}", start));
+    };
+    const panes = frame.slice(0, frame.indexOf("The window controls float"));
+    expect(panes).not.toMatch(/border-radius/);
+    expect(panes).not.toMatch(/box-shadow/);
+    expect(panes).not.toMatch(/row-gap|sheet-inset/);
+    // The one line is drawn above the content on a pane's top and left edges
+    // only, so two neighbours never show two lines.
+    for (const selector of [
+      ".shell-frame > .workspace-layer::after",
+      ".shell-frame .bottom-utility-panel::after",
+      ".shell-frame .right-utility-dock:not(:has(.dock-tiles))::after",
+    ]) {
+      const rule = panel(selector);
+      expect(rule, selector).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
+      expect(rule, selector).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
+      expect(rule, selector).not.toMatch(/border-(right|bottom)/);
+    }
+    // The line is the border, under Window glass the rim, and the strong
+    // border under increased contrast.
+    expect(inFrame(".shell.shell-frame")).toMatch(/--octant-pane-line:\s*var\(--octant-border\)/);
+    expect(inFrame(".shell--material-translucent.shell-frame")).toMatch(
+      /--octant-pane-line:\s*var\(--octant-rim\)/,
     );
-    expect(panel(".shell-frame .bottom-utility-panel::after")).toMatch(
-      /box-shadow:\s*var\(--octant-shadow-panel-rim\)/,
+    expect(inFrame('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
+      /--octant-pane-line:\s*var\(--octant-border-strong\)/,
     );
-    // Panels are 8px apart: the layer's row gap and its padding are the frame's.
+    // The edge between the thread and the dock has an 8px hit area centred on
+    // the line, and the dock has no column of its own for it.
     expect(shell).toMatch(
-      /\.shell-frame > \.workspace-layer \{[^}]*row-gap: var\(--octant-sheet-inset\)/,
+      /\.shell-frame \.right-utility-dock \{ grid-template-columns: 0 [^}]*overflow: visible/,
     );
+    expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/width:\s*8px/);
+    expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/margin-left:\s*-4px/);
     // The sidebar's rows sit on the ground: it draws no panel of its own.
     expect(shell).not.toContain(".shell-frame > .sidebar::before {");
   });
@@ -226,7 +255,7 @@ describe("the public-block visual language", () => {
     expect(light).not.toContain("--octant-accent-sheen");
   });
 
-  it("keeps a floating surface's sheen above its first line of text and a panel's seat shadow inside the gap", () => {
+  it("keeps a floating surface's sheen above its first line of text and a narrow window's panel seat shadow inside its gap", () => {
     const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     for (const match of runtime.matchAll(
       /--octant-float-sheen:\s*linear-gradient\([^;]*transparent (\d+)px\)/g,
@@ -245,8 +274,9 @@ describe("the public-block visual language", () => {
       );
       expect(Math.max(...long)).toBeLessThanOrEqual(8);
     }
-    // The bottom panel's row never overflows the layer by the frame's gap.
-    expect(runtime).toMatch(/calc\(100% - 320px - var\(--octant-sheet-inset, 0px\)\)/);
+    // The bottom panel's row has nothing of the frame's to subtract any more.
+    expect(runtime).toMatch(/max\(0px, calc\(100% - 320px\)\)/);
+    expect(runtime).not.toContain("sheet-inset");
   });
 
   it("ends a panel's bright edge band above its first line of text, and dims what shows through a dark menu", () => {
@@ -254,7 +284,7 @@ describe("the public-block visual language", () => {
     // The band is a fill under the panel's content: a tile's name starts 8px
     // down, and a band that reached it lowered the meta ink there to 4.17:1.
     const band = runtime.match(
-      /--octant-panel-sheen:\s*linear-gradient\(180deg, var\(--octant-edge-light\), transparent (\d+)px\)/,
+      /--octant-panel-band:\s*linear-gradient\(180deg, var\(--octant-edge-light\), transparent (\d+)px\)/,
     );
     expect(Number(band?.[1])).toBeLessThanOrEqual(8);
     // A clearer fill is only legible because the blur dims the page behind it.
@@ -1280,7 +1310,7 @@ describe("the public-block visual language", () => {
       );
     });
 
-    it("leaves the gap between two tiles empty at rest and never keeps an accent line after a click", () => {
+    it("leaves the divider empty at rest, since the tile beside it draws the line, and never keeps an accent line after a click", () => {
       const rule = (selector: string) => body(selector);
       expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*transparent/);
       const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
@@ -1290,8 +1320,13 @@ describe("the public-block visual language", () => {
         dock.indexOf(".dock-tiles__drag-shield"),
       );
       // Keyboard focus is the app's own outline, not a line of this rule's.
-      expect(dividerRules).not.toMatch(/accent/);
       expect(dividerRules).not.toMatch(/focus-visible/);
+      // From 681px up the grabbed line takes the accent and lies on the tile's
+      // own line (the hit area is 8px, so the line sits 4px in).
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles__divider"));
+      expect(wide).toMatch(/\[data-orientation="vertical"\]::before \{\s*left: 4px/);
+      expect(wide).toMatch(/\[data-orientation="horizontal"\]::before \{\s*top: 4px/);
+      expect(wide).toMatch(/:active::before \{\s*background: var\(--oct-accent-fg\)/);
     });
 
     it("gives every tile bar one height, so neighbouring tiles line up", () => {
@@ -1299,13 +1334,32 @@ describe("the public-block visual language", () => {
       expect(dock).not.toContain("dock-tile__caption");
     });
 
-    it("draws a tile as a panel from the shared tokens, so a see-through theme still shows through", () => {
-      const tile = body(".dock-tile");
-      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
-      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
-      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
+    it("draws a tile square and flat from the shared tokens from 681px up, with one line on its top and left", () => {
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles {"));
+      const inWide = (selector: string) => {
+        const start = wide.indexOf(`${selector} {`);
+        expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
+        return wide.slice(start, wide.indexOf("}", start));
+      };
+      expect(inWide(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
+      const tile = inWide(".dock-tile");
+      expect(tile).toMatch(/border-radius:\s*0/);
+      expect(tile).toMatch(/background:\s*var\(--octant-pane-fill\)/);
+      expect(tile).toMatch(/box-shadow:\s*none/);
+      const line = inWide(".dock-tile::after");
+      expect(line).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
+      expect(line).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
+      expect(line).not.toMatch(/border-(right|bottom)/);
       expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
       expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
+    });
+
+    it("keeps a narrow window's tile a rounded panel with a seat shadow and a rim", () => {
+      const tile = body(".dock-tile");
+      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
+      expect(tile).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
+      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
+      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
     });
   });
 });

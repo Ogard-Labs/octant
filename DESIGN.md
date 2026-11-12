@@ -240,7 +240,7 @@ this document names the token, not the number.
 | ----------------------- | ------ | -------------------------------------------------------------------------------------- |
 | `--oct-radius-sm`       | 8px    | A control or a row; a composer context chip                                            |
 | `--oct-radius-inset`    | 8px    | An object resting inside a card or well: a board card in its column                    |
-| `--oct-radius-md`       | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
+| `--oct-radius-md`       | 12px   | A card or well; a Settings section card; a narrow window's tool tile; a user bubble    |
 | `--oct-radius-lg`       | 14px   | A dialog; an inset inside the composer's pill                                          |
 | `--oct-radius-composer` | 22px   | The composer's pill: half its one-line height, so the empty composer has round ends    |
 | `--oct-radius-pill`     | 9999px | Compact chips, meters, and circular icon controls only                                 |
@@ -265,29 +265,31 @@ seats it, so an object is never told from the surface under it by an outline
 alone. Each level has its tokens in `styles.css`; a surface consumes them and
 never writes its own colour.
 
-| Level      | What it is                                                                                            | Fill                                                                                               | Rim and shadow                                                                                                                                    |
-| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)                               | none                                                                                                                                              |
-| 1 Panel    | The thread stage, each dock tool tile, the bottom panel; 12px corners                                 | `--octant-panel-surface`, with `--octant-panel-sheen`: a bright 7px band, then a sheen across 96px | `--octant-shadow-panel`: top rim, low rim, ring, a hairline, a short and a long seat shadow                                                       |
-| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                                                    | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                      |
-| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, the composer pill         | `--octant-control` and the control lift (lighter on top)                                           | `--octant-shadow-control`, `-md` (the pill, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks  |
-| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                                                    | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`                                    | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it |
+| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                              |
+| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow (a narrow window's tile keeps a rounded panel)              |
+| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                      |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, the composer pill         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the pill, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks  |
+| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it |
 
 - **The light an edge catches is the rim** (`--octant-rim`,
   `--octant-rim-top`, `--octant-rim-low`, `--octant-rim-float`, and the
   control's `--octant-control-top`, `-low`, `-rim`). Glass lets light out along
-  its lower edge too, so a panel, a card and a floating surface carry a fainter
+  its lower edge too, so a card and a floating surface carry a fainter
   line inside the bottom (`--octant-rim-low`; none in light, where it cannot
-  show on a white fill). A panel's top is a bright band as deep as the slab's
-  edge (`--octant-edge-light`, 7px) over the long sheen; the band ends above
+  show on a white fill). A pane carries none of it: it is flat, and its edge is
+  the one line it shares with its neighbour. A narrow window's tile keeps a bright
+  band as deep as the slab's edge (`--octant-edge-light`, 7px, in
+  `--octant-panel-band`) over the long sheen; the band ends above
   the first line of anything a panel holds, so a tile's name sits on the
   sheen alone (meta ink 4.99:1 there in stock dark). In dark a shadow cannot be seen on a
   near-black page, so the fill and the rim carry the lift (on an OLED preset
   the panel is a step toward the ink and the sheen lifts its top) and the
   shadow helps only where the surface crosses something lighter; in light the
-  top line is white and the shadows carry it. A panel's own content paints
-  over an inset shadow on its box, so the rim is drawn by a pseudo-element
+  top line is white and the shadows carry it. A narrow window's panel content paints
+  over an inset shadow on its box, so its rim is drawn by a pseudo-element
   above the content and the box keeps only the seat shadow. A surface that also drew a
   border or a second ring on the same edge showed two lines, so the rim is in
   the shadow token and the border is gone.
@@ -333,10 +335,10 @@ never writes its own colour.
   pressed chip the system highlight. Increased contrast takes the strong border
   and sets every rim to it, so a flat fill keeps a firmer edge than the soft
   one it had.
-- **A panel's seat shadow stays inside the gap.** It ends within 8px of the
-  panel, so a panel looks the same whatever its neighbour's order and no tile
-  darkens the top of the one beneath it. At a short window the bottom panel's
-  row subtracts the frame's gap, so the 8px below it holds.
+- **A pane has no seat shadow.** Panes share their edges, so a shadow would
+  fall on the neighbour. In a narrow window, where a tile is still a panel with
+  a gap around it, the seat shadow ends within 8px of the panel, so a panel
+  looks the same whatever its neighbour's order.
 - **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
   the raised elevation's white top line drew as a light seam on the dark pill
   in light, so it takes the two shadows alone in both modes.
@@ -348,7 +350,7 @@ never writes its own colour.
   the control's shadow), on the thread list, the sidebar and the Settings
   rail. The row under the pointer stays a flat
   wash, so "here" and "pointed at" are two states.
-- **On Window glass** the panels are a tint of the theme colour over the
+- **On Window glass** the panes are a tint of the theme colour over the
   window's native material (the sheet colour at 80%; more opaque for the
   thread, so text stays on a quiet ground), and a card takes a light rim and a shadow that can be seen on
   the desktop behind it (`--octant-shadow-raised-glass`); the opaque border is
@@ -380,27 +382,32 @@ so the three react alike in light and dark. A search or name field a feature
 draws for itself still takes its edge from the same role (`--input`, the strong
 border), not from the hairline or a control fill.
 
-The window is a frame and its panels. The title band and the sidebar are the
-frame (level 0): the window surface, painted once, with the sidebar's rows
+The window is a frame and a grid of panes. The title band and the sidebar are
+the frame (level 0): the window surface, painted once, with the sidebar's rows
 sitting on it and no panel behind them. The thread stage, each tool tile in
-the dock, and the bottom panel are separate rounded panels (level 1,
-`--oct-radius-md`) under the title band, with the frame's 8px gap between them
-and 8px short of the window's right and bottom edges. A tile is a panel of its
-own, with the same gap between tiles as between the stage and the dock, on the
-same top and bottom lines as the stage; the gap is also the divider's hit
-area, and its line shows only while it is pointed at. The gap is the frame
-showing through, which is why a panel reads as an object seated on the ground
-and why the glass shows between panels. (The window was once one sheet divided
-by hairlines, which read as flat; before that, cards on a back of the
-sidebar's material, which the glass reached only in a sidebar strip.) The
-sidebar's own corner and edge went with the sheet. Pane headers and dock tabs
-stay in the title band. With Glass on, the ground and the panels are the Tint
-over the window's native material: the panels are a lighter tint than the
-ground; every panel (the thread, a tile, the bottom panel, the dock's
-overview) is the same one fill (`--octant-panel-fill`), over a ground that is
+the dock, the bottom panel and the dock's overview are square panes (level 1)
+under the title band that touch each other and the window's right and bottom
+edges: no gap, no corner, no shadow. Between two neighbours there is one 1px
+line (`--octant-pane-line`: the border, the rim under Window glass, the strong
+border under increased contrast, and a system-colour border in forced
+colours), and one under the title band along the panes' top. Each pane draws
+only its own top and left edge, so a shared edge is never drawn twice. The
+divider's hit area is 8px wide and centred on that line, for the edge between
+the thread and the dock, between two tiles, and above the bottom panel; the
+line takes the accent while it is grabbed. A tile is told apart by its name,
+not by a ring that would double a divider. The window's own outer corners are
+the native window's; no pane rounds a corner. Rationale: panes in a grid that
+is dragged, aligned and resized share edges, and a corner and a gap on each
+one made the grid read as loose cards. (The window was once one sheet divided
+by hairlines; before that, cards on a back of the sidebar's material, and most
+recently rounded panels 8px apart on the ground.) Pane headers and dock tabs
+stay in the title band. With Glass on, the ground and the panes are the Tint
+over the window's native material: the panes are a lighter tint than the
+ground; every pane (the thread, a tile, the bottom panel, the dock's
+overview) is the same one fill (`--octant-pane-fill`), over a ground that is
 itself a tint, so text reads on a saturated desktop. Reader pages inside the
 stage are clear. Behind every page the application ground lies on the
-thread's panel, under the content, taking the panel's corners. A pane header
+thread's pane, under the content, square like the pane. A pane header
 and the dock head share the title rail (`--oct-title-rail-h`). A native
 Browser page inside a tile is placed by the tile's measured rectangle and is
 square; the corner of the page inside the tile belongs to the web renderer

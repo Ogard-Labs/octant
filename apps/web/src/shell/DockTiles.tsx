@@ -219,19 +219,26 @@ function arrange(
 const percent = (fraction: number) => `${fraction * 100}%`;
 
 /**
- * The frame's gap between panels, which is also the width of a divider. A tile
- * is a panel, so each edge it shares with a neighbour is pulled in by half the
- * gap and the pair end up exactly one gap apart; an edge on the dock's own
- * boundary stays put, on the same line as the thread's panel.
+ * The width of a divider's hit area, centred on the edge between two tiles. In
+ * a narrow window a tile is a panel and each edge it shares with a neighbour
+ * is pulled in by half a gap (`--octant-tile-inset`, set in dock.css), so the
+ * pair end up a gap apart; from 681px up the inset is 0 and tiles share the
+ * edge. An edge on the dock's own boundary never moves.
  */
-const TILE_GAP = 8;
+const DIVIDER_HIT = 8;
 const EDGE = 1e-4;
+const INSET = "var(--octant-tile-inset, 0px)";
 const along = (start: number, size: number) => {
-  const before = start > EDGE ? TILE_GAP / 2 : 0;
-  const after = start + size < 1 - EDGE ? TILE_GAP / 2 : 0;
+  const before = start > EDGE;
+  const after = start + size < 1 - EDGE;
   return {
-    start: `calc(${percent(start)} + ${before}px)`,
-    size: `calc(${percent(size)} - ${before + after}px)`,
+    start: before ? `calc(${percent(start)} + ${INSET})` : `calc(${percent(start)} + 0px)`,
+    size:
+      before && after
+        ? `calc(${percent(size)} - 2 * ${INSET})`
+        : before || after
+          ? `calc(${percent(size)} - ${INSET})`
+          : `calc(${percent(size)} - 0px)`,
   };
 };
 
@@ -651,16 +658,16 @@ function TileDivider(props: {
 
   const style: CSSProperties = vertical
     ? {
-        left: `calc(${percent(props.at)} - ${TILE_GAP / 2}px)`,
+        left: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
         top: 0,
         height: "100%",
-        width: TILE_GAP,
+        width: DIVIDER_HIT,
       }
     : {
         left: percent(props.extent?.left ?? 0),
-        top: `calc(${percent(props.at)} - ${TILE_GAP / 2}px)`,
+        top: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
         width: percent(props.extent?.width ?? 1),
-        height: TILE_GAP,
+        height: DIVIDER_HIT,
       };
   return (
     <div

@@ -23,11 +23,11 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  /* The window is a frame and its panels. The rail, the title band, and the
-     sidebar's area are the frame (the ground), painted here once; the stage,
-     the dock's tiles, and the bottom panel are panels on it (see "The frame
-     and its panels" below). When the host resolved glass, the ground and the
-     panels are the tint over the window's native material, so the frost
+  /* The window is a frame and a grid of panes. The rail, the title band, and
+     the sidebar's area are the frame (the ground), painted here once; the
+     stage, the dock's tiles, and the bottom panel are panes on it (see "The
+     frame and its panes" below). When the host resolved glass, the ground and
+     the panes are the tint over the window's native material, so the frost
      reaches the whole window and not the sidebar alone. */
   background: var(--octant-window-surface);
   border: 0;
@@ -45,8 +45,8 @@
   --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
-  /* Level 1, a panel: the fill is the sheet colour a step toward the ink, so
-     a panel is lighter than the ground even where the theme's workspace and
+  /* Level 1, a pane: the fill is the sheet colour a step toward the ink, so
+     a pane is lighter than the ground even where the theme's workspace and
      sidebar are one colour (an OLED page). */
   --octant-panel-opaque: color-mix(
     in srgb,
@@ -54,11 +54,13 @@
     var(--octant-text-primary)
   );
   --octant-panel-surface: var(--octant-panel-opaque);
-  /* Every panel (the thread, a tool tile, the bottom panel, the dock's
-     overview) is this one fill, so the glass reads as one material. */
-  --octant-panel-fill:
+  /* Every pane (the thread, a tool tile, the bottom panel, the dock's
+     overview) is the pane fill, so the glass reads as one material. A narrow
+     window's tile panel keeps the edge band over it. */
+  --octant-pane-fill:
     var(--octant-panel-sheen),
     linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
+  --octant-panel-fill: var(--octant-panel-band), var(--octant-pane-fill);
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -2017,44 +2019,50 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* The frame and its panels. The title band and the sidebar are the frame:
-   the window's ground, painted once, with the sidebar's rows sitting on it and
-   no panel behind them. The thread stage, each tool tile in the dock, and the
-   bottom panel are separate rounded panels (level 1 of the material) with the
-   frame's 8px gap between them and 8px short of the window's right and bottom
-   edges. The gap is the frame showing through, so every panel reads as an
-   object seated on the ground and the glass shows between them. Each panel
-   paints below the title band from a pseudo-element or its own box, so
-   headers and dock tabs keep sitting in the band. The ground lies over the
-   stage's paint and under everything else. A narrow window keeps its overlay
-   drawer. */
+/* The frame and its panes. The title band and the sidebar are the frame: the
+   window's ground, painted once, with the sidebar's rows sitting on it. The
+   thread stage, each tool tile in the dock, and the bottom panel are square
+   panes (level 1 of the material) that share their edges: no gap, no corner,
+   and one 1px line between two neighbours, drawn by whichever pane lies below
+   or to the right of the edge. The first row of panes starts under the title
+   band with that line along its top, and the panes reach the window's right
+   and bottom edges. Each pane paints below the title band from a
+   pseudo-element or its own box, so headers and dock tabs keep sitting in the
+   band. The ground lies over the stage's paint and under everything else. A
+   narrow window keeps its overlay drawer. */
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
      over it; the shell has to hold that level itself; without a ground the
      piece otherwise dropped below the shell's own background and the stage
-     showed the frame colour. */
+     showed the frame colour. The pane line is the one colour every divider
+     takes: under Window glass the border is lost on the tint, so the rim
+     shows instead. */
   .shell.shell-frame {
-    --octant-sheet-inset: var(--oct-space-2);
+    --octant-pane-line: var(--octant-border);
     isolation: isolate;
+  }
+
+  .shell--material-translucent.shell-frame {
+    --octant-pane-line: var(--octant-rim);
+  }
+
+  html[data-octant-increased-contrast="true"] .shell.shell-frame {
+    --octant-pane-line: var(--octant-border-strong);
   }
 
   /* The sidebar sits on the ground with no panel of its own. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
-    padding-bottom: var(--octant-sheet-inset);
+    padding-bottom: var(--oct-space-2);
     border-right: 0;
   }
 
-  /* The layer keeps the frame's gap on its left, right, and bottom, and
-     between the thread's panel and the bottom panel. */
   .shell-frame > .workspace-layer {
     position: relative;
-    padding: 0 var(--octant-sheet-inset) var(--octant-sheet-inset);
-    row-gap: var(--octant-sheet-inset);
   }
 
-  /* The thread's panel. It is a grid item rather than an absolute piece, so it
+  /* The thread's pane. It is a grid item rather than an absolute piece, so it
      follows the thread's column when the dock opens and stops where the bottom
      panel starts, and sits at a negative level so the ground can lie over it. */
   .shell-frame > .workspace-layer::before {
@@ -2062,9 +2070,7 @@ html[data-octant-native-host="true"]
     grid-column: 1;
     grid-row: 1;
     margin-top: var(--oct-title-rail-h);
-    border-radius: var(--oct-radius-md);
-    background: var(--octant-panel-fill);
-    box-shadow: var(--octant-shadow-panel-seat);
+    background: var(--octant-pane-fill);
     content: "";
     pointer-events: none;
   }
@@ -2074,36 +2080,42 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
-  /* The dock's resize edge is the frame's gap, so the thread's panel and the
-     first tile are 8px apart like every other pair. */
+  /* The dock's resize edge is the line between the thread and the first
+     tile: the dock has no column for it, and the handle straddles the line. */
   .shell-frame .right-utility-dock {
-    grid-template-columns: var(--octant-sheet-inset) minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr);
+    overflow: visible;
   }
 
-  /* Tool tiles are panels of their own (see dock.css). Before any tool is
-     open the dock shows its overview cards, and those sit on one panel. */
+  .shell-frame .right-utility-dock__resize {
+    z-index: 5;
+    width: 8px;
+    margin-left: -4px;
+  }
+
+  /* Tool tiles are panes of their own (see dock.css). Before any tool is
+     open the dock shows its overview cards, and those sit on one pane. */
   .shell-frame .right-utility-dock:not(:has(.dock-tiles))::before {
     position: absolute;
     z-index: -1;
-    inset: var(--oct-title-rail-h) 0 0 var(--octant-sheet-inset);
-    border-radius: var(--oct-radius-md);
-    background: var(--octant-panel-fill);
-    box-shadow: var(--octant-shadow-panel-seat);
+    inset: var(--oct-title-rail-h) 0 0;
+    background: var(--octant-pane-fill);
     content: "";
     pointer-events: none;
   }
 
-  /* A panel's content paints over its own inset shadow, so the rim is drawn
-     again above the content by a pseudo-element: the edge catches light along
-     the top and the corner is one clean curve, with no line of the content's
-     own beside it. The thread's rim follows its column like its fill. */
+  /* A pane's content paints over its own background, so the line is drawn
+     again above the content by a pseudo-element, on the pane's top and left
+     edges only: the edge it shares with the pane above or beside it is that
+     pane's bottom or right, which draws nothing. A border rather than a
+     shadow, so forced colours keeps it. */
   .shell-frame > .workspace-layer::after {
     z-index: 4;
     grid-column: 1;
     grid-row: 1;
     margin-top: var(--oct-title-rail-h);
-    border-radius: var(--oct-radius-md);
-    box-shadow: var(--octant-shadow-panel-rim);
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
   }
@@ -2111,9 +2123,9 @@ html[data-octant-native-host="true"]
   .shell-frame .right-utility-dock:not(:has(.dock-tiles))::after {
     position: absolute;
     z-index: 4;
-    inset: var(--oct-title-rail-h) 0 0 var(--octant-sheet-inset);
-    border-radius: var(--oct-radius-md);
-    box-shadow: var(--octant-shadow-panel-rim);
+    inset: var(--oct-title-rail-h) 0 0;
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
   }
@@ -2122,43 +2134,52 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
-  /* The sidebar's sheet piece already draws the edge between it and the
+  /* The thread's left line already draws the edge between the sidebar and the
      stage. The resize hairline ran the window's full height beside it, so it
      cut through the title band and doubled the edge; it now shows only while
-     grabbed, and only along the sheet. */
+     grabbed, and only along the panes. */
   .shell-frame__sidebar-resize::before {
     top: var(--oct-title-rail-h);
-    bottom: var(--octant-sheet-inset);
     background: transparent;
   }
 
-  /* The gap between the thread and the dock is the handle: no line at rest,
-     and the accent line while grabbed, inside the panels' height. */
+  /* The edge between the thread and the dock is the handle: no line of its own
+     at rest (the first tile draws it), and the accent line while grabbed. */
   .shell-frame .right-utility-dock__resize::before {
     top: var(--oct-title-rail-h);
-    left: calc(var(--octant-sheet-inset) / 2 - 0.5px);
+    left: 4px;
     background: transparent;
   }
 
   .shell-frame .right-utility-dock__resize:hover::before,
   .shell-frame .right-utility-dock__resize:focus-visible::before {
-    background: var(--octant-border-strong);
+    background: var(--oct-accent-fg);
   }
 
+  /* The bottom panel's handle straddles its top line, so the panel lets it
+     reach 4px above its box. */
   .shell-frame .bottom-utility-panel {
-    border-radius: var(--oct-radius-md);
-    background: var(--octant-panel-fill);
-    box-shadow: var(--octant-shadow-panel-seat);
+    overflow: visible;
+    background: var(--octant-pane-fill);
   }
 
   .shell-frame .bottom-utility-panel::after {
     position: absolute;
     z-index: 4;
     inset: 0;
-    border-radius: inherit;
-    box-shadow: var(--octant-shadow-panel-rim);
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
+  }
+
+  .shell-frame .bottom-utility-panel__resize::before {
+    background: transparent;
+  }
+
+  .shell-frame .bottom-utility-panel__resize:hover::before,
+  .shell-frame .bottom-utility-panel__resize:focus-visible::before {
+    background: var(--oct-accent-fg);
   }
 
   /* The window controls float over the workspace's first rail. A reader
@@ -2167,24 +2188,6 @@ html[data-octant-native-host="true"]
   .shell-frame .primary-workspace-layer :is(.surface__inner, .linear-issues) {
     --oct-surface-header-top: var(--oct-title-rail-h);
     padding-top: var(--oct-title-rail-h);
-  }
-
-  /* The panel's scroller clips the start-screen ground to the sheet's exposed
-     corners; otherwise its opaque picture squares off the sheet underneath. */
-  .shell-frame:not(.shell--wide-context-open)
-    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
-      :has(> .workspace-pane__header)
-    )
-    > .workspace-pane__panel {
-    border-top-right-radius: var(--oct-radius-md);
-  }
-
-  .shell--sidebar-collapsed.shell-frame
-    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
-      :has(> .workspace-pane__header)
-    )
-    > .workspace-pane__panel {
-    border-top-left-radius: var(--oct-radius-md);
   }
 
   /* A start screen has no pane heading to hold the title band open. Without
@@ -2217,9 +2220,9 @@ html[data-octant-native-host="true"]
 
   /* The pane header does not share the traffic lights' compact centreline,
      so it takes the title rail the dock head already uses and the two heads
-     close on one line. The panels start at the rail's bottom edge, which is
+     close on one line. The panes start at the rail's bottom edge, which is
      the line between the band and them; no hairline is drawn there, since the
-     panel's own top rim is that edge and a second line doubled it. */
+     pane's own top line is that edge and a second line doubled it. */
   .shell-frame .workspace-pane__header {
     min-height: var(--oct-title-rail-h);
   }
