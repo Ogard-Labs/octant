@@ -3,9 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, relative } from "node:path";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
-import Ajv2020 from "ajv/dist/2020.js";
+import type { AnySchema, ValidateFunction } from "ajv";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type {
   ExtensionEffectiveSnapshot,
@@ -58,7 +56,7 @@ interface McpSessionAuthentication {
 interface PreparedMcpTool {
   readonly listed: McpToolDefinition;
   readonly providerDefinition: ProviderToolDefinition;
-  readonly validateInput: JsonSchemaValidator<unknown>;
+  readonly validateInput: ValidateFunction<unknown>;
 }
 
 export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
@@ -413,7 +411,7 @@ export class AgentPluginMcpSessionManager {
         } catch {
           return { result: { error: "extension-tool-input-invalid" }, isError: true };
         }
-        if (!tool.validateInput(args).valid) {
+        if (!tool.validateInput(args)) {
           return { result: { error: "extension-tool-input-invalid" }, isError: true };
         }
         const definitionDigest = record.toolDefinitionDigests.get(indexed.toolName);
@@ -914,11 +912,12 @@ export class AgentPluginMcpSessionManager {
     }
     connectedSession = session;
     const duplicateToolNames = duplicatedMcpToolNames(session.tools);
-    const tools = session.tools.flatMap((tool) => {
-      if (duplicateToolNames.has(tool.name)) return [];
-      const prepared = prepareMcpTool(target, tool);
-      return prepared === undefined ? [] : [prepared];
-    });
+    const tools: PreparedMcpTool[] = [];
+    for (const tool of session.tools) {
+      if (duplicateToolNames.has(tool.name)) continue;
+      const prepared = await prepareMcpTool(target, tool);
+      if (prepared !== undefined) tools.push(prepared);
+    }
     const record: AgentPluginMcpSessionRecord = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -1174,10 +1173,16 @@ function localJsonPointerTarget(root: unknown, reference: string): unknown {
   return target;
 }
 
-function prepareMcpTool(
+let ajv2020Module: Promise<typeof import("ajv/dist/2020.js")> | undefined;
+
+function loadAjv2020() {
+  return (ajv2020Module ??= import("ajv/dist/2020.js"));
+}
+
+async function prepareMcpTool(
   record: Pick<AgentPluginMcpSessionRecord, "extensionId" | "packageId" | "componentId" | "scope">,
   tool: McpToolDefinition,
-): PreparedMcpTool | undefined {
+): Promise<PreparedMcpTool | undefined> {
   try {
     if (
       tool.inputSchema === undefined ||
@@ -1193,14 +1198,13 @@ function prepareMcpTool(
       inputSchema: tool.inputSchema,
     });
     if (mcpInputSchemaIsUnsafeToValidate(providerDefinition.inputSchema)) return undefined;
-    const validateInput = new AjvJsonSchemaValidator(
-      new Ajv2020({
-        allErrors: false,
-        strict: false,
-        validateFormats: false,
-        validateSchema: true,
-      }),
-    ).getValidator<unknown>(providerDefinition.inputSchema as JsonSchemaType);
+    const { default: Ajv2020 } = await loadAjv2020();
+    const validateInput = new Ajv2020({
+      allErrors: false,
+      strict: false,
+      validateFormats: false,
+      validateSchema: true,
+    }).compile<unknown>(providerDefinition.inputSchema as AnySchema);
     return { listed: tool, providerDefinition, validateInput };
   } catch {
     return undefined;
