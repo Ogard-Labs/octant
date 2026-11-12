@@ -1073,6 +1073,24 @@ export const CodeRuntimeWorkState = Schema.Literal(
 );
 export type CodeRuntimeWorkState = typeof CodeRuntimeWorkState.Type;
 
+export const CodeRuntimeRemoteStep = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("push"),
+    remote: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._-]{1,255}$/)),
+    remoteRef: Schema.String.pipe(
+      Schema.maxLength(1_024),
+      Schema.pattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
+    ),
+    /** The commit the push sent: the remote branch pointing at it means the push landed. */
+    commitOid: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pull-request"),
+    action: Schema.Literal("create", "update", "comment", "merge"),
+  }).annotations(strict),
+);
+export type CodeRuntimeRemoteStep = typeof CodeRuntimeRemoteStep.Type;
+
 const CodeRuntimeWorkFields = {
   id: CodeRuntimeWorkId,
   threadId: CodeThreadId,
@@ -1080,12 +1098,13 @@ const CodeRuntimeWorkFields = {
   state: CodeRuntimeWorkState,
   updatedAt: UtcTimestamp,
   /**
-   * The work acts on a remote (a push, or a pull request step), so if the host
-   * loses it mid-flight the effect may have landed without the host learning
-   * so. Restart reconciliation reads it to leave such work `ambiguous` rather
-   * than `interrupted`.
+   * The remote effect this work makes (a push, or a pull request step), so if
+   * the host loses it mid-flight the effect may have landed without the host
+   * learning so. Restart reconciliation leaves such work `ambiguous` rather
+   * than `interrupted`, and the push's target lets a later look at the remote
+   * settle it.
    */
-  reachesNetwork: Schema.optional(Schema.Literal(true)),
+  remoteStep: Schema.optional(CodeRuntimeRemoteStep),
 } as const;
 // The member with evidence comes first: a client ignores unknown fields in a
 // host answer, so the bare member listed first would accept an evidence-bearing

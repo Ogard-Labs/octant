@@ -449,6 +449,41 @@ export class GitMutationPort {
   }
 
   /**
+   * Where a remote branch points now, read without changing anything. A push
+   * the host lost mid-flight is settled by this: the remote branch pointing at
+   * the pushed commit means the push landed. It reaches the network as a push
+   * does, under the same confinement.
+   */
+  async remoteHead(
+    input: {
+      readonly checkoutRoot: string;
+      readonly remote: string;
+      readonly remoteRef: string;
+    } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "found"; readonly oid: string }
+    | { readonly status: "absent" }
+    | { readonly status: "unavailable" }
+  > {
+    if (!/^[A-Za-z0-9._-]+$/.test(input.remote) || !validBranchRef(input.remoteRef))
+      return { status: "unavailable" };
+    const result = await this.#run(
+      ["-C", input.checkoutRoot, "ls-remote", "--refs", "--", input.remote, input.remoteRef],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (result.exitCode !== 0) return { status: "unavailable" };
+    for (const line of result.stdout.split("\n")) {
+      const [oid, ref] = line.trim().split(/\s+/);
+      if (ref === input.remoteRef && oid !== undefined && isObjectId(oid))
+        return { status: "found", oid };
+    }
+    return { status: "absent" };
+  }
+
+  /**
    * Merge a run's branch into the branch the checkout is on.
    *
    * `--no-ff` on purpose: bringing a run home should leave a commit that says

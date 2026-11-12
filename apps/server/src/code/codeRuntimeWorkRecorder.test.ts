@@ -52,7 +52,7 @@ function recorder(append: () => void = () => undefined) {
 }
 
 function eventInput(id: CodeTerminalId) {
-  return { id, threadId, kind: "terminal" as const, reachesNetwork: false };
+  return { id, threadId, kind: "terminal" as const, remoteStep: undefined };
 }
 
 describe("CodeRuntimeWorkRecorder", () => {
@@ -169,11 +169,22 @@ describe("CodeRuntimeWorkRecorder", () => {
       const commit = {
         id: decodeGitOperationId("90000000-0000-4000-8000-000000000033"),
         kind: "git" as const,
-        reachesNetwork: false,
+        remoteStep: undefined,
       };
       if (push === undefined) throw new Error("A push must start runtime work");
       expect(recorder.open({ ...push, threadId })).toEqual({ status: "recorded" });
       expect(recorder.open({ ...commit, threadId })).toEqual({ status: "recorded" });
+
+      // The push's target is kept on its record so a later look at the remote
+      // can settle it.
+      expect(
+        readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(push.id)))?.remoteStep,
+      ).toEqual({
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      });
 
       reconcileCodeRestart({ connection, journal, reconciledAt: "2026-08-31T10:05:00.000Z" });
 
@@ -210,7 +221,7 @@ describe("CodeRuntimeWorkRecorder", () => {
           actor,
         });
       const id = decodeCodeOperationId("90000000-0000-4000-8000-000000000094");
-      const input = { id, threadId, kind: "provider-turn" as const, reachesNetwork: false };
+      const input = { id, threadId, kind: "provider-turn" as const, remoteStep: undefined };
       // The process that opened the record is gone: a restarted recorder only
       // sees the journaled aggregate, never the dead owner's map.
       expect(createRecorder().open(input)).toEqual({ status: "recorded" });

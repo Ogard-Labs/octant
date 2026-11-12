@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeCodeCheckoutId, decodeCodeFileId, decodeCodeRuntimeWorkId } from "@octant/contracts";
+import {
+  decodeCodeCheckoutId,
+  decodeCodeFileId,
+  decodeCodeRuntimeWorkId,
+  type CodeRuntimeRemoteStep,
+} from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { readCodeCheckout, readCodeFileReference, readCodeRuntimeWork } from "./codeProjection";
@@ -53,9 +58,16 @@ describe("Code persistence restart", () => {
     appendRuntime(journal, ids.running, "running", 101);
     appendRuntime(journal, ids.ambiguous, "ambiguous", 102);
     appendRuntime(journal, ids.runningTerminal, "running", 107, "terminal");
-    appendRuntime(journal, ids.runningPush, "running", 108, "git", { reachesNetwork: true });
+    appendRuntime(journal, ids.runningPush, "running", 108, "git", {
+      remoteStep: {
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      },
+    });
     appendRuntime(journal, ids.runningPullRequest, "running", 109, "delivery", {
-      reachesNetwork: true,
+      remoteStep: { kind: "pull-request", action: "create" },
     });
     appendRuntime(journal, ids.runningCommit, "running", 110, "git");
     appendCheckout(journal, {
@@ -357,7 +369,7 @@ function appendRuntime(
   state: "running" | "ambiguous",
   eventSuffix: number,
   kind: "provider-turn" | "terminal" | "git" | "delivery" = "provider-turn",
-  reach: { readonly reachesNetwork?: true } = {},
+  reach: { readonly remoteStep?: CodeRuntimeRemoteStep } = {},
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-runtime", aggregateId: runtimeWorkId },

@@ -5020,9 +5020,16 @@ or .zip>` write the same files, built by one host command
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
-  rather than letting it read Ready; its runtime-work record says it reaches the
-  network when it opens. File, terminal, test, review, and local Git work, whose
-  result is in the checkout, becomes `interrupted`.
+  rather than letting it read Ready; its runtime-work record keeps the remote step
+  it makes (a push's remote, branch and commit, or the pull request action) when
+  it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
+  reading the remote branch: pointing at the pushed commit it is `completed`,
+  anywhere else or absent it is `failed` and pushing again is safe, and an
+  unreadable remote leaves it unconfirmed. Observing the pull request settles an
+  unconfirmed creation by looking for the thread's pull request, open or closed.
+  An unconfirmed update, comment or merge stays unconfirmed. File, terminal,
+  test, review, and local Git work, whose result is in the checkout, becomes
+  `interrupted`.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed

@@ -40,6 +40,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeTurnReviewCapture,
   decodeCodeOperationId,
+  CodeGitOperationId,
   decodeCodeThreadId,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
@@ -70,6 +71,7 @@ import {
   type HarnessRetryNotice,
   type CodeOperationEventFrame,
   type CodeOperationId,
+  type CodeRuntimeWork,
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
@@ -99,7 +101,7 @@ import {
 } from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
@@ -260,6 +262,10 @@ type Awaitable<T> = T | Promise<T>;
 
 interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
+  /** A thread's runtime work records; without it a lost push or pull request is never settled. */
+  readonly readCodeRuntimeWorks?: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<{ readonly work: CodeRuntimeWork }>;
   readonly journal: Journal;
   readonly readCodeCheckout: (
     checkoutId: CodeCheckoutIdentity["id"],
@@ -459,7 +465,7 @@ export interface CodeOperationRuntimeOptions {
     | "restoreWorkingTree"
     | "releaseCheckpoint"
   > &
-    Partial<Pick<GitMutationPort, "applyHunks">>;
+    Partial<Pick<GitMutationPort, "applyHunks" | "remoteHead">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -1243,8 +1249,33 @@ export function createCodeOperationRuntime(
       return turns.threadWithActiveTurnPosture(session);
     },
   };
+  const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(readRuntimeWorks === undefined
+      ? {}
+      : {
+          unconfirmedSteps: {
+            list: (threadId: CodeThreadId) =>
+              readRuntimeWorks(threadId)
+                .map((entry) => entry.work)
+                .filter((work) => work.state === "ambiguous"),
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.settleOrphaned({
+                  // A push is recorded under its Git operation, a pull request
+                  // step under its own operation.
+                  id:
+                    work.kind === "git"
+                      ? decodeCodeGitOperationId(String(work.id))
+                      : decodeCodeOperationId(String(work.id)),
+                  threadId: work.threadId,
+                  kind: work.kind,
+                  state,
+                }),
+              ),
+          },
+        }),
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
@@ -1286,7 +1317,7 @@ export function createCodeOperationRuntime(
             id: started.id,
             threadId: command.threadId,
             kind: started.kind,
-            reachesNetwork: started.reachesNetwork,
+            remoteStep: started.remoteStep,
           }),
         );
     },
@@ -3546,7 +3577,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         id: active.operationId,
         threadId: active.thread.id,
         kind: "provider-turn",
-        reachesNetwork: false,
+        remoteStep: undefined,
       }),
     );
     return turnState("running");
@@ -6778,8 +6809,11 @@ function baseCheckoutResolver(
   };
 }
 
+const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
+
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
+    remoteHead: (input, signal) => git.remoteHead(input, signal),
     observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
       mapGitObservation(
         await git.observe(

@@ -1058,12 +1058,12 @@ export function reconcileCodeRestart(input: {
     // push nobody can account for. File, terminal, test, review, and local Git
     // work has no process left to wait for and its result is in the checkout,
     // so it is `interrupted`; calling a dead shell "waiting" would leave the
-    // thread blocked forever. Delivery work recorded before `reachesNetwork`
+    // thread blocked forever. Delivery work recorded before `remoteStep`
     // existed is still a GitHub call, so its kind alone decides.
     const state =
       work.kind === "provider-turn"
         ? "waiting"
-        : work.reachesNetwork === true || work.kind === "delivery"
+        : work.remoteStep !== undefined || work.kind === "delivery"
           ? "ambiguous"
           : "interrupted";
     // `updatedAt` keeps the moment this work last actually moved. Stamping the
