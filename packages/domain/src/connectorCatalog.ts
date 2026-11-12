@@ -41,6 +41,12 @@ export interface ConnectorCatalogEntry {
   /** The vendor's own page on connecting to this server, shown beside the entry. */
   readonly docs: string;
   readonly auth: ConnectorAuth;
+  /**
+   * Hosts a locally started connector may reach through the host's proxy
+   * (`*.example.com` covers the names below example.com). Only an entry that
+   * names some is ever granted a network path; a hosted entry never has any.
+   */
+  readonly egress?: ReadonlyArray<string>;
 }
 
 export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string>> = {

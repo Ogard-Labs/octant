@@ -113,6 +113,7 @@ afterEach(async () => {
 function fixture() {
   let identity = "original-binding";
   const tunnels = new ServerPreviewTunnels({
+    now: () => Date.now(),
     address: () => ({ server: { alias: "web", user: "deploy" }, identity }),
     ownerCurrent: () => true,
     agentSocket: () => undefined,

@@ -42,7 +42,10 @@ describe("PersistenceLive", () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({ category: "recovery-required" });
+      expect(result.left).toMatchObject({
+        category: "recovery-required",
+        recovery: "removal-unfinished",
+      });
     }
     expect(existsSync(databasePath)).toBe(false);
     expect(existsSync(join(stagedDirectory, "octant.sqlite3"))).toBe(true);
@@ -450,7 +453,7 @@ describe("PersistenceLive", () => {
     inspected.close();
   });
 
-  it("fails closed when a projection checkpoint is ahead of the journal", async () => {
+  it("rebuilds projections from the journal when a projection checkpoint is ahead of it", async () => {
     const directory = temporaryDirectory();
     const seeded = openSqlite(join(directory, "octant.sqlite3"));
     applyMigrations(seeded, MIGRATIONS, () => now);
@@ -460,16 +463,18 @@ describe("PersistenceLive", () => {
       )
       .run("aggregate-heads", 1, now);
     seeded.close();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const result = await startupResult(directory);
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({ category: "recovery-required" });
-    }
+    expect(Either.isRight(result)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      "Octant rebuilt its projections from the journal at startup.",
+    );
+    warn.mockRestore();
   });
 
-  it("fails closed when recovered projection state is inconsistent", async () => {
+  it("rebuilds projections from the journal when their state disagrees with it", async () => {
     const directory = temporaryDirectory();
     const seeded = openSqlite(join(directory, "octant.sqlite3"));
     applyMigrations(seeded, MIGRATIONS, () => now);
@@ -484,14 +489,50 @@ describe("PersistenceLive", () => {
         "INSERT INTO projection_checkpoints (projection_name, last_sequence, updated_at) VALUES (?, ?, ?)",
       )
       .run("aggregate-heads", 1, now);
+    const journalBefore = seeded.prepare("SELECT * FROM event_journal").all();
+    seeded.close();
+
+    const result = await startupResult(directory);
+
+    expect(Either.isRight(result)).toBe(true);
+    const inspected = openSqlite(join(directory, "octant.sqlite3"));
+    expect(inspected.prepare("SELECT * FROM event_journal").all()).toEqual(journalBefore);
+    expect(
+      inspected
+        .prepare("SELECT aggregate_type, aggregate_id, aggregate_version FROM aggregate_heads")
+        .all(),
+    ).toEqual([
+      {
+        aggregate_type: "fixture",
+        aggregate_id: "00000000-0000-4000-8000-000000001901",
+        aggregate_version: 1,
+      },
+    ]);
+    inspected.close();
+  });
+
+  it("refuses to start over journal damage a rebuild cannot repair and leaves the journal unchanged", async () => {
+    const directory = temporaryDirectory();
+    const seeded = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(seeded, MIGRATIONS, () => now);
+    insertFixtureEvent(seeded);
+    // A version gap inside one aggregate is damage to the journal itself.
+    seeded.prepare("UPDATE event_journal SET aggregate_version = 2").run();
+    const journalBefore = seeded.prepare("SELECT * FROM event_journal").all();
     seeded.close();
 
     const result = await startupResult(directory);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({ category: "recovery-required" });
+      expect(result.left).toMatchObject({
+        category: "recovery-required",
+        recovery: "store-damaged",
+      });
     }
+    const inspected = openSqlite(join(directory, "octant.sqlite3"));
+    expect(inspected.prepare("SELECT * FROM event_journal").all()).toEqual(journalBefore);
+    inspected.close();
   });
 
   it.each([

@@ -252,7 +252,7 @@ export class CommandCredentialBindings {
       requestId: this.#options.uuid(),
       binding,
       threadId,
-      expiresAt: new Date(Date.now() + 180000).toISOString(),
+      expiresAt: new Date(ends).toISOString(),
       executionPolicy: context.executionPolicy,
       state: "pending",
     });

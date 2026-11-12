@@ -112,6 +112,15 @@
   line-height: var(--oct-leading-meta);
 }
 
+/* The second line of a described menu row: Meta in the menu's own words. A row
+   that holds one stands 44px tall (`--oct-menu-row-two-h`). */
+.oct-menu-detail {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-meta);
+}
+
 /* Every pick-list's option: menu, context menu, select, combobox. */
 .oct-menu-option {
   font-size: var(--oct-text-detail);

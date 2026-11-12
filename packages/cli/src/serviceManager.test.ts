@@ -248,4 +248,91 @@ describe("per-user service managers", () => {
     expect(unit).toContain(`Environment=XDG_CONFIG_HOME=${dirname(runtimePaths.configDirectory)}`);
     expect(unit).toContain(`Environment=XDG_STATE_HOME=${dirname(runtimePaths.stateDirectory)}`);
   });
+
+  it("starts the app's own windowless host with no inherited environment when asked to", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-launchd-app-host-"));
+    roots.push(root);
+    const manager = createLaunchdUserServiceManager({
+      paths: paths(root),
+      uid: process.getuid?.() ?? 0,
+      home: join(root, "home"),
+      executable: "/Applications/Octant.app/Contents/MacOS/Octant",
+      hostArguments: ["--octant-host-only"],
+      runtimeEnvironment: { OCTANT_DATA_DIR: join(root, "data"), OCTANT_SERVER_PORT: "17777" },
+      runner: { run: vi.fn(async () => ({ stdout: "", stderr: "" })) },
+    });
+
+    await manager.install();
+
+    const descriptor = await readFile(
+      join(root, "home", "Library", "LaunchAgents", "app.octant.server.plist"),
+      "utf8",
+    );
+    expect(descriptor).toContain(
+      "<array><string>/Applications/Octant.app/Contents/MacOS/Octant</string><string>--octant-host-only</string></array>",
+    );
+    expect(descriptor).toContain("<key>EnvironmentVariables</key><dict></dict>");
+  });
+
+  it("reports what is installed on disk and removes it on uninstall", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-launchd-uninstall-"));
+    roots.push(root);
+    const notLoaded = Object.assign(new Error("Command failed"), { code: 113 });
+    const calls: Array<readonly string[]> = [];
+    const options = {
+      paths: paths(root),
+      uid: process.getuid?.() ?? 0,
+      home: join(root, "home"),
+      executable: "/Applications/Octant.app/Contents/MacOS/Octant",
+      hostArguments: ["--octant-host-only"],
+      runner: {
+        run: vi.fn(async (_command: string, args: readonly string[]) => {
+          calls.push(args);
+          if (args[0] === "print" || args[0] === "bootout") throw notLoaded;
+          return { stdout: "", stderr: "" };
+        }),
+      },
+    };
+    await createLaunchdUserServiceManager(options).install();
+
+    // A fresh manager, as after a restart, reads the descriptor from disk.
+    const later = createLaunchdUserServiceManager(options);
+    await expect(later.status()).resolves.toMatchObject({ installed: true });
+    await later.uninstall();
+    await expect(later.status()).resolves.toMatchObject({ installed: false, active: false });
+    await expect(
+      readFile(join(root, "home", "Library", "LaunchAgents", "app.octant.server.plist")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(calls).toContainEqual(["bootout", `gui/${process.getuid?.() ?? 0}/app.octant.server`]);
+  });
+
+  it("disables, removes and forgets the systemd unit on uninstall", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-systemd-uninstall-"));
+    roots.push(root);
+    const calls: Array<readonly string[]> = [];
+    const manager = createSystemdUserServiceManager({
+      paths: xdgPaths(root),
+      uid: process.getuid?.() ?? 0,
+      home: join(root, "home"),
+      executable: "/opt/Octant/octant",
+      hostArguments: ["--octant-host-only"],
+      runner: {
+        run: vi.fn(async (_command: string, args: readonly string[]) => {
+          calls.push(args);
+          return { stdout: "", stderr: "" };
+        }),
+      },
+    });
+    await manager.install();
+
+    await manager.uninstall();
+
+    await expect(
+      readFile(join(root, "home", ".config", "systemd", "user", "octant.service")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(calls.slice(-2)).toEqual([
+      ["--user", "--no-ask-password", "disable", "--now", "octant.service"],
+      ["--user", "--no-ask-password", "daemon-reload"],
+    ]);
+  });
 });

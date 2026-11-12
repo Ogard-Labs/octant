@@ -74,6 +74,8 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** The host's process authority clock, which Claude's pre-tool grants expire on. */
+  readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -272,6 +274,9 @@ export function makeProviderDriver(
           : { serverAccess: options.claudeServerAccess }),
         runtimeRegistry: options.runtimeRegistry,
         resumeIdentityPort: options.claudeResumeIdentityPort,
+        ...(options.claudeAuthorityNow === undefined
+          ? {}
+          : { authorityNow: options.claudeAuthorityNow }),
         permissionPersistence: options.permissionPersistence,
         isProjectConfinedPath: options.isProjectConfinedPath,
         ...(options.credentialResolver === undefined

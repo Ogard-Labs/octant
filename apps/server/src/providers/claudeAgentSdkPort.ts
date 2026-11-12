@@ -4,6 +4,7 @@ import {
   type Options as ClaudeSdkOptions,
   type McpSdkServerConfigWithInstance,
   type McpSetServersResult,
+  type SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ProviderContextBreakdown,
@@ -1006,6 +1007,48 @@ function deferredPromise<A>(): {
   return { promise, resolve, reject };
 }
 
+/**
+ * How long a forced kill waits for the runtime's own cleanup to confirm that
+ * its whole process group is gone. The process port escalates and verifies
+ * within a few seconds; past this the kill is reported as not confirmed.
+ */
+const FORCE_KILL_CONFIRMATION_MS = 10_000;
+
+/**
+ * Sends SIGKILL and resolves only once the runtime process reports how its
+ * cleanup ended. A bare `kill` returns before anything has died, so treating
+ * it as done reported every forced stop as successful, even one whose process
+ * group survived; the architecture requires a kill failure to leave an explicit
+ * recovery error instead. The process port emits `error` before `exit` when the
+ * group outlives the kill.
+ */
+function killAndConfirmExit(
+  runtime: SpawnedProcess | undefined,
+): Promise<"exited" | "unconfirmed"> {
+  // No runtime was ever launched for this query, so nothing is left running.
+  if (runtime === undefined) return Promise.resolve("exited");
+  if (runtime.exitCode !== null || (runtime.signalCode ?? null) !== null) {
+    return Promise.resolve("exited");
+  }
+  return new Promise((resolve) => {
+    let cleanupFailed = false;
+    const onError = () => {
+      cleanupFailed = true;
+    };
+    const finish = (outcome: "exited" | "unconfirmed") => {
+      clearTimeout(timer);
+      runtime.off("error", onError);
+      runtime.off("exit", onExit);
+      resolve(outcome);
+    };
+    const onExit = () => finish(cleanupFailed ? "unconfirmed" : "exited");
+    const timer = setTimeout(() => finish("unconfirmed"), FORCE_KILL_CONFIRMATION_MS);
+    runtime.on("error", onError);
+    runtime.on("exit", onExit);
+    runtime.kill("SIGKILL");
+  });
+}
+
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
@@ -1612,9 +1655,18 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   });
                 }, "compaction request"),
               forceKill: () =>
-                Effect.sync(() => {
-                  spawned?.kill("SIGKILL");
-                }),
+                Effect.flatMap(
+                  Effect.promise(() => killAndConfirmExit(spawned)),
+                  (outcome) =>
+                    outcome === "exited"
+                      ? Effect.void
+                      : Effect.fail(
+                          failure(
+                            "unavailable",
+                            "Claude's runtime did not confirm that it stopped after a forced kill.",
+                          ),
+                        ),
+                ),
               interrupt: () =>
                 request(async () => {
                   for (const message of prompt.clear()) issuedMessageIds.delete(message.uuid);

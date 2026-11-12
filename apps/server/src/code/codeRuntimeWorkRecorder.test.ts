@@ -8,11 +8,13 @@ import { openSqlite } from "../persistence/sqlitePort";
 import {
   readCodeRuntimeWork,
   readCodeRuntimeWorkAggregateVersion,
+  reconcileCodeRestart,
 } from "../persistence/codeProjection";
 import {
   CodeGitOperationId,
   CodeTerminalId,
   EventActor,
+  decodeCodeOperationCommand,
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeCodeTerminalId,
@@ -50,7 +52,7 @@ function recorder(append: () => void = () => undefined) {
 }
 
 function eventInput(id: CodeTerminalId) {
-  return { id, threadId, kind: "terminal" as const };
+  return { id, threadId, kind: "terminal" as const, remoteStep: undefined };
 }
 
 describe("CodeRuntimeWorkRecorder", () => {
@@ -125,6 +127,79 @@ describe("CodeRuntimeWorkRecorder", () => {
     }
   });
 
+  it("leaves a push the host lost mid-flight unconfirmed after a restart, and a local commit interrupted", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-recorder-push-restart-"));
+    const connection = openSqlite(join(directory, "journal.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, clock);
+      const registry = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registry.events,
+        projections: registry.projections,
+        clock,
+      });
+      const recorder = new CodeRuntimeWorkRecorder({
+        journal,
+        readVersion: (id) => readCodeRuntimeWorkAggregateVersion(connection, id),
+        uuid,
+        clock,
+        actor,
+      });
+      const scope = {
+        threadId,
+        checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000006"),
+      };
+      const push = codeRuntimeWorkStarted(
+        decodeCodeOperationCommand({
+          kind: "push-git",
+          ...scope,
+          operationId: "90000000-0000-4000-8000-000000000030",
+          gitOperationId: "90000000-0000-4000-8000-000000000031",
+          remote: "origin",
+          localRef: "refs/heads/feature",
+          remoteRef: "refs/heads/feature",
+          expectedHeadOid: "a".repeat(40),
+          expectedStateToken: "b".repeat(64),
+          confirmation: { remote: "origin", refspec: "refs/heads/feature:refs/heads/feature" },
+          authorization: { kind: "full-access" },
+        }),
+      );
+      // A commit resolves inside the checkout, so its plan never reaches the network.
+      const commit = {
+        id: decodeGitOperationId("90000000-0000-4000-8000-000000000033"),
+        kind: "git" as const,
+        remoteStep: undefined,
+      };
+      if (push === undefined) throw new Error("A push must start runtime work");
+      expect(recorder.open({ ...push, threadId })).toEqual({ status: "recorded" });
+      expect(recorder.open({ ...commit, threadId })).toEqual({ status: "recorded" });
+
+      // The push's target is kept on its record so a later look at the remote
+      // can settle it.
+      expect(
+        readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(push.id)))?.remoteStep,
+      ).toEqual({
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      });
+
+      reconcileCodeRestart({ connection, journal, reconciledAt: "2026-08-31T10:05:00.000Z" });
+
+      expect(
+        readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(push.id))),
+      ).toMatchObject({ kind: "git", state: "ambiguous" });
+      expect(
+        readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(commit.id))),
+      ).toMatchObject({ kind: "git", state: "interrupted" });
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("settles a record a previous process left open without owning it", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-recorder-orphan-"));
     const connection = openSqlite(join(directory, "journal.sqlite3"));
@@ -146,7 +221,7 @@ describe("CodeRuntimeWorkRecorder", () => {
           actor,
         });
       const id = decodeCodeOperationId("90000000-0000-4000-8000-000000000094");
-      const input = { id, threadId, kind: "provider-turn" as const };
+      const input = { id, threadId, kind: "provider-turn" as const, remoteStep: undefined };
       // The process that opened the record is gone: a restarted recorder only
       // sees the journaled aggregate, never the dead owner's map.
       expect(createRecorder().open(input)).toEqual({ status: "recorded" });

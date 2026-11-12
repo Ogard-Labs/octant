@@ -138,6 +138,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -4204,7 +4205,10 @@ export class CodeService {
       return this.#failure("stale", "Code state changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Code storage is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Code storage is unavailable."),
+      );
     }
     return this.#failure("failed", "Octant Code service failed.");
   }

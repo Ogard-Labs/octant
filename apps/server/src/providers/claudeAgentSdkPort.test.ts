@@ -1,5 +1,7 @@
 import type { ProviderFailure } from "@octant/contracts";
 import { Chunk, Effect, Stream } from "effect";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { describe, expect, test, vi } from "vitest";
 
 import {
@@ -81,7 +83,53 @@ const safeRuntimeInitialization = {
   session_id: "session-1",
 } as const;
 
-function makeHarness(output: readonly unknown[] = [safeRuntimeInitialization]) {
+/**
+ * A runtime process whose kill outcome the test decides: `exits` cleans up and
+ * exits, `outlives` reports that its process group survived the kill, as the
+ * real process port does when cleanup cannot finish.
+ */
+type RuntimeListener =
+  | ((code: number | null, signal: NodeJS.Signals | null) => void)
+  | ((error: Error) => void);
+
+function fakeRuntimeProcess(onKill: "exits" | "outlives") {
+  const events = new EventEmitter();
+  let exited = false;
+  const process = {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    get killed() {
+      return exited;
+    },
+    get exitCode() {
+      return exited ? 0 : null;
+    },
+    kill: vi.fn((_signal: NodeJS.Signals) => {
+      queueMicrotask(() => {
+        if (onKill === "outlives")
+          events.emit("error", new Error("Claude process cleanup failed."));
+        exited = onKill === "exits";
+        events.emit("exit", null, "SIGKILL");
+      });
+      return true;
+    }),
+    on(event: "exit" | "error", listener: RuntimeListener) {
+      events.on(event, listener);
+    },
+    once(event: "exit" | "error", listener: RuntimeListener) {
+      events.once(event, listener);
+    },
+    off(event: "exit" | "error", listener: RuntimeListener) {
+      events.off(event, listener);
+    },
+  };
+  return process;
+}
+
+function makeHarness(
+  output: readonly unknown[] = [safeRuntimeInitialization],
+  runtimeProcess?: ReturnType<typeof fakeRuntimeProcess>,
+) {
   const query = new FakeQuery(output);
   let invocation: ClaudeAgentSdkQueryInvocation | undefined;
   const listSessions = vi.fn(async () => [
@@ -106,7 +154,8 @@ function makeHarness(output: readonly unknown[] = [safeRuntimeInitialization]) {
   const spawnClaudeCodeProcess = vi.fn((confinement: ClaudeRuntimeConfinement) => {
     spawnConfinements.push(confinement);
     return () => {
-      throw new Error("not called by fake SDK");
+      if (runtimeProcess === undefined) throw new Error("not called by fake SDK");
+      return runtimeProcess;
     };
   });
   const port = makeClaudeAgentSdkPort({ sdk, spawnClaudeCodeProcess });
@@ -166,6 +215,36 @@ async function collectMessages(output: readonly unknown[]) {
 }
 
 describe("Claude Agent SDK port", () => {
+  test.each([
+    ["exits", "succeeds"],
+    ["outlives", "fails"],
+  ] as const)(
+    "a forced kill whose runtime %s the kill %s, so a kill that did not take is never reported as done",
+    async (onKill, expected) => {
+      const runtimeProcess = fakeRuntimeProcess(onKill);
+      const harness = makeHarness([safeRuntimeInitialization], runtimeProcess);
+      const outcome = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            // The fake SDK never launches the runtime itself; launch it the way
+            // the real SDK does, through the callback the port handed over.
+            harness.invocation?.options.spawnClaudeCodeProcess?.({
+              command: "claude",
+              args: [],
+              cwd: "/repo",
+              env: {},
+              signal: new AbortController().signal,
+            });
+            return yield* Effect.either(query.forceKill());
+          }),
+        ),
+      );
+      expect(runtimeProcess.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(outcome._tag).toBe(expected === "succeeds" ? "Right" : "Left");
+    },
+  );
+
   test("connects only the app-owned tool server before delivering a tool-enabled prompt", async () => {
     const name = "mcp__octant__octant_browser";
     const harness = makeHarness([

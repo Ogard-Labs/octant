@@ -78,6 +78,11 @@ export function createComputerUseToolService(options: {
   readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
   readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void>;
+  /**
+   * The server's process authority clock. Owners and five-minute app grants
+   * expire from it, so a wall clock set back cannot extend one.
+   */
+  readonly now: () => number;
 }) {
   const pending = new Map<
     string,
@@ -232,7 +237,9 @@ export function createComputerUseToolService(options: {
       return options.outsideContent?.(action.owner) ?? { sources: [], sourceCount: 0 };
     },
     uuid: randomUUID,
-    clock: () => new Date().toISOString(),
+    // Approval events carry this clock's time, and an app grant's expiry is
+    // computed from its approval's time, so both stay on the authority clock.
+    clock: () => new Date(options.now()).toISOString(),
     evidence: { record: options.record },
     adapter: {
       observe: async (request) => {
@@ -325,7 +332,8 @@ export function createComputerUseToolService(options: {
     const previous = owners.get(ownerKey(owner));
     if (
       previous !== undefined &&
-      (previous.expiresAt <= Date.now() || !sameToolActionAuthority(previous.authority, authority))
+      (previous.expiresAt <= options.now() ||
+        !sameToolActionAuthority(previous.authority, authority))
     ) {
       await execute(owner, { operation: "stop" });
     }
@@ -348,7 +356,7 @@ export function createComputerUseToolService(options: {
     owners.set(ownerKey(owner), {
       owner,
       authority,
-      expiresAt: owners.get(ownerKey(owner))?.expiresAt ?? Date.now() + 5 * 60_000,
+      expiresAt: owners.get(ownerKey(owner))?.expiresAt ?? options.now() + 5 * 60_000,
     });
     if (command.operation === "apps") return dispatch(owner, command, signal);
     const observed =
@@ -383,7 +391,7 @@ export function createComputerUseToolService(options: {
     // (untrustedContentPolicy), so the runtime asks again and the person
     // confirms this action freshly.
     const requiresApproval =
-      (grants.get(grantKey)?.expiresAt ?? 0) <= Date.now() ||
+      (grants.get(grantKey)?.expiresAt ?? 0) <= options.now() ||
       options.externalContentIngested(owner);
     const action = {
       owner,
@@ -639,7 +647,7 @@ export function createComputerUseToolService(options: {
             sessionId: action.sessionId,
           });
       }
-      for (const [key, grant] of grants) if (grant.expiresAt <= Date.now()) grants.delete(key);
+      for (const [key, grant] of grants) if (grant.expiresAt <= options.now()) grants.delete(key);
       await Promise.all(
         [...owners.values()]
           .filter(({ owner, authority, expiresAt }) => {
@@ -647,7 +655,7 @@ export function createComputerUseToolService(options: {
             return (
               !options.settings().enabled ||
               !options.ownerIsCurrent(owner) ||
-              expiresAt <= Date.now() ||
+              expiresAt <= options.now() ||
               current === undefined ||
               !sameToolActionAuthority(authority, current)
             );
