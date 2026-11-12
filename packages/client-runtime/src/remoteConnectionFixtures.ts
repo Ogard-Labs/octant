@@ -574,7 +574,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path.startsWith("/api/code/") ||
         path.startsWith("/api/preview/") ||
         path.startsWith("/api/extensions/") ||
-        path === "/api/providers/bootstrap" ||
+        path.startsWith("/api/providers/") ||
         path === "/api/projects/bootstrap" ||
         path === "/api/replica-sync/status" ||
         path.startsWith("/api/speech/") ||

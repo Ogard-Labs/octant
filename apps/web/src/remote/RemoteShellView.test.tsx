@@ -411,6 +411,23 @@ function answerProduct(
             createdAt: now,
             updatedAt: now,
           },
+          // Signs in with a subscription, so the Providers page asks the
+          // host's credential store whether its grant is stored.
+          {
+            id: "10000000-0000-4000-8000-000000000002",
+            displayName: "Claude personal",
+            driverKind: "claude",
+            configuration: {
+              kind: "claude-agent-sdk",
+              binaryPath: "/opt/homebrew/bin/claude",
+              authentication: "subscription",
+            },
+            enabled: true,
+            environmentPolicy: "inherit-host",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
         ],
         defaults: { permissionPersistence: "current-session", version: 1 },
         observedStates: [
@@ -812,7 +829,7 @@ describe("RemoteShellView", () => {
     expect(within(code).queryByRole("button", { name: "Start thread" })).toBeNull();
   });
 
-  it("opens the host's Extensions and Providers settings for a browser the host's own person paired, with no key entry", async () => {
+  it("opens the host's Extensions and Providers settings for a browser the host's own person paired", async () => {
     const user = userEvent.setup();
     const seen: ProductRequest[] = [];
     const { bridge } = await readyBridge(seen, false, true);
@@ -821,8 +838,11 @@ describe("RemoteShellView", () => {
     const settings = await screen.findByRole("region", { name: "Host settings" });
     await user.click(await within(settings).findByRole("button", { name: "Providers" }));
     expect(await within(settings).findByText("Codex local")).toBeInTheDocument();
-    expect(within(settings).queryByLabelText(/api key/i)).toBeNull();
 
+    // The Providers page asks the host's credential store over the session.
+    await waitFor(() =>
+      expect(seen.map((request) => request.path)).toContain("/api/providers/credentials/status"),
+    );
     await user.click(within(settings).getByRole("button", { name: "Extensions" }));
     await waitFor(() =>
       expect(seen.map((request) => request.path)).toContain("/api/extensions/snapshot"),

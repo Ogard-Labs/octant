@@ -1,4 +1,4 @@
-import type { OctantHostBridge } from "../shell/hostBridge";
+import type { ProviderKeyHost } from "./providerKeyHost";
 import { openExternalUrl } from "../shell/openExternalUrl";
 import type { ProviderSettingsViewProps } from "./ProviderSettingsView";
 import type { ProviderController } from "./useProviderController";
@@ -10,7 +10,7 @@ import type { ProviderController } from "./useProviderController";
  */
 export function providerSettingsViewProps(
   controller: ProviderController,
-  hostBridge: OctantHostBridge | undefined,
+  hostBridge: ProviderKeyHost | undefined,
 ): Omit<ProviderSettingsViewProps, "discovery" | "discoverySnapshot"> {
   return {
     busy: controller.busy,

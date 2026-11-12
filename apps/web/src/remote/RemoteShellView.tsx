@@ -24,6 +24,7 @@ import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteExtensionClient,
   createRemoteProductClients,
+  createRemoteProviderCredentialClient,
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
 import { RemoteHostSettings } from "./RemoteHostSettings";
@@ -75,6 +76,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
+  );
+  const providerKeys = useMemo(
+    () => createRemoteProviderCredentialClient(props.bridge),
+    [props.bridge],
   );
   const providerOAuth = useMemo(() => createRemoteProviderOAuth(props.bridge), [props.bridge]);
   // The matrix names what the host forwards for this session; a restricted
@@ -195,6 +200,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       <RemoteHostSettings
         extensionClient={extensionClient}
         providerClient={clients.provider}
+        providerKeys={providerKeys}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}
       />

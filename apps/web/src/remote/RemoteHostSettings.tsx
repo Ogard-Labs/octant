@@ -7,6 +7,7 @@ import type {
   ProviderOAuthCommand,
   ProviderOAuthCommandResult,
 } from "../providers/ProviderOAuthSignIn";
+import type { ProviderKeyHost } from "../providers/providerKeyHost";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { useProviderController } from "../providers/useProviderController";
@@ -29,6 +30,8 @@ export interface RemoteHostSettingsProps {
   readonly reachable: ReadonlySet<RemoteShellSurfaceKind>;
   readonly extensionClient: ExtensionClient;
   readonly providerClient: ProviderClient;
+  /** Stores, replaces and clears a provider key in the host's credential store. */
+  readonly providerKeys: ProviderKeyHost;
   /** Starts and polls a provider sign-in over the session. */
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
@@ -41,8 +44,9 @@ export interface RemoteHostSettingsProps {
  * clients that travel over the session (maintainer decision, 2026-11-12). A
  * section is offered only where the matrix says the host forwards its routes,
  * and each is closed until asked for so the shell opens without its reads.
- * There is no host bridge here, so the Providers section takes no key: a key
- * reaches the credential broker only from a window on the host.
+ * The Providers section takes a key only where the matrix says the host
+ * forwards the credential routes; the key then travels in a request body to
+ * the host's credential store and is never read back.
  */
 export function RemoteHostSettings(props: RemoteHostSettingsProps) {
   const sections = SECTIONS.filter((section) => props.reachable.has(section.surface));
@@ -67,7 +71,11 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       </div>
       {open === "extensions" ? <ExtensionsSettingsView client={props.extensionClient} /> : null}
       {open === "providers" ? (
-        <RemoteProviderSettings client={props.providerClient} providerOAuth={props.providerOAuth} />
+        <RemoteProviderSettings
+          client={props.providerClient}
+          keyHost={props.reachable.has("provider-credentials") ? props.providerKeys : undefined}
+          providerOAuth={props.providerOAuth}
+        />
       ) : null}
     </section>
   );
@@ -75,12 +83,16 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
 
 function RemoteProviderSettings(props: {
   readonly client: ProviderClient;
+  readonly keyHost: ProviderKeyHost | undefined;
   readonly providerOAuth: RemoteHostSettingsProps["providerOAuth"];
 }) {
-  const controller = useProviderController({ client: props.client });
+  const controller = useProviderController({
+    client: props.client,
+    ...(props.keyHost === undefined ? {} : { hostBridge: props.keyHost }),
+  });
   return (
     <ProviderSettingsView
-      {...providerSettingsViewProps(controller, undefined)}
+      {...providerSettingsViewProps(controller, props.keyHost)}
       // Scanning the host for installed CLIs is a route the host keeps local.
       discovery={null}
       onProviderOAuth={props.providerOAuth}

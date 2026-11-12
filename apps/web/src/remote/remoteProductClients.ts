@@ -18,6 +18,10 @@ import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-c
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import {
+  createProviderCredentialClient,
+  type ProviderCredentialClient,
+} from "@octant/client-runtime/provider-credential-client";
+import {
   createWorkMutationClient,
   type WorkMutationClient,
 } from "@octant/client-runtime/work-mutation-client";
@@ -85,6 +89,16 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/** A provider's key on its way to the host's credential store, over the session. */
+export function createRemoteProviderCredentialClient(
+  bridge: RemoteSessionBridge,
+): ProviderCredentialClient {
+  return createProviderCredentialClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
   });
 }
 
