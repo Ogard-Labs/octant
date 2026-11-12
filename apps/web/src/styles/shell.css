@@ -4754,6 +4754,23 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
+/* A live agent Browser the dock would show as a card while the dock is closed:
+   one quiet dot on the dock toggle, the same mark the dock's cards use. */
+.window-chrome__button[data-activity="browser"] {
+  position: relative;
+}
+
+.window-chrome__button[data-activity="browser"]::after {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  content: "";
+}
+
 /* The Browser's toolbar at narrow widths. These are container-width rules, so
    they apply wherever the Browser is that narrow, in a dock tile or in a full
    pane, and the same control at the same width looks the same.

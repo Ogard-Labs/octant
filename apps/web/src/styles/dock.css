@@ -1406,3 +1406,188 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* The shelf: minimised tools as small live cards at the foot of the dock body,
+   under the overview or the tiles. It takes its natural height and never more
+   than two fifths of the dock, scrolling inside past that; the area above
+   measures what is left and keeps its own floors. */
+.right-utility-dock__content[data-shelf="true"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.right-utility-dock__content[data-shelf="true"]:has(> .dock-start) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-start {
+  min-height: 0;
+  flex: 1 1 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+  overflow-y: auto;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-tiles {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* Two cards stand side by side once each can have 160px (a dock about 352px and
+   wider) and stack below that; one card takes the whole width. A card is a 28px
+   bar over a 104px preview, 152px in all, so two side by side need 168px and
+   stay under the cap in any dock 420px or taller; the cap and the inner scroll
+   are the fallback for a very short dock and for two stacked cards. */
+.dock-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  max-height: 40%;
+  flex: none;
+  gap: var(--oct-space-2);
+  /* Inline padding matches the tiles' own inset, so a card's edge is the edge of the tile above it. */
+  padding: var(--oct-space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dock-shelf__slot {
+  min-width: 0;
+}
+
+/* A card is one of the dock's cards: its own wash over the dock's ground. The
+   picture and the terminal bring their own content fill, which is opaque on
+   purpose and sits inside the card, never under it. */
+.dock-mini-card {
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
+  container-type: inline-size;
+}
+
+/* A narrow card that has a word to say (Exited, Preview ended) gives that word
+   the room the icon and the name had; the name still labels the card for
+   assistive technology, and the buttons stay where they are. */
+@container (max-width: 200px) {
+  .dock-mini-card[data-detail="true"] .dock-card__icon,
+  .dock-mini-card[data-detail="true"] .dock-mini-card__title {
+    display: none;
+  }
+
+  .dock-mini-card[data-detail="true"] .dock-mini-card__head {
+    gap: 2px;
+  }
+}
+
+.dock-mini-card__head {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-mini-card__title {
+  min-width: 0;
+  /* The name gives way first, with an ellipsis, before a word beside it or a button. */
+  flex: 1 10 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-mini-card__detail {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* New output: a quiet mark, the same dot the dock toggle carries, named for
+   assistive technology and gone as soon as the card has been looked at. */
+.dock-mini-card__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+}
+
+.dock-mini-card__action {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  padding: 0;
+}
+
+.dock-mini-card__preview {
+  position: relative;
+  height: 104px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--octant-surface-inset);
+  /* Concentric with the card: its 12px corner minus the card's 8px inset. */
+  border-radius: 4px;
+}
+
+.dock-mini-card__picture,
+.dock-mini-card__skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The page's top left, cropped to the preview and never stretched. */
+.dock-mini-card__picture {
+  object-fit: cover;
+  object-position: top left;
+  user-select: none;
+}
+
+.dock-mini-card__skeleton {
+  border-radius: 0;
+}
+
+/* The shell's last lines, in the smallest terminal type, fill the preview. */
+.dock-mini-card__terminal,
+.dock-mini-card__skeleton--terminal,
+.dock-mini-card__note {
+  display: block;
+  height: 100%;
+}
+
+.dock-mini-card__terminal {
+  overflow: hidden;
+}
+
+.dock-mini-card__terminal > section {
+  height: 100%;
+}
+
+.dock-mini-card__terminal .terminal-leave-hint {
+  display: none;
+}
+
+.dock-mini-card__note {
+  display: grid;
+  margin: 0;
+  padding: var(--oct-space-2);
+  place-items: center;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The whole preview is the expand control; it sits over the inert picture. */
+.dock-mini-card__expand {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: inherit;
+}

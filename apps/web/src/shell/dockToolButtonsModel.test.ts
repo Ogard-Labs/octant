@@ -283,3 +283,156 @@ describe("the title band's tool buttons", () => {
     expect(byId(model, "browser")?.press).toEqual({ kind: "show-beside", tabId: "b2" });
   });
 });
+
+describe("the tool buttons beside a shelf of minimised cards", () => {
+  const shelf = { shelfDrawn: true } as const;
+
+  it("minimises a pressed Browser or Terminal on a press and closes every other tool", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [
+          { id: "b1", surface: "browser" },
+          { id: "b2", surface: "browser" },
+          { id: "t1", surface: "terminal" },
+          { id: "f1", surface: "files" },
+        ],
+        shownTabIds: ["b2", "t1", "f1"],
+      }),
+    );
+    expect(byId(model, "browser")?.press).toEqual({ kind: "minimise", tabId: "b2" });
+    expect(byId(model, "terminal")?.press).toEqual({ kind: "minimise", tabId: "t1" });
+    expect(byId(model, "files")?.press).toEqual({ kind: "close", tabIds: ["f1"] });
+  });
+
+  it("offers Minimise to card on the Browser and Terminal buttons' menus and no other", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [
+          { id: "b1", surface: "browser" },
+          { id: "t1", surface: "terminal" },
+          { id: "f1", surface: "files" },
+        ],
+        shownTabIds: ["b1", "t1", "f1"],
+        layout: {
+          columns: [
+            {
+              share: 1,
+              tiles: [
+                { tabId: "b1", share: 1 / 3 },
+                { tabId: "t1", share: 1 / 3 },
+                { tabId: "f1", share: 1 / 3 },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const labels = (id: string) => byId(model, id)?.menu.map((item) => item.label);
+    expect(labels("browser")).toContain("Minimise to card");
+    expect(labels("terminal")).toContain("Minimise to card");
+    expect(labels("files")).not.toContain("Minimise to card");
+    expect(labels("terminal")?.at(-1)).toBe("Close Terminal");
+  });
+
+  it("reads a minimised tool as open and not pressed, and a press restores it", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [
+          { id: "t1", surface: "terminal" },
+          { id: "f1", surface: "files" },
+        ],
+        shownTabIds: ["f1"],
+        minimised: ["t1"],
+      }),
+    );
+    expect(byId(model, "terminal")).toMatchObject({
+      pressed: false,
+      open: true,
+      minimised: true,
+      press: { kind: "restore", tabId: "t1" },
+    });
+    expect(byId(model, "files")).toMatchObject({ pressed: true });
+  });
+
+  it("restores a minimised tool even while the dock is closed", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [{ id: "t1", surface: "terminal" }],
+        minimised: ["t1"],
+        dockOpen: false,
+        dockPresentedOpen: false,
+      }),
+    );
+    expect(byId(model, "terminal")?.press).toEqual({ kind: "restore", tabId: "t1" });
+  });
+
+  it("restores a minimised Browser to the page it last showed", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [
+          { id: "b1", surface: "browser" },
+          { id: "b2", surface: "browser" },
+        ],
+        minimised: ["b1", "b2"],
+        lastBrowserTabId: "b2",
+      }),
+    );
+    expect(byId(model, "browser")?.press).toEqual({ kind: "restore", tabId: "b2" });
+  });
+
+  it("offers a minimised tool no placement in its menu, only a new page or shell and Close", () => {
+    const model = buildDockToolButtons(
+      input({
+        ...shelf,
+        tabs: [{ id: "t1", surface: "terminal" }],
+        minimised: ["t1"],
+        layout: { columns: [{ share: 1, tiles: [{ tabId: "f1", share: 1 }] }] },
+      }),
+    );
+    expect(byId(model, "terminal")?.menu.map((item) => item.label)).toEqual([
+      "New Terminal",
+      "Close Terminal",
+    ]);
+  });
+
+  it("never minimises in the one-tool drawer, where a press replaces the tool shown", () => {
+    const model = buildDockToolButtons(
+      input({
+        shelfDrawn: false,
+        narrow: true,
+        tabs: [
+          { id: "t1", surface: "terminal" },
+          { id: "f1", surface: "files" },
+        ],
+        shownTabIds: ["f1"],
+        minimised: [],
+      }),
+    );
+    expect(byId(model, "terminal")).toMatchObject({
+      open: true,
+      press: { kind: "select", tabId: "t1" },
+    });
+    expect(byId(model, "terminal")?.minimised).toBeUndefined();
+    const shown = buildDockToolButtons(
+      input({
+        shelfDrawn: false,
+        narrow: true,
+        tabs: [{ id: "t1", surface: "terminal" }],
+        shownTabIds: ["t1"],
+      }),
+    );
+    expect(byId(shown, "terminal")?.press).toEqual({ kind: "close", tabIds: ["t1"] });
+  });
+
+  it("closes a pressed Browser or Terminal where the thread has no shelf", () => {
+    const model = buildDockToolButtons(
+      input({ tabs: [{ id: "b1", surface: "browser" }], shownTabIds: ["b1"] }),
+    );
+    expect(byId(model, "browser")?.press).toEqual({ kind: "close", tabIds: ["b1"] });
+  });
+});
