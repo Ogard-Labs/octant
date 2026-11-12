@@ -2686,6 +2686,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     />
                   ) : null}
                 </OctantDialogPresence>
+              </>
+            ),
+            // How the turn runs sits at the row's trailing edge, beside send:
+            // the model's name, the approval control, then the context ring.
+            approval: (
+              <>
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}
@@ -2703,10 +2709,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 />
               </>
             ),
-            // Two groups: what the person adds and may do sits left, how the
-            // turn runs sits right beside send. The model used to hug the attach
-            // button, so it jumped sides between a new task and the thread it
-            // became.
             trailing: (
               <>
                 <ComposerModelPicker

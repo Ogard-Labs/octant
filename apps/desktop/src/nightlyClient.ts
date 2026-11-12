@@ -54,6 +54,8 @@ import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
+import { writeDiagnostic } from "./diagnosticLog";
+import { showNoticeWithoutBlocking, showStartupFailureAndQuit } from "./startupFailureElectron";
 import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 import {
   createNightlyDataControl,
@@ -367,10 +369,10 @@ export async function runNightlyClient(
     updates?.dispose();
     void (async () => {
       const result = await closeClientResources();
+      // Logged, not shown: a box here would hold the quit until dismissed.
       if (result.kind !== "closed")
-        dialog.showErrorBox(
-          identity.productName,
-          "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
+        writeDiagnostic(
+          `${identity.productName}: Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.`,
         );
       acceptedQuit = true;
       relaunch.quitAccepted();
@@ -389,14 +391,17 @@ export async function runNightlyClient(
     if (!recovery.recovering() && !updating) app.quit();
   });
   let bounds = { x: 100, y: 100, width: 1200, height: 800 };
+  let reconnectExhausted = false;
   const createRecovery = () =>
     createNightlyClientRecovery({
       exhausted: () => {
-        dialog.showErrorBox(
-          identity.productName,
-          "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
-        );
-        app.quit();
+        const message =
+          "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.";
+        // Once exhausted, a Dock click must not start a reconnect beside the
+        // failure window.
+        reconnectExhausted = true;
+        writeDiagnostic(`${identity.productName}: ${message}`);
+        void showStartupFailureAndQuit({ title: identity.productName, message });
       },
       open: (signal, onLeaseLost) =>
         openNightlyClientWindow({
@@ -591,11 +596,16 @@ export async function runNightlyClient(
           updating = false;
         }
       }
-      dialog.showErrorBox(identity.productName, message);
+      showNoticeWithoutBlocking(
+        [...windows.values()].find((candidate) => !candidate.isDestroyed()),
+        identity.productName,
+        message,
+      );
     },
   });
   app.on("activate", () => {
-    if (quitRequested || updating || opening || windows.size !== 0 || recovery.recovering()) return;
+    if (quitRequested || reconnectExhausted || updating || opening) return;
+    if (windows.size !== 0 || recovery.recovering()) return;
     opening = true;
     void reopenClient().finally(() => {
       opening = false;

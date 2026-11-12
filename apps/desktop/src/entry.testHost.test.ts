@@ -17,8 +17,8 @@ vi.mock("electron", () => ({
     exit: vi.fn(),
     quit: vi.fn(),
   },
-  dialog: { showErrorBox: fixture.error },
 }));
+vi.mock("./startupFailureElectron", () => ({ showStartupFailureAndQuit: fixture.error }));
 vi.mock("node:fs", async (original) => ({
   ...(await original<typeof import("node:fs")>()),
   mkdirSync: vi.fn(),
@@ -56,8 +56,10 @@ it("starts Nightly's own host for test data without asking Octant for status or 
   // point is which path Nightly took and what it told the person.
   await vi.waitFor(() =>
     expect(fixture.error).toHaveBeenCalledWith(
-      "Octant Nightly",
-      "Octant Nightly could not start the host for its test data.",
+      expect.objectContaining({
+        title: "Octant Nightly",
+        message: "Octant Nightly could not start the host for its test data.",
+      }),
     ),
   );
   expect(fixture.status).not.toHaveBeenCalled();

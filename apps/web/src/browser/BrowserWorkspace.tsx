@@ -2,7 +2,8 @@ import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
 import type { BrowserAgentAvailability } from "@octant/contracts";
-import { BrowserAgentStatus } from "./BrowserAgentStatus";
+import { agentAvailabilityNote } from "./BrowserAgentStatus";
+import { useElementWidth } from "./useElementWidth";
 import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
 import {
   BrowserAutomationClientFailure,
@@ -24,7 +25,10 @@ import type {
   BrowserViewportPoint,
 } from "@octant/contracts/browser-automation";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
-import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import {
+  decodeBrowserProfileChoice,
+  type BrowserProfileChoice,
+} from "@octant/contracts/project-browser";
 import {
   ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
@@ -40,11 +44,14 @@ import {
   Camera,
   Globe2,
   ExternalLink,
+  Ellipsis,
   Eye,
   Hand,
+  KeyRound,
   Laptop,
   LoaderCircle,
   LockKeyhole,
+  LogOut,
   PanelRight,
   PenLine,
   RotateCw,
@@ -54,7 +61,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton, octantButtonClassName } from "../ui/base/OctantButton";
+import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -73,8 +81,20 @@ import {
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
-import { BrowserProfileControl } from "./BrowserProfileControl";
-import { BrowserExtensionsButton } from "./BrowserExtensionsButton";
+import { BrowserProfileControl, browserProfileMenuItems } from "./BrowserProfileControl";
+import {
+  BrowserExtensionsButton,
+  extensionMenuItems,
+  openBrowserExtension,
+  useBrowserExtensions,
+} from "./BrowserExtensionsButton";
+import {
+  BROWSER_BUTTON_WIDTH,
+  BROWSER_COUNTED_BUTTON_WIDTH,
+  foldedTrailing,
+  type BrowserToolbarTrailing,
+  type BrowserToolbarTrailingItem,
+} from "./browserToolbarFold";
 import {
   profileChoiceOf,
   readRememberedProfileChoice,
@@ -183,7 +203,19 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // or unmounting moves it on, so a still that arrives late is not opened over a
   // page the person has already left.
   const markupRequest = useRef(0);
-  const drawButton = useRef<HTMLButtonElement>(null);
+  const chrome = useRef<HTMLElement>(null);
+  const moreAnchor = useRef<HTMLSpanElement>(null);
+  // The more menu's trigger button, found when focus returns to it.
+  const moreTrigger = useMemo(
+    () => ({
+      get current(): HTMLElement | null {
+        return moreAnchor.current?.querySelector("button") ?? null;
+      },
+    }),
+    [],
+  );
+  const [credentialRequest, setCredentialRequest] = useState(0);
+  const [signOutRequest, setSignOutRequest] = useState(0);
   const focusDrawButton = useRef(false);
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
@@ -352,7 +384,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   useEffect(() => {
     if (markupPicture !== undefined || !focusDrawButton.current) return;
     focusDrawButton.current = false;
-    drawButton.current?.focus();
+    moreTrigger.current?.focus();
   }, [markupPicture]);
   const feedbackSelectionUnavailable =
     markupPicture !== undefined
@@ -1137,6 +1169,296 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       feedback.pending.length > 0);
   const feedbackNotice = feedbackPointing.message ?? feedback.message;
 
+  const agentDriving = nativeState?.control === "agent";
+  const agentNote = agentAvailabilityNote(agentAvailability);
+  const idleNote = !activeContext
+    ? undefined
+    : snapshot?.waitingForPerson === undefined
+      ? `${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
+      : "Person hold";
+  // A status icon after the address says who may use the page, who holds it and
+  // for how long; the words are its name and tooltip, not a row of text. At
+  // rest (no page, nothing loading, the agent not blocked) it is not drawn, and
+  // the availability sentence is part of the profile icon's tooltip instead.
+  const statusText = [
+    agentDriving ? undefined : agentNote.message,
+    [controlLabel, idleNote].filter((part) => part !== undefined).join(" · "),
+  ]
+    .filter((part) => part !== undefined)
+    .join(" ");
+  // While a remote owner controls the page, handing it back is refused until
+  // local input or this action reclaims it, so Reclaim locally is the action the
+  // person needs; Hand back moves into the more menu.
+  const ownerHolds =
+    activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
+  const holdAction = ownerHolds
+    ? ({
+        hold: "reclaim",
+        label: "Reclaim locally",
+        title: "Stop remote owner control and keep the page held locally",
+      } as const)
+    : activeContext && personHasPage && props.client.handBack !== undefined
+      ? ({
+          hold: "hand-back",
+          label: "Hand back",
+          title: "You have the page. Hand it back to let the agent use it again.",
+        } as const)
+      : activeContext &&
+          snapshot?.waitingForPerson === undefined &&
+          props.client.takeOver !== undefined
+        ? ({
+            hold: "take-over",
+            label: "Take over",
+            title: "Hold the agent's Browser calls while you use the page",
+          } as const)
+        : undefined;
+  const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
+    hold === "hand-back" ? (
+      <Undo2 aria-hidden="true" size={16} />
+    ) : hold === "reclaim" ? (
+      <Laptop aria-hidden="true" size={16} />
+    ) : (
+      <Hand aria-hidden="true" size={16} />
+    );
+  const showStatus =
+    activeContext || nativeState?.loading === true || agentNote.omission !== undefined;
+  const storedProfile = storedProfileOf(snapshot?.context?.policy.profile);
+  const extensions = useBrowserExtensions({
+    client: props.client,
+    profile: nativeContext && activeContext ? storedProfile : undefined,
+    refreshKey: snapshot?.context === undefined ? undefined : String(snapshot.context.contextId),
+  });
+  const chromeWidth = useElementWidth(chrome);
+  // One predicate for the more menu's Login permission item and the control that
+  // answers it: only a live native page in a Work or Code thread has a review to
+  // open, so a headless or remote client is never offered an action that cannot run.
+  const credentialContext =
+    nativeContext &&
+    activeContext &&
+    props.client.manageCredentialUse !== undefined &&
+    snapshot?.context !== undefined &&
+    (snapshot.context.authority.mode === "work" || snapshot.context.authority.mode === "code")
+      ? {
+          contextId: snapshot.context.contextId,
+          threadId: snapshot.context.threadId,
+          mode: snapshot.context.authority.mode,
+        }
+      : undefined;
+  const baseMoreItems: ReadonlyArray<OctantMenuItem> = [
+    ...(ownerHolds && personHasPage && props.client.handBack !== undefined
+      ? [{ icon: holdIcon("hand-back"), label: "Hand back", value: "hand-back" }]
+      : []),
+    ...(activeContext && props.client.takeCapture !== undefined
+      ? [
+          {
+            disabled: capturing,
+            icon: <Camera aria-hidden="true" size={16} />,
+            label: "Screenshot",
+            value: "screenshot",
+          },
+        ]
+      : []),
+    ...(activeContext &&
+    props.canDrawOnPage === true &&
+    props.tab.threadId !== undefined &&
+    props.client.takeCapture !== undefined &&
+    props.client.readCapture !== undefined
+      ? [
+          {
+            description: feedbackPointing.pointing
+              ? "Finish or cancel pointing at an element before drawing on the page"
+              : markupPicture !== undefined
+                ? "A drawing is already open"
+                : "Keeps a screenshot with this thread",
+            disabled: capturing || markupPicture !== undefined || feedbackPointing.pointing,
+            icon: <PenLine aria-hidden="true" size={16} />,
+            label: "Draw on page",
+            value: "draw",
+          },
+        ]
+      : []),
+    ...(activeContext && props.hostBridge?.openBrowserExternal !== undefined
+      ? [
+          {
+            icon: <ExternalLink aria-hidden="true" size={16} />,
+            label: "Open in default browser",
+            value: "external",
+          },
+        ]
+      : []),
+    ...(credentialContext !== undefined
+      ? [
+          {
+            icon: <KeyRound aria-hidden="true" size={16} />,
+            label: "Login permission",
+            value: "credential",
+          },
+        ]
+      : []),
+    ...(agentNote.omission !== undefined &&
+    agentNote.remedy !== undefined &&
+    props.onAgentBrowserRecovery !== undefined
+      ? [
+          {
+            description: agentNote.message,
+            icon: <Globe2 aria-hidden="true" size={16} />,
+            label: agentNote.remedy,
+            value: "recover",
+          },
+        ]
+      : []),
+    ...(props.onDockResearch === undefined || props.tab.threadId === undefined
+      ? []
+      : [
+          {
+            icon: <PanelRight aria-hidden="true" size={16} />,
+            label: "Dock in the focus zone",
+            value: "dock",
+          },
+        ]),
+    ...(activeContext
+      ? [
+          {
+            icon: <X aria-hidden="true" size={16} />,
+            label: "Stop this Browser session",
+            value: "stop",
+          },
+        ]
+      : []),
+  ];
+  // Trailing icons that do not fit move into the More menu, from the left of
+  // the list; the profile is last and stays.
+  const trailing: ReadonlyArray<BrowserToolbarTrailingItem> = [
+    ...(showStatus ? [{ id: "status" as const, width: BROWSER_BUTTON_WIDTH }] : []),
+    ...(holdAction === undefined ? [] : [{ id: "hold" as const, width: BROWSER_BUTTON_WIDTH }]),
+    ...(extensions.length > 0 && storedProfile !== undefined
+      ? [
+          {
+            id: "extensions" as const,
+            width: agentDriving ? BROWSER_COUNTED_BUTTON_WIDTH : BROWSER_BUTTON_WIDTH,
+          },
+        ]
+      : []),
+    { id: "profile" as const, width: BROWSER_BUTTON_WIDTH },
+  ];
+  const folded = foldedTrailing({
+    rowWidth: chromeWidth,
+    visible: trailing,
+    moreHasItems: baseMoreItems.length > 0,
+  });
+  const showsTrailing = (id: BrowserToolbarTrailing) =>
+    trailing.some((item) => item.id === id) && !folded.has(id);
+  const shownProfile = taskProfileApplies
+    ? (taskProfile?.profile ?? "private")
+    : activeContext
+      ? profileChoiceOf(storedProfile)
+      : profileChoice;
+  // The standalone profile button and the folded profile items share this: no
+  // choice or sign-out while a page starts, the task's default is read or a
+  // selection is in flight.
+  const profileDisabled =
+    starting ||
+    selectingTaskProfile ||
+    (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready");
+  const profileInputs = {
+    profile: shownProfile,
+    accounts,
+    projectProfileAvailable: true,
+    signedInPagesAvailable: nativeSupported,
+  };
+  const canSignOut =
+    !taskProfileApplies && props.client.manageProfiles !== undefined && shownProfile !== "private";
+  const moreItems: ReadonlyArray<OctantMenuItem> = [
+    ...(folded.has("status")
+      ? [
+          {
+            ...(agentDriving ? {} : { description: agentNote.message }),
+            disabled: true,
+            icon: <Eye aria-hidden="true" size={16} />,
+            label: [controlLabel, idleNote].filter((part) => part !== undefined).join(" · "),
+            value: "status",
+          },
+        ]
+      : []),
+    ...(holdAction !== undefined && folded.has("hold")
+      ? [{ icon: holdIcon(holdAction.hold), label: holdAction.label, value: holdAction.hold }]
+      : []),
+    ...(folded.has("extensions") ? extensionMenuItems(extensions) : []),
+    ...(folded.has("profile")
+      ? [
+          ...browserProfileMenuItems(profileInputs).map((item) => ({
+            ...item,
+            disabled: item.disabled === true || profileDisabled,
+            label: `Profile: ${item.label}${item.value === shownProfile ? " (current)" : ""}`,
+            value: `profile:${item.value}`,
+          })),
+          ...(canSignOut
+            ? [
+                {
+                  disabled: profileDisabled,
+                  icon: <LogOut aria-hidden="true" size={16} />,
+                  label: "Sign out of this profile…",
+                  value: "profile-sign-out",
+                },
+              ]
+            : []),
+        ]
+      : []),
+    ...baseMoreItems,
+  ];
+  function runMoreItem(value: string): void {
+    if (value.startsWith("popup:") || value.startsWith("options:")) {
+      openBrowserExtension({
+        value,
+        profile: storedProfile,
+        hostBridge: props.hostBridge,
+        anchor: moreAnchor.current,
+      });
+      return;
+    }
+    if (value.startsWith("profile:")) {
+      if (profileDisabled) return;
+      void chooseProfile(decodeBrowserProfileChoice(value.slice("profile:".length)));
+      return;
+    }
+    switch (value) {
+      case "profile-sign-out":
+        if (profileDisabled) return;
+        setSignOutRequest((count) => count + 1);
+        return;
+      case "take-over":
+      case "hand-back":
+      case "reclaim":
+        void holdPage(value === "hand-back" ? "hand-back" : "take-over");
+        return;
+      case "screenshot":
+        void takeScreenshot();
+        return;
+      case "draw":
+        void startMarkup();
+        return;
+      case "external": {
+        const target = validTargetUrl(committedAddress ?? url);
+        if (target !== undefined) void props.hostBridge?.openBrowserExternal?.(target);
+        return;
+      }
+      case "credential":
+        setCredentialRequest((count) => count + 1);
+        return;
+      case "recover":
+        if (agentNote.omission !== undefined) props.onAgentBrowserRecovery?.(agentNote.omission);
+        return;
+      case "dock":
+        if (props.tab.threadId !== undefined) {
+          props.onDockResearch?.({ threadId: String(props.tab.threadId), mode: props.tab.mode });
+        }
+        return;
+      case "stop":
+        void stop(false);
+        return;
+    }
+  }
+
   return (
     <section
       aria-label="Browser automation"
@@ -1159,111 +1481,62 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       </OctantDialogPresence>
       <header
         className="browser-workspace__chrome"
+        ref={chrome}
         {...(activeContext ? { "data-page": "open" } : {})}
       >
-        <div className="browser-workspace__nav">
-          <div className="browser-workspace__history" aria-label="Browser history controls">
-            <OctantButton
-              aria-label="Back"
-              className="browser-workspace__history-button"
-              disabled={!nativeContext || !nativeState?.canGoBack}
-              onClick={() => nativeCommand("back")}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <ArrowLeft aria-hidden="true" size={14} />
-            </OctantButton>
-            <OctantButton
-              aria-label="Forward"
-              className="browser-workspace__history-button"
-              disabled={!nativeContext || !nativeState?.canGoForward}
-              onClick={() => nativeCommand("forward")}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <ArrowRight aria-hidden="true" size={14} />
-            </OctantButton>
-            <OctantButton
-              aria-label={nativeState?.loading ? "Stop loading" : "Reload"}
-              className="browser-workspace__history-button"
-              disabled={!activeContext}
-              onClick={() => {
-                if (nativeContext) {
-                  nativeCommand(nativeState?.loading ? "stop" : "reload");
-                } else if (!nativeState?.loading) {
-                  // Reload must use the committed page, not an unsubmitted omnibox draft.
-                  const target = committedAddress ?? validTargetUrl(url);
-                  if (target !== undefined) {
-                    void act("navigate", { target });
-                  }
-                }
-              }}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              {nativeState?.loading ? (
-                <X aria-hidden="true" size={14} />
-              ) : (
-                <RotateCw aria-hidden="true" size={14} />
-              )}
-            </OctantButton>
-          </div>
-          <BrowserProfileControl
-            accounts={accounts}
-            disabled={
-              starting ||
-              selectingTaskProfile ||
-              (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
-            }
-            {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
-            onChange={(choice) => void chooseProfile(choice)}
-            profile={
-              taskProfileApplies
-                ? (taskProfile?.profile ?? "private")
-                : activeContext
-                  ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
-                  : profileChoice
-            }
-            projectProfileAvailable
-            signedInPagesAvailable={nativeSupported}
-            {...(taskProfileApplies || props.client.manageProfiles === undefined
-              ? {}
-              : { onSignOut: () => signOutOfProfile() })}
-          />
-          {nativeContext &&
-          activeContext &&
-          snapshot?.context !== undefined &&
-          (snapshot.context.authority.mode === "work" ||
-            snapshot.context.authority.mode === "code") ? (
-            <BrowserCredentialBindingControl
-              key={String(snapshot.context.contextId)}
-              client={props.client}
-              context={{
-                contextId: snapshot.context.contextId,
-                threadId: snapshot.context.threadId,
-                mode: snapshot.context.authority.mode,
-              }}
-              profile={snapshot.context.policy.profile ?? { kind: "private" }}
-              held={snapshot.waitingForPerson !== undefined}
-            />
-          ) : null}
-          {nativeContext && activeContext ? (
-            <BrowserExtensionsButton
-              agentDriving={nativeState?.control === "agent"}
-              client={props.client}
-              hostBridge={props.hostBridge}
-              profile={storedProfileOf(snapshot?.context?.policy.profile)}
-              refreshKey={
-                snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
+        <OctantIconButton
+          disabled={!nativeContext || !nativeState?.canGoBack}
+          label="Back"
+          onClick={() => nativeCommand("back")}
+          type="button"
+        >
+          <ArrowLeft aria-hidden="true" size={16} />
+        </OctantIconButton>
+        <OctantIconButton
+          disabled={!nativeContext || !nativeState?.canGoForward}
+          label="Forward"
+          onClick={() => nativeCommand("forward")}
+          type="button"
+        >
+          <ArrowRight aria-hidden="true" size={16} />
+        </OctantIconButton>
+        <OctantIconButton
+          disabled={!activeContext}
+          label={nativeState?.loading ? "Stop loading" : "Reload"}
+          onClick={() => {
+            if (nativeContext) {
+              nativeCommand(nativeState?.loading ? "stop" : "reload");
+            } else if (!nativeState?.loading) {
+              // Reload must use the committed page, not an unsubmitted omnibox draft.
+              const target = committedAddress ?? validTargetUrl(url);
+              if (target !== undefined) {
+                void act("navigate", { target });
               }
-              {...(props.onManageExtensions === undefined
-                ? {}
-                : { onManage: props.onManageExtensions })}
-            />
-          ) : null}
+            }
+          }}
+          type="button"
+        >
+          {nativeState?.loading ? (
+            <X aria-hidden="true" size={16} />
+          ) : (
+            <RotateCw aria-hidden="true" size={16} />
+          )}
+        </OctantIconButton>
+        <div className="browser-workspace__field">
+          {committedAddress === undefined ? null : (
+            <span
+              aria-label={addressSecurityLabel}
+              className="browser-workspace__mark"
+              role="img"
+              title={secureAddress ? "Secure HTTPS connection" : "HTTP connection is not secure"}
+            >
+              {secureAddress ? (
+                <LockKeyhole aria-hidden="true" size={14} />
+              ) : (
+                <Globe2 aria-hidden="true" size={14} />
+              )}
+            </span>
+          )}
           <form
             className="browser-workspace__omnibox"
             noValidate
@@ -1272,23 +1545,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               void navigate();
             }}
           >
-            <span
-              aria-label={addressSecurityLabel}
-              className="browser-workspace__security"
-              title={
-                committedAddress === undefined
-                  ? "Enter an HTTP or HTTPS address"
-                  : secureAddress
-                    ? "Secure HTTPS connection"
-                    : "HTTP connection is not secure"
-              }
-            >
-              {secureAddress ? (
-                <LockKeyhole aria-hidden="true" size={12} />
-              ) : (
-                <Globe2 aria-hidden="true" size={12} />
-              )}
-            </span>
             <span className="browser-workspace__address">
               <OctantInput
                 aria-label="Browser URL"
@@ -1299,6 +1555,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 placeholder="Enter an address"
                 spellCheck={false}
                 type="text"
+                unstyled
                 value={url}
               />
               <MiddleTruncatedText
@@ -1309,186 +1566,99 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </span>
           </form>
         </div>
-        <div className="browser-workspace__tools">
-          <BrowserAgentStatus
-            agentDriving={nativeState?.control === "agent"}
-            availability={agentAvailability}
-            {...(props.onAgentBrowserRecovery === undefined
-              ? {}
-              : { onRecover: props.onAgentBrowserRecovery })}
-          />
+        {!showsTrailing("status") ? null : (
           <span
-            className="browser-workspace__control-state"
-            title={
-              nativeContext
-                ? "You and the agent share this live Chromium page."
-                : "Click, type, and scroll this headless page through the shared Browser context."
-            }
+            aria-label={statusText}
+            className="browser-workspace__status"
+            role="img"
+            title={statusText}
           >
-            {nativeState?.loading || nativeState?.control === "agent" ? (
+            {nativeState?.loading || agentDriving ? (
               <LoaderCircle
                 aria-hidden="true"
                 className="browser-workspace__control-spinner"
-                size={12}
+                size={16}
               />
-            ) : null}
-            {/* Shown only when a narrow tile leaves no room for the words. */}
-            <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
-            <span>{controlLabel}</span>
-            {activeContext ? (
-              <span
-                title={
-                  snapshot?.waitingForPerson === undefined
-                    ? "Authorized Browser work and person input renew this idle interval. Preview polling does not."
-                    : "The handoff has its own finite retention window; waiting agent calls do not keep it open."
-                }
-              >
-                {snapshot?.waitingForPerson === undefined
-                  ? `· ${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
-                  : "· Person hold"}
-              </span>
-            ) : null}
-          </span>
-          {activeContext && personHasPage && props.client.handBack !== undefined ? (
-            <OctantButton
-              aria-label="Hand back"
-              className="browser-workspace__take-over"
-              onClick={() => void holdPage("hand-back")}
-              size="xs"
-              title="You have the page. Hand it back to let the agent use it again."
-              type="button"
-              variant="secondary"
-            >
-              <Undo2 aria-hidden="true" />
-              <span className="browser-workspace__take-over-label">Hand back</span>
-            </OctantButton>
-          ) : null}
-          {activeContext &&
-          snapshot?.ownerController !== undefined &&
-          props.client.takeOver !== undefined ? (
-            <OctantButton
-              aria-label="Reclaim locally"
-              className="browser-workspace__take-over"
-              onClick={() => void holdPage("take-over")}
-              size="xs"
-              title="Stop remote owner control and keep the page held locally"
-              type="button"
-              variant="secondary"
-            >
-              <Laptop aria-hidden="true" />
-              <span className="browser-workspace__reclaim-label">Reclaim locally</span>
-            </OctantButton>
-          ) : null}
-          {activeContext &&
-          snapshot?.waitingForPerson === undefined &&
-          props.client.takeOver !== undefined ? (
-            <OctantButton
-              aria-label="Take over"
-              className="browser-workspace__take-over"
-              onClick={() => void holdPage("take-over")}
-              size="xs"
-              title="Hold the agent's Browser calls while you use the page"
-              type="button"
-              variant="ghost"
-            >
-              <Hand aria-hidden="true" />
-              <span className="browser-workspace__take-over-label">Take over</span>
-            </OctantButton>
-          ) : null}
-          {activeContext && props.client.takeCapture !== undefined ? (
-            <OctantButton
-              aria-label="Screenshot"
-              className="browser-workspace__close"
-              disabled={capturing}
-              onClick={() => void takeScreenshot()}
-              size="icon"
-              title="Screenshot (kept with this thread)"
-              type="button"
-              variant="ghost"
-            >
-              <Camera aria-hidden="true" size={14} />
-            </OctantButton>
-          ) : null}
-          {activeContext &&
-          props.canDrawOnPage === true &&
-          props.tab.threadId !== undefined &&
-          props.client.takeCapture !== undefined &&
-          props.client.readCapture !== undefined ? (
-            <OctantButton
-              ref={drawButton}
-              aria-label="Draw on page"
-              className="browser-workspace__close"
-              disabled={capturing || markupPicture !== undefined || feedbackPointing.pointing}
-              onClick={() => void startMarkup()}
-              size="icon"
-              title={
-                feedbackPointing.pointing
-                  ? "Finish or cancel pointing at an element before drawing on the page"
-                  : markupPicture !== undefined
-                    ? "A drawing is already open"
-                    : "Draw on page (keeps a screenshot with this thread)"
-              }
-              type="button"
-              variant="ghost"
-            >
-              <PenLine aria-hidden="true" size={14} />
-            </OctantButton>
-          ) : null}
-          {activeContext ? (
-            props.hostBridge?.openBrowserExternal === undefined ? null : (
-              <OctantButton
-                aria-label="Open in default browser"
-                className="browser-workspace__close"
-                onClick={() => {
-                  const target = validTargetUrl(committedAddress ?? url);
-                  if (target !== undefined) void props.hostBridge!.openBrowserExternal!(target);
-                }}
-                size="icon"
-                title="Open in default browser"
-                type="button"
-                variant="ghost"
-              >
-                <ExternalLink aria-hidden="true" size={14} />
-              </OctantButton>
-            )
-          ) : null}
-          {props.onDockResearch === undefined || props.tab.threadId === undefined ? null : (
-            <OctantButton
-              aria-label="Dock in the focus zone"
-              className="browser-workspace__close"
-              onClick={() =>
-                props.onDockResearch?.({
-                  threadId: String(props.tab.threadId),
-                  mode: props.tab.mode,
-                })
-              }
-              size="icon"
-              title="Dock in the focus zone"
-              type="button"
-              variant="ghost"
-            >
-              <PanelRight aria-hidden="true" size={14} />
-            </OctantButton>
-          )}
-          {activeContext ? (
-            <OctantButton
-              aria-label="Stop"
-              className="browser-workspace__close"
-              onClick={() => void stop(false)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X aria-hidden="true" size={14} />
-            </OctantButton>
-          ) : null}
-          <span aria-live="polite" className="sr-only">
-            <span>{statusLabel(status)}</span>
-            {snapshot?.observation?.title === undefined ? null : (
-              <span>{snapshot.observation.title}</span>
+            ) : (
+              <Eye aria-hidden="true" size={16} />
             )}
           </span>
-        </div>
+        )}
+        {holdAction === undefined || !showsTrailing("hold") ? null : (
+          <OctantIconButton
+            label={holdAction.label}
+            onClick={() =>
+              void holdPage(holdAction.hold === "hand-back" ? "hand-back" : "take-over")
+            }
+            title={holdAction.title}
+            type="button"
+          >
+            {holdIcon(holdAction.hold)}
+          </OctantIconButton>
+        )}
+        {!showsTrailing("extensions") ? null : (
+          <BrowserExtensionsButton
+            agentDriving={agentDriving}
+            client={props.client}
+            extensions={extensions}
+            hostBridge={props.hostBridge}
+            profile={storedProfile}
+            refreshKey={
+              snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
+            }
+            {...(props.onManageExtensions === undefined
+              ? {}
+              : { onManage: props.onManageExtensions })}
+          />
+        )}
+        <BrowserProfileControl
+          accounts={accounts}
+          {...(showStatus ? {} : { description: agentNote.message })}
+          disabled={profileDisabled}
+          folded={folded.has("profile")}
+          iconOnly
+          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
+          onChange={(choice) => void chooseProfile(choice)}
+          profile={shownProfile}
+          projectProfileAvailable
+          signOutRequest={signOutRequest}
+          signedInPagesAvailable={nativeSupported}
+          {...(taskProfileApplies || props.client.manageProfiles === undefined
+            ? {}
+            : { onSignOut: () => signOutOfProfile() })}
+        />
+        {moreItems.length === 0 ? null : (
+          <span className="browser-workspace__more" ref={moreAnchor}>
+            <OctantMenu
+              items={moreItems}
+              onValueChange={(value) => runMoreItem(value)}
+              selectionMode="action"
+              trigger={<Ellipsis aria-hidden="true" size={16} />}
+              triggerClassName={`${octantButtonClassName({ variant: "ghost", size: "icon" })} shell-icon-button`}
+              triggerLabel="More Browser actions"
+              triggerTitle="More Browser actions"
+              value=""
+            />
+          </span>
+        )}
+        {credentialContext === undefined || snapshot?.context === undefined ? null : (
+          <BrowserCredentialBindingControl
+            key={String(snapshot.context.contextId)}
+            client={props.client}
+            context={credentialContext}
+            held={snapshot.waitingForPerson !== undefined}
+            openRequest={credentialRequest}
+            profile={snapshot.context.policy.profile ?? { kind: "private" }}
+            restoreFocus={moreTrigger}
+          />
+        )}
+        <span aria-live="polite" className="sr-only">
+          <span>{statusLabel(status)}</span>
+          {snapshot?.observation?.title === undefined ? null : (
+            <span>{snapshot.observation.title}</span>
+          )}
+          {showStatus ? <span>{statusText}</span> : null}
+        </span>
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
         <OctantAlert tone="warning">

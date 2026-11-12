@@ -6,7 +6,14 @@ import {
 import type { ProviderInstanceId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import {
+  ListChecks,
+  PencilLine,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestionMark,
+  type LucideIcon,
+} from "lucide-react";
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
@@ -78,6 +85,15 @@ export const PERMISSION_MODE_LABEL: Readonly<Record<PermissionMode, string>> = {
   "full-access": "Full access",
 };
 
+/** One icon per mode, so the row's icon-only control says the mode at a glance. */
+const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, LucideIcon>> = {
+  auto: ShieldCheck,
+  "ask-first": ShieldQuestionMark,
+  "accept-edits": PencilLine,
+  plan: ListChecks,
+  "full-access": ShieldAlert,
+};
+
 export interface PermissionModePickerProps {
   readonly value: PermissionMode;
   readonly onChange: (mode: PermissionMode) => void;
@@ -147,6 +163,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       ? SANDBOX_DETAIL
       : detailOf(props.value);
   const sandboxSupported = props.fullAccessSandboxSupported !== false;
+  const shownMode: PermissionMode = autoFallsBack ? "ask-first" : props.value;
+  const ModeIcon = PERMISSION_MODE_ICON[shownMode];
+  // Full access is the one mode that says its name beside the icon, in the
+  // warning ink (danger without the sandbox): it is the state a person must
+  // not misread as asking first.
+  const showsWord = shownMode === "full-access";
   const options =
     props.modes === undefined
       ? PERMISSION_MODE_OPTIONS
@@ -154,17 +176,30 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   return (
     <>
       <OctantMenuRoot>
+        {/* An icon per mode in the composer's row; its name and tooltip state the
+            mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger
-          aria-label="Mode"
+          aria-label={`Mode: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
+          data-mode={shownMode}
           disabled={props.disabled === true}
-          render={<OctantButton size="sm" variant="ghost" />}
-          title={triggerDetail}
+          render={<OctantButton size={showsWord ? "sm" : "icon"} variant="ghost" />}
+          title={
+            triggerDetail === undefined
+              ? `Mode: ${triggerLabel}`
+              : `Mode: ${triggerLabel}. ${triggerDetail}`
+          }
         >
-          <ShieldCheck aria-hidden="true" />
-          <span>{triggerLabel}</span>
-          <ChevronDown aria-hidden="true" />
+          <ModeIcon aria-hidden="true" size={16} />
+          {showsWord ? (
+            <span
+              className="code-composer-choice__word"
+              data-sandboxed={sandboxed ? "true" : undefined}
+            >
+              {triggerLabel}
+            </span>
+          ) : null}
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner side="top">

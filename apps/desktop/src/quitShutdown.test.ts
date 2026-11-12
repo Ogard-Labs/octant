@@ -4,6 +4,7 @@ import {
   QUIT_DEADLINE_MS,
   WINDOW_STATE_FLUSH_BOUND_MS,
   armQuitDeadline,
+  quitAfterStartupFailure,
   saveWindowStateWithoutBlocking,
   shutDownForQuit,
 } from "./quitShutdown";
@@ -134,5 +135,124 @@ describe("the quit deadline", () => {
     vi.advanceTimersByTime(5_000);
 
     expect(forceExit).not.toHaveBeenCalled();
+  });
+});
+
+describe("quitting after a start-up that cannot proceed", () => {
+  const startupFailure = (showFailure: () => Promise<void> = async () => undefined) => {
+    const order: string[] = [];
+    let requestQuit: (() => void) | undefined;
+    let release: () => void = () => undefined;
+    const pending = quitAfterStartupFailure({
+      message: "Octant storage did not become ready within 60000ms.",
+      log: (message) => void order.push(`log: ${message}`),
+      showFailure: async (_message, { quit }) => {
+        order.push("shown");
+        // What the window's Quit button and its close event are given.
+        requestQuit = quit;
+        await showFailure();
+      },
+      shutDown: () => {
+        order.push("releasing");
+        return new Promise<void>((resolve) => {
+          release = () => {
+            order.push("released");
+            resolve();
+          };
+        });
+      },
+      onQuitRequested: (quit) => {
+        requestQuit = quit;
+      },
+      armDeadline: () => void order.push("deadline"),
+      finish: () => void order.push("finished"),
+    });
+    return {
+      order,
+      pending,
+      requestQuit: () => requestQuit?.(),
+      release: () => release(),
+    };
+  };
+
+  it("logs the reason and releases the failed start before showing it, and keeps running while it is shown", async () => {
+    const run = startupFailure();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.order).toEqual([
+      "log: Octant could not start: Octant storage did not become ready within 60000ms.",
+      "releasing",
+    ]);
+
+    run.release();
+    await run.pending;
+
+    expect(run.order.slice(2)).toEqual(["released", "shown"]);
+  });
+
+  it("ends the app when the person chooses Quit in the failure window", async () => {
+    const run = startupFailure();
+    run.release();
+    await run.pending;
+
+    run.requestQuit();
+
+    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
+  });
+
+  it("quits without showing the failure when a signal arrives while it is being released", async () => {
+    const run = startupFailure();
+    run.requestQuit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.order).not.toContain("finished");
+
+    run.release();
+    await run.pending;
+
+    expect(run.order).not.toContain("shown");
+    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
+  });
+
+  it("ends the app once and arms the deadline once when quit is requested repeatedly while the failure is shown", async () => {
+    const run = startupFailure();
+    run.release();
+    await run.pending;
+
+    run.requestQuit();
+    run.requestQuit();
+    run.requestQuit();
+
+    expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
+    expect(run.order.filter((step) => step === "deadline")).toHaveLength(1);
+  });
+
+  it("tells the failure window whether a quit was already requested", async () => {
+    let control: { quit: () => void; quitRequested: () => boolean } | undefined;
+    let release: () => void = () => undefined;
+    const pending = quitAfterStartupFailure({
+      message: "reason",
+      log: () => undefined,
+      showFailure: async (_message, given) => {
+        control = given;
+      },
+      shutDown: () => new Promise<void>((resolve) => (release = resolve)),
+      onQuitRequested: () => undefined,
+      armDeadline: () => undefined,
+      finish: () => undefined,
+    });
+    release();
+    await pending;
+
+    expect(control?.quitRequested()).toBe(false);
+    control?.quit();
+    expect(control?.quitRequested()).toBe(true);
+  });
+
+  it("still ends the app when the failure cannot be shown", async () => {
+    const run = startupFailure(() => Promise.reject(new Error("no display")));
+    run.release();
+    await run.pending;
+
+    expect(run.order).toContain("log: Octant could not show why it did not start.");
+    expect(run.order.at(-1)).toBe("finished");
   });
 });

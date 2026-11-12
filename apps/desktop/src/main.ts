@@ -256,6 +256,7 @@ import {
   resolveStableHostAttachment,
   serverSpawnSpec,
   shutdownManagedServer,
+  DESKTOP_HOST_READY_TIMEOUT_MS,
   waitForStorageReady,
 } from "./serverProcess";
 import {
@@ -284,9 +285,17 @@ import {
   buildQuitConfirmation,
   evaluateQuitRequest,
 } from "./quitGuard";
+import { writeDiagnostic } from "./diagnosticLog";
+import {
+  destroyFailureWindows,
+  noticeWindowIsClosing,
+  showNoticeWithoutBlocking,
+  showStartupFailure,
+} from "./startupFailureElectron";
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
+  quitAfterStartupFailure,
   saveWindowStateWithoutBlocking,
   shutDownForQuit,
 } from "./quitShutdown";
@@ -1424,6 +1433,9 @@ let preparingQuit = false;
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
 // AppleScript "quit", logout) cannot answer a dialog and must still proceed.
 let quitCanPrompt = false;
+// Set once a start-up has failed: a signal quit then ends the app instead of
+// being swallowed while the failure is released and shown.
+let quitAfterFailedStartup: (() => void) | undefined;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -2075,6 +2087,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const attached = await waitForStorageReady({
       serverUrl,
       instanceId,
+      timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
       ...(server === undefined
         ? {}
         : {
@@ -2253,7 +2266,8 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
     return server;
   },
   reportFatal: (error) => {
-    dialog.showErrorBox(
+    showNoticeWithoutBlocking(
+      mainWindow,
       "Octant could not restart its local server",
       formatDesktopStartupFailure(error),
     );
@@ -2935,7 +2949,8 @@ function updateHostTray(): void {
         ...(item.toolTip === undefined ? {} : { toolTip: item.toolTip }),
         click: () => {
           void openMenuBarThread({ mode: thread.mode, threadId: thread.threadId }).catch(() => {
-            dialog.showErrorBox(
+            showNoticeWithoutBlocking(
+              mainWindow,
               "Octant could not open that thread",
               "Open Octant and choose the thread from the sidebar.",
             );
@@ -3132,11 +3147,16 @@ async function runMenuBarAction(
     } else if (action === "restart-host") {
       await restartHostFromMenu();
     } else if (action === "diagnostics") {
-      await dialog.showMessageBox({
-        type: "info",
+      // Attached to a window so it is a sheet: an alert with no parent blocks
+      // the main loop, and a quit requested meanwhile would wait for it.
+      await ensureMenuWindow();
+      const diagnosticsOptions = {
+        type: "info" as const,
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
-      });
+      };
+      if (mainWindow !== undefined && !mainWindow.isDestroyed())
+        await dialog.showMessageBox(mainWindow, diagnosticsOptions);
     } else if (action === "prepare-to-shut-down") {
       // Brings back a hidden dialog's running batch in its own window, or
       // opens a new one in the main window when no batch runs.
@@ -3154,7 +3174,8 @@ async function runMenuBarAction(
       requestInteractiveQuit();
     }
   } catch {
-    dialog.showErrorBox(
+    showNoticeWithoutBlocking(
+      mainWindow,
       "Octant host action unavailable",
       "The selected host action was not authorized or could not be completed.",
     );
@@ -4636,11 +4657,7 @@ function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
 }
 
 function logQuitProblem(message: string): void {
-  try {
-    process.stderr.write(`${message}\n`);
-  } catch {
-    // Nothing is left to report to when stderr is closed.
-  }
+  writeDiagnostic(message);
 }
 
 // Ends the app when graceful shutdown stalls. It first kills the processes the
@@ -4785,17 +4802,27 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   desktopQuitAccepted = true;
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
-  dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
-  armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit(),
-  });
-  await shutDownForQuit({
-    closeAdmission: closeBrowserAdmissionForQuit,
-    flushWindowState: async () => undefined,
-    stopHost: stopHostForQuit,
+  await quitAfterStartupFailure({
+    message: formatDesktopStartupFailure(error),
     log: logQuitProblem,
+    showFailure: (message, control) =>
+      showStartupFailure({ title: "Octant could not start", message, ...control }),
+    shutDown: () =>
+      shutDownForQuit({
+        closeAdmission: closeBrowserAdmissionForQuit,
+        flushWindowState: async () => undefined,
+        stopHost: stopHostForQuit,
+        log: logQuitProblem,
+      }),
+    onQuitRequested: (quit) => {
+      quitAfterFailedStartup = quit;
+    },
+    armDeadline: () => armQuitDeadline({ forceExit: forceExitAfterStalledQuit() }),
+    finish: () => {
+      destroyFailureWindows();
+      finishQuit();
+    },
   });
-  finishQuit();
 }
 
 const requestWindow = createSingleFlight(() => desktopClientLifetime.openLocalWindow(createWindow));
@@ -5043,6 +5070,7 @@ else {
 app.on("window-all-closed", () => {
   if (
     process.platform !== "darwin" &&
+    !noticeWindowIsClosing() &&
     pendingRendererRecoveries === 0 &&
     browserSurfaceHost?.persistentOwner?.retainsProcess() !== true
   ) {
@@ -5054,6 +5082,10 @@ app.on("activate", requestActiveWindow);
 app.on("before-quit", (event) => {
   if (quitPrepared) return;
   event.preventDefault();
+  if (quitAfterFailedStartup !== undefined) {
+    quitAfterFailedStartup();
+    return;
+  }
   if (preparingQuit) return;
   if (quitCanPrompt) {
     quitCanPrompt = false;
