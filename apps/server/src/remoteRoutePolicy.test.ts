@@ -975,6 +975,34 @@ describe("remote route policy", () => {
     });
   });
 
+  it("forwards a thread's network access rules and answers for the product dispatch to judge", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const path = "/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020";
+    const inspect = (method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("GET")).toMatchObject({ kind: "allow", surface: "authenticated-product" });
+    expect(inspect("POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 16 * 1_024,
+    });
+    // No catalogued action for either method: the product dispatch refuses
+    // every session but a device the host's own person paired.
+    for (const method of ["GET", "POST"]) {
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
+    }
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>

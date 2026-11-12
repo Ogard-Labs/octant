@@ -866,6 +866,19 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     maxResponseBytes: 512 * 1_024,
   },
   {
+    // A Code thread's network access: its rules, its Project's rules and its
+    // open proposals, and the person's answers to them. It has no catalogued
+    // action, so only a device the host's own person paired reaches it; the
+    // route names that device in every rule and change it records.
+    kind: "prefix" as const,
+    path: "/api/native-harness/egress/threads/",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
     kind: "exact" as const,
     path: "/api/github/authentication",
     methods: ["GET", "HEAD"] as const,
