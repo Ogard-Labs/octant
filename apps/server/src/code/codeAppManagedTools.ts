@@ -470,6 +470,12 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly projectAllowsComments?: () => boolean;
   /**
+   * Whether this thread has read outside content. A marked thread asks before
+   * each post below Full access whatever the Project chose. Absent reads as
+   * marked, so a host that cannot tell asks.
+   */
+  readonly threadReadOutsideContent?: () => boolean;
+  /**
    * This thread's watch on its own pull request. The host resolves which pull
    * request and checks the window; nobody is asked. Absent on a host that
    * cannot watch, where watch and unwatch are refused.
@@ -806,7 +812,8 @@ type PullRequestToolInput =
  * person in the thread and sends the host's one-use approval for exactly this
  * command; Full access runs it as the person's standing choice. A merge asks
  * at every level unless a stored choice allows it, and below Full access a
- * comment skips its ask only on the Project's stored choice. The operation
+ * comment skips its ask only on the Project's stored choice, and only on a
+ * thread that has read no outside content. The operation
  * service checks that authority again before `gh` runs and journals the
  * result on the thread.
  */
@@ -830,6 +837,7 @@ async function pullRequestTool(
       ? decidePullRequestComment({
           fullAccess: posture === "full-access",
           projectAllowsComments: options.projectAllowsComments?.() === true,
+          readOutsideContent: options.threadReadOutsideContent?.() !== false,
         })
       : undefined;
   const scope = {

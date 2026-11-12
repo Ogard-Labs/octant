@@ -1229,6 +1229,12 @@ export interface CodeOperationServiceOptions {
    * push to the default branch each need an approval for the act.
    */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
+  /**
+   * Whether the thread has read outside content, read at each post. A marked
+   * thread's comment below Full access needs an approval for the act whatever
+   * the Project chose. Absent reads as marked.
+   */
+  readonly threadReadOutsideContent?: (thread: CodeThread) => boolean;
   readonly reviewFindings: CodeOperationReviewFindingPort;
   readonly recordReviewContent?: (
     input: RecordExternalContentIngestionInput,
@@ -3337,9 +3343,11 @@ export class CodeOperationService {
         : "unauthorized";
     }
     // The same holds for a comment on the Project's choice: it stands in for
-    // the per-post prompt only while the stored choice still says so.
+    // the per-post prompt only while the stored choice still says so, and
+    // only on a thread that has read no outside content.
     if (command.kind === "comment-pull-request" && command.authorization.kind === "standing") {
-      return this.#options.projectForgeChoices?.(thread).comments === true
+      return this.#options.projectForgeChoices?.(thread).comments === true &&
+        this.#pullRequestCommentDecision(thread) !== "ask"
         ? "allow"
         : "unauthorized";
     }
@@ -3379,6 +3387,19 @@ export class CodeOperationService {
         return "unauthorized";
     }
     return "allow";
+  }
+
+  /**
+   * `thread` carries the posture its active turn runs at (see
+   * `authority.effectiveThread`), so a Full-access thread running an
+   * approval-gated turn is decided as approval-gated.
+   */
+  #pullRequestCommentDecision(thread: CodeThread) {
+    return decidePullRequestComment({
+      fullAccess: thread.executionPolicy === "full-access",
+      projectAllowsComments: this.#options.projectForgeChoices?.(thread).comments === true,
+      readOutsideContent: this.#options.threadReadOutsideContent?.(thread) !== false,
+    });
   }
 
   #standingMergeBacked(source: CodeMergeStandingSource, thread: CodeThread): boolean {
@@ -5298,14 +5319,12 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     // A comment posts under the person's name. It reaches GitHub on an
     // approval for this act, at Full access, or below Full access on the
-    // Project's stored choice, which the host reads here and not from the
-    // command. `#authorize` has already held a `full-access` claim to a
+    // Project's stored choice while the thread has read no outside content,
+    // both of which the host reads here and not from the command.
+    // `#authorize` has already held a `full-access` claim to a
     // thread that is at Full access; this states the rule where the post is
     // made, so no other caller of the gate can widen it.
-    const decision = decidePullRequestComment({
-      fullAccess: thread.executionPolicy === "full-access",
-      projectAllowsComments: this.#options.projectForgeChoices?.(thread).comments === true,
-    });
+    const decision = this.#pullRequestCommentDecision(thread);
     const allowed =
       command.authorization.kind === "approved" ||
       (command.authorization.kind === "full-access" && decision === "post") ||
@@ -5315,7 +5334,7 @@ export class CodeOperationService {
         command.operationId,
         "unauthorized",
         command.authorization.kind === "standing"
-          ? "This Project no longer lets agents comment without asking, so the comment needs the person's approval for this act."
+          ? "This Project's choice does not cover this comment (it is off, or the thread has read outside content), so the comment needs the person's approval for this act."
           : "A comment posts under the person's name and needs their approval for this act.",
       );
     }

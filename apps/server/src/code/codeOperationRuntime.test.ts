@@ -6077,6 +6077,8 @@ describe("CodeOperationRuntime", () => {
           readonly defaultBranchPush: boolean;
         };
         readonly nativeApproval?: boolean;
+        /** Whether the thread has read outside content; absent, the host cannot tell. */
+        readonly readOutsideContent?: boolean;
         readonly resolvePullRequestTarget?: Parameters<
           typeof createCodeOperationRuntime
         >[0]["resolvePullRequestTarget"];
@@ -6119,6 +6121,13 @@ describe("CodeOperationRuntime", () => {
         ...(overrides.projectForgeChoices === undefined
           ? {}
           : { projectForgeChoices: overrides.projectForgeChoices }),
+        ...(overrides.readOutsideContent === undefined
+          ? {}
+          : {
+              readThreadExternalContentTaint: () => ({
+                externalContentIngested: overrides.readOutsideContent === true,
+              }),
+            }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
           update: async () => ({ status: "none" }),
@@ -6286,6 +6295,7 @@ describe("CodeOperationRuntime", () => {
       const allowed = actionFixture({
         approved: false,
         projectForgeChoices: { comments: true, defaultBranchPush: false },
+        readOutsideContent: false,
       });
       allowed.fixture.setThread(gated);
       expect(
@@ -6296,11 +6306,12 @@ describe("CodeOperationRuntime", () => {
       // Switched off, or never stored: the command's word is not enough, and
       // a merge choice or a default-branch choice is not a comment choice.
       for (const off of [
-        actionFixture({ approved: false }),
+        actionFixture({ approved: false, readOutsideContent: false }),
         actionFixture({
           approved: false,
           standing: ["project"],
           projectForgeChoices: { comments: false, defaultBranchPush: true },
+          readOutsideContent: false,
         }),
       ]) {
         off.fixture.setThread(gated);
@@ -6324,6 +6335,75 @@ describe("CodeOperationRuntime", () => {
       expect(plan.actions.comment).not.toHaveBeenCalled();
       allowed.fixture.close();
       plan.fixture.close();
+    });
+
+    it("holds a comment on the Project's choice to a thread that has read no outside content, below Full access", async () => {
+      const standing = {
+        kind: "comment-pull-request" as const,
+        body: "Looks right.",
+        authorization: { kind: "standing", allowedBy: "project" } as const,
+      };
+      const choices = { comments: true, defaultBranchPush: false };
+      const gated = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+
+      // Marked, or a host that cannot tell: the stored choice does not stand
+      // in for the ask, so the command's word posts nothing.
+      for (const readOutsideContent of [true, undefined]) {
+        const marked = actionFixture({
+          approved: false,
+          projectForgeChoices: choices,
+          ...(readOutsideContent === undefined ? {} : { readOutsideContent }),
+        });
+        marked.fixture.setThread(gated);
+        expect(
+          await marked.fixture.runtime.execute(windowId, { ...standing, ...scope(146) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(marked.actions.comment).not.toHaveBeenCalled();
+        marked.fixture.close();
+      }
+
+      // The same marked thread posts with the person's approval for the act.
+      const asked = actionFixture({ projectForgeChoices: choices, readOutsideContent: true });
+      asked.fixture.setThread(gated);
+      expect(
+        await asked.fixture.runtime.execute(windowId, {
+          ...standing,
+          ...scope(147),
+          authorization: approved(148),
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(asked.actions.comment).toHaveBeenCalledTimes(1);
+      asked.fixture.close();
+
+      // Unmarked posts unasked on the choice.
+      const unmarked = actionFixture({
+        approved: false,
+        projectForgeChoices: choices,
+        readOutsideContent: false,
+      });
+      unmarked.fixture.setThread(gated);
+      expect(
+        await unmarked.fixture.runtime.execute(windowId, { ...standing, ...scope(149) }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(unmarked.actions.comment).toHaveBeenCalledTimes(1);
+      unmarked.fixture.close();
+
+      // Full access never asks, marked or not.
+      const full = actionFixture({
+        approved: false,
+        projectForgeChoices: choices,
+        readOutsideContent: true,
+      });
+      full.fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      expect(
+        await full.fixture.runtime.execute(windowId, {
+          ...standing,
+          ...scope(150),
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(full.actions.comment).toHaveBeenCalledTimes(1);
+      full.fixture.close();
     });
 
     it("posts a comment or a review reply below Full access with an approval for that act", async () => {
