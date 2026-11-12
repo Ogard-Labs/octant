@@ -6009,8 +6009,10 @@ describe("App", () => {
     await user.click(first);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     // The explicit gesture is opening a terminal from its button: pressing the
-    // restored one closes it, and pressing again opens a fresh one.
-    await user.click(bandTool("Terminal"));
+    // restored one minimises it, so it is closed from the button's menu, and
+    // pressing again opens a fresh one.
+    await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Close Terminal" }));
     await user.click(bandTool("Terminal"));
     await user.click(second);
     expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
