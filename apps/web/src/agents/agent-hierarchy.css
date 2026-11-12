@@ -420,18 +420,6 @@
   animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
 }
 
-/* A notice and failed child work both need attention; neither hides the other. */
-.composer:has(> .composer-subagents) > .workspace-cross-context-banner--inline {
-  position: relative;
-  z-index: auto;
-  bottom: auto;
-  left: auto;
-  width: auto;
-  margin-inline: var(--oct-space-3);
-  padding-bottom: var(--oct-space-2);
-  transform: none;
-}
-
 /* The last status the host reported, while it cannot be reached. The thread's
    connection notice says why; the tray only steps back. */
 .composer-subagents[data-stale="true"] {

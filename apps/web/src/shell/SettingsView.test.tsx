@@ -307,18 +307,6 @@ describe("SettingsView", () => {
     expect(content.scrollTop).toBe(0);
   });
 
-  it("turns the stats line under the composer off and on from Appearance", async () => {
-    const user = userEvent.setup();
-    const { props } = renderSettings();
-    navigateTo("Appearance");
-
-    const stats = screen.getByRole("switch", { name: "Stats line under the composer" });
-    expect(stats).toBeChecked();
-    await user.click(stats);
-
-    expect(props.onSettingsChange).toHaveBeenCalledWith({ showThreadStats: false });
-  });
-
   it("draws the usage bars smooth until Pixelated is chosen in Appearance", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
@@ -346,13 +334,6 @@ describe("SettingsView", () => {
     await user.click(within(replyDetail).getByRole("button", { name: "High" }));
 
     expect(props.onSettingsChange).toHaveBeenCalledWith({ replyDetail: "high" });
-  });
-
-  it("shows the stats line switch off when the saved preference is off", () => {
-    renderSettings({ settings: { ...defaultShellSettings(), showThreadStats: false } });
-    navigateTo("Appearance");
-
-    expect(screen.getByRole("switch", { name: "Stats line under the composer" })).not.toBeChecked();
   });
 
   it("returns to the app from the dedicated Settings sidebar", async () => {

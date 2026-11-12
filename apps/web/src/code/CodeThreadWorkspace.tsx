@@ -9,7 +9,7 @@ import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
-import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -1504,6 +1504,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
+  const sideChatNotice = sideChatDraftNotice({
+    count: props.controller.draftSideChatReturns?.length ?? 0,
+    invalid: props.controller.draftSideChatReturnsInvalid === true,
+    onClear: () => {
+      setDraft("");
+      props.controller.setPendingDraft?.("");
+    },
+  });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "code", threadId: String(props.threadId) }}>
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -2337,7 +2346,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
           turnActive={busy}
         />
-        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2479,7 +2487,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 }
               />
               <TrackerReferenceComposerHints draft={draft} />
-              {attachments.staged.length === 0 && attachments.message === undefined ? null : (
+              {attachments.staged.length === 0 ? null : (
                 <div className="code-thread-workspace__attachments" aria-label="Attached images">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
@@ -2506,55 +2514,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       </OctantButton>
                     </span>
                   ))}
-                  {attachments.message === undefined ? null : (
-                    <span className="code-thread-workspace__hint" role="status">
-                      {attachments.message}
-                    </span>
-                  )}
                 </div>
-              )}
-              {props.controller.draftReviewFindingReferencesInvalid ||
-              (props.controller.draftReviewFindingReferences?.length ?? 0) > 0 ? (
-                <OctantAlert
-                  tone={
-                    props.controller.draftReviewFindingReferencesInvalid ? "warning" : "neutral"
-                  }
-                >
-                  {props.controller.draftReviewFindingReferencesInvalid
-                    ? "A saved review reference is unavailable. Clear the draft and select the findings again in Review."
-                    : `This editable draft includes ${props.controller.draftReviewFindingReferences?.length ?? 0} local review finding references. Nothing is sent or approved until you send it.`}
-                  {props.controller.draftReviewFindingReferencesInvalid ? (
-                    <OctantButton
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setDraft("");
-                        props.controller.setPendingDraft?.("");
-                      }}
-                    >
-                      Clear draft
-                    </OctantButton>
-                  ) : null}
-                </OctantAlert>
-              ) : null}
-              <SideChatDraftNotice
-                count={props.controller.draftSideChatReturns?.length ?? 0}
-                invalid={props.controller.draftSideChatReturnsInvalid === true}
-                onClear={() => {
-                  setDraft("");
-                  props.controller.setPendingDraft?.("");
-                }}
-              />
-              {props.controller.draftStagedDropped === true ? (
-                <p className="code-thread-workspace__hint" role="status">
-                  {COMPOSER_STAGED_DROPPED_NOTE}
-                </p>
-              ) : null}
-              {props.controller.draftPersistError === undefined ? null : (
-                <p className="code-thread-workspace__hint" role="status">
-                  {props.controller.draftPersistError}
-                </p>
               )}
             </>
           }
@@ -2790,84 +2750,143 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               },
             },
           }}
-          footer={
-            <div aria-live="polite" className="composer-status">
-              {providerChanging ? (
-                <span className="composer-status__hint code-thread-workspace__hint">
-                  Checking the selected provider…
-                </span>
-              ) : null}
-              {pendingSwitchNotice === undefined || providerChanging ? null : (
-                <span
-                  className="composer-status__hint code-thread-workspace__hint code-thread-workspace__switch-notice"
-                  role="status"
-                >
-                  {pendingSwitchNotice}
-                </span>
-              )}
-              {props.controller.accessNotice === undefined ? null : (
-                <span
-                  className="code-thread-workspace__hint"
-                  role="status"
-                  title={props.controller.accessNotice}
-                >
-                  {props.controller.accessNotice}
-                </span>
-              )}
-              {/*
-              A restore point outlives the message that announced it, so the
-              offer stands on the undo point alone. Returning to the thread
-              after a tab switch finds the way back still here, described
-              plainly rather than as the sentence the last restore printed.
-            */}
-              {restoreMessage === undefined && restoreUndo === undefined ? null : (
-                <span className="code-thread-workspace__hint" role="status">
-                  {restoreMessage ?? "Files were restored to an earlier point."}
-                  {restoreUndo === undefined ? null : " "}
-                  {restoreUndo === undefined ? null : (
-                    <OctantButton
-                      disabled={restoring}
-                      onClick={() => {
-                        void undoRestore();
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Undo restore
-                    </OctantButton>
-                  )}
-                </span>
-              )}
-              {forkMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
-                  {forkMessage}
-                </span>
-              )}
-              {mergeMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="status" title={mergeMessage}>
-                  {mergeMessage}
-                </span>
-              )}
-              {imageSaveMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span
-                  className="code-thread-workspace__hint"
-                  role="status"
-                  title={imageSaveMessage}
-                >
-                  {imageSaveMessage}
-                </span>
-              )}
-              {sendNotice === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
-                  {sendNotice}
-                </span>
-              )}
-            </div>
+          progress={
+            // A provider check passes by itself, so it is the quiet line.
+            providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
+          notices={[
+            ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(attachments.message === undefined
+              ? []
+              : [{ key: "attachment", tone: "warning" as const, text: attachments.message }]),
+            ...(props.controller.draftReviewFindingReferencesInvalid ||
+            (props.controller.draftReviewFindingReferences?.length ?? 0) > 0
+              ? [
+                  {
+                    key: "review-findings",
+                    tone: props.controller.draftReviewFindingReferencesInvalid
+                      ? ("warning" as const)
+                      : ("neutral" as const),
+                    text: props.controller.draftReviewFindingReferencesInvalid
+                      ? "A saved review reference is unavailable. Clear the draft and select the findings again in Review."
+                      : `This editable draft includes ${props.controller.draftReviewFindingReferences?.length ?? 0} local review finding references. Nothing is sent or approved until you send it.`,
+                    ...(props.controller.draftReviewFindingReferencesInvalid
+                      ? {
+                          action: (
+                            <OctantButton
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setDraft("");
+                                props.controller.setPendingDraft?.("");
+                              }}
+                            >
+                              Clear draft
+                            </OctantButton>
+                          ),
+                        }
+                      : {}),
+                  },
+                ]
+              : []),
+            ...(sideChatNotice === undefined ? [] : [sideChatNotice]),
+            ...(props.controller.draftStagedDropped === true
+              ? [
+                  {
+                    key: "staged-dropped",
+                    tone: "neutral" as const,
+                    text: COMPOSER_STAGED_DROPPED_NOTE,
+                  },
+                ]
+              : []),
+            ...(props.controller.draftPersistError === undefined
+              ? []
+              : [
+                  {
+                    key: "persist-error",
+                    tone: "warning" as const,
+                    text: props.controller.draftPersistError,
+                  },
+                ]),
+            ...(props.controller.accessNotice === undefined
+              ? []
+              : [
+                  {
+                    key: "access",
+                    tone: "neutral" as const,
+                    text: props.controller.accessNotice,
+                  },
+                ]),
+            // What a picked provider will not carry over stays true until the
+            // next message starts the new session, so it is a card that wraps:
+            // as a one-line passing message it was cut in a narrow pane before
+            // the part about hidden reasoning.
+            ...(pendingSwitchNotice === undefined || providerChanging
+              ? []
+              : [
+                  {
+                    key: "pending-switch",
+                    tone: "neutral" as const,
+                    text: pendingSwitchNotice,
+                  },
+                ]),
+            // A restore point outlives the message that announced it, so the
+            // offer stands on the undo point alone. Returning to the thread
+            // after a tab switch finds the way back still here, described
+            // plainly rather than as the sentence the last restore printed.
+            ...(restoreMessage === undefined && restoreUndo === undefined
+              ? []
+              : [
+                  {
+                    key: "restore",
+                    tone: "neutral" as const,
+                    text: restoreMessage ?? "Files were restored to an earlier point.",
+                    ...(restoreUndo === undefined
+                      ? {}
+                      : {
+                          action: (
+                            <OctantButton
+                              disabled={restoring}
+                              onClick={() => {
+                                void undoRestore();
+                              }}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              Undo restore
+                            </OctantButton>
+                          ),
+                        }),
+                  },
+                ]),
+            ...(forkMessage === undefined
+              ? []
+              : [
+                  {
+                    key: "fork",
+                    tone: "warning" as const,
+                    role: "alert" as const,
+                    text: forkMessage,
+                  },
+                ]),
+            ...(mergeMessage === undefined
+              ? []
+              : [{ key: "merge", tone: "neutral" as const, text: mergeMessage }]),
+            ...(imageSaveMessage === undefined
+              ? []
+              : [{ key: "image-save", tone: "neutral" as const, text: imageSaveMessage }]),
+            ...(sendNotice === undefined
+              ? []
+              : [
+                  {
+                    key: "send",
+                    tone: "danger" as const,
+                    role: "alert" as const,
+                    text: sendNotice,
+                  },
+                ]),
+          ]}
         />
       </section>
     </ThreadReplyDetailScope>
