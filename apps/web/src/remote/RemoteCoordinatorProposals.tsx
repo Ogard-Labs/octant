@@ -2,6 +2,7 @@ import type { CodePlannerView, CodeThread } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { requestedWorkerOptions } from "../code/plannerProposalReview";
+import { OctantButton } from "../ui/base/OctantButton";
 
 /**
  * A coordinator's pending proposed workers on a paired browser, read-only
@@ -106,14 +107,16 @@ function ProposalIntent(props: { readonly intent: string }) {
         {props.intent}
       </p>
       {clamped || expanded ? (
-        <button
+        <OctantButton
           aria-expanded={expanded}
           className="remote-workspace__proposal-toggle"
           onClick={() => setExpanded((open) => !open)}
+          size="sm"
           type="button"
+          variant="link"
         >
           {expanded ? "Show less" : "Show the full request"}
-        </button>
+        </OctantButton>
       ) : null}
     </>
   );

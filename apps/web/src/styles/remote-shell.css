@@ -93,19 +93,6 @@
 
 .remote-workspace__proposal-toggle {
   justify-self: start;
-  padding: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
-  text-decoration: underline;
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-.remote-workspace__proposal-toggle:focus-visible {
-  outline: 2px solid var(--oct-focus-edge);
-  outline-offset: 2px;
-  border-radius: var(--oct-radius-sm);
 }
 
 .remote-shell__header {
