@@ -1588,6 +1588,25 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+          <SettingsSection title="Tool-call records">
+            <div className="setgroup">
+              <SettingRow
+                description="Chat and Work keep a bounded copy of what each tool call was given and what it returned, so you can open a tool row and see it. Kept on this computer outside the journal, with keys redacted, and removed when its thread is purged. Off keeps no new records; the ones already kept stay until their threads go."
+                focused={focusedSetting === settingId("tool-call-records")}
+                label="Keep tool inputs and outputs"
+                scope="host"
+                settingId="tool-call-records"
+              >
+                <OctantSwitch
+                  checked={props.settings.keepToolCallRecords}
+                  label="Keep tool inputs and outputs"
+                  onCheckedChange={(checked) =>
+                    props.onSettingsChange({ keepToolCallRecords: checked })
+                  }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">
