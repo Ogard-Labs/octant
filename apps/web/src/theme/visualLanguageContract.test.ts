@@ -250,7 +250,7 @@ describe("the public-block visual language", () => {
     // gap, the logical and inset forms, scroll offsets, sizes, and the
     // numeric forms of leading, columns and auto rows.
     const step =
-      /(?<![\w-])-?(?:[\w[\]()=:&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|start|end|inset|inset-x|inset-y|inset-s|inset-e|space-x|space-y|translate-x|translate-y|basis|indent|scroll-m|scroll-mx|scroll-my|scroll-mt|scroll-mb|scroll-ml|scroll-mr|scroll-p|scroll-px|scroll-py|scroll-pt|scroll-pb|scroll-pl|scroll-pr|leading|columns|auto-rows|auto-cols)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+      /(?<![\w-])-?(?:[\w[\]()=&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|start|end|inset|inset-x|inset-y|inset-s|inset-e|space-x|space-y|translate-x|translate-y|basis|indent|scroll-m|scroll-mx|scroll-my|scroll-mt|scroll-mb|scroll-ml|scroll-mr|scroll-p|scroll-px|scroll-py|scroll-pt|scroll-pb|scroll-pl|scroll-pr|leading|columns|auto-rows|auto-cols)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
     // A class fragment that builds a step at run time cannot be scanned.
     const built =
       /className=\{?[`"][^`"]*(?<![\w-])(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|h|w|size|leading)-\$\{/;
@@ -278,7 +278,7 @@ describe("the public-block visual language", () => {
     // grows with the interface size. A recipe's height is `round(…rem,2px)` or a
     // pixel token; a bare step of 20px or more is a control height.
     const height =
-      /(?<![\w-])(?:[\w[\]()=:&>*#.,'^-]+:)*(?:min-h|h|size)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+      /(?<![\w-])(?:[\w[\]()=&>*#.,'^-]+:)*(?:min-h|h|size)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
     const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(height)]
         .filter((match) => Number(match[1]) >= 5)
@@ -1527,7 +1527,9 @@ describe("the public-block visual language", () => {
       expect(threadMenu).toContain("width: var(--oct-icon-md);");
       const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
       const rule = (selector: string) =>
-        styles.match(new RegExp(`${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`))?.[1] ?? "";
+        styles.match(
+          new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`),
+        )?.[1] ?? "";
       const disclosure = rule(".workspace-disclosure__action");
       expect(disclosure).toContain("font-size: var(--oct-text-detail);");
       expect(disclosure).toContain("font-weight: var(--oct-weight-medium);");
