@@ -330,8 +330,15 @@ describe("WindowChrome", () => {
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
     // the same feedback .shell-icon-button gives, still no accent.
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
-    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--oct-fg-soft);",
+    // "On" is a control pressed into the band, not the pointed-at wash: a
+    // toggle that was on looked like one being hovered.
+    // A tool button that is pressed and the dock toggle that is on share the
+    // one rule, so the two cannot drift into two looks.
+    const pressed = cssRule('.window-chrome__button[data-dock-tools-shown="true"]');
+    expect(pressed).toContain("background: var(--octant-control);");
+    expect(pressed).toContain("box-shadow: var(--octant-shadow-control-pressed);");
+    expect(shellStyles).toMatch(
+      /\.window-chrome__button\[aria-expanded="true"\],\s*\.window-chrome__button\[aria-pressed="true"\],\s*\.window-chrome__button\[data-dock-tools-shown="true"\] \{/,
     );
   });
 
@@ -583,7 +590,7 @@ describe("WindowChrome", () => {
     expect(reducedTransparency).toContain(
       ":is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy])",
     );
-    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-ground-opaque);");
     expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
@@ -638,17 +645,17 @@ describe("WindowChrome", () => {
   });
 
   it("gives every popup one lit edge and the floating fill", () => {
-    // The overlay shadow carries the popup's whole edge in both themes: light
-    // along its top, then one thin line outside it. A popup that also set a
-    // border showed two edges, and the strong border made a menu's heavier
-    // than a dialog's.
+    // The overlay shadow carries the popup's whole edge in both themes: the
+    // brightest rim along its top, then one hairline outside it. A popup that
+    // also set a border showed two edges, and the strong border made a menu's
+    // heavier than a dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("inset 0 1px 0 var(--octant-bevel-strong)");
-      expect(overlay).toMatch(/(^|,)\s*0 0 0 1px rgb\(/);
+      expect(overlay).toContain("inset 0 1px 0 var(--octant-rim-float)");
+      expect(overlay).toMatch(/(^|,)\s*0 0 0 0\.5px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
     expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
@@ -880,7 +887,8 @@ describe("WindowChrome", () => {
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
+    expect(surface).toContain("box-shadow: var(--octant-shadow-md);");
+    expect(surface).not.toContain("--oct-glass-stroke");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
     // Under Window glass the box is a step lighter than the glass around
     // it: the floor made it the darker of the two.
@@ -931,7 +939,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      "--octant-window-surface: var(--octant-sidebar-opaque);",
+      "--octant-window-surface: var(--octant-ground-opaque);",
     );
   });
 
