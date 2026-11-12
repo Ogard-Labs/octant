@@ -1092,6 +1092,7 @@ A restart recovers what the journal can prove and never guesses that an ambiguou
 - Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events.
 - Outstanding approvals are recovered, but a parked provider question settles the attempt interrupted because the session that would consume the answer died.
 - Clients catch up from the authoritative snapshot, keep retrying while the host is unreachable, and renew a remote session from the device key rather than re-pairing.
+- A Machine change cursor names the host process (epoch) it came from; a cursor from an earlier process is answered with a snapshot, never resumed, and the renderer's retries are jittered.
 - Removing a host on the phone sends nothing to the host, so it does not revoke the device.
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).

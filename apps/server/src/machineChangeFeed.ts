@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   BROWSER_CAPTURE_AGGREGATE_TYPE,
   BROWSER_STEP_AGGREGATE_TYPE,
@@ -32,20 +33,27 @@ export class MachineChangeFeed {
   readonly #frames: MachineChangeFrame[] = [];
   readonly #subscribers = new Set<Subscriber>();
   readonly #maxFrames: number;
+  readonly #epoch: string;
   #nextSequence = 1;
   #closed = false;
 
-  constructor(options: { readonly maxFrames?: number } = {}) {
+  constructor(options: { readonly maxFrames?: number; readonly epoch?: string } = {}) {
     this.#maxFrames = options.maxFrames ?? DEFAULT_MAX_FRAMES;
+    this.#epoch = options.epoch ?? randomUUID();
   }
 
   head(): number {
     return this.#nextSequence - 1;
   }
 
+  /** This process's identity; every frame carries it, and a cursor names it. */
+  epoch(): string {
+    return this.#epoch;
+  }
+
   async waitFor(topic: MachineChangeTopic, signal: AbortSignal): Promise<void> {
     const afterSequence = this.head();
-    for await (const frame of this.subscribe({ afterSequence, signal })) {
+    for await (const frame of this.subscribe({ afterSequence, epoch: this.#epoch, signal })) {
       if (frame.kind === "snapshot-required" || frame.topics.includes(topic)) return;
     }
   }
@@ -131,6 +139,7 @@ export class MachineChangeFeed {
       kind: "changed",
       sequence: this.#nextSequence,
       topics: [...new Set(topics)],
+      epoch: this.#epoch,
     });
     this.#nextSequence += 1;
     this.#frames.push(frame);
@@ -148,13 +157,23 @@ export class MachineChangeFeed {
     }
   }
 
+  /**
+   * A cursor without an epoch comes from a client older than epochs and is
+   * judged by its sequence alone, as before. A cursor from another process is
+   * never resumed, whatever its sequence: that process's changes are gone.
+   */
   async *subscribe(input: {
     readonly afterSequence: number;
+    readonly epoch?: string;
     readonly signal: AbortSignal;
   }): AsyncGenerator<MachineChangeFrame> {
     if (this.#closed || input.signal.aborted) return;
     const earliest = this.#frames[0]?.sequence ?? this.#nextSequence;
-    if (input.afterSequence < earliest - 1 || input.afterSequence > this.head()) {
+    if (
+      (input.epoch !== undefined && input.epoch !== this.#epoch) ||
+      input.afterSequence < earliest - 1 ||
+      input.afterSequence > this.head()
+    ) {
       yield this.#snapshotRequired();
       return;
     }
@@ -214,6 +233,7 @@ export class MachineChangeFeed {
     return decodeMachineChangeFrame({
       kind: "snapshot-required",
       sequence: this.#nextSequence - 1,
+      epoch: this.#epoch,
     });
   }
 }

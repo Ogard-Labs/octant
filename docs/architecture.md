@@ -4908,7 +4908,16 @@ or .zip>` write the same files, built by one host command
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
   approvals, follow-up offers and message queues use their own metadata-only
-  Machine change topics. A renderer re-reads the authoritative scoped API
+  Machine change topics. Feed sequences are per process, so every frame also
+  carries the host process's epoch, minted at start, and a client resumes
+  with both (`afterSequence` and `epoch`). A cursor from another process gets
+  `snapshot-required` whatever its sequence, since a restart's changes are
+  otherwise missed when the old cursor sits below the new head; a client
+  that sends no epoch (older than epochs) is judged by sequence alone, and a
+  client names an epoch only after a host has reported one, so it still
+  reads an older host. The renderer's reconnect backoff is jittered between
+  half and all of its delay, so a host's windows do not all retry at once. A
+  renderer re-reads the authoritative scoped API
   after a notice, on reconnect or becoming visible, and every thirty seconds
   as recovery. Hidden windows stop recovery timers. In-memory approval
   services publish both creation and settlement, including expiry and
