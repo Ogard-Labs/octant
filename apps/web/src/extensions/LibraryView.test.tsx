@@ -152,7 +152,8 @@ describe("the library view", () => {
     for (const more of screen.queryAllByRole("button", { name: /^Show all/ })) {
       await user.click(more);
     }
-    expect(screen.getByText("Co")).toBeTruthy();
+    // Context7 and Composio both begin "Co", so the tile is not unique.
+    expect(screen.getAllByText("Co").length).toBeGreaterThan(0);
     expect(screen.getByText("De")).toBeTruthy();
     expect(monogramFor("Microsoft Learn")).toBe("Ml");
     expect(monogramFor("Stripe")).not.toBe(monogramFor("Sentry"));
@@ -202,6 +203,19 @@ describe("the library view", () => {
       expect.objectContaining({ connectorId: "context7" }),
     );
     expect(onConnected).toHaveBeenCalled();
+  });
+
+  it("shows Composio's custody notice in the detail before the confirming Connect", async () => {
+    const user = userEvent.setup();
+    renderLibrary({ connectClient, localHost: true });
+    for (const more of screen.queryAllByRole("button", { name: /^Show all/ })) {
+      await user.click(more);
+    }
+    await user.click(screen.getByRole("button", { name: "Connect… Composio" }));
+    expect(addUserMcpServer).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/third-party hosted service/)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Connect" })).toBeTruthy();
   });
 
   it("takes a key in the detail before it connects a key connector", async () => {

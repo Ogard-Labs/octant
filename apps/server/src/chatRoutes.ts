@@ -24,7 +24,7 @@ import { Schema } from "effect";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { ChatServiceError, type ChatService } from "./chat/chatService";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const JSON_BODY_LIMIT = 1_048_576;
@@ -374,6 +374,24 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           return failureResponse(
             { category: "invalid", message: "Chat command is invalid." },
             400,
+            origin,
+          );
+        }
+        // Whether the host may continue an answer by itself after a restart
+        // is a choice about this computer's unattended work, made at it.
+        const principal = readPrincipalRouteContext(request)?.principal;
+        if (
+          principal !== undefined &&
+          principal.kind !== "local-window" &&
+          (command.kind === "set-chat-thread-restart-continuation" ||
+            (command.kind === "update-chat-settings" && command.restartContinuation !== undefined))
+        ) {
+          return failureResponse(
+            {
+              category: "unauthorized",
+              message: "Continue after restart is set at a window on this computer.",
+            },
+            403,
             origin,
           );
         }

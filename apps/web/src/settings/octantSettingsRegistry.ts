@@ -568,6 +568,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "searxng url address search engine research",
         },
+        {
+          id: settingId("chat-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted answer automatically recovery chat",
+        },
       ],
     },
     {
@@ -595,6 +602,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "work full access sandbox seatbelt confinement secrets network prompts",
         },
+        {
+          id: settingId("work-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery work",
+        },
       ],
     },
     {
@@ -616,6 +630,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Default diff layout",
           scope: "mode",
           keywords: "diff layout unified side by side review checkout",
+        },
+        {
+          id: settingId("code-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery",
         },
         {
           id: settingId("code-language-services"),

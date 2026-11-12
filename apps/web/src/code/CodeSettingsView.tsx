@@ -43,6 +43,8 @@ export interface CodeSettingsUpdate {
   readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
   /** Absent keeps the stored limit. */
   readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+  /** Absent keeps the stored choice. */
+  readonly restartContinuation?: boolean;
 }
 
 /** Settings › Code › Coordinators › Starting workers (docs/design/coordinator-threads.md). */
@@ -136,6 +138,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [androidSnapshotBoot, setAndroidSnapshotBoot] = useState(
     props.settings.androidEmulatorSnapshotBoot === true,
   );
+  const [restartContinuation, setRestartContinuation] = useState(
+    props.settings.restartContinuation !== false,
+  );
   const [executable, setExecutable] = useState(props.settings.externalEditor?.executable ?? "");
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
@@ -185,6 +190,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? props.settings.androidEmulatorSnapshotBoot === true
         : current,
     );
+    setRestartContinuation((current) =>
+      current === (previousSettings.restartContinuation !== false)
+        ? props.settings.restartContinuation !== false
+        : current,
+    );
     setFullAccessSandbox((current) =>
       current === (previousSettings.defaultFullAccessSandbox === true)
         ? props.settings.defaultFullAccessSandbox === true
@@ -218,6 +228,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly androidEmulatorSnapshotBoot?: boolean;
+      readonly restartContinuation?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
@@ -252,6 +263,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     if (change.androidEmulatorSnapshotBoot !== undefined) {
       setAndroidSnapshotBoot(host.androidEmulatorSnapshotBoot === true);
     }
+    if (change.restartContinuation !== undefined) {
+      setRestartContinuation(host.restartContinuation !== false);
+    }
   }
 
   /**
@@ -265,6 +279,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly androidEmulatorSnapshotBoot?: boolean;
+      readonly restartContinuation?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
@@ -323,6 +338,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.androidEmulatorSnapshotBoot === undefined
           ? {}
           : { androidEmulatorSnapshotBoot: change.androidEmulatorSnapshotBoot }),
+        ...(change.restartContinuation === undefined
+          ? {}
+          : { restartContinuation: change.restartContinuation }),
         ...(change.coordinatorStarting === undefined
           ? {}
           : { coordinatorStarting: change.coordinatorStarting }),
@@ -455,6 +473,22 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
               <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
             </OctantToggleGroup>
+          </SettingRow>
+          <SettingRow
+            description="When Octant stops in the middle of a turn, from a crash, a quit, or a restart of this computer, the thread picks the turn up by itself when Octant opens again. A thread whose push or pull request may have gone out waits for you. A thread can turn this off from its menu."
+            focused={props.focusedSetting === "code-restart-continuation"}
+            label="Continue after restart"
+            scope="mode"
+            settingId="code-restart-continuation"
+          >
+            <OctantSwitch
+              checked={restartContinuation}
+              label="Continue after restart"
+              onCheckedChange={(checked) => {
+                setRestartContinuation(checked);
+                void commit("thread-defaults", { restartContinuation: checked });
+              }}
+            />
           </SettingRow>
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="thread-defaults" />
