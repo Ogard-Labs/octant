@@ -5,6 +5,7 @@ import {
   CorrelationId,
   EventId,
   LOCAL_HOST_ID,
+  type EventActor,
   type HostOAuthJournalRecord,
   type HostOAuthTermsAcknowledgment,
 } from "@octant/contracts";
@@ -34,11 +35,12 @@ export function hostOAuthEventJournal(options: {
   readonly uuid: () => string;
   readonly now: () => string;
 }): {
-  readonly append: (record: HostOAuthJournalRecord) => void;
+  /** `actor` is who the record is journaled as; absent means the person at this host. */
+  readonly append: (record: HostOAuthJournalRecord, actor?: EventActor) => void;
   readonly acknowledgments: () => readonly HostOAuthTermsAcknowledgment[];
 } {
   return {
-    append: (record) => {
+    append: (record, actor) => {
       const decoded = decodeHostOAuthJournalRecord(record);
       const expectedVersion = readAggregateVersion(
         options.connection,
@@ -58,7 +60,7 @@ export function hostOAuthEventJournal(options: {
             eventVersion: 1,
             hostId: LOCAL_HOST_ID,
             correlationId: decodeCorrelationId(options.uuid()),
-            actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+            actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
             occurredAt: options.now(),
             payload: decoded,
           },

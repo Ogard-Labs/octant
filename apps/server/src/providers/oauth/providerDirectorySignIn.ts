@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import type { ProviderInstanceId } from "@octant/contracts";
 import {
   decodeHostOAuthDescriptor,
@@ -47,8 +48,10 @@ export async function dispatchDirectorySignIn(input: {
   readonly command: ProviderOAuthCommand;
   readonly principal: PrincipalKind;
   readonly actorId: string;
+  /** Who the journal names for this sign-in; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
 }): Promise<ProviderOAuthView> {
-  const { dependencies, command, principal, actorId } = input;
+  const { dependencies, command, principal, actorId, actor } = input;
   const target = signInTarget(dependencies, command.instanceId);
   if (target.kind === "refused") return target;
   const { descriptor, binding, copy } = target;
@@ -68,6 +71,7 @@ export async function dispatchDirectorySignIn(input: {
     const recorded = dependencies.service.acknowledgeTerms({
       principalKind: principal,
       actorId,
+      actor,
       descriptor,
     });
     if (recorded.kind === "refused") return { kind: "refused", reason: recorded.reason };
@@ -82,6 +86,7 @@ export async function dispatchDirectorySignIn(input: {
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
+      actor,
       descriptor:
         command.flow === "device-code" ? { ...descriptor, flow: "device-code" } : descriptor,
     });
@@ -90,6 +95,7 @@ export async function dispatchDirectorySignIn(input: {
   if (command.kind === "poll") {
     const state = await dependencies.service.status({
       principalKind: principal,
+      actor,
       attemptId: command.attemptId,
       descriptor,
     });

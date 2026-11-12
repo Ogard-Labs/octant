@@ -105,6 +105,7 @@ export function createExtensionRouteHandler(options: {
       extensionId: string,
       componentId: string,
       principalKind: "local-window" | "remote-device",
+      actor?: EventActor,
     ): Promise<McpServerSignInView>;
     poll(
       extensionId: string,
@@ -611,7 +612,7 @@ export function createExtensionRouteHandler(options: {
         }
         if (signIn.kind === "begin") {
           return response(
-            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind),
+            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind, actor),
             200,
             origin,
           );
