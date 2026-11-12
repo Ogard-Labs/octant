@@ -1389,7 +1389,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
-  padding: 0 4px;
+  /* The first button is centred on the column the navigation rows' 16px icons
+     stand on (the nav inset plus half the icon), so the folder glyph and the
+     glyphs of the rows below it share one centre line. */
+  padding: 0 4px 0
+    calc(var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2);
   /* The views share one row with the filter and the list switch. Wrapping
      them stacked a narrow sidebar's toolbar into three ragged rows, so the
      views scroll sideways instead, without a scrollbar over the glyphs. */

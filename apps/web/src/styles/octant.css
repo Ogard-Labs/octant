@@ -231,11 +231,14 @@
   --oct-title-rail-h: 44px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
+  /* A segment in a tray: the small control step. A tray is the segment plus
+     its 2px of padding on each side, so every tray is 28px tall. */
+  --oct-tray-segment-h: 24px;
   /* The bottom edge of a rail head: the 4px step less the hairline, so a 30px
      field between 4px above and this below, centred in the rail's minimum
      height, keeps the head at the rail's height with its 1px border. */
   --oct-rail-pad-end: calc(var(--oct-space-1) - 1px);
-  --oct-nav-head-h: 40px;
+  --oct-nav-head-h: 44px;
   --oct-nav-row-h: 32px;
   --oct-nav-inset: 12px;
   /* One row for every list a person picks from: a menu, a context menu, a
@@ -324,6 +327,10 @@
      because a transcript interleaves code and tool output that wrap
      badly at prose width. */
   --oct-thread-measure: 760px;
+  /* The room a thread's column leaves around itself: 20px each side. At a
+     phone's width the pane's panel already stands 20px in from each edge, so
+     the column takes none of its own and the gutter stays 20px, not 40. */
+  --oct-thread-gutter: 40px;
   /* The transcript's own text size (Appearance › Transcript text size).
      Medium is the body size the rest of the interface reads at: a reply set
      one step larger than the question above it and the composer below it
@@ -1049,7 +1056,7 @@ h4 {
    the drift this exists to prevent. A surface positions the
    column (block margins, padding); it never redefines the measure. */
 .thread-column {
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: min(100% - var(--oct-thread-gutter), var(--oct-thread-measure));
   margin-inline: auto;
 }
 
@@ -1063,6 +1070,13 @@ h4 {
 
 .shell[data-transcript-width="wide"] {
   --oct-thread-measure: 1040px;
+}
+
+/* The same 680px the pane's panel takes its own 20px at (styles.css). */
+@media (max-width: 680px) {
+  :root {
+    --oct-thread-gutter: 0px;
+  }
 }
 
 .shell[data-transcript-text-size="small"] {
@@ -2299,7 +2313,8 @@ input.switch:checked::after {
 }
 .toast__icon {
   flex: none;
-  margin-top: 2px;
+  /* Centred on the first line, which is as tall as the dismiss button. */
+  margin-top: var(--oct-space-1);
   color: var(--octant-text-secondary);
 }
 .toast[data-tone="success"] .toast__icon {
@@ -2315,12 +2330,16 @@ input.switch:checked::after {
   flex: 1;
   min-width: 0;
 }
+/* The button is a 24px box that ends on the toast's own 12px padding, in the
+   corner the content's last column and first line make. */
 .toast__dismiss {
   flex: none;
-  margin: -10px -10px 0 0;
+  margin: 0;
 }
 .toast .toast-title {
-  display: block;
+  display: flex;
+  min-height: var(--oct-tray-segment-h);
+  align-items: center;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -2332,8 +2351,10 @@ input.switch:checked::after {
   white-space: pre-wrap;
 }
 .toast .toast__action {
-  display: inline-flex;
-  min-height: 24px;
+  /* Inline, not a 24px inline-flex box: that made the line holding the action
+     taller than every other line of the message. */
+  display: inline;
+  min-height: 0;
   height: auto;
   gap: var(--oct-space-1);
   padding: 0;
@@ -4236,6 +4257,8 @@ input.switch:checked::after {
    never below 2px, so the tray's outline is the control's and the button is
    concentric with it. */
 .modeswitch .modeswitch__tray > .mode {
+  width: var(--oct-tray-segment-h);
+  height: var(--oct-tray-segment-h);
   border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
 }
 /* The selection role is the tray's own tint, so the chosen segment drew as
@@ -4998,7 +5021,7 @@ input.switch:checked::after {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  width: min(100% - 40px, var(--oct-composer-width));
+  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
   margin: 24px auto 12px;
 }
 
@@ -7855,7 +7878,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    a tool call, so it gets its own quiet register: italic, muted, and shut
    by default. Opening it must never be required to follow the answer. */
 .thinking {
-  border-left: 2px solid var(--oct-border);
+  border-left: 1px solid var(--oct-hairline);
   padding-left: var(--oct-space-4);
 }
 .thinking > summary {
