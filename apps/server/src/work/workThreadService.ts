@@ -264,6 +264,12 @@ export interface WorkThreadExecutionContext {
    * by a host caller that makes it from a marked thread (a follow-up).
    */
   readonly inheritedMark?: InheritedExternalContentMark;
+  /**
+   * Who asked, as the route resolved it from the authenticated principal: a
+   * paired device's change is journaled as that device. Absent means the
+   * person at this host.
+   */
+  readonly actor?: EventActor;
 }
 
 export class WorkThreadServiceError extends Error {
@@ -494,6 +500,7 @@ export class WorkThreadService {
     executionContext?: WorkThreadExecutionContext,
   ): Promise<WorkThreadCommandResult> {
     this.#assertReady();
+    const actor = executionContext?.actor ?? localPerson();
     try {
       const command = decodeWorkThreadCommand(input);
       // A creation names a thread that does not exist yet, except the move's own
@@ -536,17 +543,20 @@ export class WorkThreadService {
                 eventName: "work.settings-updated@1",
                 eventVersion: 1,
                 correlationId: decodeCorrelationId(this.#uuid()),
-                actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+                actor,
                 occurredAt: decodeTimestamp(this.#clock()),
                 payload: { kind: "settings-updated", settings },
               },
             ],
           });
-          this.#journalLowering({
-            scope: "global",
-            from: workModeOfAccess(current.defaultAccess),
-            to: workModeOfAccess(settings.defaultAccess),
-          });
+          this.#journalLowering(
+            {
+              scope: "global",
+              from: workModeOfAccess(current.defaultAccess),
+              to: workModeOfAccess(settings.defaultAccess),
+            },
+            actor,
+          );
         });
         this.#projection.applySettings({ kind: "settings-updated", settings });
         return { kind: "settings-updated", settings };
@@ -707,7 +717,7 @@ export class WorkThreadService {
               0,
               "work.thread-created@1",
               { kind: "thread-created", thread: created },
-              isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+              isRoutineHostScope(authenticatedWindowId) ? "system" : actor,
             );
             if (terminalSession !== undefined) {
               this.#terminalSessions?.journalImported(String(created.id), terminalSession);
@@ -744,7 +754,7 @@ export class WorkThreadService {
       }
 
       if (command.kind === "fork-work-thread")
-        return await this.#fork(authenticatedWindowId, command);
+        return await this.#fork(authenticatedWindowId, command, actor);
 
       // Done on a Work thread is a person's mark. A routine, goal round, or
       // child-run delivery acts as the host, never as the person.
@@ -813,10 +823,16 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(current.id, command.expectedVersion, "work.thread-completion-confirmed@1", {
-          kind: "thread-completion-confirmed",
-          thread: confirmed,
-        });
+        this.#append(
+          current.id,
+          command.expectedVersion,
+          "work.thread-completion-confirmed@1",
+          {
+            kind: "thread-completion-confirmed",
+            thread: confirmed,
+          },
+          actor,
+        );
         this.#projection.apply({
           kind: "thread-completion-confirmed",
           thread: confirmed,
@@ -843,7 +859,7 @@ export class WorkThreadService {
       if (command.kind === "move-work-thread") {
         if (project === undefined)
           throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
-        return await this.#moveThread(authenticatedWindowId, current, project, command);
+        return await this.#moveThread(authenticatedWindowId, current, project, command, actor);
       }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-work-usage-resume") {
@@ -880,10 +896,15 @@ export class WorkThreadService {
           version: command.expectedVersion + 2,
           updatedAt: usageResumeUpdatedAt,
         });
-        this.#appendBoth(current.id, command.expectedVersion, [
-          [USAGE_RESUME_SCHEDULED, { resume: record }],
-          ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
-        ]);
+        this.#appendBoth(
+          current.id,
+          command.expectedVersion,
+          [
+            [USAGE_RESUME_SCHEDULED, { resume: record }],
+            ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
+          ],
+          actor,
+        );
         this.#projection.applyUsageResume({
           eventName: USAGE_RESUME_SCHEDULED,
           payload: { resume: record },
@@ -904,10 +925,15 @@ export class WorkThreadService {
           version: command.expectedVersion + 2,
           updatedAt: usageResumeUpdatedAt,
         });
-        this.#appendBoth(current.id, command.expectedVersion, [
-          [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
-          ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
-        ]);
+        this.#appendBoth(
+          current.id,
+          command.expectedVersion,
+          [
+            [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
+            ["work.thread-updated@1", { kind: "thread-updated", thread: updated }],
+          ],
+          actor,
+        );
         this.#projection.applyUsageResume({
           eventName: USAGE_RESUME_CANCELLED,
           payload: { resume: scheduled.record },
@@ -928,10 +954,16 @@ export class WorkThreadService {
           updatedAt: decodeTimestamp(this.#clock()),
         });
         const persist = () => {
-          this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-            kind: "thread-updated",
-            thread: updated,
-          });
+          this.#append(
+            current.id,
+            command.expectedVersion,
+            "work.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: updated,
+            },
+            actor,
+          );
           this.#projection.apply({ kind: "thread-updated", thread: updated });
         };
         if (executionContext?.commitBrowserProfile !== undefined) {
@@ -959,10 +991,16 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-          kind: "thread-updated",
-          thread: updated,
-        });
+        this.#append(
+          current.id,
+          command.expectedVersion,
+          "work.thread-updated@1",
+          {
+            kind: "thread-updated",
+            thread: updated,
+          },
+          actor,
+        );
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
@@ -988,17 +1026,26 @@ export class WorkThreadService {
           updatedAt: decodeTimestamp(this.#clock()),
         });
         this.#inUnit(() => {
-          this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-            kind: "thread-updated",
-            thread: updated,
-          });
-          this.#journalLowering({
-            scope: "thread",
-            from: workModeOfAccess(current.access),
-            to: workModeOfAccess(updated.access),
-            projectId: current.projectId,
-            threadId: String(current.id),
-          });
+          this.#append(
+            current.id,
+            command.expectedVersion,
+            "work.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: updated,
+            },
+            actor,
+          );
+          this.#journalLowering(
+            {
+              scope: "thread",
+              from: workModeOfAccess(current.access),
+              to: workModeOfAccess(updated.access),
+              projectId: current.projectId,
+              threadId: String(current.id),
+            },
+            actor,
+          );
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
@@ -1177,10 +1224,16 @@ export class WorkThreadService {
                         updatedAt,
                       },
       );
-      this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-        kind: "thread-updated",
-        thread: updated,
-      });
+      this.#append(
+        current.id,
+        command.expectedVersion,
+        "work.thread-updated@1",
+        {
+          kind: "thread-updated",
+          thread: updated,
+        },
+        actor,
+      );
       this.#projection.apply({ kind: "thread-updated", thread: updated });
       if (command.kind === "change-work-thread-working-directory") {
         await this.#onWorkingDirectoryChanged({
@@ -1207,6 +1260,7 @@ export class WorkThreadService {
     current: WorkThread,
     source: Extract<Project, { readonly type: "work" }>,
     command: Extract<WorkThreadCommand, { readonly kind: "move-work-thread" }>,
+    actor: EventActor,
   ): Promise<WorkThreadCommandResult> {
     // A routine acts as the host, never as the person; filing a thread is the person's call.
     if (isRoutineHostScope(authenticatedWindowId)) {
@@ -1289,10 +1343,16 @@ export class WorkThreadService {
       version: command.expectedVersion + 1,
       updatedAt: decodeTimestamp(this.#clock()),
     });
-    this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-      kind: "thread-updated",
-      thread: updated,
-    });
+    this.#append(
+      current.id,
+      command.expectedVersion,
+      "work.thread-updated@1",
+      {
+        kind: "thread-updated",
+        thread: updated,
+      },
+      actor,
+    );
     this.#projection.apply({ kind: "thread-updated", thread: updated });
     return { kind: "thread-updated", thread: updated };
   }
@@ -1377,7 +1437,9 @@ export class WorkThreadService {
           0,
           "work.thread-created@1",
           { kind: "thread-created", thread: created },
-          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+          isRoutineHostScope(authenticatedWindowId)
+            ? "system"
+            : (executionContext?.actor ?? localPerson()),
         );
       },
     });
@@ -1675,6 +1737,7 @@ export class WorkThreadService {
   async #fork(
     authenticatedWindowId: WindowId,
     command: Extract<WorkThreadCommand, { kind: "fork-work-thread" }>,
+    actor: EventActor,
   ): Promise<WorkThreadCommandResult> {
     const turnProjection = this.#turnProjection;
     if (turnProjection.apply === undefined)
@@ -1795,7 +1858,13 @@ export class WorkThreadService {
           }
         : undefined;
     const journalFork = () => {
-      this.#append(fork.id, 0, "work.thread-created@1", { kind: "thread-created", thread: fork });
+      this.#append(
+        fork.id,
+        0,
+        "work.thread-created@1",
+        { kind: "thread-created", thread: fork },
+        actor,
+      );
       for (const copy of copies) {
         this.#appendTurn(copy.accepted.requestId, 0, "work.turn-accepted@1", copy.accepted);
         this.#appendTurn(copy.accepted.requestId, 1, "work.turn-updated@1", copy.updated);
@@ -1932,6 +2001,7 @@ export class WorkThreadService {
     threadId: WorkThreadId,
     expectedVersion: number,
     events: ReadonlyArray<readonly [string, unknown]>,
+    actor: EventActor,
   ): void {
     this.#persistence.journal.append({
       aggregate: {
@@ -1944,7 +2014,7 @@ export class WorkThreadService {
         eventName,
         eventVersion: 1,
         correlationId: decodeCorrelationId(this.#uuid()),
-        actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+        actor,
         occurredAt: decodeTimestamp(this.#clock()),
         payload,
       })),
@@ -2030,4 +2100,8 @@ function lifecycleUpdate(
 /** The picker's word for a Work thread's stored level. */
 function workModeOfAccess(access: WorkAccess): PermissionMode {
   return permissionModeOf(workThreadAccessOf(access));
+}
+
+function localPerson(): EventActor {
+  return { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
 }

@@ -258,6 +258,16 @@ describe("Code routes", () => {
     expect((await route(from(raiseThread, paired)))?.status).toBe(200);
     expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(2);
+    // The device is who the journal names for both changes.
+    for (const call of [1, 2]) {
+      expect(execute).toHaveBeenNthCalledWith(
+        call,
+        remoteDeviceId,
+        expect.anything(),
+        expect.anything(),
+        { actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId } },
+      );
+    }
 
     // The grant's guard runs before this route and holds the agent to the
     // level the person chose; the route only stops refusing what it admitted.

@@ -738,6 +738,49 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "72000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = (fixture: ReturnType<typeof serviceFixture>) =>
+      fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+        request.events.map((event: { eventName: string; actor: unknown }) => [
+          event.eventName,
+          event.actor,
+        ]),
+      );
+    const raise = {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+    };
+    const raiseDefault = {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+    };
+
+    const paired = serviceFixture({ threads: [thread()] });
+    await paired.service.execute(ids.window, raiseDefault, { actor: device });
+    await paired.service.execute(ids.window, raise, { actor: device });
+    expect(actorsOf(paired)).toEqual([
+      ["work.settings-updated@1", device],
+      ["guardrail.level-lowered@1", device],
+      ["work.thread-updated@1", device],
+      ["guardrail.level-lowered@1", device],
+    ]);
+
+    const local = serviceFixture({ threads: [thread()] });
+    await local.service.execute(ids.window, raiseDefault);
+    await local.service.execute(ids.window, raise);
+    expect(actorsOf(local).map(([, actor]) => actor)).toEqual(
+      Array.from({ length: 4 }, () => ({
+        kind: "local-user",
+        actorId: "00000000-0000-4000-8000-000000000002",
+      })),
+    );
+  });
+
   it("refuses to create a thread when promised GitHub issue context cannot be loaded", async () => {
     const fixture = serviceFixture({
       threads: [],

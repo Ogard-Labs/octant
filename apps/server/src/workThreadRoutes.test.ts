@@ -64,7 +64,9 @@ describe("Work thread routes", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ kind: "thread-created", thread: thread() });
-    expect(execute).toHaveBeenCalledWith(windowId, command);
+    expect(execute).toHaveBeenCalledWith(windowId, command, {
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+    });
   });
 
   it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
@@ -150,6 +152,24 @@ describe("Work thread routes", () => {
     expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
     expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(3);
+    // The device is who the journal names; a local window's change stays the local user's.
+    expect(execute).toHaveBeenNthCalledWith(1, remoteDeviceId, expect.anything(), {
+      actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+    });
+    await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(raiseThread),
+      }),
+    );
+    expect(execute).toHaveBeenNthCalledWith(4, expect.anything(), expect.anything(), {
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+    });
+    execute.mockClear();
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
 
     expect(
       (

@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import {
   decodeCodeProviderFileReviewRequest,
@@ -198,6 +199,7 @@ import {
   WINDOW_CAPABILITY_HEADER,
 } from "./clientPrincipal";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -642,6 +644,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // judged as a local window is; it stays the principal and the actor.
     let callerAuthority: "local-window" | "remote-device";
     let agentGrantSession: boolean;
+    // Who the journal names for what this request changes: the device, when a
+    // device asked.
+    let callerActor: EventActor;
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
@@ -662,6 +667,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         ? "local-window"
         : "remote-device";
       agentGrantSession = isAgentGrantSession(principalContext.principal);
+      callerActor = eventActorForPrincipal(principalContext.principal);
       operationInitiator = callerAuthority === "local-window" ? "user" : "agent";
       const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
       // Review and selected-hunk requests recheck that this same window still
@@ -845,7 +851,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           if (command !== undefined) {
             return jsonResponse(
-              await dependencies.service.execute(authenticatedWindowId, command, request.signal),
+              await dependencies.service.execute(authenticatedWindowId, command, request.signal, {
+                actor: callerActor,
+              }),
               200,
               origin,
             );

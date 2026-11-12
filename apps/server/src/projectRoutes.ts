@@ -14,6 +14,7 @@ import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import type { ProjectIconReader } from "./projectIcon";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -272,7 +273,14 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
             origin,
           );
         }
-        return response(await dependencies.service.executeMemory(command), 200, origin);
+        return response(
+          await dependencies.service.executeMemory(
+            command,
+            eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          ),
+          200,
+          origin,
+        );
       }
       let command;
       try {
@@ -386,7 +394,15 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
-      return response(await dependencies.service.executeProject(windowId, command), 200, origin);
+      return response(
+        await dependencies.service.executeProject(
+          windowId,
+          command,
+          eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+        ),
+        200,
+        origin,
+      );
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);
       return response(

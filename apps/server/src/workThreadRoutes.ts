@@ -22,6 +22,7 @@ import {
 import { Schema } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
   refusesTerminalSessionImport,
@@ -219,7 +220,9 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       }
       return jsonResponse(
         decodeWorkThreadCommandResult(
-          await dependencies.service.execute(authenticatedWindowId, command),
+          await dependencies.service.execute(authenticatedWindowId, command, {
+            actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          }),
         ),
         200,
         origin,
