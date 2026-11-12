@@ -18,15 +18,15 @@ export function SelectTrigger({
     <SelectPrimitive.Trigger
       className={cn(
         fieldPaint,
-        "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md) [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       data-slot="select-trigger"
       {...props}
     >
       {children ?? <SelectPrimitive.Value />}
-      <SelectPrimitive.Icon className="text-muted-foreground">
-        <ChevronDown aria-hidden="true" data-icon="inline-end" />
+      <SelectPrimitive.Icon className="shrink-0 text-muted-foreground">
+        <ChevronDown aria-hidden="true" className="size-(--oct-icon-xs)" data-icon="inline-end" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -75,7 +75,7 @@ export function SelectItem({
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-(--oct-icon-sm) items-center justify-center">
         <Check aria-hidden="true" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>

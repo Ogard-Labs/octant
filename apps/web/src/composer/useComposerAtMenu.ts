@@ -220,7 +220,7 @@ export function ComposerAtTypeahead(props: {
               type: "button",
               variant: row.id === controller.active?.id ? "secondary" : "ghost",
             },
-            createElement(ICONS[row.icon], { "aria-hidden": true, size: 12, strokeWidth: 1.8 }),
+            createElement(ICONS[row.icon], { "aria-hidden": true, size: 12 }),
             createElement("span", null, row.title),
             createElement("span", { className: "chat-composer__command-meta" }, row.meta),
           ),

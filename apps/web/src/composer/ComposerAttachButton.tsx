@@ -18,7 +18,7 @@ export interface ComposerAttachButtonProps {
  * line. In the macOS desktop app the plus opens a menu of two ways to attach,
  * a file or a capture of an open window; everywhere else it opens the file
  * chooser directly. It is a plus on a quiet round fill: it adds to the
- * message, by more than one route, and it mirrors send at the pill's other
+ * message, by more than one route, and it mirrors send at the box's other
  * end.
  */
 export function ComposerAttachButton(props: ComposerAttachButtonProps) {
@@ -63,19 +63,19 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
           type="button"
           variant="secondary"
         >
-          <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
+          <Plus aria-hidden="true" size={16} />
         </OctantButton>
       ) : (
         <>
           <OctantMenu
             items={[
               {
-                icon: <FolderOpen aria-hidden="true" size={14} strokeWidth={1.7} />,
+                icon: <FolderOpen aria-hidden="true" size={14} />,
                 label: "Choose file…",
                 value: "file",
               },
               {
-                icon: <Camera aria-hidden="true" size={14} strokeWidth={1.7} />,
+                icon: <Camera aria-hidden="true" size={14} />,
                 label: "Capture window…",
                 value: "capture-window",
               },
@@ -86,7 +86,7 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
               else if (value === "capture-window") setCapturing(true);
             }}
             selectionMode="action"
-            trigger={<Plus aria-hidden="true" size={16} strokeWidth={1.8} />}
+            trigger={<Plus aria-hidden="true" size={16} />}
             triggerClassName={octantButtonClassName({ variant: "secondary", size: "icon" })}
             triggerDisabled={props.busy === true}
             triggerLabel="Add attachment"

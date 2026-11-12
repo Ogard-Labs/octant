@@ -9,7 +9,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 export function EnvironmentTile(props: { readonly icon: LucideIcon }) {
   return (
     <span aria-hidden="true" className="environment-tile">
-      <props.icon size={14} strokeWidth={1.7} />
+      <props.icon size={14} />
     </span>
   );
 }
@@ -97,12 +97,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           )}
           {/* Trailing, where the eye ends the row: a leading chevron pushed
               every title a step right of the rows that have none. */}
-          <ChevronRight
-            aria-hidden="true"
-            className="environment-group__chevron"
-            size={14}
-            strokeWidth={1.8}
-          />
+          <ChevronRight aria-hidden="true" className="environment-group__chevron" size={14} />
         </OctantButton>
         {props.action === undefined ? null : (
           <span className="environment-group__head-action">{props.action}</span>

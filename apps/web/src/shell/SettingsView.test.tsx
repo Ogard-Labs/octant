@@ -1240,7 +1240,12 @@ describe("SettingsView", () => {
       /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*48px var\(--oct-settings-gutter\) 72px;/,
     );
     expect(styles).toContain("font-family: var(--oct-font-display)");
-    expect(styles).toContain("font-size: var(--octant-ui-font-size)");
+    // The rail's rows, "Back to app" included, take their size from the
+    // navigation-name role rather than from a size of their own.
+    expect(styles).not.toMatch(/\.settings-view__back\s*\{[^}]*font-size/);
+    expect(readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8")).toMatch(
+      /\.oct-nav-name\s*\{[^}]*font-size:\s*var\(--oct-text-detail\)/,
+    );
     expect(styles).not.toContain("--octant-ui-font-family");
   });
 

@@ -171,7 +171,7 @@ export function CodeOverview(props: CodeOverviewProps) {
           <div>
             <span className="code-overview__eyebrow">Delivery</span>
             <h2>
-              <GitBranch aria-hidden="true" size={16} strokeWidth={1.8} />
+              <GitBranch aria-hidden="true" size={16} />
               {thread.deliveryTarget.branchIntent}
             </h2>
             <p>
@@ -194,7 +194,7 @@ export function CodeOverview(props: CodeOverviewProps) {
 
         <div className="code-overview__signals">
           <article className="code-overview__signal">
-            <GitCompare aria-hidden="true" size={16} strokeWidth={1.7} />
+            <GitCompare aria-hidden="true" size={16} />
             <div>
               <span>Changes</span>
               <strong>Review checkout changes</strong>
@@ -202,7 +202,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             </div>
           </article>
           <article className="code-overview__signal">
-            <ListChecks aria-hidden="true" size={16} strokeWidth={1.7} />
+            <ListChecks aria-hidden="true" size={16} />
             <div>
               <span>Tests</span>
               <strong>Keep verification close</strong>
@@ -210,7 +210,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             </div>
           </article>
           <article className="code-overview__signal">
-            <GitPullRequest aria-hidden="true" size={16} strokeWidth={1.7} />
+            <GitPullRequest aria-hidden="true" size={16} />
             <div>
               <span>Approvals</span>
               <strong>Review before delivery</strong>
@@ -228,7 +228,7 @@ export function CodeOverview(props: CodeOverviewProps) {
               type="button"
               variant="secondary"
             >
-              <GitCompare aria-hidden="true" size={14} strokeWidth={1.8} />
+              <GitCompare aria-hidden="true" size={14} />
               <span>View changes</span>
               <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
             </OctantButton>
@@ -241,7 +241,7 @@ export function CodeOverview(props: CodeOverviewProps) {
                 type="button"
                 variant="secondary"
               >
-                <Terminal aria-hidden="true" size={14} strokeWidth={1.8} />
+                <Terminal aria-hidden="true" size={14} />
                 <span>Open terminal</span>
                 <ArrowUpRight
                   aria-hidden="true"
@@ -255,7 +255,7 @@ export function CodeOverview(props: CodeOverviewProps) {
                 type="button"
                 variant="secondary"
               >
-                <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                <GitBranch aria-hidden="true" size={14} />
                 <span>Open Git delivery</span>
                 <ArrowUpRight
                   aria-hidden="true"
@@ -269,7 +269,7 @@ export function CodeOverview(props: CodeOverviewProps) {
                 type="button"
                 variant="secondary"
               >
-                <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
+                <GitPullRequest aria-hidden="true" size={14} />
                 <span>Open pull request</span>
                 <ArrowUpRight
                   aria-hidden="true"
@@ -570,9 +570,9 @@ function CodeProjectThreadRow(props: {
               variant="ghost"
             >
               {pinned ? (
-                <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
+                <PinOff aria-hidden="true" size={14} />
               ) : (
-                <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
+                <Pin aria-hidden="true" size={14} />
               )}
             </OctantButton>
           )}

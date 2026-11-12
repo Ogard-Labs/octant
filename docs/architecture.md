@@ -1913,7 +1913,11 @@ only its own `worktrees/<name>` record removed, not the repository's other
 prunable entries, and is refused when it was on a detached HEAD whose commits
 no branch, tag or remote-tracking ref keeps: that record's HEAD and reflog may
 be all that keeps them from collection. Removing several at once asks once
-first, as removing one does. Settings › Code › Xcode builds, on a Mac, lists the build
+first, as removing one does. Paths are compared as the host compares them:
+on Windows without regard to letter case or slash direction, because Git for
+Windows records a worktree as `c:/Users/…` beside the `C:\Users\…` the
+person or another tool used, and an exact comparison would report a present
+worktree as not found or list one Octant owns. Settings › Code › Xcode builds, on a Mac, lists the build
 folders in `~/Library/Developer/Xcode/DerivedData` whose `info.plist`
 workspace is gone (orphaned) or that Xcode has not opened for 30 days
 (unused); a workspace on an unmounted volume is neither. Removing one reads
@@ -7810,7 +7814,9 @@ or a history the read could not complete. Nothing is journaled and no
 session starts.
 
 **Chat branch.** A branch (`branch-chat-thread`, also behind a Chat
-checkpoint's restore) copies message text and never the source's session, so
+checkpoint's restore) copies message text, each copied turn keeping its
+submission id so the record of who sent it still applies, and never the
+source's session, so
 on a provider that keeps its conversation in a session of its own the branch
 has no session to resume. It is created, and its first turn starts a new
 session with the carried conversation as a `branch` handoff (framed as the

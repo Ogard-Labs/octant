@@ -82,7 +82,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       {/* The dock strip's tab already says Environment; the header card names
           what the thread works in — the name on its own line, then where:
           the branch and the folder — and holds what that checkout has
-          changed. It had carried the name, the branch and a Changes pill, and
+          changed. It had carried the name, the branch and a Changes chip, and
           the section under it then listed the branch and the repository
           again. */}
       {props.computer === undefined ? null : (
@@ -101,7 +101,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
             <span aria-hidden="true" className="thread-environment-dock__meta">
               {headline.branch === undefined ? null : (
                 <span className="thread-environment-dock__branch">
-                  <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <GitBranch aria-hidden="true" size={12} />
                   <span>{headline.branch}</span>
                 </span>
               )}

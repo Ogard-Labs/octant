@@ -778,7 +778,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props.folderControl ??
     (props.projectName === undefined ? null : (
       <span className="composer-tray__item" title={props.projectRoot}>
-        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+        <FolderOpen aria-hidden="true" size={12} />
         <span>{props.projectName}</span>
       </span>
     ));
@@ -790,7 +790,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const serverLocation =
     hasProject && server !== undefined ? (
       <span className="composer-tray__item" title={`On a server: ${server.location}`}>
-        <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+        <Network aria-hidden="true" size={12} />
         <span>{server.location}</span>
       </span>
     ) : null;

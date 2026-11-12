@@ -87,7 +87,7 @@ export function CanvasThreadReferenceCard({
         </span>
       ) : (
         <span aria-hidden="true" className="canvas-ref__icon">
-          <FileStack size={16} strokeWidth={1.7} />
+          <FileStack size={16} />
         </span>
       )}
       <span className="canvas-ref__text">
@@ -131,7 +131,7 @@ export function CanvasThreadReferenceCard({
             type="button"
             variant="ghost"
           >
-            <Maximize2 aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Maximize2 aria-hidden="true" size={14} />
           </OctantButton>
         </OctantTooltip>
       )}

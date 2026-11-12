@@ -39,48 +39,67 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
   const labelId = (index: number) => `${menuId}-item-${index}-label`;
   const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
   return (
-    <ContextMenu onOpenChange={setOpen}>
+    <ContextMenu
+      onOpenChange={(next, details) => {
+        // No items, no menu: a caller keeps one trigger whatever its menu
+        // holds, and an empty list opens nothing on the web or the OS path.
+        if (next && props.items.length === 0) {
+          details.cancel();
+          return;
+        }
+        setOpen(next);
+      }}
+    >
       <ContextMenuTrigger
         aria-expanded={open}
         className={cn(props.triggerClassName, "window-no-drag")}
       >
         {props.children}
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        {props.items.map((item, index) => (
-          <ContextMenuItem
-            aria-labelledby={labelId(index)}
-            {...(item.description === undefined
-              ? {}
-              : { "aria-describedby": descriptionId(index) })}
-            className="gap-2"
-            closeOnClick
-            key={item.value}
-            label={item.label}
-            {...(item.disabled === true ? { disabled: true } : {})}
-            onClick={() => {
-              if (item.disabled === true) return;
-              props.onValueChange(item.value);
-            }}
-          >
-            {item.icon === undefined ? null : (
-              <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                {item.icon}
-              </span>
-            )}
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium" id={labelId(index)}>
-                {item.label}
-              </span>
-              {item.description === undefined ? null : (
-                <span className="truncate text-xs text-muted-foreground" id={descriptionId(index)}>
-                  {item.description}
+      {/* No items, no popup: a caller keeps one trigger whatever its menu holds. */}
+      {props.items.length === 0 ? null : (
+        <ContextMenuContent>
+          {props.items.map((item, index) => (
+            <ContextMenuItem
+              aria-labelledby={labelId(index)}
+              {...(item.description === undefined
+                ? {}
+                : { "aria-describedby": descriptionId(index) })}
+              className="gap-2"
+              closeOnClick
+              key={item.value}
+              label={item.label}
+              {...(item.disabled === true ? { disabled: true } : {})}
+              onClick={() => {
+                if (item.disabled === true) return;
+                props.onValueChange(item.value);
+              }}
+            >
+              {item.icon === undefined ? null : (
+                <span
+                  aria-hidden="true"
+                  className="flex size-(--oct-icon-md) items-center justify-center"
+                >
+                  {item.icon}
                 </span>
               )}
-            </span>
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium" id={labelId(index)}>
+                  {item.label}
+                </span>
+                {item.description === undefined ? null : (
+                  <span
+                    className="truncate text-xs text-muted-foreground"
+                    id={descriptionId(index)}
+                  >
+                    {item.description}
+                  </span>
+                )}
+              </span>
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      )}
     </ContextMenu>
   );
 }

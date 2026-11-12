@@ -675,12 +675,12 @@ export function SettingsView(props: SettingsViewProps) {
             {props.onBack === undefined || sheet ? null : (
               <footer className="settings-view__sidebar-footer">
                 <OctantButton
-                  className="setnav-item window-no-drag settings-view__back justify-start rounded-lg"
+                  className="oct-nav-name setnav-item window-no-drag settings-view__back justify-start rounded-lg"
                   onClick={props.onBack}
                   type="button"
                   variant="bare"
                 >
-                  <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                  <ArrowLeft aria-hidden="true" className="icon" size={16} />
                   <span>Back to app</span>
                 </OctantButton>
               </footer>
@@ -699,7 +699,7 @@ export function SettingsView(props: SettingsViewProps) {
                   type="button"
                   variant="ghost"
                 >
-                  <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <ArrowLeft aria-hidden="true" size={16} />
                   <span>Back to app</span>
                 </OctantButton>
               )}
@@ -734,7 +734,7 @@ export function SettingsView(props: SettingsViewProps) {
                 type="button"
                 variant="ghost"
               >
-                <Menu aria-hidden="true" size={16} strokeWidth={1.5} />
+                <Menu aria-hidden="true" size={16} />
                 <span>Settings sections</span>
               </OctantButton>
             </div>
@@ -755,7 +755,7 @@ export function SettingsView(props: SettingsViewProps) {
             <span className="settings-view__saved window-no-drag">
               {saved ? (
                 <span role="status">
-                  <Check aria-hidden="true" size={14} strokeWidth={1.5} />
+                  <Check aria-hidden="true" size={14} />
                   Saved
                 </span>
               ) : null}
@@ -770,7 +770,7 @@ export function SettingsView(props: SettingsViewProps) {
                   type="button"
                   variant="ghost"
                 >
-                  <X aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <X aria-hidden="true" size={16} />
                 </OctantButton>
               </OctantTooltip>
             ) : null}
@@ -909,7 +909,7 @@ export function SettingsView(props: SettingsViewProps) {
                 ref={navigationClose}
                 type="button"
               >
-                <X aria-hidden="true" size={16} strokeWidth={1.5} />
+                <X aria-hidden="true" size={16} />
               </OctantIconButton>
             </header>
             <div className="settings-view__drawer-body">{navigation}</div>
@@ -985,7 +985,7 @@ function SettingsSearchField(props: {
           }}
           type="button"
         >
-          <X aria-hidden="true" size={14} strokeWidth={1.5} />
+          <X aria-hidden="true" size={14} />
         </OctantIconButton>
       )}
     </div>
@@ -3360,7 +3360,7 @@ function SidebarBackgroundSettings({
                 >
                   {selected ? (
                     <span aria-hidden="true" className="settings-view__selection-mark">
-                      <Check size={14} strokeWidth={2} />
+                      <Check size={14} />
                     </span>
                   ) : null}
                 </OctantButton>

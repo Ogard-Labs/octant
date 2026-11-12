@@ -58,7 +58,7 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
                 ),
               })}
           detail="Add one under Settings › Voice & images."
-          icon={<Images size={20} strokeWidth={1.5} />}
+          icon={<Images size={20} />}
           title="No image profile yet"
         />
       ) : (

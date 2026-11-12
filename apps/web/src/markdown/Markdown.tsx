@@ -284,7 +284,10 @@ function MarkdownLink(props: { readonly href: string; readonly children: ReactNo
           label="Open in Octant"
           onClick={() => actions?.openInApp?.(props.href)}
         >
-          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+          <span
+            aria-hidden="true"
+            className="flex size-(--oct-icon-md) items-center justify-center"
+          >
             <AppWindow size={14} />
           </span>
           <span className="flex min-w-0 flex-1">Open in Octant</span>
@@ -295,13 +298,19 @@ function MarkdownLink(props: { readonly href: string; readonly children: ReactNo
           label="Open in external browser"
           onClick={openExternal}
         >
-          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+          <span
+            aria-hidden="true"
+            className="flex size-(--oct-icon-md) items-center justify-center"
+          >
             <ExternalLink size={14} />
           </span>
           <span className="flex min-w-0 flex-1">Open in external browser</span>
         </OctantContextMenuItem>
         <OctantContextMenuItem className="gap-2" closeOnClick label="Copy URL" onClick={copyUrl}>
-          <span aria-hidden="true" className="flex size-4 items-center justify-center">
+          <span
+            aria-hidden="true"
+            className="flex size-(--oct-icon-md) items-center justify-center"
+          >
             <Link2 size={14} />
           </span>
           <span className="flex min-w-0 flex-1">Copy URL</span>

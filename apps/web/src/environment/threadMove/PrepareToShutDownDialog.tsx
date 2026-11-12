@@ -856,7 +856,7 @@ function ShutdownRow(props: {
         : MessageSquare;
   return (
     <div className="shutdown-row">
-      <Glyph aria-hidden="true" className="shutdown-row__glyph" size={14} strokeWidth={1.7} />
+      <Glyph aria-hidden="true" className="shutdown-row__glyph" size={14} />
       <span className="shutdown-row__title">{row.title}</span>
       {row.projectName === undefined ? null : (
         <span className="shutdown-row__project">{row.projectName}</span>

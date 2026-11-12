@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * A filled pill on the type ramp. The previous outline-only label was
+ * A filled chip on the type ramp. The previous outline-only label was
  * drawn at 10px, a size the type hierarchy does not have, and read as a second
  * kind of border next to the hairlines that already separate rows.
  *
@@ -12,7 +12,7 @@ import { cn } from "./utils";
  * as one set rather than two.
  */
 const badgeVariants = cva(
-  "inline-flex h-[round(1.25rem,2px)] w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex h-[round(1.25rem,2px)] w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&>svg]:pointer-events-none [&>svg]:size-(--oct-icon-xs)",
   {
     variants: {
       variant: {

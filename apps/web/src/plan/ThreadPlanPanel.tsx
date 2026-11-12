@@ -66,7 +66,7 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
     return (
       <section aria-label="Plan" className="thread-plan">
         <p className="thread-plan__empty" role="note">
-          <ListChecks aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ListChecks aria-hidden="true" size={14} />
           <span>This thread has no current plan artifact.</span>
         </p>
       </section>
@@ -192,7 +192,7 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
       {controller.commandMessage === undefined ? null : (
         /* ui-boundary-exception: inline-field-error */
         <p className="thread-plan__command-error" role="alert">
-          <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
+          <AlertTriangle aria-hidden="true" size={14} />
           <span>{controller.commandMessage}</span>
         </p>
       )}
@@ -246,7 +246,7 @@ function StatusNote(props: { readonly status: Exclude<PlanStatus, "ready"> }) {
             : ListChecks;
   return (
     <p className="thread-plan__status" data-status={props.status} role="status">
-      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+      <Icon aria-hidden="true" size={14} />
       <span>{STATUS_COPY[props.status]}</span>
     </p>
   );

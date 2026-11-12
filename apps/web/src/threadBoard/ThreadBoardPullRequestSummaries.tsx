@@ -101,7 +101,7 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
               type="button"
               variant="bare"
             >
-              <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />
+              <GitPullRequest aria-hidden="true" className="icon" size={12} />
               <span className="board-card-pr-title">{summary.title}</span>
               <span className="board-card-pr-meta">
                 {repo} #{summary.identity.number}

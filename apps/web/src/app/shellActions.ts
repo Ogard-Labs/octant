@@ -44,6 +44,7 @@ import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { ThreadUtilityDockKey } from "../shell/rightUtilityDockSelection";
 import type { useShellController } from "../shell/useShellController";
 import type { useThreadUtilityPresentation } from "../shell/useThreadUtilityPresentation";
+import type { DockTileMove } from "../shell/rightUtilityDockSelection";
 import type { VisibleMode } from "../shell/workKind";
 import type { WorkspaceViewProps } from "../shell/WorkspaceView";
 import type { useZenController } from "../zen/useZenController";
@@ -223,6 +224,22 @@ export type ShellActions = {
   readonly selectChatThread: (threadId: string) => void;
   readonly selectCodeThread: (threadId: string) => void;
   readonly selectDockTab: (tabId: string) => void;
+  /** Takes a tile out of view; the tool stays open, its button in the row. */
+  readonly hideDockTile: (tabId: string) => void;
+  /** Takes a Browser or Terminal tool out of its tile as a small live card at the foot of the dock. */
+  readonly minimiseDockTool: (tabId: string) => void;
+  /** Brings a minimised tool back from its card, to the place it was minimised from while that place exists. */
+  readonly restoreDockTool: (tabId: string) => void;
+  /** Takes a minimised tool's card away; the tool stays open, its button in the row. */
+  readonly hideDockCard: (tabId: string) => void;
+  readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;
+  /** Opens a tool and shows it beside the focused tile in one step. */
+  readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
+  readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
+  readonly resizeDockTileColumns: (shares: ReadonlyArray<number>) => void;
+  readonly showDockTabAlone: (tabId: string) => void;
+  readonly showDockTabBelow: (tabId: string) => void;
+  readonly showDockTabBeside: (tabId: string) => void;
   readonly selectMode: (mode: OctantMode) => void;
   readonly selectProjectPullRequest: (row: CodeProjectPullRequestRow) => void;
   readonly selectProjectPullRequestIdentity: (identity: ThreadBoardPullRequestIdentity) => void;
@@ -313,6 +330,8 @@ export type ShellActions = {
   readonly startNewThreadDraft: (mode: OctantMode) => void;
   readonly toggleBottomPanel: (opener: HTMLElement) => void;
   readonly toggleDock: (opener: HTMLElement) => void;
+  readonly runDockToolMenu: (surface: RightUtilityDockSurfaceId, value: string) => void;
+  readonly toggleDockTool: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
   readonly tryWorkRestCommand: (
     threadId: string,

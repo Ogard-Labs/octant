@@ -106,12 +106,7 @@ function HostStatusLabel(props: {
       role="status"
     >
       {props.environment ? (
-        <Cloud
-          aria-hidden="true"
-          className="host-selector__environment-icon"
-          size={14}
-          strokeWidth={1.7}
-        />
+        <Cloud aria-hidden="true" className="host-selector__environment-icon" size={14} />
       ) : (
         <span aria-hidden="true" className={`host-selector__dot ${dotClass(props.health)}`} />
       )}
@@ -214,12 +209,7 @@ export function HostSelector(props: HostSelectorProps) {
       data-testid="host-selector"
     >
       {environment ? (
-        <Cloud
-          aria-hidden="true"
-          className="host-selector__environment-icon"
-          size={14}
-          strokeWidth={1.7}
-        />
+        <Cloud aria-hidden="true" className="host-selector__environment-icon" size={14} />
       ) : (
         <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
       )}

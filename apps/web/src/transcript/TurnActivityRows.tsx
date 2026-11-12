@@ -248,12 +248,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         onKeyDown={onSummaryKeyDown(THINKING_ID)}
         role="button"
       >
-        <ChevronRight
-          aria-hidden="true"
-          className="turn-activity__chevron"
-          size={14}
-          strokeWidth={2}
-        />
+        <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
         <span className="turn-activity__name">Thinking</span>
         {/* Hidden from assistive technology: the button's name stays
             "Thinking", and the same words are read from the body once it
@@ -293,12 +288,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
               onKeyDown={onSummaryKeyDown(TOOL_CALLS_ID)}
               role="button"
             >
-              <ChevronRight
-                aria-hidden="true"
-                className="turn-activity__chevron"
-                size={14}
-                strokeWidth={2}
-              />
+              <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
               <span className="turn-activity__name">{summary}</span>
             </summary>
             <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
@@ -369,12 +359,7 @@ function ShieldReviewLine(props: { readonly row: ReviewRow }) {
         data-verdict={decision.verdict}
         role="note"
       >
-        <Icon
-          aria-hidden="true"
-          className="turn-activity__review-icon"
-          size={14}
-          strokeWidth={1.8}
-        />
+        <Icon aria-hidden="true" className="turn-activity__review-icon" size={14} />
         <span className="turn-activity__review-verdict">{word}</span>
         <span className="turn-activity__review-call" title={summary}>
           {summary}
@@ -399,7 +384,7 @@ function ShieldReviewLine(props: { readonly row: ReviewRow }) {
       data-verdict={decision.verdict}
       role="note"
     >
-      <Icon aria-hidden="true" className="turn-activity__review-icon" size={14} strokeWidth={1.8} />
+      <Icon aria-hidden="true" className="turn-activity__review-icon" size={14} />
       <span className="turn-activity__review-verdict">
         {SHIELD_VERDICT_WORDS[decision.verdict]}
       </span>
@@ -441,23 +426,13 @@ function ActivityDisclosure(props: {
         onKeyDown={props.onKeyDown}
         role="button"
       >
-        <ChevronRight
-          aria-hidden="true"
-          className="turn-activity__chevron"
-          size={14}
-          strokeWidth={2}
-        />
+        <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
         <span className="turn-activity__name">{collapsedName(row)}</span>
         {row.kind === "tool" && row.outsideContent !== undefined ? (
           <OutsideContentTag mark={row.outsideContent} />
         ) : null}
         <span className="turn-activity__outcome">{outcomeLabel(row, props.settled)}</span>
-        <StateIcon
-          aria-hidden="true"
-          className="turn-activity__status-icon"
-          size={12}
-          strokeWidth={1.8}
-        />
+        <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={12} />
       </summary>
       <div className="turn-activity__body">{activityDetail(row, props)}</div>
     </details>
@@ -480,7 +455,7 @@ function OutsideContentTag(props: { readonly mark: ToolOutsideContentMark }) {
       data-quiet={recordedOnly === true || labels.length === 0 ? "true" : "false"}
       title={recordedOnly === true ? `${text}. Recorded only at Full access.` : text}
     >
-      {labels.length === 0 ? null : <ShieldAlert aria-hidden="true" size={12} strokeWidth={1.8} />}
+      {labels.length === 0 ? null : <ShieldAlert aria-hidden="true" size={12} />}
       <span className="turn-activity__outside-text">{text}</span>
     </span>
   );

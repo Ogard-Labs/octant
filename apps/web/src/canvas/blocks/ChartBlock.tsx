@@ -583,7 +583,7 @@ function TrendHeadline({ block }: { readonly block: CanvasChartBlock }) {
       <span className="canvas-chart__headline-at">{String(last.x)}</span>
       {change === undefined ? null : (
         <span className="canvas-chart__headline-change">
-          <Arrow aria-hidden="true" size={12} strokeWidth={2} />
+          <Arrow aria-hidden="true" size={12} />
           {`${change > 0 ? "+" : ""}${formatTick(Math.round(change))}% since ${String(first.x)}`}
         </span>
       )}

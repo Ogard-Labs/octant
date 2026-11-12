@@ -43,7 +43,11 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   vitals: Activity,
 };
 
+export function dockToolIcon(surface: RightUtilityDockSurfaceId): LucideIcon {
+  return ICONS[surface] ?? CircleDashed;
+}
+
 export function DockToolIcon(props: { readonly surface: RightUtilityDockSurfaceId }) {
-  const Icon = ICONS[props.surface] ?? CircleDashed;
-  return <Icon aria-hidden="true" size={14} strokeWidth={1.5} />;
+  const Icon = dockToolIcon(props.surface);
+  return <Icon aria-hidden="true" size={14} />;
 }

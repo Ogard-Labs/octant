@@ -60,7 +60,7 @@ export function EnvironmentFilter(props: EnvironmentFilterProps) {
       <OctantMenuRoot>
         <OctantMenuTrigger className="environment-filter__toggle">
           <span>{environmentSelectionSummary(rows, props.selection)}</span>
-          <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={12} />
         </OctantMenuTrigger>
 
         <OctantMenuPortal>
@@ -96,7 +96,7 @@ export function EnvironmentFilter(props: EnvironmentFilterProps) {
                         {REACH_NOTE[row.reach]}
                       </span>
                     )}
-                    {row.isLocal ? <Check aria-hidden="true" size={12} strokeWidth={2} /> : null}
+                    {row.isLocal ? <Check aria-hidden="true" size={12} /> : null}
                   </OctantMenuCheckboxItem>
                 ))}
               </OctantMenuGroup>

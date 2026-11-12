@@ -315,12 +315,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       props.folderControl
     ) : hasFolder && props.projectName !== undefined ? (
       <span className="composer-tray__item" title={props.projectRoot}>
-        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+        <FolderOpen aria-hidden="true" size={12} />
         <span>{props.projectName}</span>
       </span>
     ) : (
       <span className="composer-tray__item">
-        <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
+        <AlertTriangle aria-hidden="true" size={12} />
         <span>No folder</span>
         {props.onAttachFolder !== undefined ? (
           <OctantButton

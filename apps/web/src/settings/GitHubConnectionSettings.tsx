@@ -299,7 +299,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
             variant="ghost"
           >
             Advanced diagnostics
-            <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
+            <ChevronDown aria-hidden="true" size={14} />
           </OctantButton>
         }
         title="Diagnostics"

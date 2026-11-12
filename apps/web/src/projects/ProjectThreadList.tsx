@@ -161,7 +161,7 @@ export function ThreadStatusMark(props: {
       title={label}
     >
       {Icon === undefined ? null : (
-        <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+        <Icon aria-hidden="true" className="size-(--oct-icon-xs)" size={12} />
       )}
     </span>
   );
@@ -313,7 +313,7 @@ function ThreadRowPullRequests(props: {
           openOnGithub === undefined ? undefined : githubPullRequestUrl(summary.identity);
         const reference = (
           <>
-            <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+            <GitPullRequest aria-hidden="true" size={14} />
             <span className="thread-row-info-card__pr-title">
               #{number} {summary.title}
             </span>
@@ -355,7 +355,7 @@ function ThreadRowPullRequests(props: {
                 type="button"
                 variant="bare"
               >
-                <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+                <ExternalLink aria-hidden="true" size={14} />
               </OctantIconButton>
             )}
           </span>
@@ -413,7 +413,7 @@ function ThreadRowInfoCard(props: {
         <span className="thread-row-info-card__facts">
           {facts.map((fact) => (
             <span className="thread-row-info-card__fact" key={fact.key}>
-              <fact.icon aria-hidden="true" size={14} strokeWidth={1.7} />
+              <fact.icon aria-hidden="true" size={14} />
               <span className="thread-row-info-card__fact-label">{fact.label}</span>
             </span>
           ))}
@@ -487,9 +487,9 @@ export function ThreadRowActionsGutter(props: {
       : [
           {
             icon: pinned ? (
-              <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
+              <PinOff aria-hidden="true" size={14} />
             ) : (
-              <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
+              <Pin aria-hidden="true" size={14} />
             ),
             label: pinLabel,
             value: "pin",
@@ -499,7 +499,7 @@ export function ThreadRowActionsGutter(props: {
       ? []
       : [
           {
-            icon: <Archive aria-hidden="true" size={14} strokeWidth={1.8} />,
+            icon: <Archive aria-hidden="true" size={14} />,
             label: "Archive thread",
             value: "archive",
           } as const,
@@ -509,7 +509,7 @@ export function ThreadRowActionsGutter(props: {
         ? []
         : [
             {
-              icon: <RotateCcw aria-hidden="true" size={14} strokeWidth={1.8} />,
+              icon: <RotateCcw aria-hidden="true" size={14} />,
               label: "Reopen thread",
               value: "reopen",
             } as const,
@@ -518,7 +518,7 @@ export function ThreadRowActionsGutter(props: {
         ? []
         : [
             {
-              icon: <Check aria-hidden="true" size={14} strokeWidth={1.8} />,
+              icon: <Check aria-hidden="true" size={14} />,
               label: "Put thread away",
               value: "complete",
             } as const,
@@ -528,7 +528,7 @@ export function ThreadRowActionsGutter(props: {
         ? []
         : [
             {
-              icon: <BellRing aria-hidden="true" size={14} strokeWidth={1.8} />,
+              icon: <BellRing aria-hidden="true" size={14} />,
               label: "Wake thread",
               value: "wake",
             } as const,
@@ -537,12 +537,12 @@ export function ThreadRowActionsGutter(props: {
         ? []
         : snoozePresets.map((preset) => ({
             description: preset.whenLabel,
-            icon: <Clock aria-hidden="true" size={14} strokeWidth={1.8} />,
+            icon: <Clock aria-hidden="true" size={14} />,
             label: `Snooze · ${preset.label}`,
             value: `snooze:${preset.id}`,
           }))),
     ...pullRequestDestinations.map((destination) => ({
-      icon: <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />,
+      icon: <GitPullRequest aria-hidden="true" size={14} />,
       label: destination.label,
       value: destination.key,
     })),
@@ -558,11 +558,7 @@ export function ThreadRowActionsGutter(props: {
           type="button"
           variant="bare"
         >
-          {pinned ? (
-            <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
-          ) : (
-            <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
-          )}
+          {pinned ? <PinOff aria-hidden="true" size={14} /> : <Pin aria-hidden="true" size={14} />}
         </OctantIconButton>
       )}
       {props.actions.onArchiveThread === undefined ? null : (
@@ -574,7 +570,7 @@ export function ThreadRowActionsGutter(props: {
           type="button"
           variant="bare"
         >
-          <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+          <Archive aria-hidden="true" size={14} />
         </OctantIconButton>
       )}
       {overflowItems.length === 0 ? null : (
@@ -591,7 +587,7 @@ export function ThreadRowActionsGutter(props: {
             pullRequestDestinations.find((destination) => destination.key === value)?.run();
           }}
           selectionMode="action"
-          trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
+          trigger={<MoreHorizontal aria-hidden="true" size={14} />}
           triggerClassName="sidebar-navigation__thread-action sidebar-navigation__thread-action--overflow"
           triggerLabel="Thread actions"
           value=""
@@ -645,7 +641,7 @@ function ThreadLineagePopover(props: {
       open={open}
       side="bottom"
       title="Fork lineage"
-      trigger={<GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />}
+      trigger={<GitBranch aria-hidden="true" size={12} />}
       triggerClassName="sidebar-navigation__thread-lineage"
       triggerLabel="Fork lineage"
       triggerVariant="ghost-icon"
@@ -1340,7 +1336,7 @@ function CoordinatorThreadSection(props: {
                 type="button"
                 variant="bare"
               >
-                <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
+                <ChevronRight aria-hidden="true" size={12} />
               </OctantIconButton>
               <div className="project-coordinator__thread">{rows([group.coordinator])}</div>
               {open ? null : (
@@ -1399,7 +1395,7 @@ function CoordinatorWorkerCounts(props: {
               data-activity={status}
             >
               {Icon === undefined ? null : (
-                <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+                <Icon aria-hidden="true" className="size-(--oct-icon-xs)" size={12} />
               )}
             </span>
             <span aria-hidden="true">{counts[status]}</span>
@@ -1432,7 +1428,7 @@ function ProjectCheckoutGroup(props: {
     >
       <div aria-hidden="true" className="project-checkout__row">
         <span className="project-checkout__glyph">
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
         </span>
         {props.group.branch === undefined ? null : (
           <span className="project-checkout__branch" title={props.group.branch}>

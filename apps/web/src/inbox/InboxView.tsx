@@ -243,7 +243,7 @@ export function InboxView(props: InboxViewProps) {
                     title=""
                     type="button"
                   >
-                    <RefreshCw aria-hidden="true" size={16} strokeWidth={1.5} />
+                    <RefreshCw aria-hidden="true" size={16} />
                   </OctantIconButton>
                 </OctantTooltip>
               ),
@@ -290,12 +290,10 @@ export function InboxView(props: InboxViewProps) {
               >
                 <h3 className="inbox-group__head">
                   {group.projectKey === "" ? (
-                    <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                    <Folder aria-hidden="true" className="icon" size={14} />
                   ) : (
                     <ProjectIcon
-                      fallback={
-                        <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
-                      }
+                      fallback={<Folder aria-hidden="true" className="icon" size={14} />}
                       projectId={group.projectKey}
                       size={14}
                     />
@@ -391,12 +389,7 @@ export function InboxView(props: InboxViewProps) {
                             {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
                             <span className="surface-row__copy">
                               <span className="oct-row-label">
-                                <Icon
-                                  aria-hidden="true"
-                                  className="icon"
-                                  size={14}
-                                  strokeWidth={1.5}
-                                />
+                                <Icon aria-hidden="true" className="icon" size={14} />
                                 {item.title}
                               </span>
                               <span className="oct-meta">
@@ -466,12 +459,7 @@ export function InboxView(props: InboxViewProps) {
                             {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
                             <span className="surface-row__copy">
                               <span className="oct-row-label">
-                                <ListTodo
-                                  aria-hidden="true"
-                                  className="icon"
-                                  size={14}
-                                  strokeWidth={1.5}
-                                />
+                                <ListTodo aria-hidden="true" className="icon" size={14} />
                                 {row.title}
                               </span>
                               <span className="oct-meta">

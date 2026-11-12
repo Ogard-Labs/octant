@@ -173,7 +173,7 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
         title="Multi-model pool editor"
         trigger={
           <>
-            <Layers aria-hidden="true" size={14} strokeWidth={1.7} />
+            <Layers aria-hidden="true" size={14} />
             <span>
               {pool === undefined ? "Use multiple models" : `Pool · ${pool.candidates.length}`}
             </span>

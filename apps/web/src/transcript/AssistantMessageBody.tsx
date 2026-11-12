@@ -104,7 +104,7 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
     return (
       <details className="thinking" onToggle={onToggle} open={open}>
         <summary aria-label={`Tool · ${part.name} · ${part.status}`}>
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
+          <ChevronRight aria-hidden="true" className="chev" size={14} />
           <span>{`Tool · ${part.name}`}</span>
           <span>{part.status}</span>
         </summary>
@@ -118,7 +118,7 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
     return (
       <details className="thinking" onToggle={onToggle} open={open}>
         <summary aria-label="Thinking">
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
+          <ChevronRight aria-hidden="true" className="chev" size={14} />
           <span>Thinking</span>
           {/* Hidden from assistive technology: the summary's name stays
               "Thinking", and the same words are read from the body once it

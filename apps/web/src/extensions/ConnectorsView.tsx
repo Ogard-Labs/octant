@@ -137,7 +137,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
     >
       <div className="extensions-settings__body">
         <div className="extensions-settings__search">
-          <Search aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+          <Search aria-hidden="true" className="icon" size={14} />
           <OctantInput
             aria-label="Search connectors"
             className="extensions-settings__search-input"

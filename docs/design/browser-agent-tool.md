@@ -1283,7 +1283,7 @@ Several threads of one Project may each drive their own page at the same time.
   thread's live Browser authority, and returns the page's title and host, the
   thread's id and title, and whether an agent drives it. It returns no page text
   and no picture; a selected page's picture is read through its own thread's
-  route, under that thread's authority, as the floating preview reads it. A
+  route, under that thread's authority, as the dock's Browser card reads it. A
   paired device gets a page in a stored profile named by its existence alone.
 - An agent counts as driving a page while an agent action is queued or running
   on it and for 15 seconds after the last one ends; a CLI in a terminal grant

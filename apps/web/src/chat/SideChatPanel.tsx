@@ -85,7 +85,7 @@ export function SideChatPanel(props: SideChatPanelProps) {
     <section aria-label="Side Chat" className="side-chat">
       <header className="side-chat__header">
         <p className="side-chat__title">
-          <MessagesSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+          <MessagesSquare aria-hidden="true" size={14} />
           <span>
             {props.sourceTitle === undefined ? "Side Chat" : `Side Chat about ${props.sourceTitle}`}
           </span>

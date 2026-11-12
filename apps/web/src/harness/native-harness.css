@@ -232,7 +232,7 @@
 
 .native-harness-card__status {
   padding: 0 0.5rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--text-sm);
   background: color-mix(in srgb, CanvasText 10%, transparent);
 }
@@ -293,7 +293,7 @@
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
-  border-radius: var(--radius-md);
+  border-radius: var(--oct-radius-md);
   background: color-mix(in srgb, CanvasText 5%, transparent);
 }
 
