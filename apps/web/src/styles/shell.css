@@ -84,7 +84,7 @@ html[data-octant-theme-mode="light"] .shell {
      backdrop filter. Every panel (the thread, a tile, the bottom panel) is
      this one tint, over a ground that is itself a tint, so text reads on a
      saturated desktop. */
-  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 90%, transparent);
+  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);

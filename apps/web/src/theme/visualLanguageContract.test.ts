@@ -249,6 +249,22 @@ describe("the public-block visual language", () => {
     expect(runtime).toMatch(/calc\(100% - 320px - var\(--octant-sheet-inset, 0px\)\)/);
   });
 
+  it("ends a panel's bright edge band above its first line of text, and dims what shows through a dark menu", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The band is a fill under the panel's content: a tile's name starts 8px
+    // down, and a band that reached it lowered the meta ink there to 4.17:1.
+    const band = runtime.match(
+      /--octant-panel-sheen:\s*linear-gradient\(180deg, var\(--octant-edge-light\), transparent (\d+)px\)/,
+    );
+    expect(Number(band?.[1])).toBeLessThanOrEqual(8);
+    // A clearer fill is only legible because the blur dims the page behind it.
+    const dark = runtime.match(/--octant-float-blur:\s*([^;]*);/)?.[1] ?? "";
+    expect(Number(dark.match(/brightness\(([\d.]+)\)/)?.[1])).toBeLessThan(0.5);
+    const light =
+      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(light).toMatch(/--octant-float-blur:[^;]*contrast\(0\.5\)/);
+  });
+
   it("does not flatten the Code composer into two hairline boxes", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
