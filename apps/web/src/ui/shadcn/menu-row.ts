@@ -12,4 +12,4 @@ export const menuRow =
 
 /** A group's heading stands on the rows' inset, so its words line up with theirs. */
 export const menuGroupLabel =
-  "px-(--oct-menu-row-inset) py-1.5 text-xs font-medium text-muted-foreground";
+  "px-(--oct-menu-row-inset) py-1 text-xs font-medium text-muted-foreground";

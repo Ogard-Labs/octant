@@ -235,17 +235,27 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
-  it("keeps every recipe control on whole pixels at the default interface size", () => {
-    // Recipe heights are rem so a control grows with the interface size, and the
-    // root is 13px. A quarter-rem step is 3.25px there, so an odd step lands
-    // between pixels: `h-7` drew about a hundred 24.5px buttons. An odd step
-    // goes through `round(…, 2px)` instead.
-    const oddStep = /(?<![\w:-])(?:min-h|h|size)-(\d+)(?![\w.[-])/g;
-    const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
-      [...readFileSync(path, "utf8").matchAll(oddStep)]
-        .filter((match) => Number(match[1]) >= 5 && Number(match[1]) % 2 === 1)
-        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
-    );
+  it("draws every spacing utility on the pixel scale at the default interface size", () => {
+    // Tailwind's step was a quarter rem and the root is the 13px interface
+    // size, so `px-2.5` drew 8.125px and `p-1` 3.25px. The theme now sets the
+    // step to 4px, and a utility may only name a step that lands on the scale
+    // (4, 8, 12, 16, 20, 24, 32, 48, and 28 for a control's height): no half steps
+    // and no 9, 10 or 11. A width that follows the type (a menu's minimum, a
+    // terminal's height) is written in rem instead.
+    const theme = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
+    expect(theme).toMatch(/--spacing:\s*4px;/);
+
+    const scale = new Set([0, 4, 8, 12, 16, 20, 24, 28, 32, 48]);
+    const step =
+      /(?<![\w-])-?(?:[\w[\]()=:&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|inset|inset-x|inset-y|space-x|space-y|translate-x|translate-y|basis|indent)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+    const strays = ["tsx", "ts"]
+      .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+      .filter((path) => !path.includes(".test."))
+      .flatMap((path) =>
+        [...readFileSync(path, "utf8").matchAll(step)]
+          .filter((match) => !scale.has(Number(match[1]) * 4))
+          .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+      );
 
     expect(strays).toEqual([]);
   });
@@ -842,7 +852,9 @@ describe("the public-block visual language", () => {
         /\.workspace-pane\[data-active="true"\] \.workspace-pane__grip\s*\{[^}]+\}/,
       )?.[0] ?? "";
 
-    expect(tabs).toContain("inline-flex h-8 w-fit items-center gap-1 text-muted-foreground");
+    expect(tabs).toContain(
+      "inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground",
+    );
     expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");

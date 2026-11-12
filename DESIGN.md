@@ -1847,10 +1847,29 @@ bare pixel literal. A rem corner also shrinks with the interface font size,
 which a token does not. Adapters own button paint.
 
 Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
-toggles, comboboxes, badges) size in rem so they grow with the interface size;
-at the default 13px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
-3.25px at that root, so a recipe never uses an odd step bare: it rounds it to a
-whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
+toggles, comboboxes, badges) take their height in rem so they grow with the
+interface size; at the default 13px a button is 20, 24, 28, or 32px tall. A
+quarter-rem step is 3.25px at that root, so a height never uses an odd step
+bare: it rounds to a whole 2px (`h-[round(1.75rem,2px)]`), or a control lands
+between pixels. A field, a select and a combobox take the default button's 28,
+and a tab takes the small button's 24, so a row of them shares one height.
+
+_What scales with the interface size._ Type and control heights scale; spacing,
+icons and radii do not. The recipes' spacing utilities (`p-*`, `gap-*`, `m-*`)
+are pixels, because the theme sets Tailwind's spacing step to `--spacing: 4px`
+in `styles/tailwind.css`, the same 4px scale as the stylesheets'
+`--oct-space-*`; at the default size `px-2` is 8px, never the 6.5px a
+quarter-rem step drew. A recipe names a step that is on the scale (`gap-1`,
+`px-2`, `p-3`, `gap-4`) and never a half step (`px-2.5` is 10px, not 8); a
+contract test scans every class string for one. A width or height that follows
+the type (a menu's minimum width, a terminal's height) is written in rem on
+purpose. _Rationale._ The other way to the same whole pixels was to leave the
+step in rem and rewrite every recipe in `--oct-space-*` tokens, which keeps
+the half steps' meaning but spends 95 edits and leaves two spacing systems in
+one file; a larger interface size would also have padded a control that already
+grew with its text, so a control at 16px would have read as loose rather than
+larger. Pixel spacing is the same decision the icon sizes made.
+The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window

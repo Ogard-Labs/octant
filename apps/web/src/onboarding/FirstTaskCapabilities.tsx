@@ -179,7 +179,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
                     bridge={props.bridge}
                   />
                 ) : (
-                  <figure className="rounded-md border border-border p-3">
+                  <figure className="rounded-md border border-border p-2">
                     <div role="img" aria-label={`Static ${title} preview`} className="text-xs">
                       {preview}
                     </div>

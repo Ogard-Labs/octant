@@ -1962,7 +1962,7 @@ function ProjectViewFilterMenu(props: {
           >
             <OctantMenuPopup
               aria-label="Project view filters"
-              className="min-w-56 max-w-[calc(100vw-24px)]"
+              className="min-w-[14rem] max-w-[calc(100vw-24px)]"
             >
               <OctantMenuGroup>
                 <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
@@ -2096,7 +2096,7 @@ function ProjectViewFilterMenu(props: {
       >
         <h1 id={rangeTitleId}>Custom activity range</h1>
 
-        <OctantField className="gap-1 px-2 py-1.5">
+        <OctantField className="gap-1 px-2 py-1">
           <OctantFieldLabel>From</OctantFieldLabel>
           <OctantInput
             aria-describedby={activityRangeError === undefined ? undefined : activityRangeErrorId}
@@ -2117,7 +2117,7 @@ function ProjectViewFilterMenu(props: {
             value={props.filters.activityRange?.from ?? ""}
           />
         </OctantField>
-        <OctantField className="gap-1 px-2 py-1.5">
+        <OctantField className="gap-1 px-2 py-1">
           <OctantFieldLabel>To</OctantFieldLabel>
           <OctantInput
             aria-describedby={activityRangeError === undefined ? undefined : activityRangeErrorId}
@@ -2141,7 +2141,7 @@ function ProjectViewFilterMenu(props: {
         {activityRangeError === undefined ? null : (
           /* ui-boundary-exception: inline-field-error */
           <p
-            className="px-2 pb-1.5 text-sm text-destructive"
+            className="px-2 pb-1 text-sm text-destructive"
             id={activityRangeErrorId}
             role="alert"
           >

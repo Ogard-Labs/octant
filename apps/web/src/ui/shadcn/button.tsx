@@ -59,10 +59,10 @@ const buttonVariants = cva(
       // which gives 20, 24, 28, and 32 at the default size.
       size: {
         default:
-          "h-[round(2.154rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
-        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
-        lg: "h-[round(2.462rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+          "h-[round(2.154rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
+        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
+        lg: "h-[round(2.462rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
         icon: "size-[round(2.154rem,2px)]",
         "icon-xs":
           "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
@@ -75,7 +75,7 @@ const buttonVariants = cva(
     compoundVariants: [
       {
         variant: "chip",
-        class: "h-auto px-2 py-0.5 text-xs",
+        class: "h-[round(1.846rem,2px)] px-2 py-0 text-xs",
       },
     ],
     defaultVariants: {
