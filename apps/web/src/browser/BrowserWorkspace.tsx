@@ -36,7 +36,9 @@ import {
   Camera,
   Globe2,
   ExternalLink,
+  Eye,
   Hand,
+  Laptop,
   LoaderCircle,
   LockKeyhole,
   PanelRight,
@@ -1002,7 +1004,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>
-      <header className="browser-workspace__chrome">
+      <header
+        className="browser-workspace__chrome"
+        {...(activeContext ? { "data-page": "open" } : {})}
+      >
         <div className="browser-workspace__history" aria-label="Browser history controls">
           <OctantButton
             aria-label="Back"
@@ -1165,8 +1170,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           }
         >
           {nativeState?.loading || nativeState?.control === "agent" ? (
-            <LoaderCircle aria-hidden="true" size={12} />
+            <LoaderCircle
+              aria-hidden="true"
+              className="browser-workspace__control-spinner"
+              size={12}
+            />
           ) : null}
+          {/* Shown only when a narrow tile leaves no room for the words. */}
+          <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
           <span>{controlLabel}</span>
           {activeContext ? (
             <span
@@ -1208,7 +1219,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             type="button"
             variant="secondary"
           >
-            Reclaim locally
+            <Laptop aria-hidden="true" />
+            <span className="browser-workspace__reclaim-label">Reclaim locally</span>
           </OctantButton>
         ) : null}
         {activeContext &&
