@@ -758,6 +758,13 @@
   gap: var(--oct-space-1);
 }
 
+/* The leading group is empty unless the thread offers an action in it (image
+   generation). An empty one is a zero-width flex item that still took a gap,
+   so Chat's first control stood 4px right of the row's start and Code's. */
+.chat-composer__leading:empty {
+  display: none;
+}
+
 /* The row is one line: the model's name shortens before anything wraps. */
 .chat-composer__selectors {
   flex: 0 1 auto;

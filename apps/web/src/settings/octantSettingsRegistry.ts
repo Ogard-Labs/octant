@@ -37,6 +37,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "enable work mode",
         },
         {
+          id: settingId("background-host"),
+          label: "Keep Octant running in the background",
+          scope: "app",
+          keywords:
+            "background service launch agent systemd login startup start at login open at login restart crash keep running",
+        },
+        {
+          id: settingId("open-at-login"),
+          label: "Open Octant at login",
+          scope: "app",
+          keywords: "open at login startup login item start window",
+        },
+        {
           id: settingId("app-updates"),
           label: "Updates",
           scope: "app",

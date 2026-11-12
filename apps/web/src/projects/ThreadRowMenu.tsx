@@ -556,7 +556,7 @@ function MenuContent(props: { readonly icon: LucideIcon; readonly children: Reac
   return (
     <>
       <span aria-hidden="true" className="thread-row-context-menu__icon">
-        <Icon size={14} />
+        <Icon size={16} />
       </span>
       <span className="thread-row-context-menu__item-label">{props.children}</span>
     </>

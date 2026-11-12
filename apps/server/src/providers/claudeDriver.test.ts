@@ -49,6 +49,7 @@ import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator"
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
 import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000702");
@@ -220,6 +221,7 @@ function harness(
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
+    readonly authorityNow?: () => number;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -357,6 +359,7 @@ function harness(
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
+      ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
       process,
       sdk,
       credentialResolver,
@@ -1013,6 +1016,65 @@ describe("Claude execution policy", () => {
 
     await acquired.close();
     now.mockRestore();
+  });
+
+  it("expires a pre-tool grant after its elapsed lifetime even when the wall clock is set back", async () => {
+    const wallClock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => Date.now(),
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const f = harness("subscription", "current-session", { authorityNow: clock.now() });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0];
+    if (open === undefined) throw new Error("Expected the opened query.");
+    const signal = new AbortController().signal;
+    const edit = (name: string) => ({
+      file_path: `${projectRoot}/${name}.txt`,
+      old_string: "before",
+      new_string: "after",
+    });
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: edit("first"),
+        toolUseId: "missing-callback",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+
+    elapsedMs += 30_001;
+    wallClock.mockReturnValue(1_000);
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: edit("next"),
+        toolUseId: "next-tool",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    // The expired grant is tombstoned, so its tool-use ID never asks again.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: edit("first"),
+        toolUseId: "missing-callback",
+        signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+
+    await acquired.close();
+    wallClock.mockRestore();
   });
 
   it("tombstones an unmatched pre-tool grant when its turn completes", async () => {

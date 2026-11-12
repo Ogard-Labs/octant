@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, realpath, lstat, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readdir, readFile, realpath, lstat, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
 import {
   MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH,
@@ -17,6 +17,8 @@ import {
   parseWorkbook,
   type WorkbookWorksheet,
 } from "../preview/previewWorkbookChunker";
+import { writeConfinedWorkFile } from "../work/workConfinedWrite";
+import { liveWorkFilesystem, type WorkFileIdentity } from "../work/workFilesystemPort";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
@@ -199,6 +201,39 @@ export interface NativeHarnessFileSystemOptions {
   readonly protectedFileRefusal?: (path: string) => string | undefined;
 }
 
+interface NativeHarnessWritePlacement {
+  readonly target: string;
+  readonly parent: { readonly absolutePath: string; readonly remaining: ReadonlyArray<string> };
+}
+
+/** A file the model creates gets the mode a path write gave it, before the umask. */
+const CREATED_FILE_MODE = 0o666;
+
+/**
+ * Bytes go to the object containment approved through a proved open, or
+ * nowhere. Containment is checked on paths, and the agent's own process can
+ * write the root: a path write after that check resolved the ancestors again
+ * and followed one swapped for a link to a host folder, in the unsandboxed
+ * server process.
+ */
+function movedWhileWriting(): NativeHarnessFileRefused {
+  return {
+    kind: "refused",
+    reason: "path-escapes-root",
+    message:
+      "The file or a folder above it changed while it was being written, so nothing was written.",
+  };
+}
+
+async function directoryIdentity(path: string): Promise<WorkFileIdentity | undefined> {
+  try {
+    const info = await liveWorkFilesystem.stat(path);
+    return info.isDirectory ? { device: info.device, inode: info.inode } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The files a harness session may touch, and nothing outside them.
  *
@@ -306,8 +341,9 @@ export class NativeHarnessFileSystem {
     readonly path: string;
     readonly content: string;
   }): Promise<NativeHarnessWriteResult> {
-    const target = await this.#containedForWrite(input.path);
-    if (target === undefined) return { kind: "refused", reason: "path-escapes-root" };
+    const placement = await this.#containedForWrite(input.path);
+    if (placement === undefined) return { kind: "refused", reason: "path-escapes-root" };
+    const { target, parent } = placement;
     const guarded = this.#protected(this.#lexical(input.path), target);
     if (guarded !== undefined) return guarded;
     let created = true;
@@ -316,9 +352,27 @@ export class NativeHarnessFileSystem {
       created = false;
       if (!existing.isFile()) return { kind: "refused", reason: "not-a-file" };
     } catch {
-      await mkdir(dirname(target), { recursive: true });
+      created = true;
     }
-    await writeFile(target, input.content, "utf8");
+    const bytes = Buffer.from(input.content, "utf8");
+    const parentIdentity = created ? await directoryIdentity(parent.absolutePath) : undefined;
+    const wrote = created
+      ? parentIdentity !== undefined &&
+        (await writeConfinedWorkFile({
+          filesystem: liveWorkFilesystem,
+          canonicalPath: target,
+          allowCreate: true,
+          parent: { ...parent, identity: parentIdentity },
+          createMode: CREATED_FILE_MODE,
+          bytes,
+        }))
+      : await writeConfinedWorkFile({
+          filesystem: liveWorkFilesystem,
+          canonicalPath: target,
+          allowCreate: false,
+          bytes,
+        });
+    if (!wrote) return movedWhileWriting();
     const info = await stat(target);
     this.#readMarks.set(target, info.mtime.toISOString());
     return {
@@ -339,7 +393,8 @@ export class NativeHarnessFileSystem {
     if (target.kind === "refused") return target;
     const edited = editedText(target.content, input);
     if (edited.kind === "refused") return edited;
-    await this.#put(target.key, edited.text);
+    const refusedPut = await this.#put(target.key, edited.text);
+    if (refusedPut !== undefined) return refusedPut;
     return {
       kind: "edited",
       path: target.path,
@@ -376,8 +431,14 @@ export class NativeHarnessFileSystem {
     return { kind: "loaded", key: resolved, path: this.#display(resolved), content };
   }
 
-  async #put(key: string, text: string): Promise<undefined> {
-    await writeFile(key, text, "utf8");
+  async #put(key: string, text: string): Promise<NativeHarnessFileRefused | undefined> {
+    const wrote = await writeConfinedWorkFile({
+      filesystem: liveWorkFilesystem,
+      canonicalPath: key,
+      allowCreate: false,
+      bytes: Buffer.from(text, "utf8"),
+    });
+    if (!wrote) return movedWhileWriting();
     const after = await stat(key);
     this.#readMarks.set(key, after.mtime.toISOString());
     return undefined;
@@ -550,10 +611,20 @@ export class NativeHarnessFileSystem {
     return this.#inProject(canonical) ? canonical : undefined;
   }
 
-  async #containedForWrite(candidate: string): Promise<string | undefined> {
+  /**
+   * The canonical path a write lands on, and the contained directory that
+   * already exists above it with the names a create makes below that
+   * directory. The write itself goes through that directory's proved open.
+   */
+  async #containedForWrite(candidate: string): Promise<NativeHarnessWritePlacement | undefined> {
     const absolute = isAbsolute(candidate) ? candidate : resolve(this.#root, candidate);
     const existing = await this.#contained(absolute);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      return {
+        target: existing,
+        parent: { absolutePath: dirname(existing), remaining: [basename(existing)] },
+      };
+    }
     // The file does not exist yet. Its nearest ancestor that does exist must
     // itself be contained — a symlinked directory that escapes the root is
     // refused here, not skipped over — and the segments below it are literal,
@@ -571,8 +642,11 @@ export class NativeHarnessFileSystem {
       if (exists) {
         const contained = await this.#contained(ancestor);
         if (contained === undefined) return undefined;
-        const target = join(contained, ...trailing.reverse());
-        return this.#inProject(target) ? target : undefined;
+        const remaining = trailing.reverse();
+        const target = join(contained, ...remaining);
+        return this.#inProject(target)
+          ? { target, parent: { absolutePath: contained, remaining } }
+          : undefined;
       }
       trailing.push(ancestor.slice(dirname(ancestor).length + 1));
       ancestor = dirname(ancestor);

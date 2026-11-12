@@ -36,6 +36,16 @@ export interface Projection {
    * about 7 s per projection on a 500,000-event journal.
    */
   readonly aggregateTypes?: ReadonlyArray<string>;
+  /**
+   * Set by a purely derived view: no command, authority check, or invariant
+   * reads it. A failing apply then holds back this projection alone (it is
+   * quarantined and its checkpoint stops advancing) and the append commits,
+   * instead of rolling back an authoritative write such as Stop or an
+   * approval. Every other projection stays authoritative: a failure rolls the
+   * whole append back. An authoritative projection may not depend on a
+   * derived one, since a held derived view would go stale under it.
+   */
+  readonly derived?: true;
   reset(connection: SqliteConnection): void;
   apply(connection: SqliteConnection, event: EventEnvelope): void;
 }
@@ -45,6 +55,13 @@ export class DuplicateProjectionRegistration extends Data.TaggedError(
 )<{ readonly projectionName: string }> {}
 
 export class UnknownProjectionDependency extends Data.TaggedError("UnknownProjectionDependency")<{
+  readonly projectionName: string;
+  readonly dependencyName: string;
+}> {}
+
+export class AuthoritativeProjectionDependsOnDerived extends Data.TaggedError(
+  "AuthoritativeProjectionDependsOnDerived",
+)<{
   readonly projectionName: string;
   readonly dependencyName: string;
 }> {}
@@ -97,8 +114,15 @@ export class ProjectionRegistry {
       throw new DuplicateProjectionRegistration({ projectionName: projection.name });
     }
     for (const dependency of projection.dependencies) {
-      if (!this.#projections.has(dependency)) {
+      const registered = this.#projections.get(dependency);
+      if (registered === undefined) {
         throw new UnknownProjectionDependency({
+          projectionName: projection.name,
+          dependencyName: dependency,
+        });
+      }
+      if (registered.derived === true && projection.derived !== true) {
+        throw new AuthoritativeProjectionDependsOnDerived({
           projectionName: projection.name,
           dependencyName: dependency,
         });
@@ -438,7 +462,7 @@ function quarantine(
   throw failure;
 }
 
-function recordQuarantine(
+export function recordQuarantine(
   connection: SqliteConnection,
   projectionName: string,
   event: QuarantinableEvent,

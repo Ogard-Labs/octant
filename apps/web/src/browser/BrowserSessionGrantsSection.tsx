@@ -266,7 +266,7 @@ export function BrowserSessionGrantsSection(props: {
                   </p>
                 )}
                 {review === undefined ? (
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
                     <label className="field">
                       <span className="field__label">Caller</span>
                       <OctantSelectField

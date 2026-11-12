@@ -35,6 +35,27 @@ export interface HostCapabilities {
   readonly liveAndroidFrameSupported: boolean;
 }
 
+/**
+ * Settings' background-host switches, as the desktop main process reads them
+ * back from the operating system. `unsupported` where the app has no
+ * windowless host to install; `openAtLogin` is absent where the system has no
+ * login item for the app.
+ */
+export type BackgroundHostState =
+  | { readonly status: "unsupported" }
+  | {
+      readonly status: "available";
+      readonly backgroundService: boolean;
+      readonly openAtLogin?: boolean;
+      /** The last change could not be made; the switches still show what is installed. */
+      readonly failure?: "background-service" | "open-at-login";
+    };
+
+export interface BackgroundHostChange {
+  readonly backgroundService?: boolean;
+  readonly openAtLogin?: boolean;
+}
+
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 

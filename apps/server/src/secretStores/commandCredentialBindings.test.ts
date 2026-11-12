@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/command-credentials";
 import type { CommandCredentialBindingsOptions } from "./commandCredentialBindings";
 import { CommandCredentialBindings } from "./commandCredentialBindings";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const definition = decodeCommandCredentialDefinition({
   label: "Read account",
@@ -181,6 +182,37 @@ describe("explicit named credential commands", () => {
       expect(f.execute).not.toHaveBeenCalled();
     },
   );
+  it("states and enforces a request's three minutes on the authority clock when the wall clock is set back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const startedAt = Date.UTC(2026, 10, 1);
+      vi.setSystemTime(startedAt);
+      let elapsedMs = 1_000;
+      const clock = new ProcessAuthorityClock({
+        wallClock: () => Date.now(),
+        suspendAwareElapsedSource: () => elapsedMs,
+      });
+      const f = fixture({ now: clock.now() });
+      elapsedMs += 10_000;
+      vi.setSystemTime(startedAt - 60 * 60 * 1_000);
+      const saved = await f.service.save(id(2), definition);
+      if (saved.kind !== "command-credential-view" || !saved.bindings[0])
+        throw Error("Expected binding");
+      const reviewed = await f.service.review(id(2), id(3), saved.bindings[0].bindingId, id(4));
+      if (reviewed.kind !== "command-credential-view" || !reviewed.requests[0])
+        throw Error("Expected review");
+      expect(reviewed.requests[0].expiresAt).toBe(
+        new Date(startedAt + 10_000 + 180_000).toISOString(),
+      );
+      elapsedMs += 180_001;
+      expect(await f.service.approve(id(2), reviewed.requests[0].requestId)).toMatchObject({
+        effect: "none",
+      });
+      expect(f.execute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("does not publish a settled receipt after its Project authority is lost", async () => {
     const f = fixture();
     const saved = await f.service.save(id(2), definition);

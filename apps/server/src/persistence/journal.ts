@@ -18,13 +18,19 @@ import {
   EventPayloadInvalid,
   JournalInputInvalid,
   JournalWriteFailed,
+  isSqliteDiskFull,
   isSqliteStorageFailure,
   ReplayEventInvalid,
   ThreadIdInUse,
   UnknownEventName,
   UnsupportedEventVersion,
 } from "./journalErrors";
-import { ProjectionApplicationFailed, ProjectionRegistry } from "./projection";
+import {
+  type Projection,
+  ProjectionApplicationFailed,
+  ProjectionRegistry,
+  recordQuarantine,
+} from "./projection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import { threadIdHeldByAnotherMode, threadModeOfAggregateType } from "./threadIdentity";
 
@@ -126,6 +132,7 @@ export class Journal {
   readonly #selectHead: SqliteStatement;
   readonly #insertEvent: SqliteStatement;
   readonly #upsertCheckpoint: SqliteStatement;
+  readonly #selectQuarantinedProjections: SqliteStatement;
   readonly #selectEventIdentity: SqliteStatement;
   readonly #selectHeadSequence: SqliteStatement;
   readonly #replayRows: SqliteStatement;
@@ -177,6 +184,9 @@ export class Journal {
       ON CONFLICT (projection_name) DO UPDATE SET
         last_sequence = excluded.last_sequence,
         updated_at = excluded.updated_at
+    `);
+    this.#selectQuarantinedProjections = options.connection.prepare(`
+      SELECT DISTINCT projection_name FROM event_quarantine
     `);
     this.#selectEventIdentity = options.connection.prepare(`
       SELECT event_id FROM event_journal WHERE event_id = ?
@@ -572,8 +582,25 @@ export class Journal {
         if (lastEvent === undefined) {
           throw new JournalWriteFailed({ operation: "append" });
         }
+        const projections = this.#projections.all();
+        const authoritative = projections.filter((projection) => projection.derived !== true);
+        const derived = projections.filter((projection) => projection.derived === true);
+        // A derived view with a quarantine row is held: it skips every later
+        // event and keeps its checkpoint, so its lag stays visible until
+        // db:rebuild replays it whole. Applying it past the gap would report a
+        // view that silently missed an event as current.
+        const held = new Set<string>();
+        if (derived.length > 0) {
+          for (const row of this.#selectQuarantinedProjections.all() as ReadonlyArray<{
+            readonly projection_name: string;
+          }>) {
+            if (derived.some((projection) => projection.name === row.projection_name)) {
+              held.add(row.projection_name);
+            }
+          }
+        }
         for (const event of events) {
-          for (const projection of this.#projections.all()) {
+          for (const projection of authoritative) {
             try {
               projection.apply(this.#connection, event);
             } catch (error) {
@@ -585,13 +612,15 @@ export class Journal {
               });
             }
           }
+          this.#applyDerivedViews(derived, held, event);
         }
         // One checkpoint row per projection per append, not per event: the
         // whole append commits or rolls back together, so the intermediate
         // sequences were never observable, and a streamed turn appends one
         // event per text delta across ~24 projections.
         const checkpointAt = this.#clock();
-        for (const projection of this.#projections.all()) {
+        for (const projection of projections) {
+          if (held.has(projection.name)) continue;
           this.#upsertCheckpoint.run(projection.name, lastEvent.globalSequence, checkpointAt);
         }
 
@@ -615,7 +644,11 @@ export class Journal {
       const isUniqueConstraint = sqliteFailure === "unique-constraint";
       const isWriteRace = sqliteFailure === "write-race";
       if (!isUniqueConstraint && !isWriteRace) {
-        throw new JournalWriteFailed({ operation: "append" });
+        throw new JournalWriteFailed(
+          isSqliteDiskFull(error)
+            ? { operation: "append", reason: "disk-full" }
+            : { operation: "append" },
+        );
       }
 
       try {
@@ -657,6 +690,56 @@ export class Journal {
     if (this.#heldAppends === undefined) this.#publish(committed);
     else this.#heldAppends.push(committed);
     return committed;
+  }
+
+  /**
+   * Applies the derived views to one event inside a savepoint, so a view that
+   * throws leaves none of its writes behind. The failing view is quarantined
+   * at this event and held; the others are applied again without it. A
+   * storage failure is not a view's fault and still fails the whole append.
+   */
+  #applyDerivedViews(
+    derived: ReadonlyArray<Projection>,
+    held: Set<string>,
+    event: EventEnvelope,
+  ): void {
+    for (;;) {
+      const live = derived.filter((projection) => !held.has(projection.name));
+      if (live.length === 0) return;
+      let applying: Projection | undefined;
+      this.#connection.exec("SAVEPOINT octant_derived_views");
+      try {
+        for (const projection of live) {
+          applying = projection;
+          projection.apply(this.#connection, event);
+        }
+        this.#connection.exec("RELEASE octant_derived_views");
+        return;
+      } catch (error) {
+        if (isSqliteStorageFailure(error) || applying === undefined) {
+          // A real SQLITE_FULL can roll back the whole transaction on its own,
+          // taking this savepoint with it; "no such savepoint" from the cleanup
+          // would then replace the failure that says the disk is full.
+          try {
+            this.#connection.exec("ROLLBACK TO octant_derived_views");
+            this.#connection.exec("RELEASE octant_derived_views");
+          } catch {
+            // The storage failure below is the one that explains the append.
+          }
+          throw error;
+        }
+        this.#connection.exec("ROLLBACK TO octant_derived_views");
+        this.#connection.exec("RELEASE octant_derived_views");
+        recordQuarantine(
+          this.#connection,
+          applying.name,
+          event,
+          "projection-application-failed",
+          this.#clock(),
+        );
+        held.add(applying.name);
+      }
+    }
   }
 
   /**

@@ -274,6 +274,16 @@ describe("remembered MCP tool approval", () => {
     ).toEqual({ kind: "covered" });
   });
 
+  it("treats a proxied stdio server on a thread that took in outside content as a network server", () => {
+    expect(
+      decideExtensionToolGrant(facts({ threadTainted: true, reach: "proxied-stdio" })),
+    ).toEqual({
+      kind: "ask",
+      reason: "network-tool-on-tainted-thread",
+      answerCovers: "server-on-thread",
+    });
+  });
+
   it("asks once for a network server on a thread that took in outside content, and that answer holds for the thread", () => {
     expect(decideExtensionToolGrant(facts({ threadTainted: true, reach: "network" }))).toEqual({
       kind: "ask",

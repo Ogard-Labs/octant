@@ -197,6 +197,11 @@ export interface ChatComposerProps {
   /** More for the notice card above the box: the draft's own provenance. */
   readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   readonly stopDisabledReason?: string;
+  /**
+   * A Stop was pressed on the running response and the host has not yet said
+   * how it ended, so the response keeps running until the runtime confirms.
+   */
+  readonly stopping?: boolean;
   /** The Create image action. Absent when the host serves no image generation. */
   readonly imageGeneration?: {
     readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
@@ -286,9 +291,11 @@ export function ChatComposer(props: ChatComposerProps) {
       : baseSendDisabledReason;
   const stopDisabledReason =
     props.stopDisabledReason ??
-    (props.isSending && props.onStop === undefined
-      ? "Stopping is unavailable for this response."
-      : undefined);
+    (props.isSending && props.stopping === true
+      ? "Stopping this response…"
+      : props.isSending && props.onStop === undefined
+        ? "Stopping is unavailable for this response."
+        : undefined);
   // Settings belong to the running turn; the draft, attachments, and mentions
   // belong to the next message and stay editable so it can be sent right away.
   const settingsLocked = props.isSending;
@@ -951,7 +958,7 @@ export function ChatComposer(props: ChatComposerProps) {
             onSend: send,
           },
           stop: {
-            ariaLabel: "Stop response",
+            ariaLabel: props.stopping === true ? "Stopping response…" : "Stop response",
             disabledReason: stopDisabledReason,
             onStop: () => props.onStop?.(),
             forceStop:

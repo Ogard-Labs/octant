@@ -5,6 +5,7 @@ import { WorkRequestRuntime } from "../work/workRequestRuntime";
 import { WorkRequestService } from "../work/workRequestService";
 import type { RunningWorkTurnAccess } from "../work/workTurnService";
 import type { WorkAccess } from "@octant/contracts";
+import { workApprovalPostureOf } from "@octant/domain";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { FoundationsWiring } from "./foundations";
@@ -45,6 +46,10 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
       threadProjectId: (threadId) => workThreadProjection.read(threadId)?.projectId,
       threadProviderInstanceId: (threadId) =>
         workThreadProjection.read(threadId)?.providerInstanceId,
+      threadApprovalPosture: (threadId) => {
+        const thread = workThreadProjection.read(threadId);
+        return thread === undefined ? undefined : workApprovalPostureOf(thread);
+      },
     },
     projection: workRequestProjection,
     eventStore: workRequestEventStore,

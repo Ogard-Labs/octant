@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(resolve(import.meta.dirname, "../styles/octant.css"), "utf8");
+const chat = readFileSync(resolve(import.meta.dirname, "../styles/chat.css"), "utf8");
 
 function rule(selector: string): string {
   const from = styles.indexOf(`\n${selector} {`);
@@ -37,5 +38,21 @@ describe("the composer's columns", () => {
     expect(rule(".composer-under")).toContain("position: relative");
     expect(rule(".thread-info")).toContain("position: static");
     expect(rule(".thread-info__panel")).toMatch(/left: 0;/);
+  });
+
+  it("starts the row on the same column in every mode: an empty leading group takes no gap", () => {
+    // Chat's row opened with an empty group that still took the row's 4px gap, so
+    // its first control stood 4px right of Code's (439.9 against 435.9) while the
+    // prompt's text edge was the same.
+    expect(chat).toMatch(/\.chat-composer__leading:empty \{\s*display: none;/);
+    expect(rule(".composer-row")).not.toMatch(/padding/);
+    expect(rule(".composer-under")).toMatch(/padding: 0;/);
+  });
+
+  it("makes the box's one line a whole number of pixels, so its cells centre on whole pixels", () => {
+    // 28px cell + two 8px insets is the 44px box; the prompt's line is rounded to
+    // an even pixel so the centring margin is whole at any transcript size.
+    expect(rule(".composer-input")).toMatch(/round\(\s*nearest,[^;]*2px\s*\)/);
+    expect(rule(".composer-field")).toMatch(/--oct-composer-line:\s*round\(/);
   });
 });

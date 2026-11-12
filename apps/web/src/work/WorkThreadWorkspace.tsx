@@ -52,7 +52,10 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
-import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
+import {
+  WorkRequestClientFailure,
+  type WorkRequestClient,
+} from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -1152,9 +1155,16 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
         );
         return true;
-      } catch {
+      } catch (error) {
         if (currentThreadKeyRef.current !== threadKey) return false;
-        setStatus("The answer could not be delivered.");
+        // The host's refusal says why, as when the thread's permissions changed
+        // since the request was asked and it asks again; a generic line would
+        // make the next answer look like a retry of a lost delivery.
+        setStatus(
+          error instanceof WorkRequestClientFailure
+            ? error.message
+            : "The answer could not be delivered.",
+        );
         return false;
       }
     },

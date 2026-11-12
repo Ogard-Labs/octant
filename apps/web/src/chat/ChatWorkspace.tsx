@@ -1839,15 +1839,26 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             {...(activeAttempt === undefined
               ? {}
               : {
+                  stopping: stoppingAttemptId !== undefined,
                   onStop: () => {
-                    setStopRequestedFor(String(activeAttempt.id));
-                    void props.controller.execute({
-                      kind: "interrupt-chat-turn",
-                      threadId: view.thread.id,
-                      expectedVersion: view.thread.version,
-                      turnId: activeAttempt.turnId,
-                      attemptId: activeAttempt.id,
-                    });
+                    const stopping = String(activeAttempt.id);
+                    setStopRequestedFor(stopping);
+                    void props.controller
+                      .execute({
+                        kind: "interrupt-chat-turn",
+                        threadId: view.thread.id,
+                        expectedVersion: view.thread.version,
+                        turnId: activeAttempt.turnId,
+                        attemptId: activeAttempt.id,
+                      })
+                      .then((result) => {
+                        // No result means the Stop never reached the host, so
+                        // nothing is stopping and Stop must stay usable.
+                        if (result === undefined)
+                          setStopRequestedFor((current) =>
+                            current === stopping ? undefined : current,
+                          );
+                      });
                   },
                   ...(forceStopOffered
                     ? {

@@ -3608,6 +3608,24 @@ describe("startOctantServer", () => {
     expect(output).not.toContain("sqlite");
   });
 
+  it("names what a refused store needs so the desktop can offer only actions that help", () => {
+    const output = fatalStartupOutput(
+      new PersistenceStartupFailed({
+        category: "recovery-required",
+        message: "Octant storage requires recovery before startup.",
+        recovery: "removal-unfinished",
+      }),
+    );
+
+    expect(JSON.parse(output)).toEqual({
+      product: "Octant",
+      status: "failed",
+      category: "recovery-required",
+      message: "Octant storage requires recovery before startup.",
+      recovery: "removal-unfinished",
+    });
+  });
+
   it("reports the Windows startup boundary without exposing its underlying dependency details", () => {
     const output = fatalStartupOutput(
       Object.assign(new Error("private dependency diagnostic"), { code: "OCTANT_WINDOWS_IMPORTS" }),

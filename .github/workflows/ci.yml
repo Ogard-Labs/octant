@@ -339,6 +339,21 @@ jobs:
           bun run --cwd apps/server test --
           src/providers/outsideDriverProcess.escape.test.ts
           src/computerUse/desktopDaemonPort.test.ts
+      # The sandbox escape probes gated on darwin skip on the Linux server
+      # shards, so this is where they run against the real sandbox-exec: the
+      # Seatbelt profile's write, Keychain, home and egress denials; a child
+      # that starts its own session still ends with its owner and stays
+      # confined; a runtime's network is its proxy alone; the secret guard
+      # refuses protected files; and a credential command runs confined.
+      - name: Seatbelt escape probes
+        timeout-minutes: 10
+        run: >-
+          bun run --cwd apps/server test --
+          src/process/seatbeltProfile.test.ts
+          src/process/sessionEscapeProcess.test.ts
+          src/process/secretGuard.test.ts
+          src/network/providerRuntimeNetwork.hostile.test.ts
+          src/secretStores/confinedCommandCredentialProcess.test.ts
 
   desktop-linux:
     name: Desktop Linux client trust
@@ -371,6 +386,15 @@ jobs:
       - env:
           OCTANT_REQUIRE_DESKTOP_PREVIEW_ISOLATION: "1"
         run: bun run --cwd apps/server test -- src/computerUse/desktopPreview.process.test.ts
+      # A provider runtime's capsule under real Bubblewrap cannot read the
+      # person's credentials beside its Project or inside a home opened as
+      # one. Only this job installs Bubblewrap, so it is required here.
+      - env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: >-
+          bun run --cwd apps/server test --
+          src/process/linuxConfinement.test.ts
+          -t "a provider runtime under Bubblewrap"
       # The real-page Browser suite drives the runner's Chrome through
       # Playwright; its launch hook timed out on ubuntu-24.04 (run
       # 42205818274). It is not part of Linux client trust, and the macOS job

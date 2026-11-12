@@ -46,7 +46,11 @@ import {
 } from "@octant/domain";
 import { withoutThreadReplyDetails } from "@octant/domain/reply-detail-policy";
 import { Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
@@ -682,7 +686,7 @@ export class ShellService implements ShellServiceApi {
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
       return new ShellServiceError({
         category: "unavailable",
-        message: "Octant could not save shell state.",
+        message: persistenceFailureMessage(error, "Octant could not save shell state."),
       });
     }
     return new ShellServiceError({

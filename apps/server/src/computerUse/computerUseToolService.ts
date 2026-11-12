@@ -84,6 +84,12 @@ export function createComputerUseToolService(options: {
   readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
   readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void>;
+  /**
+   * The server's process authority clock. An unanswered approval offer
+   * expires from it, so a wall clock set back cannot extend one. An app
+   * grant has no clock at all.
+   */
+  readonly now: () => number;
 }) {
   const pending = new Map<
     string,
@@ -242,7 +248,9 @@ export function createComputerUseToolService(options: {
       return options.outsideContent?.(action.owner) ?? { sources: [], sourceCount: 0 };
     },
     uuid: randomUUID,
-    clock: () => new Date().toISOString(),
+    // Approval events carry this clock's time, and an offer's expiry is
+    // computed from it, so both stay on the authority clock.
+    clock: () => new Date(options.now()).toISOString(),
     evidence: { record: options.record },
     adapter: {
       observe: async (request) => {

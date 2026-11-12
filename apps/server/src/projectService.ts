@@ -90,7 +90,11 @@ import { BindingReceiptError, type BindingReceiptStorePort } from "./bindingRece
 import { defaultFolderProjectRoot, effectiveDefaultFolder } from "./defaultFolder";
 import { isWorkStatusDate } from "@octant/domain/work-project-status-policy";
 import type { WorkStatusDate } from "@octant/contracts/work-project-status";
-import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import type { ProjectRootPort } from "./projectRootPort";
@@ -1256,14 +1260,14 @@ export class ProjectService implements ProjectServiceApi {
         currentVersion: decodeAggregateVersion(error.actualVersion),
       });
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed)
-      return this.#unavailable();
+      return this.#unavailable(error);
     return this.#unavailable();
   }
 
-  #unavailable(): ProjectServiceError {
+  #unavailable(error?: unknown): ProjectServiceError {
     return new ProjectServiceError({
       category: "unavailable",
-      message: "Octant Project service is unavailable.",
+      message: persistenceFailureMessage(error, "Octant Project service is unavailable."),
     });
   }
 }
