@@ -61,7 +61,6 @@ describe("CodePullRequestPane", () => {
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         scope={scope}
       />,
     );
@@ -78,7 +77,6 @@ describe("CodePullRequestPane", () => {
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "create-pull-request",
-        idempotencyKey: "thread-delivery-v1",
       }),
     );
   });
@@ -89,7 +87,6 @@ describe("CodePullRequestPane", () => {
         client={codeClient()}
         createOperationId={() => ids.operation as never}
         executionPolicy="plan"
-        idempotencyKey="thread-delivery-v1"
         scope={scope}
       />,
     );
@@ -105,7 +102,6 @@ describe("CodePullRequestPane", () => {
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         scope={scope}
       />,
     );
@@ -132,7 +128,6 @@ describe("CodePullRequestPane", () => {
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         scope={scope}
       />,
     );
@@ -152,7 +147,6 @@ describe("CodePullRequestPane", () => {
         client={codeClient()}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         review={{
           kind: "pull-request-review",
           operationId: ids.operation as never,
@@ -179,7 +173,6 @@ describe("CodePullRequestPane", () => {
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         onNavigateThread={onNavigateThread}
         onNavigateWorktree={onNavigateWorktree}
         review={observedReview()}
@@ -216,7 +209,6 @@ describe("CodePullRequestPane", () => {
         client={codeClient()}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         review={observedReview({
           freshness: "stale",
           ambiguous: true,
@@ -240,7 +232,6 @@ describe("CodePullRequestPane", () => {
         client={codeClient()}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         review={{
           kind: "pull-request-review",
           operationId: ids.operation as never,
@@ -269,7 +260,6 @@ describe("CodePullRequestPane", () => {
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="full-access"
-        idempotencyKey="thread-delivery-v1"
         scope={scope}
       />,
     );
@@ -348,7 +338,6 @@ describe("CodePullRequestPane", () => {
           client={client}
           createOperationId={() => ids.operation as never}
           executionPolicy="full-access"
-          idempotencyKey="thread-delivery-v1"
           scope={scope}
         />,
       );
@@ -464,7 +453,6 @@ describe("CodePullRequestPane", () => {
           client={codeClient()}
           createOperationId={() => ids.operation as never}
           executionPolicy="full-access"
-          idempotencyKey="thread-delivery-v1"
           scope={scope}
         />,
       );

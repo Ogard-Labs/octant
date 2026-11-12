@@ -1289,6 +1289,15 @@ export function createCodeOperationRuntime(
                   state,
                 }),
               ),
+            describe: (threadId, operationId, remoteStep) =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.describeRemoteStep({
+                  id: operationId,
+                  threadId,
+                  kind: "delivery",
+                  remoteStep,
+                }),
+              ),
           },
         }),
     ...(options.holdsServerThread === undefined
@@ -2672,6 +2681,8 @@ interface ActiveTurn {
   };
   /** Set once the turn has settled; a late chunk is dropped instead of re-arming a timer. */
   closed?: boolean;
+  /** Set when the host's shutdown stopped the turn; it journals no outcome of its own. */
+  shutDown?: boolean;
   /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
   deltaFlushFailure?: { readonly error: unknown };
   /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
@@ -4943,11 +4954,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.reviewCapture?.close();
-        // Shutdown loses only the open burst, as a crash would.
+        // Shutdown loses only the open burst, as a crash would. The turn's
+        // record stays running, also as a crash leaves it, so the next start
+        // finds it cut off by the restart and continues it: a reboot quits
+        // Octant cleanly, and its turns are owed the same continuation.
         this.#flushBeforeStop(active);
         active.closed = true;
+        active.shutDown = true;
         active.state = "interrupted";
-        this.#persistRuntimeWork(active, "interrupted");
+        this.settleSpendReservation(active.operationId);
         active.abort.abort();
         if (active.connection === undefined) return;
         await Effect.runPromise(
@@ -6279,6 +6294,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     outcome: CodeTurnOutcome,
     failure?: CodeOperationFailure,
   ): void {
+    // A turn the host's shutdown stopped is journaled as a crash leaves it:
+    // the runner's own `interrupted` would read as a person's Stop, and the
+    // next start would not continue it.
+    if (active.shutDown === true) return;
     if (outcome === "completed" && active.deltaFlushFailure !== undefined) {
       outcome = "failed";
       failure = evidenceCapacityFailure(active.deltaFlushFailure.error);

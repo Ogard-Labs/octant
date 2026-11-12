@@ -245,6 +245,7 @@ export function startOctantServer(
       workArtifactProjection,
       workThreadProjection,
       workTurnProjection,
+      workTurnsCutOffByRestart,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -584,6 +585,7 @@ export function startOctantServer(
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
+      liftRestartRecovery,
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
@@ -983,6 +985,7 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      chatAttemptsCutOffByRestart,
       chatHiddenThreadIds,
       chatRoutes,
       chatService,
@@ -1156,18 +1159,24 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
     });
-    yield* wireContinuation({
+    const { restartRecovery } = yield* wireContinuation({
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
       capacityScheduler,
+      chatAttemptsCutOffByRestart,
       chatService,
+      codeBoardEventStore,
+      codeOperationRuntime,
       contextHarness,
       externalContentIngestionStore,
+      liftRestartRecovery,
       persistence,
       routeCodeService,
+      threadMessageQueue,
       workThreadProjection,
       workTurnProjection,
+      workTurnsCutOffByRestart,
       workTurnService,
     });
     const { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService } =
@@ -1815,6 +1824,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      restartRecovery,
       agentGrantRouteSlot,
       workRequestRuntime,
       workRequestService,

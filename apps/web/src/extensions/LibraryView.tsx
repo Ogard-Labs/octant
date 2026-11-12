@@ -930,6 +930,9 @@ function LibraryDetail(props: LibraryDetailProps) {
                   registration: {
                     guideUrl: item.connectorAuth.setupGuide,
                     requestedScopes: item.connectorAuth.requestedScopes ?? [],
+                    ...(item.connectorAuth.setupSteps === undefined
+                      ? {}
+                      : { setupSteps: item.connectorAuth.setupSteps }),
                     ...(item.connectorAuth.permissionNotice === undefined
                       ? {}
                       : { permissionNotice: item.connectorAuth.permissionNotice }),
@@ -970,6 +973,12 @@ function LibraryDetail(props: LibraryDetailProps) {
             . Kept in {thisComputerName(hostPlatform)}&apos;s credential store.
           </span>
         </form>
+      ) : null}
+      {connector &&
+      item.connectorAuth?.kind === "sign-in" &&
+      item.connectorAuth.clientSetup !== "registered" &&
+      item.connectorAuth.permissionNotice !== undefined ? (
+        <p className="oct-meta">{item.connectorAuth.permissionNotice}</p>
       ) : null}
       <footer className="library-detail__actions">
         {localSetup && available ? (
