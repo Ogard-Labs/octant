@@ -57,7 +57,7 @@ describe("ThreadComposer", () => {
         row={{
           attach: <button type="button">Attach</button>,
           trailing: <button type="button">Model name</button>,
-          approval: <button type="button">Approvals: Ask first</button>,
+          approval: <button type="button">Mode: Ask first</button>,
           actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
         }}
       />,
@@ -67,7 +67,7 @@ describe("ThreadComposer", () => {
     const order = [
       screen.getByText("Project"),
       screen.getByRole("button", { name: "Model name" }),
-      screen.getByRole("button", { name: "Approvals: Ask first" }),
+      screen.getByRole("button", { name: "Mode: Ask first" }),
     ];
     for (const element of order) expect(under).toContainElement(element);
     // Reading order is visual order: tab goes Project, model, approvals.

@@ -2189,6 +2189,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   ]
     .filter((part): part is string => part !== undefined)
     .join(" / ");
+  // The full place for a pointer user when the row cuts the name short; the
+  // spans inside the button carry no title of their own.
+  const placeTooltip = [
+    "Thread info",
+    [projectLabel, path].filter((part): part is string => part !== undefined).join(" · "),
+  ]
+    .filter((part) => part !== "")
+    .join(": ");
   const placeControl = (
     <>
       <span className="composer-place__icon">
@@ -2833,7 +2841,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ? {}
             : {
                 info: (
-                  <ThreadInfo place={{ label: placeName, content: placeControl }}>
+                  <ThreadInfo
+                    place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
+                  >
                     <ThreadGuardrailLevel
                       factsVersion={thread.version}
                       factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}

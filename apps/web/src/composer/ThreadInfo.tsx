@@ -62,7 +62,12 @@ export function ThreadInfo(props: {
    * the panel on that name, so the row has one control where it had a name and
    * an info icon; without it the panel has its own small icon.
    */
-  readonly place?: { readonly label: string; readonly content: ReactNode };
+  readonly place?: {
+    readonly label: string;
+    readonly content: ReactNode;
+    /** The tooltip: the full place when its words are cut to fit the row. */
+    readonly tooltip?: string;
+  };
 }) {
   const [open, setOpen] = useState(false);
   const [flags, setFlags] = useState<ReadonlySet<string>>(() => new Set());
@@ -113,7 +118,13 @@ export function ThreadInfo(props: {
         {/* The button is its icon alone: its two words made the line under
             the card wrap in a split pane, and left the trailing control on a
             line of its own. A waiting review still says so in words. */}
-        <OctantTooltip align="start" label="Thread info" side="top">
+        <OctantTooltip
+          align="start"
+          label={
+            place === undefined ? "Thread info" : (place.tooltip ?? `Thread info: ${place.label}`)
+          }
+          side="top"
+        >
           <OctantButton
             aria-controls={panelId}
             aria-expanded={open}

@@ -598,9 +598,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("my-repo")).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
-    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
-      "Approvals: Ask first",
-    );
+    expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Ask first");
   });
 
   it("forwards the access posture the code composer submitted with", async () => {
@@ -617,7 +615,7 @@ describe("DraftThreadWorkspace", () => {
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
-    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
+    await user.click(screen.getByRole("button", { name: /^Mode:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -1294,7 +1292,7 @@ describe("DraftThreadWorkspace", () => {
 
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Keep this exact prompt");
-    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
+    await user.click(screen.getByRole("button", { name: /^Mode:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Full access/ }));
     await user.click(await screen.findByRole("button", { name: "Use Full access" }));
 
@@ -1306,8 +1304,8 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this exact prompt",
     );
-    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
-      "Approvals: Full access",
+    expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
+      "Mode: Full access",
     );
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });

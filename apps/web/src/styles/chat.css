@@ -758,15 +758,26 @@
   gap: var(--oct-space-1);
 }
 
+/* The row is one line: the model's name shortens before anything wraps. */
 .chat-composer__selectors {
   flex: 0 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 /* The row is one line: web research is an icon, and its routing choice takes
    its own width, not the line's free space. */
 .chat-composer__research {
   flex: 0 1 auto;
+  min-width: 96px;
+}
+/* The routing choice ends in an ellipsis, but keeps enough to be read before
+   the model's name shortens. */
+.chat-composer__research label {
+  flex: 0 1 auto;
+  min-width: 64px;
+}
+.chat-composer__research label [role="combobox"] {
+  min-width: 64px;
 }
 
 /* Only toolbar labels shrink-wrap their control; the message field's block
@@ -975,9 +986,14 @@
     flex: 0 1 auto;
   }
 
-  .chat-composer__selectors,
-  .chat-composer__research {
+  .chat-composer__selectors {
     min-width: 0;
+  }
+  .chat-composer__research {
+    min-width: 96px;
+  }
+  .chat-composer__research label {
+    min-width: 64px;
   }
 
   .chat-composer__selectors [role="combobox"],

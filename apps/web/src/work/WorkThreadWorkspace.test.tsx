@@ -266,8 +266,9 @@ describe("WorkThreadWorkspace", () => {
       );
       const strip = await screen.findByRole("button", { name: /^Thread info/ });
       expect(within(strip).getByText("Research")).toBeVisible();
-      expect(within(strip).getByText("research/brief")).toHaveAttribute(
-        "title",
+      expect(within(strip).getByText("research/brief")).toBeVisible();
+      await userEvent.setup().hover(strip);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         matching ? "/Users/example/Research/research/brief" : "research/brief",
       );
       expect(strip.closest(".composer-under")).not.toBeNull();
@@ -305,7 +306,9 @@ describe("WorkThreadWorkspace", () => {
     );
     const strip = await screen.findByRole("button", { name: /^Thread info/ });
     // One "Research", and hovering it still tells where the folder is.
-    expect(within(strip).getByText("Research")).toHaveAttribute("title", "/Users/example/Research");
+    expect(within(strip).getByText("Research")).toBeVisible();
+    await userEvent.setup().hover(strip);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("/Users/example/Research");
   });
 
   it("names the server and folder a thread on a server works in", async () => {
@@ -341,7 +344,8 @@ describe("WorkThreadWorkspace", () => {
     );
     const strip = await screen.findByRole("button", { name: /^Thread info/ });
     expect(within(strip).getByText("Notes")).toBeVisible();
-    expect(within(strip).getByText("notes")).toHaveAttribute("title", "devbox:/home/build/notes");
+    await userEvent.setup().hover(strip);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("devbox:/home/build/notes");
   });
 
   it("keeps a Browser approval visible and explains a failed decision", async () => {
@@ -1031,8 +1035,8 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    const mode = await screen.findByRole("button", { name: /^Approvals:/ });
-    expect(mode).toHaveAccessibleName("Approvals: Ask first");
+    const mode = await screen.findByRole("button", { name: /^Mode:/ });
+    expect(mode).toHaveAccessibleName("Mode: Ask first");
     await user.click(mode);
     expect(screen.queryByRole("menuitemradio", { name: /^Plan/ })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("menuitemradio", { name: /^Full access/ }));
@@ -1044,8 +1048,8 @@ describe("WorkThreadWorkspace", () => {
       access: "full-access",
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
-        "Approvals: Full access",
+      expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
+        "Mode: Full access",
       ),
     );
   });

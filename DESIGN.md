@@ -963,9 +963,10 @@ control (its icon in the leading cell, then its name; in Code the checkout's
 branch, diff and pull-request icon follow it), the surface's own icons (Create
 image, Plan, Web research), then, right-aligned, the plan meters where there
 are any, the model's name in meta ink with no chevron, the approval mode as one
-icon-only button, and the context ring. The approval button's accessible name
-and tooltip state the mode ("Approvals: Ask first"); it is one shield icon for
-every mode, since no mode has an icon of its own. Labels are the 12px meta step
+icon-only button (Full access adds its words), and the context ring. The approval button's accessible name
+and tooltip state the mode ("Mode: Ask first"); each mode has its own icon, and
+Full access alone keeps its words beside it, in the warning ink (danger without
+the sandbox), so it cannot be read as asking first. Labels are the 12px meta step
 in the meta ink, icons are 16px, nothing is filled at rest, and the standard
 hover fill answers the pointer. A long Project name ends in an ellipsis and
 never pushes the right side under it. Where a Work thread names its Project,

@@ -243,6 +243,12 @@
   --oct-icon-sm: 14px;
   --oct-icon-md: 16px;
   --oct-icon-lg: 20px;
+  /* The composer's columns. The box's attach and send buttons are one cell, the
+     row under it repeats that cell, and the prompt's text and the row's first
+     text start the same distance in: inset + cell + gap + gap. */
+  --oct-composer-cell: 28px;
+  --oct-composer-inset: var(--oct-space-2);
+  --oct-composer-gap: var(--oct-space-1);
   --oct-icon-mark: 32px;
 
   --oct-avatar-sm: 24px;
@@ -4597,9 +4603,9 @@ input.switch:checked::after {
 .composer-field {
   display: flex;
   align-items: flex-end;
-  gap: var(--oct-space-1);
+  gap: var(--oct-composer-gap);
   min-width: 0;
-  padding-inline: var(--oct-space-2);
+  padding-inline: var(--oct-composer-inset);
 }
 .composer-field__prompt {
   flex: 1 1 auto;
@@ -4619,7 +4625,7 @@ input.switch:checked::after {
   font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
-  margin-bottom: calc((1lh - 4px) / 2);
+  margin-bottom: calc((1lh + 24px - var(--oct-composer-cell)) / 2);
 }
 /* The microphone's failure is said in the notice card above the box, where it
    wraps; beside the control it was cut to fit, and a cut failure is not read.
@@ -4639,7 +4645,7 @@ input.switch:checked::after {
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
 .composer-field__attach + .composer-field__prompt .composer-input {
-  padding-inline-start: var(--oct-space-1);
+  padding-inline-start: var(--oct-composer-gap);
 }
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
@@ -4648,16 +4654,16 @@ input.switch:checked::after {
    with the control corner, 8px in from the 12px corner of the box. */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
-  min-height: 28px;
-  height: 28px;
+  min-height: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
   box-shadow: none;
 }
 .composer-field__attach button[data-size="icon"],
 .composer-field__actions button[data-size="icon"] {
-  width: 28px;
-  min-width: 28px;
+  width: var(--oct-composer-cell);
+  min-width: var(--oct-composer-cell);
   padding: 0;
 }
 /* The row under the box is one line on the box's own columns, with no fill
@@ -4674,7 +4680,7 @@ input.switch:checked::after {
   align-items: center;
   gap: var(--oct-space-2);
   min-width: 0;
-  height: 28px;
+  height: var(--oct-composer-cell);
   padding: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -4693,16 +4699,16 @@ input.switch:checked::after {
 .composer-place {
   display: flex;
   align-items: center;
-  gap: var(--oct-space-2);
+  gap: calc(var(--oct-composer-gap) * 2);
   min-width: 0;
 }
 .composer-place__icon {
   display: inline-flex;
-  flex: 0 0 28px;
+  flex: 0 0 var(--oct-composer-cell);
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
 }
 .composer-place__name,
 .composer-place__folder {
@@ -4719,8 +4725,8 @@ input.switch:checked::after {
 }
 .composer-place--control {
   max-width: 100%;
-  height: 28px;
-  min-height: 28px;
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
   padding: 0 var(--oct-space-2) 0 0;
   font-size: var(--oct-text-xs);
 }
@@ -4758,7 +4764,10 @@ input.switch:checked::after {
     max-width: none;
   }
   .composer-under
-    > :is(.thread-composer__context, .thread-info:has(.composer-place--control))
+    > :is(
+      .thread-composer__context:not(:empty, :has(> :only-child:empty)),
+      .thread-info:has(.composer-place--control)
+    )
     ~ .composer-row {
     flex: 1 0 100%;
   }
@@ -4771,8 +4780,8 @@ input.switch:checked::after {
   flex-wrap: nowrap;
   align-items: center;
   min-width: 0;
-  height: 28px;
-  min-height: 28px;
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
   gap: var(--oct-space-1);
   border-top: 0;
 }
@@ -4784,6 +4793,10 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   margin-inline-start: auto;
 }
+.composer-row > .composer-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .composer-actions > .thread-plan-windows {
   flex: 0 1 auto;
   min-width: 0;
@@ -4793,11 +4806,14 @@ input.switch:checked::after {
    when even that is not enough the row wraps rather than pushing the send
    control past the frame's edge, where it went missing at 430px. */
 .composer-row .composer-model-picker {
+  display: flex;
   min-width: 0;
   max-width: 200px;
   flex: 0 1 auto;
 }
 .composer-row .composer-model-picker__trigger {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 /* One control size and one label size across the whole row. Measured before
@@ -4811,8 +4827,8 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"] {
-  min-height: 28px;
-  height: 28px;
+  min-height: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
   border-radius: var(--oct-radius-sm);
 }
 /* The composer is one raised object, so nothing riding its row draws a second
@@ -4832,10 +4848,10 @@ input.switch:checked::after {
    controls on the page are. */
 .composer-row button[data-size="icon"],
 .thread-info > button[data-size="icon"] {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: var(--oct-composer-cell);
+  min-width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
@@ -4845,8 +4861,9 @@ input.switch:checked::after {
    bordered picker, opening from the row's left edge. */
 .composer-row [role="combobox"] {
   width: auto;
+  min-width: 0;
   max-width: 190px;
-  min-height: 28px;
+  min-height: var(--oct-composer-cell);
   padding-inline: 8px;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
@@ -4860,12 +4877,27 @@ input.switch:checked::after {
    title band above them read as one system. The model picker is a button
    recipe and keeps the recipe's own hover; a product class may not repaint
    it (ui:check counts that as a repaint). */
-/* No control in the row carries a chevron: a label opens its menu without one. */
-.composer-row [role="combobox"] > svg {
-  display: none;
+/* Full access keeps its words beside its icon, in the warning ink (danger
+   without the sandbox), so it cannot be read as asking first. */
+.composer-row .code-composer-choice__trigger[data-mode="full-access"] {
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-1) var(--oct-space-2);
 }
-.composer-row select {
-  appearance: none;
+.code-composer-choice__word {
+  color: var(--oct-danger-fg);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+.code-composer-choice__word[data-sandboxed="true"] {
+  color: var(--oct-warn-fg);
+}
+.composer-row .code-composer-choice__trigger[data-mode="full-access"] > svg {
+  color: var(--oct-danger-fg);
+}
+/* No control in the row carries a chevron: a label opens its menu without one. */
+.composer-row [role="combobox"] > svg,
+.composer-row [role="combobox"] > [aria-hidden="true"] {
+  display: none;
 }
 .composer-row [role="combobox"]:hover {
   color: var(--oct-fg);
@@ -4878,7 +4910,7 @@ input.switch:checked::after {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  min-height: 28px;
+  min-height: var(--oct-composer-cell);
   padding-block: 0;
   padding-inline: 8px var(--oct-space-2);
   color: var(--oct-meta);
@@ -4905,7 +4937,7 @@ input.switch:checked::after {
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
 .composer-row .composer-model-picker--empty {
-  min-height: 28px;
+  min-height: var(--oct-composer-cell);
   padding: 0;
   border: 0;
   background: transparent;
@@ -4980,7 +5012,7 @@ input.switch:checked::after {
 }
 /* A row starts where the box's first control does. */
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
-  padding-inline: var(--oct-space-2);
+  padding-inline: var(--oct-composer-inset);
 }
 /* The composer's one raised surface: a container, so its corner is the
    container token at one line and at four. */
@@ -5090,7 +5122,7 @@ input.switch:checked::after {
   position: absolute;
   top: 12px;
   /* Clear of send at the box's trailing edge. */
-  right: calc(var(--oct-space-2) * 2 + 28px);
+  right: calc(var(--oct-space-2) * 2 + var(--oct-composer-cell));
   padding: 1px var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   box-shadow: inset 0 0 0 1px var(--oct-border);
@@ -5111,7 +5143,7 @@ input.switch:checked::after {
   flex: 0 1 auto;
   max-width: 60%;
   align-items: center;
-  height: 28px;
+  height: var(--oct-composer-cell);
   min-width: 0;
   padding: 0;
   color: var(--oct-meta);

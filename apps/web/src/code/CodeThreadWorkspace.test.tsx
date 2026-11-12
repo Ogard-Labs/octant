@@ -521,7 +521,7 @@ describe("CodeThreadWorkspace", () => {
       </AgentProfileNamesProvider>,
     );
     expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
+    await user.click(screen.getByRole("button", { name: /^Mode:/ }));
     expect(await screen.findByText("Started under Reviewer")).toBeVisible();
     await user.keyboard("{Escape}");
 
@@ -548,7 +548,7 @@ describe("CodeThreadWorkspace", () => {
     // Under the pill the row reads the model's name, then the approval control,
     // then the context ring: attach, the prompt, the microphone and send above.
     const attach = screen.getByRole("button", { name: "Add attachment" });
-    const access = screen.getByRole("button", { name: /^Approvals:/ });
+    const access = screen.getByRole("button", { name: /^Mode:/ });
     const model = screen.getByRole("button", { name: "Provider and model" });
     const follows = (before: Node, after: Node) =>
       (before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -2343,8 +2343,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const mode = screen.getByRole("button", { name: /^Approvals:/ });
-    expect(mode).toHaveAccessibleName("Approvals: Ask first");
+    const mode = screen.getByRole("button", { name: /^Mode:/ });
+    expect(mode).toHaveAccessibleName("Mode: Ask first");
     await user.click(mode);
     expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
     await user.click(await screen.findByRole("menuitemradio", { name: "Auto · Recommended" }));
@@ -2358,7 +2358,7 @@ describe("CodeThreadWorkspace", () => {
     });
 
     // The first Full access pick in a Project waits for the warning.
-    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
+    await user.click(screen.getByRole("button", { name: /^Mode:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Full access" }));
     expect(execute).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("dialog", { name: "Use Full access?" })).toHaveTextContent(
@@ -2374,7 +2374,7 @@ describe("CodeThreadWorkspace", () => {
     const user = userEvent.setup();
     render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
 
-    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
+    await user.click(screen.getByRole("button", { name: /^Mode:/ }));
     const auto = await screen.findByRole("menuitemradio", { name: "Auto" });
     expect(auto).toHaveAttribute("aria-disabled", "true");
     expect(auto).toHaveAccessibleDescription(
@@ -2393,8 +2393,8 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    const mode = screen.getByRole("button", { name: /^Approvals:/ });
-    expect(mode).toHaveAccessibleName("Approvals: Full access");
+    const mode = screen.getByRole("button", { name: /^Mode:/ });
+    expect(mode).toHaveAccessibleName("Mode: Full access");
     expect(mode).toHaveAccessibleDescription(
       "No sandbox and no prompts. Every action is still recorded.",
     );

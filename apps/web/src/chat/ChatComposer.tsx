@@ -766,12 +766,12 @@ export function ChatComposer(props: ChatComposerProps) {
       </div>
       <div className="chat-composer__research">
         <OctantButton
-          aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
+          aria-label="Web research"
           aria-pressed={props.research.enabled}
           disabled={settingsLocked}
           onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
           size="icon"
-          title={props.research.enabled ? "Web research is on" : "Web research is off"}
+          title="Web research"
           type="button"
           variant={props.research.enabled ? "secondary" : "ghost"}
         >
