@@ -155,11 +155,39 @@ describe("Canvas choice answers", () => {
       EMPTY_CANVAS_CHOICE_ANSWER_STATE,
     );
     const cleared = admit(
-      revise([{ kind: "clear", blockId: "decisions", questionId: "who" }], 1),
+      revise(
+        [
+          {
+            kind: "clear",
+            blockId: "decisions",
+            questionId: "who",
+            questionFingerprint: canvasChoiceQuestionFingerprint(who),
+          },
+        ],
+        1,
+      ),
       state,
     );
     if (cleared.kind !== "accepted") throw new Error(cleared.message);
     expect(cleared.events.reduce(applyCanvasChoiceAnswerEvent, state).answers).toEqual([]);
+  });
+
+  it("refuses to clear an answer from a window that still shows the question before it was revised", () => {
+    const first = admit(revise([set()]));
+    if (first.kind !== "accepted") throw new Error(first.message);
+    const state = first.events.reduce(
+      applyCanvasChoiceAnswerEvent,
+      EMPTY_CANVAS_CHOICE_ANSWER_STATE,
+    );
+    expect(
+      admit(
+        revise(
+          [{ kind: "clear", blockId: "decisions", questionId: "who", questionFingerprint: "old" }],
+          1,
+        ),
+        state,
+      ),
+    ).toMatchObject({ kind: "rejected", code: "question-changed" });
   });
 
   it("recommends only where the recommendation is unambiguous and allowed", () => {

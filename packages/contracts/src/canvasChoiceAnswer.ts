@@ -91,6 +91,8 @@ export const CanvasChoiceAnswerChange = Schema.Union(
     kind: Schema.Literal("clear"),
     blockId: CanvasBlockId,
     questionId: QuestionId,
+    /** The question as the window drew it, so a window showing an old question cannot erase the answer to its revision. */
+    questionFingerprint: CanvasChoiceQuestionFingerprint,
   }).annotations(strict),
 );
 export type CanvasChoiceAnswerChange = typeof CanvasChoiceAnswerChange.Type;

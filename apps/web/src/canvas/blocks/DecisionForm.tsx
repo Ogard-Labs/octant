@@ -139,7 +139,12 @@ export function DecisionForm(props: DecisionFormProps) {
       }
     } else if (draft.selected.length === 0) {
       if (saved !== undefined || (inFlight.current.get(question.id) ?? 0) > 0) {
-        change = { kind: "clear", blockId: block.blockId, questionId: question.id };
+        change = {
+          kind: "clear",
+          blockId: block.blockId,
+          questionId: question.id,
+          questionFingerprint: canvasChoiceQuestionFingerprint(question),
+        };
       }
     } else if (questionAnswerIsAllowed(question, { selectedOptionIds: draft.selected })) {
       change = {

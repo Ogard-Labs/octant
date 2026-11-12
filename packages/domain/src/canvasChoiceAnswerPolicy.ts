@@ -128,6 +128,9 @@ export function admitCanvasChoiceAnswersRevision(
       return reject("unknown-question", "That question is no longer in the Canvas.");
     }
     const sequence = state.sequence + index + 1;
+    if (change.questionFingerprint !== canvasChoiceQuestionFingerprint(question)) {
+      return reject("question-changed", "This question changed; reload to answer it again.");
+    }
     if (change.kind === "clear") {
       events.push({
         kind: "cleared",
