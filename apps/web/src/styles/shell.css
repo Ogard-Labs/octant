@@ -657,15 +657,30 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
 }
 
-.window-chrome__button:hover,
-.window-chrome__button[aria-expanded="true"] {
+.window-chrome__button:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border-color: transparent;
 }
 
-.window-chrome__button:active {
+/* "On" (a panel is open, a menu is open) is a control pressed into the band:
+   a filled tile with the sunk shadow. It was the pointed-at wash, so a toggle
+   that was on looked like one being hovered. Pressing sinks it further. */
+.window-chrome__button[aria-expanded="true"] {
+  color: var(--oct-fg);
+  background: var(--octant-control);
+  border-color: transparent;
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
+.window-chrome__button[aria-expanded="true"]:hover {
+  background: var(--octant-control-hover);
+}
+
+.window-chrome__button:active,
+.window-chrome__button[aria-expanded="true"]:active {
   background: var(--octant-control-pressed);
+  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .window-chrome__overflow {

@@ -159,10 +159,19 @@ describe("the public-block visual language", () => {
     // panel starts; both draw the shared panel recipe, never a literal colour.
     const thread = panel(".shell-frame > .workspace-layer::before");
     expect(thread).toMatch(/grid-column:\s*1/);
-    expect(thread).toMatch(/box-shadow:\s*var\(--octant-shadow-panel\)/);
+    expect(thread).toMatch(/background:\s*var\(--octant-panel-fill\)/);
+    expect(thread).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
     expect(thread).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
     expect(panel(".shell-frame .bottom-utility-panel")).toMatch(
-      /box-shadow:\s*var\(--octant-shadow-panel\)/,
+      /background:\s*var\(--octant-panel-fill\)/,
+    );
+    // The rim is drawn again above the content, since a panel's own children
+    // paint over an inset shadow on its box.
+    expect(panel(".shell-frame > .workspace-layer::after")).toMatch(
+      /box-shadow:\s*var\(--octant-shadow-panel-rim\)/,
+    );
+    expect(panel(".shell-frame .bottom-utility-panel::after")).toMatch(
+      /box-shadow:\s*var\(--octant-shadow-panel-rim\)/,
     );
     // Panels are 8px apart: the layer's row gap and its padding are the frame's.
     expect(shell).toMatch(
@@ -1208,10 +1217,9 @@ describe("the public-block visual language", () => {
 
     it("draws a tile as a panel from the shared tokens, so a see-through theme still shows through", () => {
       const tile = body(".dock-tile");
-      expect(tile).toMatch(
-        /background:\s*var\(--octant-panel-sheen\),\s*var\(--octant-panel-surface\)/,
-      );
-      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel\)/);
+      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
+      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
+      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
       expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
       expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
     });

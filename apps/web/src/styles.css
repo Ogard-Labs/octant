@@ -135,10 +135,8 @@
   /* The rim and the seat are two tokens: a panel's own content paints over
      an inset shadow, so the rim is also drawn by a pseudo-element above the
      content (see shell.css), and the seat stays on the panel's box. */
-  --octant-shadow-panel-rim:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim);
-  --octant-shadow-panel-seat:
-    0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 18px 36px -20px #000;
+  --octant-shadow-panel-rim: inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim);
+  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 18px 36px -20px #000;
   --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
   /* Level 2: a card on a panel. A card is a hair smaller in shadow than a
      control's tile: it lies on the panel instead of standing on it. */

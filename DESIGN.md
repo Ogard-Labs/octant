@@ -280,7 +280,9 @@ never writes its own colour.
   near-black page, so the fill and the rim carry the lift (on an OLED preset
   the panel is a step toward the ink and the sheen lifts its top) and the
   shadow helps only where the surface crosses something lighter; in light the
-  top line is white and the shadows carry it. A surface that also drew a
+  top line is white and the shadows carry it. A panel's own content paints
+  over an inset shadow on its box, so the rim is drawn by a pseudo-element
+  above the content and the box keeps only the seat shadow. A surface that also drew a
   border or a second ring on the same edge showed two lines, so the rim is in
   the shadow token and the border is gone.
 - **A control is a raised tile.** A filled button (default, solid, outline,
@@ -293,7 +295,10 @@ never writes its own colour.
   accent glow under it (`--octant-accent-sheen`, `--octant-shadow-primary`);
   the composer's send is the primary once there is something to send. Ghost,
   link, bare and the suggestion chip stay flat until pointed at, as do the
-  quiet controls of a row (the line under a composer, the microphone).
+  quiet controls of a row (the line under a composer, the microphone). A
+  toggle that is on (the dock and bottom-panel buttons in the title band, a
+  tile's open menu) is a control pressed in: a filled tile with the sunk
+  shadow, told apart from the pointed-at wash and from the deeper press.
 - **A well is cut in**: darker than what it is in, an inner top shadow, and a
   light line under its bottom edge. What is chosen in a well is a raised control
   again (the thumb of the Work and Code switch).
@@ -361,7 +366,9 @@ sidebar's material, which the glass reached only in a sidebar strip.) The
 sidebar's own corner and edge went with the sheet. Pane headers and dock tabs
 stay in the title band. With Glass on, the ground and the panels are the Tint
 over the window's native material: the panels are a lighter tint than the
-ground and the thread's panel a second layer of it. Reader pages inside the
+ground; every panel (the thread, a tile, the bottom panel, the dock's
+overview) is the same one fill (`--octant-panel-fill`), over a ground that is
+itself a tint, so text reads on a saturated desktop. Reader pages inside the
 stage are clear. Behind every page the application ground lies on the
 thread's panel, under the content, taking the panel's corners. A pane header
 and the dock head share the title rail (`--oct-title-rail-h`). A native
@@ -1836,10 +1843,9 @@ glass or none of it is.
 
 Under Glass nothing inside the shell paints the theme's opaque page,
 workspace, or card colour over a panel; every layer takes one of the shell's
-surfaces (`--octant-window-surface` for the frame, `--octant-panel-surface`
-for a tool tile or the bottom panel, `--octant-stage-surface` for the thread's
-panel, with a second layer of it under the thread), defined once on every
-shell in `shell.css`:
+surfaces (`--octant-window-surface` for the frame and `--octant-panel-surface`
+for every panel, the thread's included), defined once on every shell in
+`shell.css`:
 
 - **Settings** wears the same frame and panels: the navigation and gutters are
   the frame, the page is a panel, and a section card is the card step below.

@@ -842,6 +842,13 @@
   border: 0;
 }
 
+/* A tile's menu is open: the control is pressed into the bar, as the band's
+   toggles are, and not the pointed-at wash. */
+.dock-tile__control[aria-expanded="true"] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
 .dock-tile__control {
   width: 24px;
   min-width: 24px;

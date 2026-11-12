@@ -305,8 +305,13 @@ describe("WindowChrome", () => {
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
     // the same feedback .shell-icon-button gives, still no accent.
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
+    // "On" is a control pressed into the band, not the pointed-at wash: a
+    // toggle that was on looked like one being hovered.
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--oct-fg-soft);",
+      "background: var(--octant-control);",
+    );
+    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
+      "box-shadow: var(--octant-shadow-control-pressed);",
     );
   });
 
