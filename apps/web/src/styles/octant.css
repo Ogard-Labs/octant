@@ -4799,8 +4799,8 @@ input.switch:checked::after {
   min-width: 0;
 }
 .composer-actions > .thread-plan-windows {
-  flex: 0 1 auto;
-  min-width: 0;
+  /* The compact meter is small, and its figure never shrinks under what follows. */
+  flex: 0 0 auto;
   margin-inline-end: var(--oct-space-1);
 }
 /* A narrow column shortens the model's name before anything else moves, and

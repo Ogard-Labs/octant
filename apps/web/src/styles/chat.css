@@ -778,6 +778,7 @@
 }
 .chat-composer__research label [role="combobox"] {
   min-width: 64px;
+  max-width: 100%;
 }
 
 /* Only toolbar labels shrink-wrap their control; the message field's block
