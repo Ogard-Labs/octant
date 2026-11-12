@@ -2260,6 +2260,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 .thread-composer__context .code-checkout-bar__action {
   order: 2;
+  flex: 0 0 auto;
   width: var(--oct-composer-cell);
   height: var(--oct-composer-cell);
   min-height: var(--oct-composer-cell);

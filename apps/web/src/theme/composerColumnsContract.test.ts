@@ -32,4 +32,10 @@ describe("the composer's columns", () => {
       /\.composer-frame:not\(\.composer-frame--held\) > :is\(\.composer-start, \.composer-under\) \{\s*padding-inline: var\(--oct-composer-inset\)/,
     );
   });
+
+  it("places the info panel against the row, not its trigger, so it stays inside the composer", () => {
+    expect(rule(".composer-under")).toContain("position: relative");
+    expect(rule(".thread-info")).toContain("position: static");
+    expect(rule(".thread-info__panel")).toMatch(/left: 0;/);
+  });
 });
