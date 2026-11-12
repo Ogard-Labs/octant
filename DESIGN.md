@@ -3624,8 +3624,9 @@ request from the person.
   managed server) if shutdown has not finished.
 - The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
   the setting "Press ⌘Q twice to quit" is on, which is its default; with it
-  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
-  not built yet: today the double press cannot be turned off). The
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12).
+  The switch is in Settings › General under Quitting, shown only in the Mac
+  app; the app starts guarded and learns the choice when settings load. The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first

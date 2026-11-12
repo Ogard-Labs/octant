@@ -311,6 +311,7 @@ import {
 import {
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
+  useQuitShortcutSecondPressSync,
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
@@ -897,6 +898,10 @@ function LaunchedShell(
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
+  useQuitShortcutSecondPressSync(
+    props.hostBridge,
+    controller.settings?.quitShortcutNeedsSecondPress,
+  );
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,

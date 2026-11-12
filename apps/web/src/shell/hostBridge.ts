@@ -687,6 +687,8 @@ export interface OctantHostBridge
   ) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
+  /** Reports the person's setting: whether ⌘Q needs a second press. */
+  readonly setQuitShortcutSecondPress?: (needed: boolean) => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
 }
 

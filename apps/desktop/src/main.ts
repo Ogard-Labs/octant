@@ -3847,6 +3847,11 @@ function installIpcHandlers(): void {
       }),
     );
   });
+  ipcMain.handle(IPC_CHANNELS.quitShortcutSecondPress, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    // Only an explicit false lifts the guard; anything else keeps it.
+    quitShortcutNeedsSecondPress = value !== false;
+  });
   ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     if (typeof value !== "boolean") throw new Error("Octant rejected an invalid update setting.");
@@ -4856,8 +4861,15 @@ async function recoverWindowAfterRendererExit(
   }
 }
 
+/**
+ * Whether the quit shortcut needs a second press. The renderer reports the
+ * person's setting once settings load; until then the guard stays on.
+ */
+let quitShortcutNeedsSecondPress = true;
+
 const quitShortcutGuard = createQuitShortcutGuard({
   now: () => performance.now(),
+  needsSecondPress: () => quitShortcutNeedsSecondPress,
   showNotice: () => {
     // An opened server page has no preload bridge, so a hint sent there is never
     // shown; only a shell window that registered as a trusted renderer can show it.

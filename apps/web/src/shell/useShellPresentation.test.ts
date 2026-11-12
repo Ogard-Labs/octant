@@ -5,6 +5,7 @@ import {
   readSidebarCollapsed,
   useBackgroundImageLibrary,
   useAutomaticUpdateCheckSync,
+  useQuitShortcutSecondPressSync,
   useReleaseRingSync,
   useSidebarBackgroundFetcher,
   writeBottomPanelPresentation,
@@ -29,6 +30,23 @@ it("never forwards shared host update preferences into an application that owns 
   });
   expect(setAutomaticAppUpdateChecks).not.toHaveBeenCalled();
   expect(setAppUpdateRing).not.toHaveBeenCalled();
+});
+
+it("tells the desktop app each time the person changes whether the quit shortcut needs a second press", () => {
+  const setQuitShortcutSecondPress = vi.fn();
+  const host = { setQuitShortcutSecondPress };
+  const { rerender } = renderHook(
+    ({ needed }: { readonly needed: boolean | undefined }) =>
+      useQuitShortcutSecondPressSync(host, needed),
+    { initialProps: { needed: undefined as boolean | undefined } },
+  );
+  // Settings not loaded yet: the desktop keeps its own default, guarded.
+  expect(setQuitShortcutSecondPress).not.toHaveBeenCalled();
+
+  rerender({ needed: false });
+  rerender({ needed: true });
+
+  expect(setQuitShortcutSecondPress.mock.calls).toEqual([[false], [true]]);
 });
 
 const windowCapability = `${"C".repeat(42)}A`;

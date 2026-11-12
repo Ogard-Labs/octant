@@ -684,6 +684,12 @@ export const ShellSettings = Schema.Struct({
    * default). Turning the switch on records the choice explicitly.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether the desktop app's quit keyboard shortcut needs a second press
+   * before it quits. On by default, including for a store from before the
+   * choice existed: the guard was always on then.
+   */
+  quitShortcutNeedsSecondPress: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
     default: () => ({ enabled: true, automaticUpdates: false }),
   }),

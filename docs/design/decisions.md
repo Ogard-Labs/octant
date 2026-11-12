@@ -53,7 +53,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 5       | 4            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 4       | 1            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 10        | 9       | 1            | 0                   |
+| [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **165** | **77**       | **5**               |
+| **All areas**                                                                         | **247**   | **166** | **76**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2278,10 +2278,10 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting (maintainer request, 2026-11-12), not built yet: today it is always on. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
 
 ### Window defaults, ground and drafts
 
@@ -2468,7 +2468,7 @@ Work and Code have server-authoritative boards. Chat has none, and an agent cann
 - Cards cannot be dragged between columns. A person marks a Work thread Done with no confirmation, and Reopen undoes it in one click; a Code thread reaches Done when its delivery target is satisfied or a person marks it Done as their own override (maintainer request, 2026-11-12).
 - A Code card may show one plan-progress count computed at read time. It is absent with no live plan and never shown on Work cards. _Here only._
 - The pull request list is a cached host-local snapshot, and board queries never call the forge. A card's summary says fresh, stale or unavailable. The forge is reached only by explicit refresh or a per-Project opt-in cadence (off by default, floored at 30 seconds).
-- The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. The list offers Newest, Oldest and a "mine" filter (maintainer request, 2026-11-12); not built yet: today they are not offered, because the snapshot has no creation time and no signed-in login. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.
+- The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. The list offers Newest, Oldest and a "mine" filter (maintainer request, 2026-11-12); not built yet: today they are not offered, because the snapshot has no creation time and no signed-in login. Creation time is one more field on the existing list read; the signed-in login needs a forge read of its own. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.
 
 Status: Partly built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 

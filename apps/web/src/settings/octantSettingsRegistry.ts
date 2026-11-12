@@ -44,6 +44,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
+          id: settingId("quit-shortcut-second-press"),
+          label: "Press ⌘Q twice to quit",
+          scope: "app",
+          keywords:
+            "quit quitting exit close shortcut command q cmd twice double press again guard",
+        },
+        {
           id: settingId("default-folder"),
           label: "Default folder",
           scope: "host",

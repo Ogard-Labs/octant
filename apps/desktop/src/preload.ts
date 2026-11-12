@@ -403,6 +403,8 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /** Reports the person's setting: whether the quit shortcut needs a second press. */
+  readonly setQuitShortcutSecondPress: (needed: boolean) => void;
   /** Prepare to Shut Down… from the menu, or Move threads first… from the quit confirmation. */
   readonly subscribePrepareToShutDown?: (
     listener: (request: { readonly fromQuit: boolean }) => void,
@@ -1140,6 +1142,11 @@ export function createHostBridge(
       const receive: SettingsOpenListener = () => listener();
       ipc.on(IPC_CHANNELS.quitShortcutHint, receive);
       return () => ipc.removeListener(IPC_CHANNELS.quitShortcutHint, receive);
+    },
+    setQuitShortcutSecondPress: (needed: boolean) => {
+      void ipc
+        .invoke(IPC_CHANNELS.quitShortcutSecondPress, needed !== false)
+        .catch(() => undefined);
     },
     subscribeStartNewAgent: (listener: () => void) => {
       const receive: AgentStartListener = () => listener();

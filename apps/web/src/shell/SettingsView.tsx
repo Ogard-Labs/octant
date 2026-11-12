@@ -2279,6 +2279,28 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           />
         </div>
       </SettingsSection>
+      {/* Only the Mac app has the ⌘Q menu accelerator the second press guards. */}
+      {props.hostBridge?.setQuitShortcutSecondPress === undefined || !isApplePlatform() ? null : (
+        <SettingsSection title="Quitting">
+          <div className="setgroup">
+            <SettingRow
+              description="The first ⌘Q shows a notice and the second, within a moment, quits. Off, one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
+              focused={focusedSetting === settingId("quit-shortcut-second-press")}
+              label="Press ⌘Q twice to quit"
+              scope="app"
+              settingId="quit-shortcut-second-press"
+            >
+              <OctantSwitch
+                checked={props.settings.quitShortcutNeedsSecondPress}
+                label="Press ⌘Q twice to quit"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ quitShortcutNeedsSecondPress: checked })
+                }
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
       <SettingsSection title="Files">
         <div className="setgroup">
           <SettingRow
