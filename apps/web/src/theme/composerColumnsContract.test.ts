@@ -55,4 +55,15 @@ describe("the composer's columns", () => {
     expect(rule(".composer-input")).toMatch(/round\(\s*nearest,[^;]*2px\s*\)/);
     expect(rule(".composer-field")).toMatch(/--oct-composer-line:\s*round\(/);
   });
+
+  it("stands a thread's composer and its text column the same gutter from a phone's edges", () => {
+    // The panel is padded 20px at 680px and below, so the composer and the
+    // column each take the one gutter token, which is 0 there: 20px each side
+    // at 390, 430 and 680 as on the start screen, not 40.
+    expect(rule(".composer.thread-composer")).toContain("min(100% - var(--oct-thread-gutter)");
+    expect(rule(".thread-column")).toContain("min(100% - var(--oct-thread-gutter)");
+    expect(styles).toMatch(/@media \(max-width: 680px\) \{\s*:root \{\s*--oct-thread-gutter:\s*0px;/);
+    // Wider layouts keep the 20px each side the column always had.
+    expect(styles).toMatch(/--oct-thread-gutter:\s*40px;/);
+  });
 });

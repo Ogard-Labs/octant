@@ -1894,7 +1894,7 @@ rail (44px), on which a rail tab and a rail icon control sit on one centreline a
 the band's hairline meets the dock's; the sidebar's header row is its part of
 that rail (`--oct-title-rail-h`), so its controls share the window controls'
 centreline, and below it the sidebar runs navigation, Project, and
-thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`),
+thread rows at the nav row height down to a 44px account row (`--oct-nav-head-h`),
 with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
@@ -1950,8 +1950,54 @@ rule:
 - _A foot ends where the rows above it end._ The account row's chevron stands
   on the navigation inset (12px), the edge a thread's status mark ends on.
 - _At a phone's width_ the start screen's composer stands the panel's 20px from
-  each edge, as a thread's composer does (its width is the viewport less 40px),
-  with no margin or padding of its own on top.
+  each edge, and so do a thread's composer and its text column. The panel is
+  already padded 20px at 680px and below, so the thread's gutter token
+  (`--oct-thread-gutter`, 40px for the two sides) is 0 there, and the column
+  and composer take the panel's width: 390, 430 and 680px all show 20px, not
+  the 40px the column's own gutter added inside the panel. Above 680px nothing
+  changes.
+- _The title's text stands on the thread column's edge._ The title band's text
+  starts where the transcript's column starts, at the larger of a 20px gutter
+  and half of the pane less the thread measure, so a centred, narrower column
+  carries the title with it. What could precede the title (the environment
+  mark, the pull-request chip) follows it, because the 20px gutter cannot hold
+  a 20px mark; with content tabs open there is no title and they lead as before.
+  The grip's own 4px padding and 1px border are taken off the start so the text,
+  not the grip's hover fill, stands on the edge. Where the sidebar is collapsed
+  the title clears the window controls instead (the larger of their width and
+  the column's edge). With a Project step in the breadcrumb ("Project / title"),
+  the breadcrumb starts on the edge and the title follows its slash.
+- _Controls are 24, 28, 32 or 44px, and rows 32 or 44._ A segment in a tray is
+  24px (`--oct-tray-segment-h`) inside 2px of padding, so every tray is 28px:
+  the mode switch in the sidebar's header, the thread-list switch under it and
+  the composer's Work and Code switch alike. A tray's inner corner stays the
+  tray's corner less its padding, never under 2px. The icon rail's button is its
+  32px face, with no border and no negative margin to give one back, and the
+  account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
+- _The account row's avatar and the Projects toolbar's folder sit on the icon
+  column._ The 20px avatar is centred on the centre line of the 16px navigation
+  icons (the 12px inset plus half an icon), not left-aligned with them, and the
+  Projects toolbar's first button is centred on the same line so its 16px folder
+  starts where the rows' glyphs do.
+- _A toast's dismiss ends on its padding._ The 24px button's box ends on the
+  toast's 12px padding, not 2px from its corner; the title line is 24px tall so
+  the icon, the title and the glyph share a centre, and an action in the message
+  (View host) is inline text, so its line is as tall as the others.
+- _Settings has one rhythm._ The page's band takes the page's 32px gutter at
+  both ends (the close button ends where the content ends), sections are 24px
+  apart, the page ends 48px under its last section, and a section label and a
+  section note each leave 12px under them (a label that carries a note has 12px
+  between them too), with lines set from the role leadings rounded to a pixel.
+- _One hairline._ A 1px dividing line or a quiet control outline on the title
+  band, the thread's disclosures, the sidebar's tiles and the icon rail is
+  `--oct-hairline` (10% ink): the environment mark's edge, the divider between
+  a thread's tool rows, the rail's count badge and divider, a count tile's edge,
+  and the rule beside a reasoning block, which is 1px, not a 2px bar. A
+  deliberately stronger edge stays: a field's border, a focus edge, a status
+  tint, and a Project tile's initial (22%, 40% on hover), which is an
+  identity mark rather than a divider.
+- _A slider's track is the soft ink_ (`--oct-fg-soft`, as the `.range` recipe
+  draws it), so it shows on a dark card; the card colour made it vanish.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on

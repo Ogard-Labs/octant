@@ -727,7 +727,7 @@ describe("WindowChrome", () => {
       "background: transparent;",
     );
     expect(cssRule(".shell--sidebar-collapsed .workspace-pane__header")).toContain(
-      "padding-left: var(--octant-window-chrome-leading-width",
+      "padding-left: max(var(--octant-window-chrome-leading-width",
     );
     expect(
       cssRule('html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"]'),
@@ -1382,12 +1382,12 @@ describe("WindowChrome", () => {
     const nativeCollapsed = cssRule(
       'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
     );
-    expect(nativeCollapsed).toContain("padding-left: var(--octant-window-chrome-leading-width");
+    expect(nativeCollapsed).toContain("padding-left: max(var(--octant-window-chrome-leading-width");
     expect(
       cssRule(
         '.shell--sidebar-collapsed .workspace-split[data-orientation="horizontal"] > :last-child .workspace-pane__header',
       ),
-    ).toContain("padding-left: var(--oct-space-3)");
+    ).toContain("padding-left: var(--pane-title-start)");
   });
 
   it("keeps the window controls above the pane header rather than tied with it", () => {

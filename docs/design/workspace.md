@@ -571,10 +571,13 @@ Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
 any window reaches every open pane. A thread pane's title row is its
-drag handle: an environment mark (a small neutral tile holding a laptop glyph
+drag handle. Its text starts on the left edge of the thread's text column
+below (see Alignment in the design system), so the title reads one line down
+into the transcript: a breadcrumb (the Project in meta text, a slash, and the
+title), then the environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), then a breadcrumb: the Project in meta text, a slash,
-and the title. The Project keeps its width (capped at a fixed character count,
+it runs on another host) and the pull-request chip. With content tabs open the
+mark leads the tabs as before. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
 faster, with no fixed floor so a narrow pane keeps its status chip); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
