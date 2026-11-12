@@ -68,7 +68,9 @@ export class AgentAccessProjection implements Projection {
       const sent = decodeTurnSent(event.payload);
       connection
         .prepare(
-          `INSERT OR REPLACE INTO agent_access_turn_projection
+          // The first record of a turn stands: a later one for the same turn
+          // cannot rename who sent it.
+          `INSERT OR IGNORE INTO agent_access_turn_projection
              (thread_id, turn_key, grant_id, mode, sent_at, last_sequence)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )

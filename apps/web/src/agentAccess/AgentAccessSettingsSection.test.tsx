@@ -145,8 +145,8 @@ describe("Started by", () => {
 
 describe("Sent by", () => {
   function Prompt(props: { readonly threadId: string; readonly turnKey: string }) {
-    const sender = useAgentTurnSenders(props.threadId);
-    return <AgentTurnSender agentName={sender(props.turnKey)} />;
+    const sender = useAgentTurnSenders();
+    return <AgentTurnSender agentName={sender(props.threadId, props.turnKey)} />;
   }
 
   it("names the outside agent under each turn it sent, by the id the turn keeps, and nothing under others", async () => {

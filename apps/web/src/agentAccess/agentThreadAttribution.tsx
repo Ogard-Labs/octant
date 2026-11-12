@@ -90,19 +90,21 @@ function sameNames(left: ReadonlyMap<string, string>, right: ReadonlyMap<string,
 }
 
 /**
- * A lookup from a turn id (the id the turn's record keeps: a Code operation
- * id, a Chat submission id, a Work turn id) to the outside agent that sent it,
- * for one thread. Read once in a transcript and used for every turn in it.
+ * A lookup from a thread and a turn id (the id the turn's record keeps: a Code
+ * operation id, a Chat submission id, a Work turn id) to the outside agent that
+ * sent that turn. Read once in a transcript and used for every turn in it; a
+ * fork's inherited turns are looked up under the thread that ran them.
  */
-export function useAgentTurnSenders(
+export function useAgentTurnSenders(): (
   threadId: string | undefined,
-): (turnKey: string | undefined) => string | undefined {
+  turnKey: string | undefined,
+) => string | undefined {
   const names = useContext(AgentThreadNamesContext);
   return useCallback(
-    (turnKey) =>
+    (threadId, turnKey) =>
       threadId === undefined || turnKey === undefined
         ? undefined
         : names.turns.get(turnName(threadId, turnKey)),
-    [names, threadId],
+    [names],
   );
 }

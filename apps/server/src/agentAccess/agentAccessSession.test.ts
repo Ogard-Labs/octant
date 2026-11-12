@@ -461,7 +461,7 @@ describe("stopping a revoked agent's turns", () => {
 });
 
 describe("the sender of each turn", () => {
-  function session(dispatchStatus = 200) {
+  function session(answer: (body: Readonly<Record<string, unknown>>) => Response) {
     const fixture = deps();
     const created = createAgentSession({
       grant: grant({ threads: "project", modes: ["code", "work", "chat"] }),
@@ -470,14 +470,21 @@ describe("the sender of each turn", () => {
         ...fixture,
         hostId: () => "40000000-0000-4000-8000-000000000001",
         markOutsideContent: () => undefined,
-        dispatch: async () => Response.json({}, { status: dispatchStatus }),
+        dispatch: async ({ request }) => answer((await request.json()) as Record<string, unknown>),
       },
     });
     return { session: created, sentTurns: fixture.sentTurns };
   }
+  // What the host answers when it starts the turn the request named.
+  const started = (body: Readonly<Record<string, unknown>>) =>
+    Response.json(
+      body["kind"] === "send-chat-turn"
+        ? { kind: "turn-created", turn: { submissionId: body["submissionId"] } }
+        : { kind: "provider-turn-state", operationId: body["operationId"], state: "running" },
+    );
 
   it("records the id each accepted turn keeps, so the transcript can name the agent", async () => {
-    const { session: agent, sentTurns } = session();
+    const { session: agent, sentTurns } = session(started);
     await agent.send({
       path: "/api/code/commands",
       method: "POST",
@@ -494,15 +501,43 @@ describe("the sender of each turn", () => {
     ]);
   });
 
-  it("records nothing for a turn the host refused, or for an answer", async () => {
-    const refusedSend = session(409);
-    await refusedSend.session.send({
+  it("records nothing for a turn the host refused, even one it answered with HTTP 200, or for an answer", async () => {
+    const send = {
       path: "/api/code/commands",
-      method: "POST",
+      method: "POST" as const,
       body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
-    });
-    expect(refusedSend.sentTurns).toEqual([]);
-    const { session: agent, sentTurns } = session();
+    };
+    for (const answer of [
+      () => Response.json({ kind: "refused" }, { status: 409 }),
+      // A start refused before launch answers 200 with the refusal in the result.
+      () =>
+        Response.json({
+          kind: "operation-failed",
+          operationId: turnKey,
+          failure: { code: "refused" },
+          admission: "refused",
+        }),
+      () =>
+        Response.json({
+          kind: "provider-turn-state",
+          operationId: turnKey,
+          state: "failed",
+          failure: { code: "refused" },
+          admission: "refused",
+        }),
+      // An answer naming a different turn is not this request's turn.
+      () =>
+        Response.json({
+          kind: "provider-turn-state",
+          operationId: "60000000-0000-4000-8000-000000000099",
+          state: "running",
+        }),
+    ]) {
+      const refusedSend = session(answer);
+      await refusedSend.session.send(send);
+      expect(refusedSend.sentTurns).toEqual([]);
+    }
+    const { session: agent, sentTurns } = session(started);
     await agent.send({
       path: "/api/chat/commands",
       method: "POST",

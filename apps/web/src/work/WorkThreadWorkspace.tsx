@@ -782,7 +782,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
   // A Work turn keeps the turn id its sender chose, which is how a turn an
   // outside agent sent is named for that agent.
-  const agentTurnSender = useAgentTurnSenders(String(props.threadId));
+  const agentTurnSender = useAgentTurnSenders();
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -2380,7 +2380,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </article>
                     );
                   }
-                  const sentBy = agentTurnSender(String(row.turn.turnId));
+                  const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
                   return (
                     <article
                       aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}

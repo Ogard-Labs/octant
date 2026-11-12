@@ -376,12 +376,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [codeClient, draft, props.threadId]);
   const compacting = useComposerCompacting();
   // A Code turn keeps the operation id its sender chose, which is how a turn
-  // an outside agent sent is named for that agent. A fork's inherited turns
-  // are named under the thread that ran them.
-  const agentTurnSender = useAgentTurnSenders(String(props.threadId));
-  const inheritedTurnSender = useAgentTurnSenders(
-    view?.thread.forkedFrom === undefined ? undefined : String(view.thread.forkedFrom.threadId),
-  );
+  // an outside agent sent is named for that agent. A fork's inherited turns,
+  // however many forks back, are named under the thread that ran them.
+  const agentTurnSender = useAgentTurnSenders();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
@@ -1805,9 +1802,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 const sentBy =
                   message.role !== "user" || delivered || message.operationId === undefined
                     ? undefined
-                    : message.sourceThreadId === undefined
-                      ? agentTurnSender(String(message.operationId))
-                      : inheritedTurnSender(String(message.operationId));
+                    : agentTurnSender(
+                        String(message.sourceThreadId ?? props.threadId),
+                        String(message.operationId),
+                      );
                 // A follow-up's turn is marked the same way, by the host's heading.
                 const followUpPrompt =
                   message.role === "user"

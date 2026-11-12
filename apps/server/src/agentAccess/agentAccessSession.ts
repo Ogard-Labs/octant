@@ -153,7 +153,10 @@ export function createAgentSession(input: {
       const parsed = parseJson(text);
       if (response.ok && checked.marksThread !== undefined && checked.turnMode !== undefined) {
         deps.service.noteTurnThread(String(grant.grantId), checked.marksThread, checked.turnMode);
-        if (checked.turnKey !== undefined) {
+        if (
+          checked.turnKey !== undefined &&
+          startedTurn(checked.turnMode, checked.turnKey, parsed)
+        ) {
           deps.service.recordTurnSent({
             grantId: String(grant.grantId),
             threadId: checked.marksThread,
@@ -559,6 +562,32 @@ function createdThreadId(body: unknown): string | undefined {
   if (typeof body !== "object" || body === null) return undefined;
   const thread = (body as { readonly thread?: { readonly id?: unknown } }).thread;
   return typeof thread?.id === "string" ? thread.id : undefined;
+}
+
+/**
+ * Whether the product answer names the turn this request started. A Code
+ * start that was refused or failed before launch still answers HTTP 200, as
+ * does a replay that found an earlier operation's result, so the status alone
+ * would record turns that never ran.
+ */
+function startedTurn(mode: AgentGrantMode, turnKey: string, body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return false;
+  const answer = body as Readonly<Record<string, unknown>>;
+  if (mode === "code") {
+    return (
+      answer["operationId"] === turnKey &&
+      (answer["kind"] === "operation-accepted" ||
+        (answer["kind"] === "provider-turn-state" && answer["admission"] === undefined))
+    );
+  }
+  if (mode === "work") return answer["kind"] === "turn-accepted" && answer["turnId"] === turnKey;
+  const turn = answer["turn"];
+  return (
+    answer["kind"] === "turn-created" &&
+    typeof turn === "object" &&
+    turn !== null &&
+    (turn as Readonly<Record<string, unknown>>)["submissionId"] === turnKey
+  );
 }
 
 function isUuid(value: unknown): value is string {

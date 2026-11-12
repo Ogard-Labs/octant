@@ -282,6 +282,28 @@ describe("agent grants", () => {
     expect(service.turnAttributions()[0]?.agentName).toBe("Studio bot");
   });
 
+  it("keeps the first sender of a turn when another grant records the same turn", () => {
+    const { service } = harness();
+    const first = created(
+      service.execute(
+        { kind: "create", draft: { name: "Home bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const second = created(
+      service.execute(
+        { kind: "create", draft: { name: "Other bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const turnKey = "62000000-0000-4000-8000-000000000002";
+    service.recordTurnSent({ grantId: first, threadId: "thread-1", mode: "code", turnKey });
+    service.recordTurnSent({ grantId: second, threadId: "thread-1", mode: "code", turnKey });
+    expect(service.turnAttributions()).toEqual([
+      { threadId: "thread-1", turnKey, agentName: "Home bot" },
+    ]);
+  });
+
   it("holds a grant's turn starts until each is released, once", () => {
     const { service } = harness();
     const first = service.holdTurnStart("g");

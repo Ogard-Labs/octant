@@ -266,7 +266,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
   // A Chat turn keeps the submission id its sender chose, which is how a turn
   // an outside agent sent is named for that agent.
-  const agentTurnSender = useAgentTurnSenders(String(props.view.thread.id));
+  const agentTurnSender = useAgentTurnSenders();
   const chatReplyInFlight = turns.some((turn) =>
     turn.attempts.some(
       (attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming",
@@ -557,7 +557,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
 
         const sentBy =
           delivery === undefined && turn.submissionId !== undefined
-            ? agentTurnSender(String(turn.submissionId))
+            ? agentTurnSender(String(props.view.thread.id), String(turn.submissionId))
             : undefined;
         return (
           <div className="chat-transcript__turn">
