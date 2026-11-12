@@ -10334,9 +10334,14 @@ that is not yet effective for the thread is refused and never reaches the model.
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
-  `extension-tool-grant` aggregate). The person can also allow all tools of
-  one server at once, at every level (maintainer request, 2026-11-12; not
-  built yet: today a grant covers one tool, never the whole server). The grant
+  `extension-tool-grant` aggregate). The person can also answer "allow all
+  tools of this server", wherever the prompt offers to remember (maintainer
+  request, 2026-11-12). That journals the same event with no tool name and no
+  listing digest: it binds the Project, extension, package, component, and
+  the package version and digest, so it covers every tool the server lists,
+  including one added later under the same digest, and an update asks again.
+  It is revoked, listed, and forgotten exactly as a tool's grant is, and the
+  Plan and outside-content rules below apply to it unchanged. A tool's grant
   binds the Project, extension, package, component, and MCP tool name, the
   package version and digest, and a SHA-256 of the tool's name, description,
   and input schema as its server listed them at connect; the provider-facing
@@ -10359,9 +10364,13 @@ that is not yet effective for the thread is refused and never reaches the model.
     Remembering is an answer at the machine, and the person who sent that
     turn is not at it.
   - A Plan turn is asked for every call, and the answer covers that call
-    alone. A Chat thread outside a Project can remember a grant for the
-    account (maintainer request, 2026-11-12; not built yet: today a thread
-    with no Project is asked for every call). An answer that asks to be
+    alone. A Chat thread outside a Project remembers a grant for the
+    account (maintainer request, 2026-11-12): the same events with no
+    Project, on one fixed account aggregate
+    (`EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID`). Only a thread outside a
+    Project uses an account grant; a Project's thread keeps to its own
+    Project's grants, so an answer given in Chat never spares a prompt where
+    a Project's files and shell are in reach. An answer that asks to be
     remembered where it cannot be is refused and the call keeps waiting.
   - Below Full access, on a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
@@ -10380,8 +10389,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings ›
-    Permissions lists them by Project with Revoke, and the prompt offers "always
-    allow" only to a client on a loopback host.
+    Permissions lists them by Project with Revoke, a whole server's grant as
+    "All tools of" that server and the account's under "Chat outside a
+    Project", and the prompt offers "always allow" only to a client on a
+    loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called

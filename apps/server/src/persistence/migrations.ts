@@ -2538,6 +2538,36 @@ CREATE INDEX validation_evidence_authority_idx
         ON agent_access_turn_projection(last_sequence);
     `,
   },
+  {
+    version: 98,
+    name: "widen_extension_tool_grants_to_servers_and_the_account",
+    // A grant may now be for the account (no Project) or for every tool of a
+    // server (no tool name and no listing digest), and SQLite cannot drop NOT
+    // NULL in place. The rows are rebuildable, so the table is recreated and
+    // its checkpoint cleared to replay the grant events into it.
+    sql: `
+      DROP TABLE extension_tool_grant_projection;
+      CREATE TABLE extension_tool_grant_projection (
+        grant_id TEXT PRIMARY KEY CHECK(length(trim(grant_id)) > 0),
+        project_id TEXT CHECK(project_id IS NULL OR length(trim(project_id)) > 0),
+        extension_id TEXT NOT NULL CHECK(length(trim(extension_id)) > 0),
+        package_id TEXT NOT NULL CHECK(length(trim(package_id)) > 0),
+        component_id TEXT NOT NULL CHECK(length(trim(component_id)) > 0),
+        mcp_tool_name TEXT CHECK(mcp_tool_name IS NULL OR length(trim(mcp_tool_name)) > 0),
+        package_version TEXT NOT NULL CHECK(length(trim(package_version)) > 0),
+        package_digest TEXT NOT NULL CHECK(length(trim(package_digest)) > 0),
+        definition_digest TEXT CHECK(definition_digest IS NULL OR length(trim(definition_digest)) > 0),
+        revocation_reason TEXT CHECK(revocation_reason IS NULL OR revocation_reason IN ('person', 'plugin-uninstalled', 'trust-revoked', 'rolled-back')),
+        granted_at TEXT NOT NULL CHECK(length(trim(granted_at)) > 0),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        CHECK((mcp_tool_name IS NULL) = (definition_digest IS NULL))
+      ) STRICT;
+      CREATE INDEX extension_tool_grant_extension_idx
+        ON extension_tool_grant_projection(extension_id);
+      DELETE FROM projection_checkpoints WHERE projection_name = 'extension-tool-grants';
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

@@ -1538,8 +1538,8 @@ Below Full access every MCP tool call waits for an approval in the turn's window
 
 - Built: a Work or Code thread at Full access runs an MCP tool unasked, with or without a window, and records no grant for it; a Plan turn on such a thread still asks.
 - A paired device answers only prompts its own turns raised, and an unanswered approval waits in Needs you until a person answers it (maintainer request, 2026-11-12); not built yet: today it expires after five minutes.
-- A turn the host runs with no window (a routine, a goal loop) waits in Needs you for its approval instead of being refused (maintainer request, 2026-11-12); not built yet: today such a call is refused.
-- A remembered approval covers one tool in one Project, bound to a digest of its listing. The person can also allow all tools of one server at once, and a Chat thread outside a Project can remember a grant for the account (maintainer request, 2026-11-12); not built yet: today a grant covers one tool in one Project and nothing wider. It grows only through the local window answering its own turn's prompt, and any mismatch asks again.
+- A turn the host runs with no window (a routine, a goal loop) waits in Needs you for its approval instead of being refused (maintainer request, 2026-11-12). Built: such a turn runs under the host's own scope, so its prompt is raised and any local window that may drive its thread answers it, once. Not built yet: the prompt is shown on the open thread and not in Needs you, it expires with the five-minute limit above, and a call that reaches the host with no scope at all is still refused, because no window could be shown it.
+- A remembered approval covers one tool in one Project, bound to a digest of its listing. The person can also allow all tools of one server at once, bound to the package version and digest so an update asks again, and a Chat thread outside a Project remembers a grant for the account, which only threads outside a Project use (maintainer request, 2026-11-12). A grant grows only through the local window answering its own turn's prompt, and any mismatch asks again.
 - Below Full access, on a thread that has taken in outside content, a remembered grant holds only for a local stdio server; a network server asks every call.
 - Uninstall, withdrawn trust and rollback revoke grants, and installing again restores nothing.
 
@@ -2255,7 +2255,7 @@ Approval and confirmation dialogs default to the safe answer, and the host decid
 
 - The safe action receives initial focus. Escape, Cancel and backdrop dismissal never change data, and closing restores focus to the opener.
 - Destructive actions opt into the danger treatment explicitly; ordinary confirmations use the standard action treatment.
-- An extension tool request names the plugin, its server and the tool. "Always allow in this Project" appears only when the host marks the call rememberable and the window is local.
+- An extension tool request names the plugin, its server and the tool. "Always allow in this Project" ("Always allow for this account" on a thread outside a Project) and "Allow all tools of this server" appear only when the host marks the call rememberable and the window is local.
 - A browser request from a CLI in a Code thread's terminal says a program in the terminal asked, not the thread's agent.
 - Native Code approvals are isolated host documents. Shared renderer components never grant Code authority, and Enter never implicitly grants access.
 
