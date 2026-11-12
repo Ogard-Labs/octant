@@ -845,6 +845,27 @@ describe("CodeOperationRuntime", () => {
       }
     });
 
+    it("leaves a lost push unconfirmed when its checkout cannot be resolved in time", async () => {
+      const remoteHead = vi.fn(async () => ({ status: "found" as const, oid: "a".repeat(40) }));
+      // A probe of a stalled mount that never answers and ignores every signal.
+      const fixture = runtimeFixture({
+        remoteHead,
+        resolveCheckoutRoot: () => new Promise(() => {}),
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(remoteHead).not.toHaveBeenCalled();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
     it("returns at once while a remote is still being asked, and lets go when stopped", async () => {
       let asked = false;
       const remoteHead = vi.fn(

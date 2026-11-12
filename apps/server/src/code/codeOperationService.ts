@@ -4759,7 +4759,13 @@ export class CodeOperationService {
       return { status: "skipped", reason: "checkout-unavailable" };
     if (checkout.kind === "remote-root" && this.#options.holdsServerThread?.(thread) !== true)
       return { status: "skipped", reason: "checkout-unavailable" };
-    const root = await this.#options.authority.resolveCheckoutRoot(scopeId, thread, checkout);
+    // Resolving the root probes the folder and its repository, which a stalled
+    // mount can hold indefinitely; the step's bound covers it too, so a stuck
+    // probe neither occupies a worker nor holds shutdown.
+    const root = await untilAborted(
+      stepSignal(),
+      Promise.resolve(this.#options.authority.resolveCheckoutRoot(scopeId, thread, checkout)),
+    );
     if (root === undefined) return { status: "skipped", reason: "checkout-unavailable" };
     // A server thread's Git runs on its server, as its Git tab's does.
     const git =
