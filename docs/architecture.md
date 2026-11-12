@@ -10151,6 +10151,24 @@ that is not yet effective for the thread is refused and never reaches the model.
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
+  A stdio server has no network unless the bundled catalog entry for its
+  reserved `connector-<id>` package lists hosts (`egress` on
+  `ConnectorCatalogEntry`). The host looks the hosts up from the catalog by the
+  folder its own store wrote; a package never names its own, so a third-party
+  or hand-added server never gets any. Seatbelt cannot name a host, so the
+  process is granted one loopback port (`allowLoopbackPorts`) and the host runs
+  a CONNECT-only proxy there for that session (`hostAllowListProxy`): it
+  tunnels port 443 to the listed names (`*.example.com` covers names below
+  example.com, not example.com), refuses plain requests, other ports, and any
+  name that resolves to this computer or a local network, and stops with the
+  process. `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` point the server at it.
+  Such a server is `proxied-stdio` for grants: it can carry what a thread has
+  read out in a call's arguments, so on a tainted thread every call asks and the
+  answer is single use, exactly as for a network server. Rationale: the
+  alternatives were a global network grant (any host) or no network (the
+  connector cannot work); a host list the host enforces keeps the confinement
+  and the writes limit while allowing the one service the person connected.
+
 - **MCP HTTP session recovery.** A successful initialize and tool listing is a
   connection observation, not permanent service or document readiness. An
   unknown-session HTTP 404, failed network request or unreadable response
@@ -10211,7 +10229,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     where it cannot be is refused and the call keeps waiting.
   - On a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
-    its plugin data. A network (HTTP) server's tool asks for every call there
+    its plugin data (a stdio server a catalog entry gives listed hosts is not
+    one: it asks every call like a network server). A network (HTTP) server's tool asks for every call there
     and the answer is single use, because its arguments can carry out what
     the thread has read. Every MCP result taints its thread, so a network
     tool's grant spares the prompt only until that thread's first tool result.

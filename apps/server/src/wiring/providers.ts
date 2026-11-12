@@ -1018,6 +1018,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        egressHostsForSource: (sourceRef) => userAddedMcpServers.egressHosts(sourceRef),
         bindUserAddedAuthentication: (launch, target) =>
           mcpServerSignInHolder.current?.bindAuthentication(
             target.extensionId,
