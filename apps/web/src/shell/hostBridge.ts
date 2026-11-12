@@ -24,6 +24,8 @@ import type {
   ApprovalSurfacePalette,
   AppUpdateInstallOutcome,
   AttentionNotificationRequest,
+  BackgroundHostChange,
+  BackgroundHostState,
   BoundProjectType,
   BrowserSurfaceRequest,
   BrowserSurfaceState,
@@ -68,6 +70,8 @@ export type {
   ApprovalSurfacePalette,
   AppUpdateInstallOutcome,
   AttentionNotificationRequest,
+  BackgroundHostChange,
+  BackgroundHostState,
   AttentionReason,
   BoundProjectType,
   BrowserSurfaceRequest,
@@ -556,6 +560,13 @@ export interface OctantHostBridge
   readonly installNightly?: () => Promise<NightlyInstallState>;
   readonly openNightly?: () => Promise<NightlyInstallState>;
   readonly removeNightly?: () => Promise<NightlyInstallState>;
+  /**
+   * The background host and open-at-login switches. Absent in Nightly and on a
+   * remote client, so a paired device never sees or changes them; the desktop
+   * main process installs, removes and reads back each one.
+   */
+  readonly readBackgroundHost?: () => Promise<BackgroundHostState>;
+  readonly changeBackgroundHost?: (change: BackgroundHostChange) => Promise<BackgroundHostState>;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.

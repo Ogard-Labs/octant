@@ -78,14 +78,16 @@ async function consumeMachineChanges(
   changed: (topics: ReadonlyArray<MachineChangeTopic>) => void,
 ): Promise<void> {
   let cursor = 0;
+  let epoch: string | undefined;
   let retryMs = 250;
   while (!signal.aborted) {
     try {
       let received = false;
-      for await (const frame of client.subscribe(cursor, signal)) {
+      for await (const frame of client.subscribe(cursor, signal, epoch)) {
         if (signal.aborted) return;
         received = true;
         cursor = frame.sequence;
+        epoch = frame.epoch;
         changed(
           frame.kind === "snapshot-required"
             ? [
@@ -109,8 +111,17 @@ async function consumeMachineChanges(
       if (signal.aborted) return;
       retryMs = Math.min(retryMs * 2, 2_000);
     }
-    await waitForReconnect(signal, retryMs);
+    await waitForReconnect(signal, withJitter(retryMs));
   }
+}
+
+/**
+ * Somewhere between half and all of `delayMs`. Every window of a host
+ * reconnects when it restarts; without jitter they all retried on the same
+ * schedule and reached the new process together.
+ */
+export function withJitter(delayMs: number, random: () => number = Math.random): number {
+  return Math.round(delayMs / 2 + random() * (delayMs / 2));
 }
 
 function advanceRevisions(

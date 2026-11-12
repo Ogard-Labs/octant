@@ -119,6 +119,16 @@ describe("remembered MCP tool approval", () => {
     ).toEqual({ kind: "covered" });
   });
 
+  it("asks for every call of a proxied stdio tool on a thread that took in outside content", () => {
+    expect(
+      decideExtensionToolGrant(facts({ threadTainted: true, reach: "proxied-stdio" })),
+    ).toEqual({
+      kind: "ask",
+      reason: "network-tool-on-tainted-thread",
+      rememberable: false,
+    });
+  });
+
   it("asks for every call of a network tool on a thread that took in outside content", () => {
     expect(decideExtensionToolGrant(facts({ threadTainted: true, reach: "network" }))).toEqual({
       kind: "ask",

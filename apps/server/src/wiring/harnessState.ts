@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
+import { approvalPostureOf, workApprovalPostureOf } from "@octant/domain";
 import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import {
   readApprovalOutsideContent,
@@ -93,6 +94,24 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
     outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
+    posture: (threadId, mode) => {
+      try {
+        if (mode === "code") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : approvalPostureOf(thread);
+        }
+        if (mode === "work") {
+          const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+          return thread === undefined ? undefined : workApprovalPostureOf(thread);
+        }
+        // A Chat thread holds no posture a person can change.
+        return persistence.readChatThread(decodeChatThreadId(threadId)) === undefined
+          ? undefined
+          : "chat";
+      } catch {
+        return undefined;
+      }
+    },
   });
   // Octant Shield is built with the harness, after these stores; a child
   // asks through it once it exists.

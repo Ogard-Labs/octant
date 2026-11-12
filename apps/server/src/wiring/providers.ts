@@ -255,6 +255,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The Project's registered servers, for Claude's own `ssh` below Full access. */
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** The host's process authority clock, which Claude's pre-tool grants expire on. */
+  readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
@@ -411,6 +413,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.claudeAuthorityNow === undefined
+        ? {}
+        : { claudeAuthorityNow: options.claudeAuthorityNow }),
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
@@ -590,6 +595,7 @@ export type ProvidersDependencies = Pick<
     | "extensionToolApprovalService"
     | "isPairedDeviceScope"
     | "processAuthorityNow"
+    | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -623,6 +629,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     options,
     persistence,
     processAuthorityNow,
+    processAuthorityTime,
     providerRuntimeNetwork,
     providerRuntimeRegistry,
     serverRegistry,
@@ -1020,6 +1027,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        egressHostsForSource: (sourceRef) => userAddedMcpServers.egressHosts(sourceRef),
         bindUserAddedAuthentication: (launch, target) =>
           mcpServerSignInHolder.current?.bindAuthentication(
             target.extensionId,
@@ -1765,6 +1773,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeRuntimeNetwork: runtimeNetwork,
             claudeServerAccess: serverAccess,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
+            claudeAuthorityNow: processAuthorityTime,
             isProjectConfinedPath,
             get claudeInstances() {
               return persistence.readProviderInstances();
@@ -1992,6 +2001,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeRuntimeNetwork: runtimeNetwork,
       claudeServerAccess: serverAccess,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
+      claudeAuthorityNow: processAuthorityTime,
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,

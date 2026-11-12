@@ -204,6 +204,45 @@ describe("node extension process port", () => {
     ).rejects.toMatchObject({ code: expect.stringMatching(/ENOTDIR|EISDIR/) });
   });
 
+  it("grants a loopback port, and no other network, to a proxied macOS sandbox launch", async () => {
+    let profile = "";
+    const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
+      profile = String(input[1]?.[1] ?? "");
+      return nodeSpawn(...input);
+    }) as typeof nodeSpawn;
+    const port = createNodeExtensionProcessPort({
+      spawn,
+      shutdownTimeoutMs: 100,
+      platform: "darwin",
+      sandboxPath: process.execPath,
+    });
+    const child = await port
+      .start({
+        ...startInput,
+        readiness: "spawn",
+        sandbox: {
+          kind: "macos-seatbelt",
+          scope: {
+            hostId: "local",
+            mode: "chat",
+            projectId: null,
+            threadId: "thread-1",
+            providerFamily: "openai-compatible",
+          },
+          allowRead: [process.cwd()],
+          allowWrite: [tmpdir()],
+          allowNetwork: false,
+          allowLoopbackPorts: [48123, 0, 70000],
+        },
+      })
+      .catch(() => undefined);
+    await child?.stop().catch(() => undefined);
+    expect(profile).toContain('(allow network-outbound (remote ip "localhost:48123"))');
+    expect(profile).not.toContain("(allow network*)");
+    expect(profile).not.toContain("localhost:0");
+    expect(profile).not.toContain("localhost:70000");
+  });
+
   it("constructs a network-denied macOS sandbox launch", async () => {
     let observed: { command: string; args: ReadonlyArray<string> } | undefined;
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {

@@ -235,15 +235,53 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
-  it("keeps every recipe control on whole pixels at the default interface size", () => {
-    // Recipe heights are rem so a control grows with the interface size, and the
-    // root is 13px. A quarter-rem step is 3.25px there, so an odd step lands
-    // between pixels: `h-7` drew about a hundred 24.5px buttons. An odd step
-    // goes through `round(…, 2px)` instead.
-    const oddStep = /(?<![\w:-])(?:min-h|h|size)-(\d+)(?![\w.[-])/g;
+  it("draws every spacing utility on the pixel scale at the default interface size", () => {
+    // Tailwind's step was a quarter rem and the root is the 13px interface
+    // size, so `px-2.5` drew 8.125px and `p-1` 3.25px. The theme now sets the
+    // step to 4px, and a utility may only name a step that lands on the scale
+    // (4, 8, 12, 16, 20, 24, 32, 48, and 28 for a control's height): no half steps
+    // and no 9, 10 or 11. A width that follows the type (a menu's minimum, a
+    // terminal's height) is written in rem instead.
+    const theme = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
+    expect(theme).toMatch(/--spacing:\s*4px;/);
+
+    const scale = new Set([0, 4, 8, 12, 16, 20, 24, 28, 32, 48]);
+    // Every utility Tailwind multiplies by the spacing step: padding, margin,
+    // gap, the logical and inset forms, scroll offsets, sizes, and the
+    // numeric forms of leading, columns and auto rows.
+    const step =
+      /(?<![\w-])-?(?:[\w[\]()=&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|start|end|inset|inset-x|inset-y|inset-s|inset-e|space-x|space-y|translate-x|translate-y|basis|indent|scroll-m|scroll-mx|scroll-my|scroll-mt|scroll-mb|scroll-ml|scroll-mr|scroll-p|scroll-px|scroll-py|scroll-pt|scroll-pb|scroll-pl|scroll-pr|leading|columns|auto-rows|auto-cols)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+    // A class fragment that builds a step at run time cannot be scanned.
+    const built =
+      /className=\{?[`"][^`"]*(?<![\w-])(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|h|w|size|leading)-\$\{/;
+    const files = ["tsx", "ts"]
+      .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+      .filter((path) => !path.includes(".test."));
+    const strays = files.flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(step)]
+        .filter((match) => !scale.has(Number(match[1]) * 4))
+        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+    );
+    const buildsAStep = files
+      .filter((path) =>
+        readFileSync(path, "utf8")
+          .split("\n")
+          .some((line) => built.test(line)),
+      )
+      .map((path) => relative(webRoot, path));
+    expect(buildsAStep).toEqual([]);
+    expect(strays).toEqual([]);
+  });
+
+  it("takes a shared recipe's control height in rem so it follows the interface size", () => {
+    // Spacing is pixels now, so `h-7` would draw a 28px control that no longer
+    // grows with the interface size. A recipe's height is `round(…rem,2px)` or a
+    // pixel token; a bare step of 20px or more is a control height.
+    const height =
+      /(?<![\w-])(?:[\w[\]()=&>*#.,'^-]+:)*(?:min-h|h|size)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
     const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
-      [...readFileSync(path, "utf8").matchAll(oddStep)]
-        .filter((match) => Number(match[1]) >= 5 && Number(match[1]) % 2 === 1)
+      [...readFileSync(path, "utf8").matchAll(height)]
+        .filter((match) => Number(match[1]) >= 5)
         .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
     );
 
@@ -810,7 +848,9 @@ describe("the public-block visual language", () => {
     // redefining it made the same message change shape between the first send
     // and the next. The empty prompt is one line on a start screen and under a
     // thread alike, and no surface or presentation sizes it again.
-    expect(prompt).toMatch(/min-height:\s*calc\(1lh \+ 24px\)/);
+    // One line is a whole-pixel line (`--oct-composer-line`) and 12px above and
+    // under it, so the box lands on whole pixels.
+    expect(prompt).toMatch(/min-height:\s*calc\(var\(--oct-composer-line\) \+ 24px\)/);
     expect(system).not.toMatch(/\.composer--follow-up \.composer-input \{/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {
@@ -842,7 +882,9 @@ describe("the public-block visual language", () => {
         /\.workspace-pane\[data-active="true"\] \.workspace-pane__grip\s*\{[^}]+\}/,
       )?.[0] ?? "";
 
-    expect(tabs).toContain("inline-flex h-8 w-fit items-center gap-1 text-muted-foreground");
+    expect(tabs).toContain(
+      "inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground",
+    );
     expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");
@@ -1425,6 +1467,83 @@ describe("the public-block visual language", () => {
       }
     });
 
+    it("draws every menu as one row: 28px, a 16px icon column, one gap, the Menu option type", () => {
+      // The words stood 36px from a menu's edge in More tools, 40 in a thread's
+      // context menu and 12 in the mode menu, in 12px and 13px type, behind
+      // separators inset 0.8px and 4px, on rows of 28px and 40px.
+      expect(system).toMatch(/--oct-menu-row-h:\s*28px;/);
+      expect(system).toMatch(/--oct-menu-row-two-h:\s*44px;/);
+      expect(system).toMatch(/--oct-menu-row-gap:\s*var\(--oct-space-2\);/);
+      expect(system).toMatch(/--oct-icon-md:\s*16px;/);
+
+      const row = readFileSync(join(webRoot, "ui/shadcn/menu-row.ts"), "utf8");
+      expect(row).toContain("gap-(--oct-menu-row-gap)");
+      expect(row).toContain("has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h)");
+      expect(row).toContain("oct-menu-option");
+      expect(row).toContain("size-(--oct-icon-md)");
+      expect(row).toMatch(/menuGroupLabel =\s*"oct-nav-group /);
+      // One separator, as wide as the rows: no negative margin, no inset of its own.
+      expect(row).toMatch(/menuSeparator = "my-1 h-px bg-border"/);
+      expect(system).toMatch(
+        /--oct-menu-row-trail:\s*calc\(\s*var\(--oct-menu-row-inset\) \+ var\(--oct-icon-md\) \+ var\(--oct-menu-row-gap\)\s*\);/,
+      );
+      expect(readFileSync(join(webRoot, "ui/shadcn/select.tsx"), "utf8")).toContain(
+        "pr-(--oct-menu-row-trail)",
+      );
+
+      for (const recipe of ["dropdown-menu", "context-menu"]) {
+        const source = readFileSync(join(webRoot, "ui/shadcn", `${recipe}.tsx`), "utf8");
+        expect(source, recipe).toContain("menuSeparator");
+        expect(source, recipe).not.toMatch(/-mx-|my-1 h-px/);
+      }
+      // A menu where any row has an icon reserves the column for all of them.
+      for (const adapter of ["OctantMenu", "OctantContextMenu"]) {
+        const source = readFileSync(join(webRoot, "ui/base", `${adapter}.tsx`), "utf8");
+        expect(source, adapter).toContain("menuIconColumn");
+        expect(source, adapter).toContain("hasIcons");
+        expect(source, adapter).toContain("oct-menu-detail");
+      }
+
+      // No call site gives a menu row its own padding, height, gap or type.
+      const itemTag =
+        /<(?:Octant[A-Za-z]*Menu[A-Za-z]*(?:Item|SubTrigger)|(?:Dropdown|Context)Menu[A-Za-z]*(?:Item|SubTrigger))\b(?:(?!\/?>)[\s\S])*?className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
+      const ownLayout =
+        /(?:^|\s)(?:p|px|py|pt|pb|pl|pr|gap|gap-x|gap-y|h|min-h|leading-\S+|text-(?:xs|sm|base|lg)|font-\S+)(?:-\S+)?(?=\s|$)/;
+      const overrides = ["tsx"]
+        .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+        .filter((path) => !path.includes(".test.") && !path.includes("/ui/"))
+        .flatMap((path) =>
+          [...readFileSync(path, "utf8").matchAll(itemTag)]
+            .filter((match) => ownLayout.test(match[1] ?? match[2] ?? ""))
+            .map((match) => `${relative(webRoot, path)}: ${match[1] ?? match[2] ?? ""}`),
+        );
+      expect(overrides).toEqual([]);
+
+      // A feature stylesheet gives its menu's rows no size, gap or type of their own.
+      const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
+      const threadMenu = shell.slice(
+        shell.indexOf(".thread-row-context-menu {"),
+        shell.indexOf(".thread-row-context-menu__item-label {"),
+      );
+      expect(threadMenu).not.toMatch(/min-height|font-size|line-height|\[role=/);
+      expect(threadMenu).toContain("width: var(--oct-icon-md);");
+      const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+      const rule = (selector: string) =>
+        styles.match(
+          new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`),
+        )?.[1] ?? "";
+      const disclosure = rule(".workspace-disclosure__action");
+      expect(disclosure).toContain("font-size: var(--oct-text-detail);");
+      expect(disclosure).toContain("font-weight: var(--oct-weight-medium);");
+      expect(disclosure).toContain("min-height: var(--oct-menu-row-h);");
+      expect(disclosure).toContain("gap: var(--oct-menu-row-gap);");
+      const model = rule(".composer-model-picker__model");
+      expect(model).toContain("gap: var(--oct-menu-row-gap);");
+      expect(model).toContain("min-height: var(--oct-menu-row-h);");
+      expect(model).toContain("font-size: var(--oct-text-detail);");
+      expect(rule(".composer-model-picker__models")).toContain("padding: var(--oct-menu-inset);");
+    });
+
     it("declares the scrollbar once and lets no stylesheet draw a second one", () => {
       // A second colour stood in octant.css and lost on source order alone.
       // The treatment is the two standard properties in styles.css; a feature
@@ -1531,32 +1650,28 @@ describe("the public-block visual language", () => {
       expect(dock).not.toContain("dock-tile__caption");
     });
 
-    it("draws a tile square and flat from the shared tokens from 681px up, with one line on its top and left", () => {
-      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles {"));
-      const inWide = (selector: string) => {
-        const start = wide.indexOf(`${selector} {`);
-        expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
-        return wide.slice(start, wide.indexOf("}", start));
-      };
-      expect(inWide(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
-      const tile = inWide(".dock-tile");
+    it("draws a tile square and flat on the pane fill at every width, with no gap to a neighbour", () => {
+      expect(body(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
+      const tile = body(".dock-tile");
       expect(tile).toMatch(/border-radius:\s*0/);
       expect(tile).toMatch(/background:\s*var\(--octant-pane-fill\)/);
-      expect(tile).toMatch(/box-shadow:\s*none/);
-      const line = inWide(".dock-tile::after");
+      expect(tile).not.toMatch(/box-shadow|--oct-radius/);
+      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
+      const rim = body(".dock-tile::after");
+      expect(rim).toMatch(/border-radius:\s*0/);
+      expect(rim).not.toMatch(/box-shadow/);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
+      // No rule narrows the window to give a tile back a corner, a rim or a gap.
+      expect(dock).not.toMatch(/--octant-tile-inset:\s*[1-9]/);
+      expect(dock).not.toMatch(/panel-seat|panel-rim|octant-panel-fill/);
+    });
+
+    it("draws the one line on a tile's top and left from 681px up, where the window is a grid of panes", () => {
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tile::after"));
+      const line = wide.slice(wide.indexOf(".dock-tile::after {"), wide.indexOf("}"));
       expect(line).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
       expect(line).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
       expect(line).not.toMatch(/border-(right|bottom)/);
-      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
-      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
-    });
-
-    it("keeps a narrow window's tile a rounded panel with a seat shadow and a rim", () => {
-      const tile = body(".dock-tile");
-      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
-      expect(tile).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
-      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
-      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
     });
   });
 

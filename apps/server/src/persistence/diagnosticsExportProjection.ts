@@ -55,6 +55,11 @@ interface ProjectionStatements {
 export class DiagnosticsExportProjection implements Projection {
   readonly name = "diagnostics-exports";
   readonly dependencies: ReadonlyArray<string> = ["aggregate-heads"];
+  // Only a person's diagnostics export reads these rows, and it refuses
+  // ("could not be verified") when an incident is missing, so a held view
+  // fails that export closed. Failure incidents are journaled beside failing
+  // turns, where a bug here must not roll back the turn's own events.
+  readonly derived = true as const;
   #statements = new WeakMap<SqliteConnection, ProjectionStatements>();
 
   reset(connection: SqliteConnection): void {

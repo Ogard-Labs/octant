@@ -8,7 +8,7 @@ import {
   type ComponentProps,
   type MutableRefObject,
 } from "react";
-import { menuGroupLabel, menuRow } from "./menu-row";
+import { menuGroupLabel, menuRow, menuSeparator } from "./menu-row";
 import { cn } from "./utils";
 
 /** Whether the open in progress came from the keyboard, set by the root, read by the popup. */
@@ -104,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-[var(--oct-z-popup)] min-w-48 max-w-(--available-width) rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] min-w-[12rem] max-w-(--available-width) rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"
@@ -164,7 +164,7 @@ export function DropdownMenuSeparator({
 }: ComponentProps<typeof MenuPrimitive.Separator>) {
   return (
     <MenuPrimitive.Separator
-      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      className={cn(menuSeparator, className)}
       data-slot="dropdown-menu-separator"
       {...props}
     />
@@ -229,7 +229,7 @@ export function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight aria-hidden="true" className="ml-auto" size={14} />
+      <ChevronRight aria-hidden="true" className="ml-auto size-(--oct-icon-sm)" />
     </MenuPrimitive.SubmenuTrigger>
   );
 }

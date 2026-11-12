@@ -14,7 +14,11 @@ import {
 } from "@octant/contracts";
 import { resolveEffectiveTokens } from "@octant/theme";
 import { Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { THEME_SETTINGS_AGGREGATE_ID } from "../persistence/themeProjection";
@@ -140,7 +144,7 @@ export class ThemeService implements ThemeServiceApi {
       if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
         throw new ThemeServiceError({
           category: "unavailable",
-          message: "Octant could not save appearance settings.",
+          message: persistenceFailureMessage(error, "Octant could not save appearance settings."),
         });
       }
       throw new ThemeServiceError({

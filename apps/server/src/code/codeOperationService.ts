@@ -67,6 +67,7 @@ import {
   type CodeRepositoryTestStatus,
   type CodeReviewFinding,
   type CodeThread,
+  type CodeRuntimeWork,
   type CodeThreadId,
   type AgentRun,
   type AgentRunId,
@@ -552,6 +553,8 @@ export interface CodeOperationScaffoldPort {
 }
 
 export interface CodeOperationGitPort {
+  /** Absent on a host that cannot read a remote; a lost push then stays unconfirmed. */
+  readonly remoteHead?: GitService["remoteHead"];
   readonly prepareHunks?: GitService["prepareHunks"];
   readonly applyHunks?: GitService["applyHunks"];
   readonly observe: (input: {
@@ -1033,6 +1036,8 @@ export interface CodeOperationTurnPort {
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** When set, only this turn may be stopped; a different live turn is left running. */
+    readonly turnOperationId?: CodeOperationId;
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -1214,6 +1219,16 @@ export interface CodeOperationServiceOptions {
     | { readonly status: "unavailable" }
   >;
   readonly pullRequests: CodeOperationPullRequestPort;
+  /**
+   * The thread's push and pull request steps whose outcome the host never
+   * learned (`ambiguous`), and how to settle one. Observing the checkout or the
+   * pull request looks at the remote and settles them, so reopening a thread
+   * clears a step that did land. Absent: such steps stay unconfirmed.
+   */
+  readonly unconfirmedSteps?: {
+    readonly list: (threadId: CodeThread["id"]) => ReadonlyArray<CodeRuntimeWork>;
+    readonly settle: (work: CodeRuntimeWork, state: "completed" | "failed") => void;
+  };
   /**
    * The standing merge permissions the person has stored for this thread right
    * now: its Project's "agents may merge" setting, and the routine that
@@ -3785,6 +3800,7 @@ export class CodeOperationService {
       case "observe-git":
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        await this.#settleLostPushes(thread, root.checkoutRoot, git);
         return this.#gitObservation(command, root.checkoutRoot, git);
       case "review-run":
         return this.#reviewRun(command, thread, root.checkoutRoot);
@@ -3945,6 +3961,7 @@ export class CodeOperationService {
       case "merge-pull-request":
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
+        await this.#settleLostPullRequestCreations(thread);
         return this.#pullRequestReview(command, root.checkoutRoot, git);
       case "observe-turn-review": {
         const preview = await this.#options.turns.reviewPreview?.({
@@ -4127,7 +4144,9 @@ export class CodeOperationService {
         for (const starting of this.#startingTurns) {
           if (
             String(starting.thread.id) === String(thread.id) &&
-            starting.checkoutRoot === root.checkoutRoot
+            starting.checkoutRoot === root.checkoutRoot &&
+            (command.turnOperationId === undefined ||
+              String(starting.operationId) === String(command.turnOperationId))
           ) {
             starting.cancelled = true;
             this.#startingTurns.delete(starting);
@@ -4137,6 +4156,9 @@ export class CodeOperationService {
         const cancelled = await this.#options.turns.cancel({
           thread,
           checkoutRoot: root.checkoutRoot,
+          ...(command.turnOperationId === undefined
+            ? {}
+            : { turnOperationId: command.turnOperationId }),
         });
         // A start the runtime has not taken on never will be now, so it is
         // journaled as stopped here: its preparation may not return for a long
@@ -4545,6 +4567,62 @@ export class CodeOperationService {
         executionPolicy: thread.executionPolicy,
       }),
     );
+  }
+
+  /**
+   * A push the host lost mid-flight is settled by where the remote branch now
+   * points: at the pushed commit, it landed; anywhere else or nowhere, it did
+   * not, and pushing again is safe. A remote that cannot be read leaves the step
+   * unconfirmed rather than guessing.
+   */
+  async #settleLostPushes(
+    thread: CodeThread,
+    checkoutRoot: string,
+    git: CodeOperationGitPort,
+  ): Promise<void> {
+    const steps = this.#options.unconfirmedSteps;
+    if (steps === undefined || git.remoteHead === undefined) return;
+    for (const work of steps.list(thread.id)) {
+      const step = work.remoteStep;
+      if (work.state !== "ambiguous" || step?.kind !== "push") continue;
+      const remote = await git.remoteHead({
+        checkoutRoot,
+        remote: step.remote,
+        remoteRef: step.remoteRef,
+        executionPolicy: thread.executionPolicy,
+      });
+      if (remote.status === "unavailable") continue;
+      steps.settle(
+        work,
+        remote.status === "found" && remote.oid === step.commitOid ? "completed" : "failed",
+      );
+    }
+  }
+
+  /**
+   * A pull request the host lost while creating it is settled by looking for
+   * the thread's pull request: one found, open or already closed, means it was
+   * created. Updates, comments and merges cannot be told apart from an earlier
+   * one this way, so they stay unconfirmed.
+   */
+  async #settleLostPullRequestCreations(thread: CodeThread): Promise<void> {
+    const steps = this.#options.unconfirmedSteps;
+    const locate = this.#options.pullRequests.locate;
+    if (steps === undefined || locate === undefined) return;
+    for (const work of steps.list(thread.id)) {
+      const step = work.remoteStep;
+      if (work.state !== "ambiguous" || step?.kind !== "pull-request" || step.action !== "create")
+        continue;
+      const signal = new AbortController().signal;
+      const open = await locate(thread.id, "open", signal);
+      if (open.status === "found") {
+        steps.settle(work, "completed");
+        continue;
+      }
+      const closed = open.status === "none" ? await locate(thread.id, "closed", signal) : open;
+      if (closed.status === "found") steps.settle(work, "completed");
+      else if (closed.status === "none") steps.settle(work, "failed");
+    }
   }
 
   async #gitObservation(
