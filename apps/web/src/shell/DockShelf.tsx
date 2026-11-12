@@ -97,6 +97,7 @@ export function DockMiniCard(props: {
       aria-label={`Minimised ${props.toolLabel}`}
       className="dock-card dock-mini-card"
       data-dock-card={props.surface}
+      data-detail={props.detail !== undefined}
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget)) return;
         focus.current = false;

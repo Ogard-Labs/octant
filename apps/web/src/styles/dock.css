@@ -1349,8 +1349,14 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   flex: 1 1 0;
 }
 
+/* Two cards stand side by side once each can have 160px (a dock about 352px and
+   wider) and stack below that; one card takes the whole width. A card is a 28px
+   bar over a 104px preview, 152px in all, so two side by side need 168px and
+   stay under the cap in any dock 420px or taller; the cap and the inner scroll
+   are the fallback for a very short dock and for two stacked cards. */
 .dock-shelf {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   max-height: 40%;
   flex: none;
   gap: var(--oct-space-2);
@@ -1368,29 +1374,44 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
    picture and the terminal bring their own content fill, which is opaque on
    purpose and sits inside the card, never under it. */
 .dock-mini-card {
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
+  container-type: inline-size;
+}
+
+/* A narrow card that has a word to say (Exited, Preview ended) gives that word
+   the room the icon had; the name still labels the card for assistive technology. */
+@container (max-width: 200px) {
+  .dock-mini-card[data-detail="true"] .dock-card__icon {
+    display: none;
+  }
 }
 
 .dock-mini-card__head {
   display: flex;
   min-width: 0;
-  min-height: 24px;
+  height: 28px;
+  min-height: 28px;
   align-items: center;
   gap: var(--oct-space-1);
 }
 
 .dock-mini-card__title {
   min-width: 0;
-  flex: 1 1 auto;
+  /* The name gives way first, with an ellipsis, before a word beside it or a button. */
+  flex: 1 10 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .dock-mini-card__detail {
-  flex: none;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1405,16 +1426,17 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 }
 
 .dock-mini-card__action {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  min-height: 22px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   flex: none;
   padding: 0;
 }
 
 .dock-mini-card__preview {
   position: relative;
+  height: 104px;
   min-width: 0;
   overflow: hidden;
   background: var(--octant-surface-inset);
@@ -1426,12 +1448,13 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 .dock-mini-card__skeleton {
   display: block;
   width: 100%;
-  aspect-ratio: 9 / 5;
+  height: 100%;
 }
 
+/* The page's top left, cropped to the preview and never stretched. */
 .dock-mini-card__picture {
   object-fit: cover;
-  object-position: top center;
+  object-position: top left;
   user-select: none;
 }
 
@@ -1439,13 +1462,12 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   border-radius: 0;
 }
 
-/* The shell's tail is about six rows of the smallest terminal type. */
+/* The shell's last lines, in the smallest terminal type, fill the preview. */
 .dock-mini-card__terminal,
 .dock-mini-card__skeleton--terminal,
 .dock-mini-card__note {
   display: block;
-  height: 72px;
-  aspect-ratio: auto;
+  height: 100%;
 }
 
 .dock-mini-card__terminal {
@@ -1463,7 +1485,7 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 .dock-mini-card__note {
   display: grid;
   margin: 0;
-  padding: var(--oct-space-3);
+  padding: var(--oct-space-2);
   place-items: center;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);

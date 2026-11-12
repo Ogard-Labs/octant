@@ -1381,6 +1381,20 @@ describe("tool tiles in the right sidebar", () => {
       );
     });
 
+    it("keeps a card compact: a 28px bar over a 104px preview, with 24px buttons, side by side from 160px each", () => {
+      expect(dockStylesheet).toMatch(
+        /\.dock-shelf\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\)/,
+      );
+      expect(dockStylesheet).toMatch(/\.dock-mini-card__head\s*\{[^}]*height:\s*28px/);
+      expect(dockStylesheet).toMatch(/\.dock-mini-card__preview\s*\{[^}]*height:\s*104px/);
+      expect(dockStylesheet).toMatch(
+        /\.dock-mini-card__action\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/,
+      );
+      expect(dockStylesheet).toMatch(
+        /\.dock-mini-card__picture\s*\{[^}]*object-fit:\s*cover[^}]*object-position:\s*top left/,
+      );
+    });
+
     it("names the shelf's group Minimised tools", () => {
       render(<TiledDock initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")} />);
       expect(screen.getByRole("group", { name: "Minimised tools" })).toBeVisible();

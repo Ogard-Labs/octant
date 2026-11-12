@@ -1119,9 +1119,16 @@ thread's open tools; the bottom panel never has one.
   since moved it keeps it where they put it.
 - **The shelf.** A group named **Minimised tools** at the foot of the dock body,
   under the overview when no tool is shown and under the tiles when tools are
-  shown. It takes its natural height, at most two cards (Browser, Terminal), and
-  never more than two fifths of the dock, scrolling inside past that; the tiles
-  above keep their floors and measure the space that is left. The modal dock
+  shown. It takes its natural height and holds at most two cards (Browser,
+  Terminal). A card is compact: an 8px inset, a 28px bar (icon, name, Show, Hide
+  card, each button a 24px target) over a preview 104px tall, 152px in all.
+  Two cards stand side by side, half the width each with an 8px gap, once each can
+  have 160px (a dock about 352px wide or wider) and stack below that; one card
+  takes the whole width and keeps the 104px preview. Side by side they need 168px
+  and stay clear of the cap in any dock 420px tall or taller. The shelf is never
+  more than two fifths of the dock and scrolls inside past that, which only a very
+  short dock, or two stacked cards in a dock under about 820px tall, reaches; the
+  tiles above keep their floors and measure the space that is left. The modal dock
   (960px and below) has no room for it and draws none; the state is kept, and
   there the minimised tool's tab stays in the strip so nothing leads nowhere.
   Otherwise a minimised tool leaves the strip, since its card stands for it.
@@ -1149,7 +1156,7 @@ thread's open tools; the bottom panel never has one.
 - **The Browser card** shows the page's title, or its host, with the profile's
   name beside it where the page lives in one (a signed-in page acts as the
   person's account) and the page count past one, over a picture of the page
-  fitted to the card's width, top aligned, at about 9:5. It reads the same host
+  cropped to the preview from its top left, never stretched. It reads the same host
   snapshot the Browser pane reads, and asks for a fresh picture only while the
   card is on screen: no card, no request for one. It polls every second while a
   session is live and every five otherwise, backs off while the page does not
@@ -1177,7 +1184,7 @@ thread's open tools; the bottom panel never has one.
   accent ring, and the modal dock, which draws no shelf, shows none.
 - **The Terminal card** shows the shell's current tail, live, in a read-only
   instance of the terminal engine at the smallest type the terminal settings
-  allow, about six rows, with no input, no focus and no resize sent to the shell.
+  allow, filling the preview (the shell's last lines, about seven rows), with no input, no focus and no resize sent to the shell.
   It reads the shell's state and follows the host's live stream, whose first
   frame is the tail, and stops it when the card goes away; it keeps only a few
   KiB of tail, drawn at most once an animation frame and appended to the terminal

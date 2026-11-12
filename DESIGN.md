@@ -2353,20 +2353,24 @@ covered the thread's own text and could not show a shell at all, so it is gone;
 the cards replace it. The shelf is a group named **Minimised tools** at the foot
 of the dock body, under the overview when no tool is shown and under the tiles
 when tools are shown (the tiles measure what is left and keep their floors). It
-takes its natural height, holds at most two cards (Browser, then Terminal), is
-never more than two fifths of the dock (it scrolls inside past that) and is not
+takes its natural height and holds at most two cards (Browser, then Terminal),
+side by side at half the width each (8px gap) once each can have 160px, a dock
+about 352px wide or wider, and stacked below that; one card takes the whole width.
+It is never more than two fifths of the dock (it scrolls inside past that, which
+two side-by-side cards do not reach in a dock 420px tall or taller) and is not
 drawn in the narrow modal dock, where the state is kept and the minimised tool's
 tab stays in the strip. A card is a `.dock-card` like the overview's, with no
-frosted parts and no new fill: a head with the tool's icon, a title (the page's
+frosted parts and no new fill, an 8px inset round a 28px bar over a 104px preview,
+152px in all: a head with the tool's icon, a title (the page's
 title or host with the profile name beside it where the page lives in one, or
 "Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
 output" for a shell that printed while nobody looked, an expand icon button
 (**Show Browser**, **Show Terminal**) and a hide icon button (**Hide Browser card**,
 **Hide Terminal card**, which removes the card and closes or stops nothing: the
-tool stays an open tab in the strip), then a preview that is itself the expand button (named
-"Show Browser, live preview"). The Browser's picture is fitted to the card's
-width, top aligned, at 9:5, a neutral skeleton while stale or missing; the
-Terminal shows about six rows of the smallest terminal type, read-only, or "No
+tool stays an open tab in the strip; every button a 24px target), then a preview that is itself the expand button (named
+"Show Browser, live preview"; its corner is the card's 12px minus the 8px inset, 4px). The name truncates with an ellipsis
+before a detail word or a button moves. The Browser's picture is cropped to the preview from its top left, never stretched, a neutral skeleton while stale or missing; the
+Terminal shows its last lines in the smallest terminal type, read-only, or "No
 terminal running" or "Preview unavailable". The picture and the terminal keep
 their own content fill, inside the card. A minimised tool leaves the strip, since
 its card stands for it, and **Show another tool** lists it with the open tools not
