@@ -4921,9 +4921,17 @@ input.switch:checked::after {
   white-space: nowrap;
 }
 /* The subagents tray stands directly above the frame; the line would sit on
-   it, so it is announced only. */
+   it, so it is announced only. It is clipped, not removed: `display: none`
+   took it out of the accessibility tree, and "Compacting session" was then
+   never said while the tray was shown. */
 .composer:has(> .composer-subagents) .composer-progress__line {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 .composer-notices {
   display: grid;

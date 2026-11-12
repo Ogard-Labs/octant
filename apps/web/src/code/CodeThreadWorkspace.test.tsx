@@ -2874,9 +2874,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
-      "hidden reasoning and the",
-    );
+    const disclosure = screen.getByText(/Your next message starts a new session on/);
+    expect(disclosure).toHaveTextContent("hidden reasoning and the");
+    // It stays until the next message, so it is a card that wraps, not the
+    // one-line passing message.
+    expect(disclosure.closest(".composer-notice")).not.toBeNull();
+    expect(disclosure.closest(".composer-progress")).toBeNull();
   });
 
   it("warns before sending that a thread switched to a model its provider cannot carry the session onto starts a new session", () => {

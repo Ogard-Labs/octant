@@ -2726,13 +2726,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             },
           }}
           progress={
-            // Passing messages: a provider check, or a switch that settles by
-            // itself. The newest wins and neither is a card.
-            providerChanging
-              ? { text: "Checking the selected provider…" }
-              : pendingSwitchNotice === undefined
-                ? undefined
-                : { text: pendingSwitchNotice }
+            // A provider check passes by itself, so it is the quiet line.
+            providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
@@ -2796,6 +2791,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     key: "access",
                     tone: "neutral" as const,
                     text: props.controller.accessNotice,
+                  },
+                ]),
+            // What a picked provider will not carry over stays true until the
+            // next message starts the new session, so it is a card that wraps:
+            // as a one-line passing message it was cut in a narrow pane before
+            // the part about hidden reasoning.
+            ...(pendingSwitchNotice === undefined || providerChanging
+              ? []
+              : [
+                  {
+                    key: "pending-switch",
+                    tone: "neutral" as const,
+                    text: pendingSwitchNotice,
                   },
                 ]),
             // A restore point outlives the message that announced it, so the

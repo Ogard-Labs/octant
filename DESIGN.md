@@ -863,11 +863,11 @@ long as the fact applies. Pressing it opens a popover with the full sentence and
 the Review action; in a narrow row (under 560px) the chip keeps the globe and
 drops the words, and its name and tooltip keep them. A plain note that stays until the
 person acts (a saved-draft sentence saying nothing was sent, a locked task, a
-handoff or access note, a receipt) is still a card, one for each, wrapping whole,
+handoff or access note, what a newly picked provider will not carry over, a receipt) is still a card, one for each, wrapping whole,
 never cut to a line and never hidden: only a surface marks a state as passing.
 A card as heavy as the pill, plus two rows under it, read as
 four stacked layers for a note that was not an error. Progress that a surface marks as passing by itself
-(sending, a response streaming, a provider check, a switch that settles, a
+(sending, a response streaming, a provider check, a
 session compacting, a first turn being prepared, a keyboard hint) is never a card and never changes the
 composer's height: it is one quiet line of meta ink in the transcript's bottom
 padding directly above the notice group, leading-aligned with the pill, one
@@ -875,9 +875,9 @@ message at a time with the newest winning, and no line at all where a control
 already says it (the Stop control during a response). A card for each passing
 status made the transcript jump about 48px twice a message. The line lives in
 one persistent polite status region that stays mounted, is the prompt's
-description (why Send is held), and also receives the words of every plain-fact
-card when it appears, because a card that mounts already filled may not be
-announced; a pending refusal's card is part of the prompt's description too, so
+description (why Send is held). Beside a subagents tray the line is clipped from
+view and still said. A card that stays is read where it stands and is not
+repeated in the region; a pending refusal's card is part of the prompt's description too, so
 it is heard again when the prompt takes focus. Over an application ground or under Window glass the card
 is the same glass as the pill with its tone laid over it, not the callout's
 opaque ground beside a translucent pill. A tinted bar inside the pill fought the
