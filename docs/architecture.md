@@ -8769,11 +8769,9 @@ the model at another size.
   Turn start and settlement are recorded for every provider so a crash or host
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
   The same server admission holds a recovered session until a person resumes it,
-  unless the setting "Resume interrupted turns after a restart" is on (off by
-  default): then a turn with no uncertain side effect resumes by itself, and
-  a turn whose last effect is uncertain still waits for the person
-  (maintainer request, 2026-11-12; not built yet: today every recovered
-  session waits for a person);
+  or until the host lifts it to continue a turn a restart cut off (Code restart
+  recovery, on by default): a turn whose last effect is uncertain still waits
+  for the person (maintainer request, 2026-11-12);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
