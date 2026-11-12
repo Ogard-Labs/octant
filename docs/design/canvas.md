@@ -995,7 +995,8 @@ sends, so a retry after an unconfirmed send is the same message and the queue
 answers it as a duplicate, while a deliberate second send is a new one. After
 the host confirms, the block shows the sent answers; a refusal keeps the draft
 and shows the host's reason. A reload shows the question afresh, since the
-answer lives in the thread rather than the Canvas.
+answer lives in the thread rather than the Canvas. [Decision forms](#decision-forms)
+are the designed change that saves answers on the Canvas.
 
 The block reads only, listing its questions and options with one line saying
 why, wherever it cannot send: a window without a message queue for the thread
@@ -1019,6 +1020,179 @@ belong in the conversation, and to put the questions in a choice block
 whenever it needs answers to more than four, grouped under headings with each
 recommendation flagged, rather than asking in several rounds. The `ask-user`
 description and the always-visible Canvas description both point there too.
+
+## Decision forms
+
+Status: designed, not built, except the unlimited question count above, which
+is built. A decision form is a `choice` block that an agent uses when it needs
+many decisions at once: a list the person works through, leaves, and returns
+to, and that the agent reads back. It is the same block, not a new kind, so
+the question schema stays one schema. What it adds is sections, a note on each
+question, answers that save on the Canvas as they are made, a progress count,
+an action that accepts the agent's recommendations, and a way for the agent to
+read the answers. It adds no authority: an answer speaks for the person as
+their own message does, and is never an approval of a gated action.
+
+### Block shape
+
+These fields arrive with Canvas schema version 29, so a document that declares
+an earlier version and carries one is refused as a declared future version. A
+block that carries none of them is the plain choice block above, at version 27.
+
+- `sections` (optional, one or more): each has a distinct `id`, a `title` (at
+  most 256 characters), an optional `intro` (at most 1,024), and ordered
+  `questionIds`. When present, every question belongs to exactly one section;
+  an unknown, repeated, or unplaced question id is refused. Absent, the
+  questions are one flat list in order. Sections group and label. They have no
+  count limit, no ordering rule between them, and no skip or branch logic.
+- `allowNote` on a question (optional, default true): `false` withholds the
+  note. A note is at most 2,000 characters. It annotates the chosen options and
+  is not a replacement for them, unlike the written answer (`allowCustom`),
+  which stands in for the choice.
+
+Everything else about a question is unchanged. The block still holds no answer:
+answers live in their own records below, never in a document version.
+
+### Saved answers
+
+A person's answers are journaled facts of one `canvas-choice-answers`
+aggregate per Canvas, shaped as the comments' aggregate is: events
+`canvas.choice-answer-set@1` and `canvas.choice-answer-cleared@1`, whose
+aggregate version is the Canvas's answer sequence, so concurrent writes
+conflict on the journal instead of both winning. A set names the Canvas, the
+block, the question, the `questionFingerprint` the window saw (a digest of the
+question's canonical definition: id, prompt, selection, option ids and labels,
+selection limits, `allowCustom`, `allowNote`), the selected option ids, an
+optional written answer or note, an `acceptedRecommendation` flag, and the time.
+A pure `applyCanvasChoiceAnswerEvent` reducer rebuilds the answers on restart
+and on replay, and a pure `admitCanvasChoiceAnswer` policy decides each write.
+
+The host admits a write only when:
+
+- the block is a choice block in the Canvas's head version, and the question
+  exists there with the fingerprint the window sent (otherwise the write is
+  refused as `question-changed` and the window reloads the question);
+- the selection obeys the question's own rule: only offered options, at least
+  `minSelections` (default one) and at most `maxSelections`, a written answer
+  only when `allowCustom` is not `false` and then with no selection, and a note
+  only when `allowNote` is not `false`;
+- the author is the host-stamped `local-user` of a host window. The host
+  ignores any actor the request names, the `octant_canvas` tool has no
+  operation that writes an answer, and a revision that carries one is refused
+  by the block's strict decode, so an agent can never answer for a person. A
+  paired or remote client reads saved answers and cannot write them.
+
+The route is `/api/canvas/choice-answers-revise`. It carries the expected
+answer sequence and a list of changes, applied together or not at all (one
+pick is a list of one; accepting recommendations is a list of many). A stale
+sequence is refused and the window retries once against the new sequence: the
+later write to the same question wins, and a write to a different question
+never conflicts with it.
+
+**Carry-over.** When an agent revises the block, a saved answer stays when its
+question id exists with the same fingerprint. Otherwise it is stale: it stays
+in the journal, the person sees it read-only under the revised question as
+"Earlier answer", it does not count as answered, and the agent's read marks it
+stale. An answer to a removed question is kept in the journal and is neither
+shown nor read. Answers leave with their Canvas when it is purged.
+
+**Why not a Canvas version per answer.** A version for each pick would put 24
+or more immutable versions in the history for one sitting, and every pick would
+race an agent's revision for the head sequence, so a person's work would be
+refused whenever the agent revised. A separate aggregate gives the answers
+their own sequence, as comments have.
+
+### The form
+
+The form draws in the Canvas workspace tab, in the sidebar and as a page of its
+own, wherever the choice block draws today; the thread still shows a card.
+
+- **Sections** draw in order, each a titled group with its intro above its
+  questions. A block without sections draws one flat list.
+- **Each question** shows its options as selectable cards, a _Recommended_
+  badge where the agent flagged one (never preselected), the written answer
+  where allowed, and a note field where allowed. The existing questionnaire
+  controls and their keyboard and radio-group behaviour are reused.
+- **Saving.** Every pick saves as it is made and a note saves when typing
+  pauses or the field loses focus. Each question shows _Saved_ or, when the
+  host refused, the host's reason beside the kept local value. There is no
+  Save button. A reload shows the saved answers.
+- **Progress.** A sticky header shows "N of M answered" in a polite live
+  region. A question counts when it has a saved, valid answer. One whose
+  `minSelections` is 0 is optional: it never blocks sending and reads
+  "skipped" when unanswered.
+- **Accept recommendations.** A header action, _Accept every recommendation
+  not yet answered_, answers each unanswered question that has an unambiguous
+  recommendation: a single-choice question with exactly one recommended
+  option, or a multiple-choice question whose recommended options satisfy its
+  selection limits. It never replaces an existing answer, leaves any question
+  it cannot decide unanswered and says how many, and is one batched write. The
+  answers it makes carry `acceptedRecommendation`, cleared as soon as the person
+  changes that answer. The action is absent when no question is eligible.
+- **Send answers.** Saving does not wake the agent; the explicit Send does,
+  through the existing path: one message enqueued on the owning thread's queue
+  from the window the person is in, under the thread's existing authority, never
+  a host-initiated turn and never an approval. It is enabled when every
+  question is answered or optional. The message names the Canvas, the block,
+  and the counts, and lists each question under its section with the chosen
+  labels, written answer, and note, marking accepted recommendations. When that
+  list would pass 20,000 characters the message carries the counts only and
+  tells the agent to read the answers from the Canvas. Its ids are derived from
+  the Canvas, the block, the answer sequence, and the count of confirmed sends,
+  so a retry is a duplicate and a deliberate second send is new. Answers stay
+  editable after a send, and a later send is a new message.
+- Where the form cannot send, it reads only, with a reason, in the cases the
+  choice block lists above. Saved answers are shown wherever the form is read
+  from a paired client.
+
+### What the agent reads
+
+The `octant_canvas` `read` operation returns, for each choice block, a
+`choiceAnswers` object: the counts answered and total, the time of the last
+confirmed send, and for each question its selected option ids and labels, written
+answer, note, `acceptedRecommendation`, `stale`, and answer time. Only the
+Canvas's owning thread and its managed children receive it, as with
+`requestedChanges`; another thread that can read the Canvas gets none. The
+`describe` guidance tells the agent to wait for the person's Send, read the
+answers from the Canvas, treat an accepted recommendation as the person agreeing
+to its own suggestion and not as new information, and never to assume an answer
+it has not read.
+
+### What leaves the computer
+
+Answers and notes are the person's own and stay on this computer. A share, a
+public link, and the Markdown and HTML export carry the questions, options, and
+sections (share version 17, naming blocks up to Canvas version 29) and never an
+answer or note. Artifact sync does not carry answers in this design; carrying
+them is a follow-up to [Artifact replica sync](artifact-replica-sync.md), as the
+comments' path is.
+
+### Rejected and deferred
+
+- _A separate `decisions` block._ It would fork the question schema; extending
+  `choice` keeps one.
+- _Conditional or branching questions._ Deferred: an agent with a dependent
+  question sends a second block after the first is answered.
+- _Required answers per block._ `minSelections: 0` already marks a question
+  optional; no new flag.
+- _Agent-visible answers on every read._ Answers are the person's; only the
+  owning thread reads them.
+
+### Build and verification plan
+
+Delivered in slices so each is reviewable. One: the unlimited question count
+and the agent guidance (built). Two: the version-29 contract fields, the
+aggregate, events, reducer, admission policy, and route. Three: the form
+(sections, saving states, progress, notes, accept recommendations). Four: the
+Send message, `read` output, and `describe` guidance. Five: share and export of
+sections. Each slice carries focused red/green policy and contract tests;
+slice two adds journal replay, concurrent-write, stale-fingerprint, and
+authority negatives (a paired client and a named agent actor are refused);
+slice three adds renderer tests and rendered QA of a 24-question form at the
+sidebar, page, and narrow widths, in light and dark and under forced colours;
+slice four adds a real-provider smoke in which an agent builds a 24-question
+form and reads the answers, a maintainer live check where credentials are
+needed.
 
 ## Diagram boards and comments
 
