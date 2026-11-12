@@ -39,6 +39,7 @@ export interface AgentSessionDependencies {
     | "holdTurnStart"
     | "noteTurnThread"
     | "turnThreadsOf"
+    | "recordTurnSent"
   >;
   readonly dispatch: (
     handoff: AuthenticatedProductDispatchHandoff,
@@ -152,6 +153,14 @@ export function createAgentSession(input: {
       const parsed = parseJson(text);
       if (response.ok && checked.marksThread !== undefined && checked.turnMode !== undefined) {
         deps.service.noteTurnThread(String(grant.grantId), checked.marksThread, checked.turnMode);
+        if (checked.turnKey !== undefined) {
+          deps.service.recordTurnSent({
+            grantId: String(grant.grantId),
+            threadId: checked.marksThread,
+            mode: checked.turnMode,
+            turnKey: checked.turnKey,
+          });
+        }
       }
       if (response.ok && checked.recordsThread !== undefined) {
         const threadId = checked.recordsThread.threadId ?? createdThreadId(parsed);
@@ -235,6 +244,8 @@ type GuardResult =
       readonly marksThread?: string;
       /** The marked thread's mode, so a turn the agent starts there counts toward its limit. */
       readonly turnMode?: AgentGrantMode;
+      /** The id the started turn's record keeps, so the agent is named as its sender. */
+      readonly turnKey?: string;
     }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -276,7 +287,12 @@ export function guardAgentRequest(input: {
   // Text the agent sends a thread (a prompt or an answer) is outside content,
   // and starts work at the thread's own access, which must still be within the
   // grant: lowering a grant lowers what its agent can run on threads it made.
-  const prompt = (threadId: unknown): GuardResult => {
+  // A turn start names the id its turn record will keep, so the agent can be
+  // named as that turn's sender; an answer starts no turn and names none.
+  const prompt = (threadId: unknown, turnKey?: unknown): GuardResult => {
+    if (turnKey !== undefined && !isUuid(turnKey)) {
+      return refused("That turn has no id Octant can record it by.");
+    }
     if (typeof threadId !== "string" || !inScope(threadId)) {
       return refused("That thread is not in this agent's grant.");
     }
@@ -289,7 +305,12 @@ export function guardAgentRequest(input: {
     if (access === undefined || !modelAllowed(grant, access.modelId)) {
       return refused("That thread runs on a model this agent's grant does not include.");
     }
-    return { kind: "allowed", marksThread: threadId, turnMode: access.kind };
+    return {
+      kind: "allowed",
+      marksThread: threadId,
+      turnMode: access.kind,
+      ...(typeof turnKey === "string" ? { turnKey } : {}),
+    };
   };
   const body = (request.body ?? {}) as Readonly<Record<string, unknown>>;
 
@@ -330,7 +351,9 @@ export function guardAgentRequest(input: {
         },
       };
     }
-    if (kind === "send-chat-turn") return prompt(body["threadId"]);
+    if (kind === "send-chat-turn") {
+      return prompt(body["threadId"], body["submissionId"] ?? null);
+    }
     if (kind === "interrupt-chat-turn") return thread(body["threadId"]);
     if (kind === "answer-chat-turn-question") {
       if (!scope.tools.includes("answer_question")) {
@@ -373,7 +396,7 @@ export function guardAgentRequest(input: {
     return refused("This agent may not do that.");
   }
   if (path === "/api/work/turns" && kind === "start-work-thread-turn")
-    return prompt(body["threadId"]);
+    return prompt(body["threadId"], body["turnId"] ?? null);
   if (path === "/api/work/turns/cancel" && kind === "cancel-work-turn")
     return thread(body["threadId"]);
   if (path === "/api/code/commands") {
@@ -411,7 +434,8 @@ export function guardAgentRequest(input: {
         },
       };
     }
-    if (kind === "start-provider-turn") return prompt(body["threadId"]);
+    if (kind === "start-provider-turn")
+      return prompt(body["threadId"], body["operationId"] ?? null);
     if (kind === "cancel-provider-turn") return thread(body["threadId"]);
     return refused("This agent may not do that.");
   }
@@ -535,6 +559,13 @@ function createdThreadId(body: unknown): string | undefined {
   if (typeof body !== "object" || body === null) return undefined;
   const thread = (body as { readonly thread?: { readonly id?: unknown } }).thread;
   return typeof thread?.id === "string" ? thread.id : undefined;
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
 }
 
 function refused(message: string): GuardResult {

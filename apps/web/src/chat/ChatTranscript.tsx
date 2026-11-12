@@ -1,3 +1,4 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
@@ -263,6 +264,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
+  // A Chat turn keeps the submission id its sender chose, which is how a turn
+  // an outside agent sent is named for that agent.
+  const agentTurnSender = useAgentTurnSenders(String(props.view.thread.id));
   const chatReplyInFlight = turns.some((turn) =>
     turn.attempts.some(
       (attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming",
@@ -551,11 +555,21 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           }
         };
 
+        const sentBy =
+          delivery === undefined && turn.submissionId !== undefined
+            ? agentTurnSender(String(turn.submissionId))
+            : undefined;
         return (
           <div className="chat-transcript__turn">
             <TurnActionMenu actions={messageActions} onAction={onAction}>
               <article
-                aria-label={delivery === undefined ? "Your message" : "Subagent results"}
+                aria-label={
+                  delivery !== undefined
+                    ? "Subagent results"
+                    : sentBy === undefined
+                      ? "Your message"
+                      : `Message from ${sentBy}`
+                }
                 className={delivery === undefined ? "turn-user" : "turn-child-result"}
               >
                 {delivery !== undefined ? (
@@ -570,6 +584,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       {attachmentList}
                     </div>
                     <TurnTime at={turn.createdAt} copyValue={userContent?.body} />
+                    <AgentTurnSender agentName={sentBy} />
                   </>
                 )}
                 {checkpoints === undefined ? null : (

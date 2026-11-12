@@ -47,11 +47,13 @@ function grant(overrides: Partial<AgentGrantScope> = {}): AgentGrant {
 
 const autoThread = "30000000-0000-4000-8000-000000000004";
 const chatThread = "30000000-0000-4000-8000-000000000005";
+const turnKey = "60000000-0000-4000-8000-000000000001";
 const otherModelThread = "30000000-0000-4000-8000-000000000006";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
   const turned: Array<{ threadId: string; mode: string }> = [];
+  const sentTurns: Array<{ threadId: string; turnKey: string }> = [];
   let starting = 0;
   const service: AgentSessionDependencies["service"] = {
     threadOwner: (threadId: string) =>
@@ -67,6 +69,9 @@ function deps() {
       turned.push({ threadId, mode });
     },
     turnThreadsOf: () => [],
+    recordTurnSent: (input) => {
+      sentTurns.push({ threadId: input.threadId, turnKey: input.turnKey });
+    },
     holdTurnStart: () => {
       const startingAlready = starting;
       starting += 1;
@@ -102,7 +107,7 @@ function deps() {
           : threadId === otherModelThread
             ? { ...askFirst, modelId: "other-model" }
             : undefined;
-  return { service, threadProject, threadAccess, recorded, turned };
+  return { service, threadProject, threadAccess, recorded, turned, sentTurns };
 }
 
 const guard = (
@@ -190,7 +195,7 @@ describe("the agent grant guard", () => {
       guard({
         path: "/api/code/commands",
         method: "POST",
-        body: { kind: "start-provider-turn", threadId: strangerThread },
+        body: { kind: "start-provider-turn", operationId: turnKey, threadId: strangerThread },
       }),
     ).toBe("refused");
   });
@@ -292,7 +297,7 @@ describe("a grant that narrows after the agent made threads", () => {
         {
           path: "/api/code/commands",
           method: "POST",
-          body: { kind: "start-provider-turn", threadId },
+          body: { kind: "start-provider-turn", operationId: turnKey, threadId },
         },
         { highestLevel },
       );
@@ -324,7 +329,7 @@ describe("prompts an outside agent sends", () => {
     await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: projectThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
     });
     expect(order).toEqual([`marked ${projectThread}`, "sent"]);
   });
@@ -349,7 +354,7 @@ describe("prompts an outside agent sends", () => {
     const answer = await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: ownThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: ownThread },
     });
     expect(answer.status).toBe(503);
     expect(dispatch).not.toHaveBeenCalled();
@@ -388,7 +393,7 @@ describe("threads the person made in a granted Project", () => {
         {
           path: "/api/code/commands",
           method: "POST",
-          body: { kind: "start-provider-turn", threadId },
+          body: { kind: "start-provider-turn", operationId: turnKey, threadId },
         },
         { threads: "project", models: ["fake-model"] },
       );
@@ -413,7 +418,7 @@ describe("threads the person made in a granted Project", () => {
     await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: projectThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
     });
     expect(turned).toEqual([{ threadId: projectThread, mode: "code" }]);
   });
@@ -452,5 +457,70 @@ describe("stopping a revoked agent's turns", () => {
     expect((await cancel(projectThread)).status).toBe(200);
     expect((await cancel(strangerThread)).status).toBe(403);
     expect(sent).toEqual(["/api/code/commands"]);
+  });
+});
+
+describe("the sender of each turn", () => {
+  function session(dispatchStatus = 200) {
+    const fixture = deps();
+    const created = createAgentSession({
+      grant: grant({ threads: "project", modes: ["code", "work", "chat"] }),
+      signal: new AbortController().signal,
+      deps: {
+        ...fixture,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent: () => undefined,
+        dispatch: async () => Response.json({}, { status: dispatchStatus }),
+      },
+    });
+    return { session: created, sentTurns: fixture.sentTurns };
+  }
+
+  it("records the id each accepted turn keeps, so the transcript can name the agent", async () => {
+    const { session: agent, sentTurns } = session();
+    await agent.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
+    });
+    await agent.send({
+      path: "/api/chat/commands",
+      method: "POST",
+      body: { kind: "send-chat-turn", submissionId: turnKey, threadId: chatThread },
+    });
+    expect(sentTurns).toEqual([
+      { threadId: projectThread, turnKey },
+      { threadId: chatThread, turnKey },
+    ]);
+  });
+
+  it("records nothing for a turn the host refused, or for an answer", async () => {
+    const refusedSend = session(409);
+    await refusedSend.session.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
+    });
+    expect(refusedSend.sentTurns).toEqual([]);
+    const { session: agent, sentTurns } = session();
+    await agent.send({
+      path: "/api/chat/commands",
+      method: "POST",
+      body: { kind: "answer-chat-turn-question", threadId: chatThread },
+    });
+    expect(sentTurns).toEqual([]);
+  });
+
+  it("refuses a turn start that names no id to record it by", () => {
+    expect(
+      guard(
+        {
+          path: "/api/code/commands",
+          method: "POST",
+          body: { kind: "start-provider-turn", threadId: projectThread },
+        },
+        { threads: "project" },
+      ),
+    ).toBe("refused");
   });
 });

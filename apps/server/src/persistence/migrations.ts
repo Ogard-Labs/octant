@@ -2495,6 +2495,27 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 96,
+    name: "create_agent_access_turns",
+    // The turns an outside agent sent, keyed by the id each turn record keeps
+    // (a Code operation id, a Chat submission id, a Work turn id), so a
+    // transcript can name the agent as a turn's sender. Rebuilt from the
+    // agent-access journal events like the other agent-access rows.
+    sql: `
+      CREATE TABLE agent_access_turn_projection (
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        turn_key TEXT NOT NULL CHECK(length(turn_key) = 36),
+        grant_id TEXT NOT NULL CHECK(length(grant_id) = 36),
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+        sent_at TEXT NOT NULL CHECK(length(trim(sent_at)) > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (thread_id, turn_key)
+      ) STRICT;
+      CREATE INDEX agent_access_turn_sequence_idx
+        ON agent_access_turn_projection(last_sequence);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

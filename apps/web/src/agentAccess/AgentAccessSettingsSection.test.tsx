@@ -11,7 +11,11 @@ import {
 import { SidebarThreadRowContent } from "../projects/SidebarThreadRowContent";
 import type { AgentAccessAdministrationBridge } from "../shell/hostBridge";
 import { AgentAccessSettingsSection } from "./AgentAccessSettingsSection";
-import { AgentThreadAttributionProvider } from "./agentThreadAttribution";
+import {
+  AgentThreadAttributionProvider,
+  AgentTurnSender,
+  useAgentTurnSenders,
+} from "./agentThreadAttribution";
 
 const grantId = "63000000-0000-4000-8000-000000000001";
 const projectId = "63000000-0000-4000-8000-000000000002";
@@ -136,5 +140,34 @@ describe("Started by", () => {
     );
     expect(await screen.findByText("Started by Home bot")).toBeTruthy();
     expect(screen.getAllByText(/Started by/)).toHaveLength(1);
+  });
+});
+
+describe("Sent by", () => {
+  function Prompt(props: { readonly threadId: string; readonly turnKey: string }) {
+    const sender = useAgentTurnSenders(props.threadId);
+    return <AgentTurnSender agentName={sender(props.turnKey)} />;
+  }
+
+  it("names the outside agent under each turn it sent, by the id the turn keeps, and nothing under others", async () => {
+    const agentTurn = "64000000-0000-4000-8000-000000000001";
+    const personTurn = "64000000-0000-4000-8000-000000000002";
+    const client: AgentGrantClient = {
+      grants: async () => ({ kind: "grants", grants: [] }),
+      revoke: async () => ({ kind: "done" }),
+      threads: async () => ({
+        threads: [],
+        turns: [{ threadId: "t-project", turnKey: agentTurn, agentName: "Home bot" }],
+      }),
+    };
+    render(
+      <AgentThreadAttributionProvider client={client}>
+        <Prompt threadId="t-project" turnKey={agentTurn} />
+        <Prompt threadId="t-project" turnKey={personTurn} />
+        <Prompt threadId="t-other" turnKey={agentTurn} />
+      </AgentThreadAttributionProvider>,
+    );
+    expect(await screen.findByText("Sent by Home bot")).toBeTruthy();
+    expect(screen.getAllByText(/Sent by/)).toHaveLength(1);
   });
 });

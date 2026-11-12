@@ -1,3 +1,4 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -374,6 +375,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       .catch(() => undefined);
   }, [codeClient, draft, props.threadId]);
   const compacting = useComposerCompacting();
+  // A Code turn keeps the operation id its sender chose, which is how a turn
+  // an outside agent sent is named for that agent. A fork's inherited turns
+  // are named under the thread that ran them.
+  const agentTurnSender = useAgentTurnSenders(String(props.threadId));
+  const inheritedTurnSender = useAgentTurnSenders(
+    view?.thread.forkedFrom === undefined ? undefined : String(view.thread.forkedFrom.threadId),
+  );
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
@@ -1794,6 +1802,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 // host's own delivery wording is what says this is a subagent's
                 // result and not something the person typed.
                 const delivered = message.role === "user" && isChildResultDelivery(message.text);
+                const sentBy =
+                  message.role !== "user" || delivered || message.operationId === undefined
+                    ? undefined
+                    : message.sourceThreadId === undefined
+                      ? agentTurnSender(String(message.operationId))
+                      : inheritedTurnSender(String(message.operationId));
                 // A follow-up's turn is marked the same way, by the host's heading.
                 const followUpPrompt =
                   message.role === "user"
@@ -1875,7 +1889,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           : followUpPrompt !== undefined
                             ? "Scheduled follow-up"
                             : message.role === "user"
-                              ? "Your message"
+                              ? sentBy === undefined
+                                ? "Your message"
+                                : `Message from ${sentBy}`
                               : "Assistant message"
                       }
                       className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
@@ -1965,6 +1981,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             {message.at === undefined ? null : (
                               <TurnTime at={message.at} copyValue={message.text} />
                             )}
+                            <AgentTurnSender agentName={sentBy} />
                           </>
                         ) : (
                           <>

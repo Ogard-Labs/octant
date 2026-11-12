@@ -67,6 +67,9 @@ function routes() {
       attributions: () => [
         { threadId: "t-1", grantId: grantId as never, agentName: "Home bot", mode: "code" },
       ],
+      turnAttributions: () => [
+        { threadId: "t-1", turnKey: "61000000-0000-4000-8000-0000000000aa", agentName: "Home bot" },
+      ],
       execute: (command, actor) => {
         executed.push({ command, actor });
         return { kind: "done" };
@@ -84,6 +87,13 @@ describe("agent grant routes", () => {
       expect(response?.status).toBe(200);
       expect(await response?.json()).toEqual({
         threads: [{ threadId: "t-1", grantId, agentName: "Home bot", mode: "code" }],
+        turns: [
+          {
+            threadId: "t-1",
+            turnKey: "61000000-0000-4000-8000-0000000000aa",
+            agentName: "Home bot",
+          },
+        ],
       });
     }
   });
