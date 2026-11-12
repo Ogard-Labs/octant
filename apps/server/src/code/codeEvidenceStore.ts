@@ -4,7 +4,7 @@ import {
   decodeCodeEvidenceReference,
   type CodeEvidenceReference,
 } from "@octant/contracts";
-import type { SqliteConnection } from "../persistence/sqlitePort";
+import type { SqliteConnection, SqliteStatement } from "../persistence/sqlitePort";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -26,6 +26,9 @@ export class CodeEvidenceStore {
   readonly #clock: () => string;
   readonly #maxStoredBytes: number;
   readonly #maxEntries: number;
+  readonly #findByDigest: SqliteStatement;
+  readonly #insert: SqliteStatement;
+  readonly #findById: SqliteStatement;
   #storedBytes = 0;
   #entryCount = 0;
 
@@ -41,6 +44,23 @@ export class CodeEvidenceStore {
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#maxStoredBytes = options.maxStoredBytes ?? DEFAULT_MAX_STORED_BYTES;
     this.#maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    // Prepared once: a streamed reply stores evidence many times a second.
+    this.#findByDigest = this.#connection.prepare(
+      `SELECT content_id, body_text, byte_length
+         FROM code_evidence_content_store
+         WHERE digest = ?
+         LIMIT 1`,
+    );
+    this.#insert = this.#connection.prepare(
+      `INSERT INTO code_evidence_content_store
+          (content_id, body_text, digest, byte_length, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+    );
+    this.#findById = this.#connection.prepare(
+      `SELECT body_text, digest, byte_length
+         FROM code_evidence_content_store
+         WHERE content_id = ?`,
+    );
     this.reconcileCapacity();
   }
 
@@ -62,14 +82,7 @@ export class CodeEvidenceStore {
       throw new Error("Code evidence exceeds the bounded content limit.");
     }
     const digest = createHash("sha256").update(bytes).digest("hex");
-    const existing = this.#connection
-      .prepare(
-        `SELECT content_id, body_text, byte_length
-         FROM code_evidence_content_store
-         WHERE digest = ?
-         LIMIT 1`,
-      )
-      .get(digest) as
+    const existing = this.#findByDigest.get(digest) as
       | { readonly content_id: string; readonly body_text: string; readonly byte_length: number }
       | undefined;
     if (existing !== undefined) {
@@ -100,26 +113,20 @@ export class CodeEvidenceStore {
       byteLength: bytes.byteLength,
       ...(metadata?.truncated === true ? { truncated: true } : {}),
     });
-    this.#connection
-      .prepare(
-        `INSERT INTO code_evidence_content_store
-          (content_id, body_text, digest, byte_length, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(reference.contentId, content, reference.digest, reference.byteLength, this.#clock());
+    this.#insert.run(
+      reference.contentId,
+      content,
+      reference.digest,
+      reference.byteLength,
+      this.#clock(),
+    );
     this.#entryCount += 1;
     this.#storedBytes += bytes.byteLength;
     return reference;
   }
 
   read(reference: CodeEvidenceReference): string | undefined {
-    const row = this.#connection
-      .prepare(
-        `SELECT body_text, digest, byte_length
-         FROM code_evidence_content_store
-         WHERE content_id = ?`,
-      )
-      .get(reference.contentId) as
+    const row = this.#findById.get(reference.contentId) as
       | { readonly body_text: string; readonly digest: string; readonly byte_length: number }
       | undefined;
     if (row === undefined) return undefined;

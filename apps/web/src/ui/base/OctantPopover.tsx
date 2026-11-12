@@ -111,7 +111,7 @@ export function OctantPopover(props: OctantPopoverProps) {
       <PopoverPortal>
         <PopoverPositioner
           align={props.align ?? "start"}
-          className="z-50 window-no-drag"
+          className="z-[var(--oct-z-popup)] window-no-drag"
           {...(props.collisionAvoidance === undefined
             ? {}
             : { collisionAvoidance: props.collisionAvoidance })}

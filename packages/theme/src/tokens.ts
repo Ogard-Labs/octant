@@ -149,7 +149,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     contrastTarget: "workspace",
     contrastLevel: "ui",
     defaultLight: "#6f6f6d",
-    defaultDark: "#808080",
+    defaultDark: "#8a8a8a",
   },
   {
     id: "text-primary",

@@ -136,27 +136,29 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                   |
-| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
-| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)   |
-| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, on a toolbar's row (`oct-page-title`)                                   |
-| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`); a part of a dialog is headed at 15 / 600 (its `h3`)                  |
-| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                       |
-| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
-| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
-| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
-| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
-| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
-| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
+| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                                     |
+| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                   |
+| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                     |
+| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, and a thread's title in the title band (`oct-page-title`)                                 |
+| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)     |
+| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                         |
+| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), a Settings section's label, a sidebar or Settings rail group heading |
+| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option, sidebar row and thread title, an empty state's title                                      |
+| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                                            |
+| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                           |
+| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, a turn's time and "Worked for" (`oct-meta`)                |
+| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                   |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, counts, `strong`, the app's name, a destination's page title), and
-700 (`--oct-weight-title`) only for the large title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
+card titles, `strong`, the app's name, a destination's page title), and
+700 (`--oct-weight-title`) only for the large title. A count beside a label
+is Meta at 400; the one count at medium weight is a plan meter's figure, which
+stands with no label of its own (see Plan meters). The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
@@ -167,8 +169,11 @@ fact in a list is its name in muted ink and its value in primary ink. (A
 dialog's title was the body's 15px, and a reply's headings were 15/14/14 at
 medium weight: each was one more line of the text under it.)
 
-Titles and the welcome question use `--oct-tracking-tight` (-0.025em); section labels use `--oct-tracking-snug`;
-body and detail use none.
+The large title and a dialog's title use `--oct-tracking-tight` (-0.025em); the page title and
+section labels use `--oct-tracking-snug` (-0.01em), because tight tracking on 14px type closes
+the letters up; the welcome question has its own -0.012em; body and detail use none. The role
+leadings are tokens too: `--oct-leading-label` (1.35), `--oct-leading-meta` (1.4) and
+`--oct-leading-detail` (1.45) beside the heading and snug ones.
 
 ### Colour
 
@@ -233,6 +238,13 @@ warning is wrong.
 
 ### Shapes and depth
 
+A divider handle (the sidebar's, the dock's, the bottom panel's, a pane split's)
+is a hairline in the border at rest, the strong border under the pointer, and
+the meta ink at double width while it is grabbed; keyboard focus draws the shared
+focus edge, on the visible handle when the focusable element is an invisible
+input (a pane split). None of it is the accent: a clicked divider kept a bright
+accent line lit, and a split showed no keyboard mark at all.
+
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
@@ -246,6 +258,15 @@ this document names the token, not the number.
 | `--oct-radius-pill`     | 9999px | Compact chips, meters, and circular icon controls only                                 |
 | `--radius` (`md`)       | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
 | `--radius-lg` / `-xl`   | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
+
+A corner that sits within one radius of a rounded parent's corner is concentric
+with it: the parent's radius less the gap between them, or square when the gap
+is at least the radius, never the same token again. Two equal radii one inset
+apart leave a frame that swells at the corner. The rule governs an object
+inside a rounded container (a card in a card, a tile in a round end) and the
+narrow layout. It no longer governs the wide window's frame: from 681px up the
+panes are square and reach the window's right and bottom edges, so no pane has a
+corner to nest in the native window's own (see the frame and its panes below).
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -394,7 +415,7 @@ under increased contrast, and a system-colour border in forced colours), and one
 only its own top and left edge, so a shared edge is never drawn twice. The
 divider's hit area is 8px wide and centred on that line, for the edge between
 the thread and the dock, between two tiles, and above the bottom panel; the
-line takes the accent while it is grabbed. A tile is told apart by its name,
+line is the strong border under the pointer and the meta ink while it is grabbed, never the accent. A tile is told apart by its name,
 not by a ring that would double a divider. The window's own outer corners are
 the native window's; no pane rounds a corner. Rationale: panes in a grid that
 is dragged, aligned and resized share edges, and a corner and a gap on each
@@ -542,8 +563,8 @@ sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility, and Reading: transcript text size and width, Reply detail,
-the stats line and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
+text, accessibility, and Reading: transcript text size and width, Reply detail
+and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
@@ -766,21 +787,23 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits under the follow-up composer, on the page rather than
-in the box, where a person reads the last turn's figures after sending. Above the
-box, one strip holds where the thread runs (Project and branch) on the left and
-the plan meters described below on the right, so the box holds only the message
-and its controls. The stats are one row of figures at the 12px meta step in the
-meta ink, separated by middle dots, with no hue on any number and no fill on the
-row: the thread's turns, input and output tokens, thinking tokens when the
-provider reported them (part of the output), the cache hit, speed, first token,
-and cost. The turn count never stands alone. Where the plan meters have no strip
-of their own, they lead the row. It wraps at narrow widths rather than scrolling,
-and a trailing quiet icon button hides it. A figure
-that is approximate carries a leading tilde and a dotted underline that explains it on
-hover; a figure the provider did not report is absent, never zero. The whole line is one
-button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
-and cost with Previous and Next turn controls.
+A thread's turn figures sit at the top of its Thread info panel, not under the
+composer: with the row of controls and the line of figures under the pill, plus a
+card, the composer read as four stacked layers. Above the box, one strip holds
+where the thread runs (Project and branch) on the left and the plan meters
+described below on the right, so the box holds only the message and its
+controls. The figures are one compact block of the 12px meta step in the meta
+ink, separated by middle dots, with no hue on any number and no fill: the
+thread's turns, input and output tokens, thinking tokens when the provider
+reported them (part of the output), the cache hit, speed, first token, and cost.
+The turn count never stands alone. The block wraps rather than scrolling, and a
+figure that is approximate carries a leading tilde and a dotted underline that
+explains it on hover; a figure the provider did not report is absent, never
+zero. Its Turn details link, like Turn details in the context meter's popover,
+opens the per-turn detail dialog, a plain definition list of tokens, timing, and
+cost with Previous and Next turn controls. There is no hide control and no
+setting: the panel is closed until asked for, so the figures cost the page
+nothing.
 
 **Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
 the same row as where the work runs: the row under a thread's box, and on a
@@ -858,7 +881,7 @@ Project terminal and browser Zen uses, which no agent can see or reach;
 start screen) stops its shell, since nothing else could reopen it. The
 composer never remounts when the Project is chosen, so the draft stays. Send
 on a Code start screen with no Project chosen stays live and answers with one
-line directly under the composer, "Choose a Project first. A Code task works in a
+card directly above the pill, "Choose a Project first. A Code task works in a
 folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
@@ -908,8 +931,55 @@ the pill's one solid control: the primary text colour as its fill, with the
 page colour on it. It is not the accent: a filled accent circle was the
 loudest thing on the page under an empty prompt. The microphone is in the
 pill because it writes into the prompt; in the line under it, it read as a
-fact about the thread. A notice about sending stays in the pill, under the
-prompt. How the
+fact about the thread. A notice is never in the pill. What the composer has to
+say about its thread or about sending (a refusal, a failure, a status, a hint,
+the Project offer, a failed dictation) is the system's callout in a card directly
+above the pill, in the pill's width, and in its tone: the callout's own corner
+(12px, not the pill's 22px), 8px between the last card and the pill, the
+words wrapping and the action at the trailing edge, dropping under the words
+in a narrow composer. Each notice is a card of its own, the most severe first
+(a refusal or failure, then a warning, then a plain fact), so three notices are
+three short rows. A start screen's order from the top is the start row of
+chips, the notice cards, the pill, the line under it. A card is shown for as
+long as its notice applies, so what an agent may do and what a thread read are
+never less visible than they were in the pill; it takes no focus when it
+appears, and in tab order it comes before the prompt. A refusal is an alert and
+a status is a status. A card is for something the person must read or act on
+and that stays until it is resolved: a refusal, a failure, or an offer with an
+action. It is the callout's compact form (the 12px meta step, tight padding,
+one line where the text fits, its tone tint, the callout's own hairline) so
+the pill stays the one strong shape. With nothing of that pending, nothing
+stands above the pill. The composer is the pill and one quiet row under it. A
+standing fact about access is not a card: that a thread has read outside content
+is a chip in that row, directly after the access control, a globe and the words
+"Outside content" in the warning ink with no fill or edge at rest, shown for as
+long as the fact applies. Pressing it opens a popover with the full sentence and
+the Review action; in a narrow row (under 560px) the chip keeps the globe and
+drops the words, and its name and tooltip keep them. A plain note that stays until the
+person acts (a saved-draft sentence saying nothing was sent, a locked task, a
+handoff or access note, what a newly picked provider will not carry over, a receipt) is still a card, one for each, wrapping whole,
+never cut to a line and never hidden: only a surface marks a state as passing.
+A card as heavy as the pill, plus two rows under it, read as
+four stacked layers for a note that was not an error. Progress that a surface marks as passing by itself
+(sending, a response streaming, a provider check, a
+session compacting, a first turn being prepared, a keyboard hint) is never a card and never changes the
+composer's height: it is one quiet line of meta ink in the transcript's bottom
+padding directly above the notice group, leading-aligned with the pill, one
+message at a time with the newest winning, and no line at all where a control
+already says it (the Stop control during a response). A card for each passing
+status made the transcript jump about 48px twice a message. The line lives in
+one persistent polite status region that stays mounted, is the prompt's
+description (why Send is held). Beside a subagents tray the line is clipped from
+view and still said. A card that stays is read where it stands and is not
+repeated in the region; a pending refusal's card is part of the prompt's description too, so
+it is heard again when the prompt takes focus. Over an application ground or under Window glass the card
+is the same glass as the pill with its tone laid over it, not the callout's
+opaque ground beside a translucent pill. A tinted bar inside the pill fought the
+pill's corners (a rounded bar in a rounded pill, with thin uneven gaps), made the
+pill a tall lopsided shape, and read as part of the message being typed; with
+the cards above it, the empty pill is 44px tall in every state, and the
+microphone's failure no longer has to be cut to fit beside it. The person's
+own attachments and the message queue are not notices and keep their place. How the
 thread runs is one quiet line under the pill, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
 checkout), the surface's row (image and access leading; the model and then
@@ -1013,11 +1083,14 @@ means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
 Start-screen composers ask in plain words ("Ask anything…"); a thread's
 follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
-tip. When the latest reply suggested a next message for this thread ("Next
-step here"), the empty follow-up composer shows it in place of "Reply…", with a
-quiet Tab key cap at its top-right, and a bare Tab puts it in the draft and
-marks the suggestion used; once anything is typed, or with a modifier held,
-Tab keeps its ordinary meaning.
+tip. When the latest reply predicted the person's next message, or suggested a
+next message for this thread ("Next step here"), the empty follow-up composer
+shows it in place of "Reply…", with a quiet Tab key cap at its top-right, and a
+bare Tab puts it in the draft (a "Next step here" suggestion is then marked
+used). The prediction leads when there are both, because it is written as the
+person would type it; it has no card, and it leaves the composer once the
+person sends anything. Once anything is typed, or with a modifier held, Tab
+keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name
@@ -1219,7 +1292,11 @@ its own.
 The rest of the thread view is one set of recipes in `octant.css` and the
 reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
 them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
-between rows. A person's message is a right-aligned bubble (`turn-user`,
+between rows and fades its content out over 12px at both edges, in every mode:
+text scrolling under the title band's hairline or into the composer ended in half
+a line cut flat, and only Code had a fade, at the top. At rest the first line
+sits below it. The find bar sits just below the top fade so it is never dimmed;
+the fade also dims the scrollbar thumb at the two extremes, which is accepted. A person's message is a right-aligned bubble (`turn-user`,
 `bubble`: control fill, hairline, `--oct-radius-md`, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
@@ -1413,6 +1490,19 @@ become one and the row goes away, with the reader's row where it was; Jump to
 latest, or sending a message, returns to the newest messages at the end. A
 jump happens once: after its message has been shown, nothing jumps back to it.
 
+The Browser toolbar is two groups, navigation and the address first, then the
+page's status and the tools. They share one row from 1100px; below it the
+controls become one row and the address takes a row under it, so a page open
+never takes more than two rows. In a tile from 303px wide no control is clipped
+or overlaid and only the address ellipsizes. Words leave one control at a time as
+the width falls and come back in the reverse order as it grows: who may use the
+page (below 801px), the profile (below 640px), Reclaim locally (below 610px),
+Take over and Hand back (below 521px), then the holder (below 420px). Each
+keeps its name and tooltip as a bare glyph. With no page open the address takes
+its own row below 390px. The desktop app's Open in default browser button is
+counted in these widths, so below 303px, where the row no longer fits, the last
+button wraps to a third row.
+
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each
 row is a hairline-ringed object with a 72 x 48 picture, the page title in the
@@ -1425,6 +1515,30 @@ tabular figures on a pill of the card surface with a hairline ring, so it
 reads by shape and word, never by colour. It moves only once opened, where a
 ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
 its first frame.
+
+**Draw on page** is a ghost icon button (a 16px pen-line) beside Screenshot in
+the Browser toolbar, offered only in a Work or Code thread's Browser. While a
+picture is drawn on, its still fills the page area, fitted and centred on the
+canvas colour, and one floating bar sits at the bottom centre
+(`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
+shadow of a menu, with no outline and no blur. Its controls are 28px icon
+buttons with a 16px glyph and a tooltip, one row down to a 500px dock: Select,
+Pen, Box, Arrow, Text (the chosen one pressed, `aria-pressed`); one ink control
+named for its colour ("Ink colour: Red") that opens a small popover of six named
+swatches (Red, Yellow, Green, Blue, White, Black; arrows move, Enter picks,
+Escape closes and returns focus); one width toggle ("Thick stroke", pressed when
+thick); Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
+button, and **Discard drawing** as the trailing pair, which wrap together on a
+narrower dock. A pressed control is the raised tile a selected row wears
+(`--octant-float-pressed` with `--octant-shadow-selected`), not an accent ring,
+and every swatch has a hairline edge (`--octant-border-strong`) so white shows
+on a light bar and black on a dark one. A notice about adding the picture is
+drawn in a column above the bar, inside the stage, so it never moves the still;
+a refusal is an alert and focus returns to the drawing. The ink colours are drawn into a picture that
+leaves the app, so they are fixed values in code
+(`apps/web/src/theme/markupInk.ts`), the one place the renderer draws a
+colour that no theme changes. A selected mark is outlined with a dashed accent
+line; that outline is never in the exported picture.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
@@ -1453,7 +1567,7 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
 | Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                        |
 | Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                             |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
+| Strong divider         | `--octant-divider-strong`                           | `#8a8a8a` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
 | Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                                      |
 | Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                            |
 | Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill         |
@@ -1473,7 +1587,11 @@ from the workspace. Every hairline registers on the surface it separates
 so an edge is never guessed. An off switch and an unchecked checkbox are the
 exception: they must be found at a glance on a card, so they take the strong
 divider (4.4:1 on a card and 4.9:1 on the page in light; the strong border
-measured 1.65:1 and 1.85:1 there).
+measured 1.65:1 and 1.85:1 there). In dark the role is lifted so the edge
+stays at 3:1 or more on the lifted card the Settings sheet draws (`#3d3d3d`,
+3.15:1; it was 2.76:1) and 5.3:1 on the page; every dark preset keeps the same
+floor. The same role draws a scrollbar thumb on hover and rare dividers, which
+become one step lighter in dark.
 The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
@@ -1670,6 +1788,11 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Icon rail foot.** The rail's destinations scroll, with the same short fade at
+their edges and no scrollbar, above a foot (usage, Settings) that stays on
+screen. One column that scrolled as a whole put Settings out of reach in a short
+window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
@@ -2210,7 +2333,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line under the composer: cache, speed, and first token are columns,
+as the figures in Thread info: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
@@ -2875,6 +2998,12 @@ and Tooltip. Composition rules:
   fill, not a solid one: a red slab reads as the page's subject rather than one
   action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
   Icon-only buttons always have an accessible label and tooltip/title.
+  A control in the title band is one shape whatever it holds: 28px
+  (`--oct-rail-button-h`) with the control corner (`--oct-radius-sm`), icon-only
+  controls square, a label or a label with a chevron the same height. The compact
+  24px, 6px step drew the dock's tools and the Project actions beside 28px, 8px
+  window buttons as three shapes. Open in is outlined, the one band control that
+  keeps an edge, in the same 28px and control corner, not a card-radius pill.
   A standalone icon-only control has two sizes and nothing between: the 28px
   rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
   panel head, or toolbar, and a 24px square for an action inside a row. The
@@ -2892,10 +3021,22 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden. Dialogs and floating popups share one
-  layer, so the one opened last paints on top: a menu or popover opened inside
-  a dialog or the narrow dock sheet appears above it, and Escape closes the
-  innermost surface first.
+  when the title is visually hidden. Dialogs and sheets share one layer and
+  popups stand above it: a menu or popover opened inside a dialog or the
+  narrow dock sheet appears above it, and Escape closes the innermost surface
+  first.
+- Layers are tokens: page chrome stays at or below `--oct-z-overlay` (40),
+  dialogs and sheets with their backdrops stand at `--oct-z-floating` (50), a
+  notice at `--oct-z-toast` (55), and everything a person opens to aim at
+  (menus, context menus, popovers, selects, comboboxes, tooltips, hover
+  cards) at `--oct-z-popup` (60). A notice sits above a dialog or sheet
+  because under its backdrop it could be neither read nor dismissed, and
+  under a popup because a notice that said the app had stopped unexpectedly
+  once covered an open menu in the right dock's header and took the clicks
+  meant for its items. A menu opened inside a dialog stays above the dialog.
+  The `.toast-stack` column takes no press outside its notices. A new surface
+  takes one of these tokens, never a number of its own, and nothing in the
+  workspace goes above z-index 7.
 - A list a person picks from draws one row. One line is 28px
   (`--oct-menu-row-h`), its words stand 8px in from the row's edge
   (`--oct-menu-row-inset`), and the rows stand 4px in from the popup's edge
@@ -3045,17 +3186,20 @@ it (a row removed by the confirmation it showed), and one of two dialogs that
 share a presence when the other takes its place. In a window nobody can see
 there is no exit to show, so a dialog closed there is removed at once.
 
-A dialog that is leaving is only there to be seen. Its scrim and its controls
+A dialog or a sheet that is leaving is only there to be seen. Its scrim and its controls
 take no press and no key (`inert`), so the page under it answers at once and a
 second press cannot repeat what the first did. Focus goes back to the opener
 as the exit starts, not when it ends, and when the exit ends focus is left
-where it is if the person, or a command they ran from the dialog, has moved it
+where it is if the person, or a command they ran from it, has moved it
 in the meantime.
 
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
 control. Words in the chrome do not select when the pointer drags across them,
 controls keep the arrow cursor, a disabled control keeps it too, and the hand
-is for a real link. Pictures and links do not lift off as drag ghosts. Reading
+is for a real link. A disabled control is drawn at one shared opacity,
+`--oct-disabled-opacity` (0.75), so its label stays at 3:1 or more in both
+modes while it still reads as unavailable: no hover fill, no pointer events.
+A select's chevron is not dimmed while the select is enabled. Pictures and links do not lift off as drag ghosts. Reading
 matter opts back in, so a message, a diff, a value, and an error can still be
 copied. The keyboard focus edge shows only while a person is moving focus by
 keyboard (`data-octant-input`): a dialog handing focus back to its trigger paints
@@ -3132,6 +3276,22 @@ still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device sees the section as managed on the host machine
 ([rules](docs/architecture.md#modes-chat-work-and-code)).
+**Worktrees on this computer** follows it: a first row says when the host last
+scanned ("Not scanned since Octant started" until then) and how many it found,
+with **Scan** and, when any qualify, **Remove N merged or gone**, which asks
+once in the destructive role (ignored files go with each folder), then removes
+each and reports how many stayed because they need a look. Worktrees are
+grouped under their repository's path in mono; each row is the branch (or
+"Detached HEAD"), then a line of facts (Folder is gone, Locked by Git, Merged
+or pushed, or Has commits only here; size; last used) and the folder in mono,
+with **Remove** (**Forget** when the folder is gone; disabled when locked).
+Remove asks once in the destructive role; when the host answers that commits
+exist only on the branch it asks again listing up to ten of them, and when the
+worktree was used in the last 15 minutes it asks once more (**Remove anyway**).
+**Xcode builds**, on a Mac only, lists DerivedData folders whose project is
+gone or that Xcode has not opened for 30 days, largest first, each with its
+state, size and workspace path in mono, a **Remove** per row and **Remove N
+whose project is gone**, both asking once.
 A Code, Chat, or Work tool row whose result was outside content carries an
 "Outside content" tag, followed by what Octant Shield's Watcher found in it in
 the warning role, and a Code thread's board card a small mark; at Full access
@@ -3527,16 +3687,53 @@ the update, so the card shows once. The collapsed icon rail never draws the
 card and does not acknowledge it; it waits for the sidebar to open. A browser
 or remote client has no card.
 
-A release may bundle one announcement beside its notes. It replaces the card as
-a modal dialog laid out as a poster: a 200px picture running to the dialog's
-edges at its top (the aperture band with the mark at 56px when there is none),
-then a title, a body and the two answers, all centred. "Not now" is the quiet
-filled button and the primary button opens the notes, labelled "See what's
-new" unless the release names its own; the dialog opens with focus on the
-primary button. (With the picture inset and the text ranged left it read as a
-settings dialog that happened to hold an image.) Any answer acknowledges the
-update and the card is not shown afterwards. The announcement is a bounded file
-and an optional bundled picture; an invalid one is simply absent. The rule is in
+A release may bundle announcements beside its notes: one to five, shown in a
+row. They replace the card as a modal dialog laid out as a poster: a 200px
+picture running to the dialog's edges at its top (the aperture band with the
+mark at 56px when there is none), then a title, a body and the answers, all
+centred. (With the picture inset and the text ranged left it read as a settings
+dialog that happened to hold an image.) The dialog shows one announcement at a
+time. "Not now" is the quiet filled button on every step, and the primary
+button opens the notes, labelled "See what's new" unless the announcement names
+its own. With a single announcement that is the whole dialog: it opens with
+focus on the primary button and has no paging.
+
+With several, a position line ("2 of 3") sits under the body and is part of the
+dialog's accessible description; it is a polite status, so each step is read
+out. A "Back" button (a ghost button before "Not now") is absent on the first
+announcement. "Next" is the primary button on every announcement but the last;
+on the last the announcement's own button (or "See what's new") takes its
+place. An announcement that names its own action keeps that button, quiet,
+beside "Next" on its step. Left and Right arrow move between announcements
+unless focus is in a field or widget that uses them, and stop at the ends;
+Escape closes. Focus stays in the dialog and lands on the primary button after
+each step. The step changes with no animation of its own, so reduced motion
+needs nothing extra; the dialog's open and close follow the overlay rules.
+
+The set is acknowledged once, however it ends: closing at any step, pressing an
+action, or finishing the last announcement acknowledges the update, and neither
+the dialog nor the card is shown afterwards. The acknowledgement is the app
+version, which names the whole bundle, so changing, adding or removing an
+announcement means a new release and the set shows again. Reason: a row of
+announcements is one message from one release, and asking again for each one
+would turn a courtesy into a chore.
+
+The announcements are one bounded file and optional bundled pictures; none of
+them can run code or name anything outside the resources folder. The file is
+`{ "schemaVersion": 2, "announcements": [ ... ] }` with entries of `title` (80
+characters), `body` (600), and optionally `actionLabel` (32), `picture` (a bare
+png, jpg or webp name, 524,288 bytes at most, whose bytes must match its
+name) and `pictureAlt` (160). The file is at most 16,384 characters: five full
+entries, pretty-printed and escaped, come to about 3,000 characters each. A
+version 1 file (one announcement object) still works as a list of one. A file
+that is not valid as a whole (bad JSON, an unknown top-level field, a wrong
+shape) shows nothing. Inside a valid version 2 file an entry that is invalid by
+itself, including one whose picture is missing, too large or the wrong format,
+is skipped and the others still show in order; beyond five, the first five
+valid ones show. Pictures are read only for entries that will be shown, and all
+of them cross to the renderer together as data URLs (at most about 3.5 MB, once
+per launch, only when the notes are due), because a second round trip would
+make the Next button wait on disk. The rule is in
 [Decisions and requirements](docs/design/decisions.md#whats-new-after-an-update).
 
 ### Mode-specific utility chrome
@@ -3565,7 +3762,9 @@ A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
 A refused binding keeps the prior authorized Project and draft. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
-action when available, and reveal upward behind the message surface.
+action when available, as one of the composer's notice cards above the pill. A note that stays until
+the person acts is a card too; only a state its surface marks as passing is the
+quiet line.
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.

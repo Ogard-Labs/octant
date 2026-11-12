@@ -45,6 +45,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import type { ComposerNoticeItem, ComposerProgress } from "../composer/ComposerNotice";
 import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
@@ -193,6 +194,8 @@ export interface ChatComposerProps {
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
+  /** More for the notice card above the pill: the draft's own provenance. */
+  readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   readonly stopDisabledReason?: string;
   /** The Create image action. Absent when the host serves no image generation. */
   readonly imageGeneration?: {
@@ -323,9 +326,9 @@ export function ChatComposer(props: ChatComposerProps) {
       ? {}
       : { mentionMessage: props.threadMentions.statusMessage }),
   });
-  // Persistent capability notices stay available to assistive technology but
-  // are visually hidden; only actionable state (errors, streaming) is loud.
-  const quietStatus = !status.loud;
+  // The full status text stays the prompt's description for assistive
+  // technology and is never drawn; only actionable state (errors, streaming)
+  // is a card above the pill, and announces itself there.
 
   // `.composer-input` sizes itself through `field-sizing: content` with the
   // system's 60–240px bounds; an inline height would override the stylesheet
@@ -919,19 +922,10 @@ export function ChatComposer(props: ChatComposerProps) {
       chips={chips}
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
       {...(props.threadDropKey === undefined ? {} : { threadDropKey: props.threadDropKey })}
-      footer={
-        <div
-          aria-live="polite"
-          className={`composer-status chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}${
-            props.isSending && !quietStatus ? " chat-composer__status--live" : ""
-          }`}
-          id={statusId}
-          role="status"
-          title={status.text}
-        >
-          {status.text}
-        </div>
-      }
+      notices={[...(props.notices ?? []), ...status.notices]}
+      description={status.text}
+      progress={status.progress}
+      statusId={statusId}
       input={input}
       label={{
         className: "chat-composer__message-field",
@@ -981,39 +975,66 @@ function composeStatus(input: {
   readonly sendPending: boolean;
   readonly statusMessage?: string | undefined;
   readonly stopDisabledReason?: string | undefined;
-}): { readonly text: string; readonly loud: boolean } {
-  // Quiet messages inform assistive technology without persistent visual
-  // noise; loud messages (failures, streaming state) must be visible.
+}): {
+  readonly text: string;
+  readonly notices: ReadonlyArray<ComposerNoticeItem>;
+  readonly progress: ComposerProgress | undefined;
+} {
+  // Quiet messages are the prompt's description for assistive technology and
+  // are never drawn. A refusal, a failure or a fact that stays until it is
+  // resolved is a card above the pill. What comes and goes by itself (sending,
+  // a response streaming) is progress: one quiet line, never a card.
   const quiet: string[] = [];
-  const loud: string[] = [];
+  const notices: ComposerNoticeItem[] = [];
   if (input.attachment.kind === "unavailable") quiet.push(input.attachment.reason);
   // The image notice is only worth saying when attachments are otherwise
   // available; a provider that takes no attachments at all already said so.
   if (input.attachment.kind === "supported" && input.imageAttachment?.kind === "unavailable") {
     quiet.push(input.imageAttachment.reason);
   }
-  if (input.mentionMessage !== undefined) loud.push(input.mentionMessage);
+  if (input.mentionMessage !== undefined) {
+    notices.push({ key: "mention", tone: "warning", text: input.mentionMessage });
+  }
   if (input.research.kind === "unavailable") {
-    loud.push(`Research unavailable: ${input.research.reason}`);
+    notices.push({
+      key: "research",
+      tone: "warning",
+      text: `Research unavailable: ${input.research.reason}`,
+    });
   } else if (input.research.kind === "selected") {
     quiet.push(
       `Research uses ${input.research.backend === "searxng" ? "SearXNG" : "provider-native research"}.`,
     );
   }
-  if (input.statusMessage !== undefined) loud.push(input.statusMessage);
-  if (input.sendError !== undefined) loud.push(input.sendError);
+  if (input.statusMessage !== undefined) {
+    notices.push({ key: "status", tone: "warning", text: input.statusMessage });
+  }
+  if (input.sendError !== undefined) {
+    notices.push({ key: "send-error", tone: "danger", text: input.sendError });
+  }
+  let progress: ComposerProgress | undefined;
   if (input.sendPending) {
-    loud.push("Sending message…");
+    progress = { text: "Sending message…" };
   } else if (input.isSending && input.stopDisabledReason !== undefined) {
-    loud.push(input.stopDisabledReason);
+    progress = { text: input.stopDisabledReason };
   } else if (input.isSending) {
-    loud.push("Response is streaming. Submit to add a message to the host queue.");
+    // The Stop control already says a response is running.
+    progress = {
+      text: "Response is streaming. Submit to add a message to the host queue.",
+      quiet: true,
+    };
   } else if (input.sendDisabledReason !== undefined) {
     quiet.push(input.sendDisabledReason);
   }
-  const messages = [...new Set([...quiet, ...loud])];
+  const messages = [...new Set(quiet)];
   return {
-    text: messages.length > 0 ? messages.join(" ") : "Ready to send.",
-    loud: loud.length > 0,
+    text:
+      messages.length > 0
+        ? messages.join(" ")
+        : notices.length > 0 || progress !== undefined
+          ? ""
+          : "Ready to send.",
+    notices,
+    progress,
   };
 }

@@ -5,6 +5,9 @@
 .computer-use-driver/
 .managed-tools/
 .scratch/
+# Scratch folders agents create for rendered checks: screenshots, browser profiles, throwaway data dirs
+qa-shots/
+.qa-data/
 coverage/
 dist/
 node_modules/

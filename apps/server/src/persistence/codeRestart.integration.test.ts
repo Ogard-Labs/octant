@@ -245,6 +245,7 @@ describe("Code persistence restart", () => {
         .prepare("SELECT projection_name, reason FROM event_quarantine ORDER BY projection_name")
         .all(),
     ).toEqual([
+      { projection_name: "agent-access", reason: "unsupported-event-version" },
       { projection_name: "agent-profiles", reason: "unsupported-event-version" },
       { projection_name: "agent-runs", reason: "unsupported-event-version" },
       { projection_name: "aggregate-heads", reason: "unsupported-event-version" },

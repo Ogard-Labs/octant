@@ -1077,10 +1077,10 @@ describe("CodeComposerAdapter interactions", () => {
     fireEvent.paste(screen.getByLabelText("First message"), {
       clipboardData: { files: [file], items: [] },
     });
-    const attached = await screen.findByLabelText("Attached images");
-    expect(attached).toHaveTextContent(
+    const refusal = await screen.findByText(
       "The selected model does not accept images. Choose an image-capable model.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
 
@@ -1293,7 +1293,7 @@ describe("CodeComposerAdapter interactions", () => {
 
       await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
       expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
-      expect(screen.getByRole("status")).toHaveTextContent(
+      expect(screen.getByRole("alert")).toHaveTextContent(
         "Runs on this computer's files; a Project on a server runs on the Octant Harness only.",
       );
       await user.click(screen.getByRole("button", { name: "Provider and model" }));

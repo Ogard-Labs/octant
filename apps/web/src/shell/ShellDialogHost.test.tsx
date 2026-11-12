@@ -81,7 +81,7 @@ function hostProps(): ShellDialogHostProps {
     announcementSequence: 0,
     createOpen: false,
     whatsNew: {
-      announcement: undefined,
+      announcements: undefined,
       card: undefined,
       document: undefined,
       notesOpen: false,

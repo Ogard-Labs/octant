@@ -143,7 +143,10 @@ export function refused(reason: ArchivedWorktreeRefusalReason): RemoveArchivedWo
  * there. A worktree with dependencies installed can hold hundreds of thousands
  * of files, so the walk stops after a bound and says the size is partial.
  */
-export async function measureFolder(root: string): Promise<FolderSize | undefined> {
+export async function measureFolder(
+  root: string,
+  maxEntries: number = MAX_SIZE_ENTRIES,
+): Promise<FolderSize | undefined> {
   try {
     if (!(await lstat(root)).isDirectory()) return undefined;
   } catch {
@@ -163,7 +166,7 @@ export async function measureFolder(root: string): Promise<FolderSize | undefine
     }
     for (const name of names) {
       entries += 1;
-      if (entries > MAX_SIZE_ENTRIES) return { bytes, complete: false };
+      if (entries > maxEntries) return { bytes, complete: false };
       const path = join(folder, name);
       try {
         const status = await lstat(path);

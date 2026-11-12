@@ -4,6 +4,8 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "start": "expo start",
     "start:mock": "OCTANT_MOBILE_MOCK_SCENARIO=full expo start --web --clear",
     "start:mock:stale": "OCTANT_MOBILE_MOCK_SCENARIO=stale expo start --web --clear",

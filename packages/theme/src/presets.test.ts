@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHexColor } from "./color";
+import { contrastRatio, parseHexColor } from "./color";
 import { CHART_SCALE_ROLE_IDS } from "./chartScales";
 import {
   DEFAULT_DARK_TOKENS,
@@ -189,6 +189,24 @@ describe("built-in theme preset catalog", () => {
       "#732982",
     ]);
     expect(getThemePreset("norway")?.patternPalette).toEqual(["#ba0c2f", "#ffffff", "#00205b"]);
+  });
+
+  it("draws every dark preset's off-control edge at 3:1 on the page, the sheet and a lifted card", () => {
+    // 3d3d3d is the lifted card measured under the dark graphite preset.
+    for (const preset of THEME_PRESETS) {
+      const dark = preset.tokens.dark;
+      if (dark === undefined) continue;
+      const edge = dark["divider-strong"]!;
+      for (const ground of [
+        dark["app-background"]!,
+        dark["workspace"]!,
+        dark["floating"]!,
+        dark["control"]!,
+        "#3d3d3d",
+      ]) {
+        expect(contrastRatio(edge, ground), `${preset.id} on ${ground}`).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it("returns undefined for an unknown id without throwing", () => {
