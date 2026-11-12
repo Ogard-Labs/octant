@@ -4575,6 +4575,16 @@ flowchart LR
   Chat deltas, each its own event), so no single commit, including the one
   that settles a Stop, grows with how fast the provider streams: an unbounded Chat burst under a flood held nearly 600 deltas and
   its commit kept Stop waiting 1.4 s.
+  Projecting a streamed Chat delta costs the same however long the reply
+  already is: the Chat projection stores each appended reference as its own
+  row (`chat_streamed_response_projection`) instead of rewriting the attempt
+  row and its turn JSON, reads fold those rows onto the attempt in journal
+  order, and the next whole `chat.attempt-updated@1`, which carries every
+  reference streamed before it, replaces them. A replayed delta that a later
+  whole attempt already carries adds nothing, so rebuild and replay give the
+  same reply. Rationale: rewriting both rows per delta made 2,000 deltas take
+  21–30 s to project (2.7 s with one row per delta), each late delta binding about 580 KB, and a Stop
+  after a long flood waited behind those commits.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
@@ -7093,7 +7103,7 @@ transaction, so the store fsyncs per burst rather than per token and stays on
 `synchronous = FULL`. The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
-projection, which already holds the attempt's current state. An opt-in
+projection, which folds the references streamed so far onto the attempt. An opt-in
 parameter the host does not know is ignored rather than refused, so a newer
 client on an older host still streams: a bad value on a known opt-in is a 400,
 but a future opt-in degrades to the frames it would have had without it. The receipt is

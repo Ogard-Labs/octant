@@ -1101,7 +1101,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 
 - A command targets one aggregate and carries the expected aggregate version; a stale version returns a typed concurrency conflict and writes nothing. _Here only._
 - Every event carries a versioned envelope. A projection checkpoint may trail the journal head but never lead it. _Here only._
-- The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst.
+- The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst. Projecting a streamed Chat delta writes one row of its own, not the whole attempt and turn, so its cost does not grow with the reply; reads and the next whole attempt fold those rows in.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
 - A turn's streamed text and reasoning are bounded at 32 MiB: past it the turn keeps what was journaled, ends with a truncation marker, and stops. A write that fails on a full disk commits nothing and tells the person the disk is full.
