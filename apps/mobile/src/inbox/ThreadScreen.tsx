@@ -40,6 +40,7 @@ import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { appendTranscript } from "../voice/voiceDictation";
+import { DefaultLevelsPanel } from "./thread/DefaultLevelsPanel";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
 import { ThreadLevelPanel } from "./thread/ThreadLevelPanel";
 import { ThreadTranscript } from "./thread/ThreadTranscript";
@@ -390,6 +391,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 actsAsHostPerson={standing.actsAsHostPerson}
                 onChanged={() => void work.refresh({ quiet: true })}
                 subject={{ mode: "work", thread: work.thread }}
+                transport={transport}
+              />
+            ) : null}
+            {!offlineDemo &&
+            transport !== undefined &&
+            (selected.mode === "work" || selected.mode === "code") &&
+            routinesProjectId !== undefined ? (
+              <DefaultLevelsPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                mode={selected.mode}
+                projectId={routinesProjectId}
                 transport={transport}
               />
             ) : null}
