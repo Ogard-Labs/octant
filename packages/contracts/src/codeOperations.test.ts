@@ -381,7 +381,6 @@ describe("Code operation contracts", () => {
         ...scope,
         title: "Add operation contracts",
         body: "Strict provider-neutral operation schemas.",
-        idempotencyKey: "pr-create-001",
         authorization: { kind: "full-access" },
       },
       {

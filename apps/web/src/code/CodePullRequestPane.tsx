@@ -89,7 +89,6 @@ export interface CodePullRequestPaneProps {
   readonly client: Pick<CodeClient, "executeOperation" | "operationContent">;
   readonly createOperationId: () => CodeOperationId;
   readonly executionPolicy: ProviderExecutionPolicy;
-  readonly idempotencyKey: string;
   readonly requestApproval?: (
     command: Parameters<CodeClient["executeOperation"]>[0],
   ) => Promise<CodeApprovalId | undefined>;
@@ -564,7 +563,6 @@ function CreatePullRequest(
         operationId,
         title,
         body: finalBody,
-        idempotencyKey: props.idempotencyKey,
         authorization: { kind: "full-access" },
         ...props.scope,
       } as const;
