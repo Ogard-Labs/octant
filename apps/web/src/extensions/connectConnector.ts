@@ -24,6 +24,23 @@ export async function connectConnector(
   entry: Pick<ConnectorCatalogEntry, "id" | "displayName" | "url" | "auth">,
   secret?: string,
 ): Promise<ConnectResult> {
+  if (entry.auth.kind === "command") {
+    // The host rebuilds the program from the catalog; the request names the
+    // entry and carries only the one secret the person typed.
+    return addServer(client, {
+      name: entry.displayName,
+      connectorId: entry.id,
+      server: {
+        type: "stdio",
+        command: "node",
+        args: [],
+        env:
+          secret === undefined
+            ? []
+            : [{ name: entry.auth.secret.name, value: secret, secret: true }],
+      },
+    });
+  }
   return addServer(client, {
     name: entry.displayName,
     connectorId: entry.id,

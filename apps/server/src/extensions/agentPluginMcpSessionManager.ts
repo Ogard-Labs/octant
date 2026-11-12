@@ -56,6 +56,7 @@ export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly session: AgentPluginMcpSession;
   readonly tools: ReadonlyArray<McpToolDefinition>;
   readonly reach: ExtensionToolReach;
+  readonly askEveryCall: ReadonlyArray<string>;
   readonly authenticationGeneration: number;
   readonly authentication?: McpSessionAuthentication;
   /** Each tool's definition digest, taken once from the listing at connect. */
@@ -78,6 +79,8 @@ export interface ExtensionToolCall {
   readonly digest: string;
   readonly definitionDigest: string;
   readonly reach: ExtensionToolReach;
+  /** True when the catalog lists this tool as ask-every-call. */
+  readonly askEveryCall?: boolean;
   readonly providerToolName: string;
   readonly mcpToolName: string;
   readonly inputJson: string;
@@ -110,6 +113,8 @@ type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
    * the package.
    */
   readonly egressHosts?: ReadonlyArray<string>;
+  /** Tool names the catalog entry lists as ask-every-call, from the same vouched source. */
+  readonly askEveryCall?: ReadonlyArray<string>;
 };
 
 export interface AgentPluginMcpSessionManagerOptions {
@@ -146,6 +151,7 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly isUserAddedSource?: (sourceRef: string) => boolean;
   /** The catalog's listed hosts for a package the host wrote for a command connector. */
   readonly egressHostsForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
+  readonly askEveryCallForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
   readonly resolveUserAddedSecrets?: (
     launch: AgentPluginsMcpLaunchSpec,
     target: { readonly extensionId: string; readonly componentId: string },
@@ -170,6 +176,7 @@ export class AgentPluginMcpSessionManager {
   readonly #uuid: () => string;
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
   readonly #egressHostsForSource: AgentPluginMcpSessionManagerOptions["egressHostsForSource"];
+  readonly #askEveryCallForSource: AgentPluginMcpSessionManagerOptions["askEveryCallForSource"];
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #bindUserAddedAuthentication: AgentPluginMcpSessionManagerOptions["bindUserAddedAuthentication"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
@@ -223,6 +230,7 @@ export class AgentPluginMcpSessionManager {
     this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
     this.#egressHostsForSource = options.egressHostsForSource;
+    this.#askEveryCallForSource = options.askEveryCallForSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
     this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
   }
@@ -390,6 +398,7 @@ export class AgentPluginMcpSessionManager {
                 digest: record.digest,
                 definitionDigest,
                 reach: record.reach,
+                ...(record.askEveryCall.includes(indexed.toolName) ? { askEveryCall: true } : {}),
                 providerToolName: name,
                 mcpToolName: indexed.toolName,
                 inputJson,
@@ -573,6 +582,8 @@ export class AgentPluginMcpSessionManager {
           "sourceRef" in packageState.source ? packageState.source.sourceRef : undefined;
         const egressHosts =
           sourceRef === undefined ? undefined : this.#egressHostsForSource?.(sourceRef);
+        const askEveryCall =
+          sourceRef === undefined ? undefined : this.#askEveryCallForSource?.(sourceRef);
         const key = {
           extensionId: packageState.extensionId,
           packageId: packageState.packageId,
@@ -586,6 +597,7 @@ export class AgentPluginMcpSessionManager {
             "sourceRef" in packageState.source &&
             this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
           ...(egressHosts === undefined || egressHosts.length === 0 ? {} : { egressHosts }),
+          ...(askEveryCall === undefined || askEveryCall.length === 0 ? {} : { askEveryCall }),
         };
         desired.set(sessionKey(key), key);
       }
@@ -865,6 +877,7 @@ export class AgentPluginMcpSessionManager {
           : target.egressHosts === undefined
             ? "confined-stdio"
             : "proxied-stdio",
+      askEveryCall: target.askEveryCall ?? [],
       authenticationGeneration,
       ...(authentication === undefined ? {} : { authentication }),
       toolDefinitionDigests: new Map(

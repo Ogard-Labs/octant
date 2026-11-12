@@ -119,6 +119,19 @@ describe("remembered MCP tool approval", () => {
     ).toEqual({ kind: "covered" });
   });
 
+  it("never lets a grant cover a tool the catalog marks ask-every-call", () => {
+    for (const reach of ["confined-stdio", "proxied-stdio", "network"] as const) {
+      expect(decideExtensionToolGrant(facts({ reach, askEveryCall: true }))).toEqual({
+        kind: "ask",
+        reason: "ask-every-call-tool",
+        rememberable: false,
+      });
+    }
+    expect(decideExtensionToolGrant(facts({ reach: "proxied-stdio" }))).toEqual({
+      kind: "covered",
+    });
+  });
+
   it("asks for every call of a proxied stdio tool on a thread that took in outside content", () => {
     expect(
       decideExtensionToolGrant(facts({ threadTainted: true, reach: "proxied-stdio" })),

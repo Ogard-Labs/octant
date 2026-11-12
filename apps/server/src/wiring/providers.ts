@@ -195,6 +195,7 @@ import { readUserNpmConfig } from "../extensions/npmRegistryConfig";
 import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBuildIosAppsCatalog";
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
+import { createConnectorPackageInstaller } from "../extensions/connectorPackageInstall";
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
@@ -881,6 +882,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     const userAddedMcpServers = new UserAddedMcpServerStore({
       directory: join(providerDataDirectory, "extensions", "user-added"),
       registry: userAddedPluginRegistry,
+      installPackage: createConnectorPackageInstaller({
+        fetch: globalThis.fetch,
+        isFetchAllowed: isMarketplaceFetchAllowed,
+      }),
       ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? {}
         : {
@@ -1026,6 +1031,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         egressHostsForSource: (sourceRef) => userAddedMcpServers.egressHosts(sourceRef),
+        askEveryCallForSource: (sourceRef) => userAddedMcpServers.askEveryCall(sourceRef),
         bindUserAddedAuthentication: (launch, target) =>
           mcpServerSignInHolder.current?.bindAuthentication(
             target.extensionId,
