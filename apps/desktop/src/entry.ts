@@ -1,5 +1,6 @@
 import { CANVAS_PROTOTYPE_HOST_SWITCH, runCanvasPrototypeHost } from "./canvasPrototypeHost";
-import { app, dialog } from "electron";
+import { app } from "electron";
+import { showStartupFailure } from "./startupFailureElectron";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -82,14 +83,16 @@ if (
     // Electron waits for ESM evaluation before ready. The signed client path
     // needs ready to create its window, so it must not hold this module open.
     void launchDesktop().catch((error: unknown) => {
-      void app.whenReady().then(() => {
-        dialog.showErrorBox(
-          identity.productName,
-          error instanceof NightlyTestHostFailure
-            ? error.message
-            : "Octant Nightly could not open its authenticated client window.",
-        );
-        app.quit();
+      const message =
+        error instanceof NightlyTestHostFailure
+          ? error.message
+          : "Octant Nightly could not open its authenticated client window.";
+      process.stderr.write(`${identity.productName}: ${message}\n`);
+      void showStartupFailure({
+        title: identity.productName,
+        message,
+        logsDirectory: undefined,
+        quit: () => app.quit(),
       });
     });
   } else {
@@ -201,9 +204,12 @@ async function launchDesktop(): Promise<void> {
   if (outcome.kind === "client-bridge-required") {
     app.setName(identity.productName);
     app.setPath("userData", desktopWindowStorageDirectory(identity, "", app.getPath("appData")));
-    void app.whenReady().then(() => {
-      dialog.showErrorBox(identity.productName, outcome.message);
-      app.quit();
+    process.stderr.write(`${identity.productName}: ${outcome.message}\n`);
+    void showStartupFailure({
+      title: identity.productName,
+      message: outcome.message,
+      logsDirectory: undefined,
+      quit: () => app.quit(),
     });
   }
 }

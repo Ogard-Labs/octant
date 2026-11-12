@@ -416,13 +416,23 @@ host backs up and replays its journal before it listens, and on a loaded
 machine (load average above 60) a large journal outlasted the former 15
 seconds, so each launch stopped the host mid-start and showed a failure. A
 start-up that cannot proceed writes its reason to stderr and releases the
-launch (bounded by the quit stop bounds) before the "Octant could not start"
-box is shown, then quits when the box is dismissed. A quit requested during
-the release, such as SIGTERM or SIGINT, ends the app without showing the box;
-one delivered while the box is open ends it without waiting for dismissal. On
-a packaged macOS build the modal box was observed to hold a SIGTERM until it
-was dismissed, so the release comes first and nothing is left running behind
-the box.
+launch (bounded by the quit stop bounds) before anything is shown. The failure
+is then shown in a small window of its own, never a native alert: it states
+that Octant could not start, the reason, where the log is, and one Quit button.
+The page is a static document loaded as a data URL into a sandboxed,
+context-isolated window with no preload and no script, so it needs no renderer
+or host, loads nothing from the network, and refuses every navigation but its
+Quit link. SIGTERM, SIGINT, a logout or shutdown request, the Quit menu item,
+the Quit button and closing the window all end the app once with the cleanup
+already run; a quit requested during the release ends the app without showing
+the window. Every platform takes this one path. An alert with no parent window
+(`dialog.showErrorBox`, the synchronous message box, and the asynchronous
+message box without a window) runs a nested modal loop (`-[NSAlert runModal]`)
+on macOS, and a packaged launch was observed to stay in it for twenty seconds
+after a SIGTERM; other failures raised outside a live window, such as a failed
+host restart or a failed menu action, go to a sheet on a live window or, with
+none, to stderr. A box shown from a live window as the answer to a person's
+action keeps its parent window and is unchanged.
 
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native

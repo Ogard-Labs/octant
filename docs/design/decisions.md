@@ -119,10 +119,12 @@ listen and ordinary shutdown, attempts every acquired cleanup stage even after
 an earlier failure, awaits its HTTP listener and closes held connections.
 Startup and cleanup failures are reported without widening the existing quit
 deadline or taking ownership of borrowed hosts. The desktop gives the host it
-spawned 60 seconds to open its store, and a start-up failure is logged and its
-launch released before the failure box is shown. A signal quit after the
-failure ends the app instead of being swallowed; whether a packaged macOS build
-acts on it while the modal box is open is not yet verified.
+spawned 60 seconds to open its store. A start-up failure is logged and its
+launch released before anything is shown, and is then shown in a window that
+does not block quitting, never a native alert without a parent: on macOS that
+alert runs a nested modal loop that a signal cannot interrupt (observed in a
+packaged build, which stayed alive twenty seconds after SIGTERM). Signals, the
+Quit menu item, closing the window and its Quit button all end the app once.
 
 Status: Built. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 

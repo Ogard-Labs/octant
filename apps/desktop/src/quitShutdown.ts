@@ -91,19 +91,20 @@ export function armQuitDeadline(options: {
 
 /**
  * Ends the app after a start-up that cannot proceed. The reason is logged and
- * what the failed start still holds is released before the failure is shown,
- * because the error box is modal: on a packaged macOS build a launch whose
- * host missed its readiness deadline sat behind that box with nothing on
- * stdout or stderr, and a SIGTERM sent meanwhile was not acted on until the
- * box was dismissed. A quit requested while the app is releasing (SIGTERM,
- * SIGINT, logout) ends it without showing the box; one that reaches the app
- * while the box is open ends it without waiting for dismissal.
+ * what the failed start still holds is released before the failure is shown.
+ * The failure is shown in a window, never an alert without a parent: on macOS
+ * that alert runs a nested modal loop, and a packaged launch sat in it with a
+ * SIGTERM waiting behind it for as long as the box stayed open. The window
+ * leaves the main loop running, so a quit from any source (signal, logout,
+ * menu, closing the window, the Quit button) reaches `quit` and ends the app
+ * once. A quit requested while the app is still releasing ends it without
+ * showing anything.
  */
 export async function quitAfterStartupFailure(options: {
   readonly message: string;
   readonly log: (message: string) => void;
-  /** Resolves when the person dismisses the failure. */
-  readonly showFailure: (message: string) => Promise<void>;
+  /** Puts the failure on screen and returns without waiting for a person; `quit` ends the app. */
+  readonly showFailure: (message: string, quit: () => void) => Promise<void>;
   /** Releases what the failed start still holds; bounded and never rejects. */
   readonly shutDown: () => Promise<unknown>;
   /** Receives the call that ends the app on a quit requested from now on. */
@@ -122,18 +123,21 @@ export async function quitAfterStartupFailure(options: {
     options.armDeadline();
     options.finish();
   };
-  options.onQuitRequested(() => {
+  const quit = () => {
     quitRequested = true;
     if (released) end();
-  });
+  };
+  options.onQuitRequested(quit);
   await options.shutDown();
   released = true;
-  if (!quitRequested) {
-    try {
-      await options.showFailure(options.message);
-    } catch {
-      options.log("Octant could not show why it did not start.");
-    }
+  if (quitRequested) {
+    end();
+    return;
   }
-  end();
+  try {
+    await options.showFailure(options.message, quit);
+  } catch {
+    options.log("Octant could not show why it did not start.");
+    end();
+  }
 }

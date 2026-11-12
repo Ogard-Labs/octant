@@ -285,6 +285,7 @@ import {
   buildQuitConfirmation,
   evaluateQuitRequest,
 } from "./quitGuard";
+import { showNoticeWithoutBlocking, showStartupFailure } from "./startupFailureElectron";
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
@@ -2258,7 +2259,8 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
     return server;
   },
   reportFatal: (error) => {
-    dialog.showErrorBox(
+    showNoticeWithoutBlocking(
+      mainWindow,
       "Octant could not restart its local server",
       formatDesktopStartupFailure(error),
     );
@@ -2940,7 +2942,8 @@ function updateHostTray(): void {
         ...(item.toolTip === undefined ? {} : { toolTip: item.toolTip }),
         click: () => {
           void openMenuBarThread({ mode: thread.mode, threadId: thread.threadId }).catch(() => {
-            dialog.showErrorBox(
+            showNoticeWithoutBlocking(
+              mainWindow,
               "Octant could not open that thread",
               "Open Octant and choose the thread from the sidebar.",
             );
@@ -3137,11 +3140,16 @@ async function runMenuBarAction(
     } else if (action === "restart-host") {
       await restartHostFromMenu();
     } else if (action === "diagnostics") {
-      await dialog.showMessageBox({
-        type: "info",
+      // Attached to a window so it is a sheet: an alert with no parent blocks
+      // the main loop, and a quit requested meanwhile would wait for it.
+      await ensureMenuWindow();
+      const diagnosticsOptions = {
+        type: "info" as const,
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
-      });
+      };
+      if (mainWindow !== undefined && !mainWindow.isDestroyed())
+        await dialog.showMessageBox(mainWindow, diagnosticsOptions);
     } else if (action === "prepare-to-shut-down") {
       // Brings back a hidden dialog's running batch in its own window, or
       // opens a new one in the main window when no batch runs.
@@ -3159,7 +3167,8 @@ async function runMenuBarAction(
       requestInteractiveQuit();
     }
   } catch {
-    dialog.showErrorBox(
+    showNoticeWithoutBlocking(
+      mainWindow,
       "Octant host action unavailable",
       "The selected host action was not authorized or could not be completed.",
     );
@@ -4793,7 +4802,16 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   await quitAfterStartupFailure({
     message: formatDesktopStartupFailure(error),
     log: logQuitProblem,
-    showFailure: async (message) => dialog.showErrorBox("Octant could not start", message),
+    showFailure: async (message, quit) => {
+      // A failure before ready (a replaced instance that never exited) cannot
+      // create a window yet; a quit requested meanwhile still ends the app.
+      await showStartupFailure({
+        title: "Octant could not start",
+        message,
+        logsDirectory: desktopHostStartup.logsDirectory,
+        quit,
+      });
+    },
     shutDown: () =>
       shutDownForQuit({
         closeAdmission: closeBrowserAdmissionForQuit,

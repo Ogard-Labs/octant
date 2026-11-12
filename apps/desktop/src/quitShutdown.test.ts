@@ -139,17 +139,18 @@ describe("the quit deadline", () => {
 });
 
 describe("quitting after a start-up that cannot proceed", () => {
-  const startupFailure = (showFailure: () => Promise<void>) => {
+  const startupFailure = (showFailure: () => Promise<void> = async () => undefined) => {
     const order: string[] = [];
     let requestQuit: (() => void) | undefined;
     let release: () => void = () => undefined;
     const pending = quitAfterStartupFailure({
       message: "Octant storage did not become ready within 60000ms.",
       log: (message) => void order.push(`log: ${message}`),
-      showFailure: async () => {
+      showFailure: async (_message, quit) => {
         order.push("shown");
+        // What the window's Quit button and its close event are given.
+        requestQuit = quit;
         await showFailure();
-        order.push("dismissed");
       },
       shutDown: () => {
         order.push("releasing");
@@ -174,8 +175,8 @@ describe("quitting after a start-up that cannot proceed", () => {
     };
   };
 
-  it("logs the reason and releases the failed start before showing it, then quits on dismissal", async () => {
-    const run = startupFailure(async () => undefined);
+  it("logs the reason and releases the failed start before showing it, and keeps running while it is shown", async () => {
+    const run = startupFailure();
     await vi.advanceTimersByTimeAsync(0);
     expect(run.order).toEqual([
       "log: Octant could not start: Octant storage did not become ready within 60000ms.",
@@ -185,11 +186,21 @@ describe("quitting after a start-up that cannot proceed", () => {
     run.release();
     await run.pending;
 
-    expect(run.order.slice(2)).toEqual(["released", "shown", "dismissed", "deadline", "finished"]);
+    expect(run.order.slice(2)).toEqual(["released", "shown"]);
+  });
+
+  it("ends the app when the person chooses Quit in the failure window", async () => {
+    const run = startupFailure();
+    run.release();
+    await run.pending;
+
+    run.requestQuit();
+
+    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
   });
 
   it("quits without showing the failure when a signal arrives while it is being released", async () => {
-    const run = startupFailure(never);
+    const run = startupFailure();
     run.requestQuit();
     await vi.advanceTimersByTimeAsync(0);
     expect(run.order).not.toContain("finished");
@@ -201,27 +212,14 @@ describe("quitting after a start-up that cannot proceed", () => {
     expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
   });
 
-  it("quits on a signal while the failure is shown without waiting for dismissal", async () => {
-    const run = startupFailure(never);
+  it("ends the app once and arms the deadline once when quit is requested repeatedly while the failure is shown", async () => {
+    const run = startupFailure();
     run.release();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(run.order.at(-1)).toBe("shown");
-
-    run.requestQuit();
-    run.requestQuit();
-
-    expect(run.order.slice(-2)).toEqual(["deadline", "finished"]);
-    expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
-  });
-
-  it("ends the app once when a signal arrives and the failure is then dismissed", async () => {
-    let dismiss: () => void = () => undefined;
-    const run = startupFailure(() => new Promise<void>((resolve) => (dismiss = resolve)));
-    run.release();
-    await vi.advanceTimersByTimeAsync(0);
-    run.requestQuit();
-    dismiss();
     await run.pending;
+
+    run.requestQuit();
+    run.requestQuit();
+    run.requestQuit();
 
     expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
     expect(run.order.filter((step) => step === "deadline")).toHaveLength(1);

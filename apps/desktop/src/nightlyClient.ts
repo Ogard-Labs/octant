@@ -54,6 +54,7 @@ import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
+import { showNoticeWithoutBlocking, showStartupFailure } from "./startupFailureElectron";
 import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 import {
   createNightlyDataControl,
@@ -367,10 +368,10 @@ export async function runNightlyClient(
     updates?.dispose();
     void (async () => {
       const result = await closeClientResources();
+      // Logged, not shown: a box here would hold the quit until dismissed.
       if (result.kind !== "closed")
-        dialog.showErrorBox(
-          identity.productName,
-          "Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.",
+        process.stderr.write(
+          `${identity.productName}: Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.\n`,
         );
       acceptedQuit = true;
       relaunch.quitAccepted();
@@ -392,11 +393,15 @@ export async function runNightlyClient(
   const createRecovery = () =>
     createNightlyClientRecovery({
       exhausted: () => {
-        dialog.showErrorBox(
-          identity.productName,
-          "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
-        );
-        app.quit();
+        const message =
+          "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.";
+        process.stderr.write(`${identity.productName}: ${message}\n`);
+        void showStartupFailure({
+          title: identity.productName,
+          message,
+          logsDirectory: undefined,
+          quit: () => app.quit(),
+        });
       },
       open: (signal, onLeaseLost) =>
         openNightlyClientWindow({
@@ -591,7 +596,11 @@ export async function runNightlyClient(
           updating = false;
         }
       }
-      dialog.showErrorBox(identity.productName, message);
+      showNoticeWithoutBlocking(
+        [...windows.values()].find((candidate) => !candidate.isDestroyed()),
+        identity.productName,
+        message,
+      );
     },
   });
   app.on("activate", () => {
