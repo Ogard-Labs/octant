@@ -727,7 +727,18 @@ depends only on 1–3.
    default, since it makes Octant read another tool's credential store, but
    the person may opt in per endpoint with "Use my AWS profile", off by
    default, which reads their existing cloud profile (maintainer request,
-   2026-11-12; not built yet: today no cloud profile is read).
+   2026-11-12; not built yet: today no cloud profile is read). The read can
+   stay inside the broker, since a profile-sourced grant would sign through
+   the same `/v1/cloud-iam/sign` route under the same stored scope and no
+   runtime or journal would see it. Unresolved before it is built: which
+   profile kinds are read (a single sign-on profile, whose portal, account
+   and role are a grant's source fields; static access keys; an assumed
+   role; a credential process, which would run a configured command inside
+   the broker); whether the broker reads the cloud command line's cached
+   portal session, which is another tool's token store, and what happens
+   when that session ends; how the account and role are proved for a profile
+   that names neither; and whether `AWS_CONFIG_FILE` and its kin redirect
+   the read.
 5. **Google Vertex.** Deferred until an organization needs it. Its bearer is
    valid across the whole cloud account, so it may never reach the server;
    when it is built, the only acceptable shape is a broker-side relay that
