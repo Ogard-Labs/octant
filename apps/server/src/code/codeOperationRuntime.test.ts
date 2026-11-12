@@ -15377,6 +15377,7 @@ describe("continuing a Code turn a restart cut off", () => {
     const releaseQueue = vi.fn(async (_threadId: CodeThreadId) => {});
     const ports: CodeRestartContinuationPorts = {
       cutOff,
+      quitByPerson: false,
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
@@ -15510,6 +15511,39 @@ describe("continuing a Code turn a restart cut off", () => {
       ).resolves.toMatchObject({ continued: [{ threadId: String(threadId) }], held: [] });
       await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
       expect(next.connection.resume).toHaveBeenCalledOnce();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread a person's quit cut off, with the quit as its reason, and starts nothing", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await first.host.runtime.close();
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, { quitByPerson: true });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toEqual({
+        at: now,
+        continued: [],
+        held: [
+          {
+            mode: "code",
+            threadId: String(threadId),
+            reason: "quit",
+            detail: "Octant was quit while this thread was working, so it waits for you.",
+          },
+        ],
+      });
+      expect(next.connection.resume).not.toHaveBeenCalled();
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      // The hold is not a continuation, so the crash-loop count stays untouched.
+      expect(
+        createCodeRestartContinuationAttempts(next.host.connection).read(String(threadId)),
+      ).toBeUndefined();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
     } finally {
       for (const host of hosts) host.close();
     }

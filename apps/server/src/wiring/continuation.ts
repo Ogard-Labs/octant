@@ -39,6 +39,7 @@ import { WorkTurnServiceError, type WorkTurnService } from "../work/workTurnServ
 import type { WorkTurnCutOffByRestart } from "../work/workTurnProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { consumePersonQuit } from "../personQuit";
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
@@ -283,6 +284,9 @@ export function wireContinuation(deps: ContinuationDependencies) {
 function startRestartContinuation(
   deps: ContinuationDependencies,
 ): () => HostRestartRecovery | undefined {
+  // Read and removed on every start, whether or not anything was cut off, so
+  // a quit with nothing running holds nothing after a later crash.
+  const quitByPerson = consumePersonQuit(deps.persistence.dataDirectory);
   if (
     deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
     deps.chatAttemptsCutOffByRestart.length === 0 &&
@@ -296,10 +300,11 @@ function startRestartContinuation(
       return undefined;
     });
   void (async () => {
-    const code = await settled(continueCodeTurns(deps), "Code");
+    const code = await settled(continueCodeTurns(deps, quitByPerson), "Code");
     const chat = await settled(
       continueChatTurns({
         cutOff: deps.chatAttemptsCutOffByRestart,
+        quitByPerson,
         chat: deps.chatService,
         enabled: () => deps.persistence.readChatSettings()?.settings.restartContinuation !== false,
         connection: deps.persistence.connection,
@@ -316,6 +321,7 @@ function startRestartContinuation(
     const work = await settled(
       continueWorkTurns({
         cutOff: deps.workTurnsCutOffByRestart,
+        quitByPerson,
         work: deps.workTurnService,
         readThread: (threadId) => deps.workThreadProjection.read(threadId),
         enabled: () => deps.workThreadProjection.settings()?.restartContinuation !== false,
@@ -346,6 +352,8 @@ function startRestartContinuation(
 /** What continuing Chat answers after a restart reads and does. */
 export interface ChatRestartContinuationDependencies {
   readonly cutOff: ReadonlyArray<ChatAttemptCutOffByRestart>;
+  /** The previous host stopped because a person quit it (personQuit.ts). */
+  readonly quitByPerson: boolean;
   readonly chat: Pick<ChatService, "read" | "execute" | "restartContinuationReadiness">;
   /** Settings › Chat › Continue after restart. */
   readonly enabled: () => boolean;
@@ -362,6 +370,7 @@ export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
   const byAttempt = new Map(cutOff.map((cut) => [String(cut.attemptId), cut] as const));
   return continueThreadTurnsCutOffByRestart({
     mode: "chat",
+    quitByPerson: deps.quitByPerson,
     cutOff: cutOff.map((cut) => ({
       threadId: String(cut.threadId),
       turnId: String(cut.attemptId),
@@ -414,6 +423,8 @@ export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
 /** What continuing Work turns after a restart reads and does. */
 export interface WorkRestartContinuationDependencies {
   readonly cutOff: ReadonlyArray<WorkTurnCutOffByRestart>;
+  /** The previous host stopped because a person quit it (personQuit.ts). */
+  readonly quitByPerson: boolean;
   readonly work: Pick<WorkTurnService, "startFirstTurn" | "restartContinuationReadiness">;
   readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
   /** Settings › Work › Continue after restart. */
@@ -433,6 +444,7 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
   const byRequest = new Map(cutOff.map((cut) => [String(cut.requestId), cut] as const));
   return continueThreadTurnsCutOffByRestart({
     mode: "work",
+    quitByPerson: deps.quitByPerson,
     cutOff: cutOff.map((cut) => ({
       threadId: String(cut.threadId),
       turnId: String(cut.requestId),
@@ -498,6 +510,7 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
 /** Continues the Code turns this start found cut off (docs/architecture.md, Code restart recovery). */
 function continueCodeTurns(
   deps: ContinuationDependencies,
+  quitByPerson: boolean,
 ): Promise<HostRestartRecovery | undefined> {
   const {
     codeBoardEventStore,
@@ -511,6 +524,7 @@ function continueCodeTurns(
   const refused = (detail: string) => ({ kind: "refused" as const, detail });
   return continueCodeTurnsCutOffByRestart({
     cutOff: persistence.codeTurnsCutOffByRestart,
+    quitByPerson,
     readThread: (threadId) => persistence.readCodeThread(threadId),
     runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
     enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,

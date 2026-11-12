@@ -5196,6 +5196,54 @@ or .zip>` write the same files, built by one host command
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
 
+  A person who quits Octant while turns run chose to stop them, so the next
+  start holds those threads instead of continuing them (maintainers decided on
+  2026-11-12). Restart recovery in all three modes holds each cut-off thread
+  with the `quit` reason ("Octant was quit while this thread was working, so
+  it waits for you."), checked after the setting, the thread's switch and, in
+  Code, an unknown push or pull request step, which keep their own reasons. A
+  quit hold starts nothing, lifts no queue and leaves the crash-loop count
+  alone. The window's notice then reads "Octant was quit while threads were
+  working. N threads wait for you." and links the first thread; the person
+  continues it with that thread's ordinary Resume or next message. No
+  per-thread continue action exists for a held thread.
+
+  The hold is server-enforced; the desktop only reports how it is quitting.
+  Once a quit is accepted, and before it stops the host, the desktop calls
+  `POST /api/desktop/person-quit` on the loopback listener when, and only
+  when, all of these are true: the quit was interactive (the app menu's Quit,
+  ⌘Q, or closing the last window where that quits, the same quits that may
+  ask before stopping running work); no system shutdown was announced; and
+  the host is one this desktop owns and stops. The route admits only the
+  desktop bridge secret: a request with an Origin, a forwarded remote request
+  (it carries a principal route context), a Nightly main token and a
+  non-loopback host are refused, and `/api/desktop` is local-only on the
+  private listener, so a paired device or remote client reaches it on no
+  path. The host writes `person-quit.json` beside its store; the next start
+  reads it and removes it before restart recovery runs, whether or not
+  anything was cut off, so it answers for that one start. With no file
+  (a crash, a force quit, a signal, a report that did not land within its
+  one-second bound) the start continues as before; a file that cannot be
+  removed is read as no quit, so it never holds threads after a later crash.
+  The report waits for nothing else, and a quit with no turn running writes a
+  file that holds nothing.
+
+  A system restart or shutdown continues, like a crash. The desktop latches
+  Electron's `powerMonitor` `shutdown` event (macOS and Linux; it fires before
+  the system quits apps) and each window's `query-session-end` and
+  `session-end` (Windows, where the session end reaches windows, not the app).
+  A macOS restart, shutdown or logout also quits the app with an Apple event,
+  which is not an interactive quit, so it continues even if the event came
+  late. With the Background service on, the host is not this desktop's to
+  stop: quitting closes the windows, the host keeps running and its turns keep
+  going, so nothing is reported and nothing is held. Limits: the Dock's Quit
+  and an AppleScript `quit` arrive as the same Apple event a shutdown sends,
+  so they continue rather than hold; a Linux session that ends without
+  logind's shutdown signal, after closing the last window, reads as a
+  person's quit; an update's relaunch is not interactive and continues. A
+  native quit, a system shutdown and the Windows session end are maintainer
+  live checks.
+
 - **Fast thread reads.** A window owns Code navigation bootstrap and the
   follow-up navigation list. Its open thread controllers consume that metadata
   while keeping independent transcripts, streams and active-thread follow-up
