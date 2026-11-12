@@ -924,14 +924,6 @@ export const ShellSettings = Schema.Struct({
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  /**
-   * "Resume interrupted turns after a restart". On, a thread a host restart
-   * left needing recovery resumes by itself when its journal shows nothing
-   * was running; one whose turn was cut off still waits for the person. It is
-   * a host switch set from a local window, as every shell setting is. A store
-   * persisted before this shipped decodes to off.
-   */
-  resumeInterruptedTurns: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;
 

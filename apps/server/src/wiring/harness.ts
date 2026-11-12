@@ -39,7 +39,6 @@ import { ThreadWorkService } from "../chat/threadWorkService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
-import { UnattendedRestartResume } from "../harness/unattendedRestartResume";
 import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
 import {
   readShieldWatcherLabels,
@@ -79,11 +78,7 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import {
-  defaultShellSettings,
-  isNativeHarnessDriverKind,
-  workThreadAccessOf,
-} from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -538,15 +533,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const restartContinuation: {
     current: NativeHarnessSessionRouteDependencies["continueRecovery"];
   } = { current: undefined };
-  const leadDeliversSteering = (providerInstanceId: ProviderInstanceId): boolean => {
-    const instance = persistence.readProviderInstance(providerInstanceId);
-    return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
-  };
-  const recoveryBlockers = async ({
-    threadId,
-  }: {
-    readonly threadId: string;
-  }): Promise<ReadonlyArray<string>> => {
+  const recoveryBlockers = async (threadId: string): Promise<ReadonlyArray<string>> => {
     const view = nativeHarnessSessions.read(threadId);
     if (view === undefined) return [];
     return nativeHarnessRecoveryBlockers(
@@ -573,20 +560,31 @@ export function wireHarness(deps: HarnessDependencies) {
       view,
     );
   };
-  const settleInterruptedTurns = (input: {
-    readonly threadId: string;
-    readonly mode: OctantMode;
-  }): void => {
-    for (const listener of recoveryLiftedListeners) listener(input);
+  /**
+   * The host's own Resume of a session a restart left needing recovery, for a
+   * turn it continues by itself: the same blockers and the same settlement a
+   * person's Resume with Continue takes, in the same order, so the cut-off
+   * turn reads settled before the continuation starts.
+   */
+  const liftRestartRecovery = async (
+    threadId: string,
+  ): Promise<
+    { readonly kind: "none" | "lifted" } | { readonly kind: "held"; readonly detail: string }
+  > => {
+    const view = nativeHarnessSessions.read(threadId);
+    if (view?.session.status !== "recovery-required") return { kind: "none" };
+    const blockers = await recoveryBlockers(threadId);
+    if (blockers.length > 0)
+      return { kind: "held", detail: `Not ready to resume: ${blockers.join(" ")}`.slice(0, 255) };
+    for (const listener of recoveryLiftedListeners) listener({ threadId, mode: view.session.mode });
+    return nativeHarnessSessions.resume(threadId)
+      ? { kind: "lifted" }
+      : { kind: "held", detail: "The thread's harness session could not be resumed." };
   };
-  const continueRecovery: NonNullable<NativeHarnessSessionRouteDependencies["continueRecovery"]> = (
-    input,
-  ) =>
-    restartContinuation.current?.(input) ??
-    Promise.resolve({
-      kind: "refused",
-      message: "Restart continuation is unavailable on this host.",
-    });
+  const leadDeliversSteering = (providerInstanceId: ProviderInstanceId): boolean => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+  };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
     windowAuthorityStore,
@@ -610,9 +608,16 @@ export function wireHarness(deps: HarnessDependencies) {
     onPaused: (input) => {
       for (const listener of pausedByPersonListeners) listener(input);
     },
-    settleInterruptedTurns,
-    continueRecovery,
-    recoveryBlockers,
+    settleInterruptedTurns: (input) => {
+      for (const listener of recoveryLiftedListeners) listener(input);
+    },
+    continueRecovery: (input) =>
+      restartContinuation.current?.(input) ??
+      Promise.resolve({
+        kind: "refused",
+        message: "Restart continuation is unavailable on this host.",
+      }),
+    recoveryBlockers: ({ threadId }) => recoveryBlockers(threadId),
     followUps: followUpActions,
     answerQuestion: ({ threadId, questionId, answer }) =>
       nativeHarnessQuestions.answer(threadId, questionId, answer),
@@ -634,24 +639,6 @@ export function wireHarness(deps: HarnessDependencies) {
       });
     },
     authorizeThread: authorizeFollowUpThread,
-  });
-  // Built here, after the journal replay marked the sessions a restart cut,
-  // so it judges exactly those. The message queue's timer drives its passes
-  // once the continuation it queues can be queued.
-  const unattendedRestartResume = new UnattendedRestartResume({
-    settingOn: () =>
-      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).resumeInterruptedTurns,
-    sessions: nativeHarnessSessions,
-    windowFor: async (threadId) => {
-      for (const windowId of windowAuthorityStore.listWindowIds()) {
-        if (await authorizeFollowUpThread({ threadId, windowId: String(windowId) }))
-          return String(windowId);
-      }
-      return undefined;
-    },
-    recoveryBlockers,
-    settleInterruptedTurns,
-    continueRecovery,
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
     serverContext: (projectId) => shieldServerStore.context(projectId),
@@ -1113,7 +1100,7 @@ export function wireHarness(deps: HarnessDependencies) {
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,
-    unattendedRestartResume,
+    liftRestartRecovery,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,

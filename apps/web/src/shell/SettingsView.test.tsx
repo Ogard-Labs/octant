@@ -756,22 +756,6 @@ describe("SettingsView", () => {
     });
   });
 
-  it("offers Resume interrupted turns after a restart, off by default, and saves the person's choice", async () => {
-    const user = userEvent.setup();
-    const { props } = renderSettings({
-      providerController: providerControllerFixture(),
-      discoveryController: discoveryControllerFixture(),
-      initialDeepLink: { section: "providers" },
-    });
-    const control = await screen.findByRole("switch", {
-      name: "Resume interrupted turns after a restart",
-    });
-    expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText(/A thread whose turn was cut off always waits for you/)).toBeVisible();
-    await user.click(control);
-    expect(props.onSettingsChange).toHaveBeenCalledWith({ resumeInterruptedTurns: true });
-  });
-
   it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();

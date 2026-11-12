@@ -234,7 +234,6 @@ describe("shell settings policy", () => {
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
       persistentBrowserOwner: false,
-      resumeInterruptedTurns: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
@@ -247,7 +246,6 @@ describe("shell settings policy", () => {
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
       persistentBrowserOwner: false,
-      resumeInterruptedTurns: false,
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(

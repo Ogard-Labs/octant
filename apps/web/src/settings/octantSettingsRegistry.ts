@@ -561,6 +561,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "searxng url address search engine research",
         },
+        {
+          id: settingId("chat-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted answer automatically recovery chat",
+        },
       ],
     },
     {
@@ -588,6 +595,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "work full access sandbox seatbelt confinement secrets network prompts",
         },
+        {
+          id: settingId("work-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery work",
+        },
       ],
     },
     {
@@ -609,6 +623,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Default diff layout",
           scope: "mode",
           keywords: "diff layout unified side by side review checkout",
+        },
+        {
+          id: settingId("code-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery",
         },
         {
           id: settingId("code-language-services"),
@@ -738,13 +759,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
-        },
-        {
-          id: settingId("resume-interrupted-turns"),
-          label: "Resume interrupted turns after a restart",
-          scope: "host",
-          keywords:
-            "resume interrupted turns after a restart host restarted crash continue by itself automatically unattended waiting answer cut off recovery",
         },
         {
           id: settingId("opencode-managed-update"),

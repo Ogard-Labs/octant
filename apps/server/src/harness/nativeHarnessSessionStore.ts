@@ -40,12 +40,7 @@ import {
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
-import {
-  validateQuestionnaireAnswer,
-  addTurnToSessionMetrics,
-  addTurnUsage,
-  type RestartRecoveryStanding,
-} from "@octant/domain";
+import { validateQuestionnaireAnswer, addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
@@ -77,8 +72,6 @@ export interface NativeHarnessSessionStoreOptions {
 interface SessionRecord {
   session: NativeHarnessSession;
   recoveryIdentity?: string;
-  /** The last resume was the host's own, and no turn has completed since. */
-  resumedUnattended?: true;
   routes: NativeHarnessRouteDecision[];
   turns: NativeHarnessTurnRecord[];
   reductions: NativeHarnessContextReduction[];
@@ -142,29 +135,6 @@ export class NativeHarnessSessionStore {
     const record = this.#records.get(threadId);
     if (record?.session.status !== "recovery-required") return undefined;
     return record.recoveryIdentity;
-  }
-
-  /**
-   * What the restart left, from the replayed journal alone: a turn that had
-   * started and never settled, or only an answer nobody can give any more.
-   * Absent unless the session needs recovery.
-   */
-  recoveryStanding(threadId: string): RestartRecoveryStanding | undefined {
-    const record = this.#records.get(threadId);
-    if (record?.session.status !== "recovery-required") return undefined;
-    return this.#turnsInFlight.has(threadId) ? "turn-cut-off" : "answer-dropped";
-  }
-
-  /** The threads whose session a restart left needing recovery. */
-  threadsNeedingRecovery(): ReadonlyArray<string> {
-    return [...this.#records]
-      .filter(([, record]) => record.session.status === "recovery-required")
-      .map(([threadId]) => threadId);
-  }
-
-  /** Whether the session's last resume was the host's own, with no turn completed since. */
-  resumedUnattended(threadId: string): boolean {
-    return this.#records.get(threadId)?.resumedUnattended === true;
   }
 
   read(threadId: string): NativeHarnessSessionView | undefined {
@@ -320,7 +290,6 @@ export class NativeHarnessSessionStore {
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.turnCompleted, turn);
     push(record.turns, turn);
     this.#turnsInFlight.delete(threadId);
-    delete record.resumedUnattended;
     this.#setSession(record, {
       ...record.session,
       ...sessionTotals(record.session, turn),
@@ -651,7 +620,7 @@ export class NativeHarnessSessionStore {
    * raise the same recovery again. A plain pause settles nothing: an approval
    * the finishing turn is waiting on is still live.
    */
-  resume(threadId: string, options: { readonly unattended?: boolean } = {}): boolean {
+  resume(threadId: string): boolean {
     const record = this.#records.get(threadId);
     if (record === undefined) return false;
     if (record.session.status === "running" || record.session.status === "idle") return false;
@@ -674,10 +643,7 @@ export class NativeHarnessSessionStore {
     }
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, {
       sessionId: record.session.id,
-      ...(options.unattended === true ? { unattended: true } : {}),
     });
-    if (options.unattended === true) record.resumedUnattended = true;
-    else delete record.resumedUnattended;
     const { detail: _detail, ...rest } = record.session;
     this.#setSession(record, {
       ...rest,
@@ -797,7 +763,6 @@ export class NativeHarnessSessionStore {
       const turn = payload as NativeHarnessTurnRecord;
       push(record.turns, turn);
       this.#turnsInFlight.delete(threadId);
-      delete record.resumedUnattended;
       // The status stays what the journal last set. "Running" is never
       // journaled, so the only status a completed turn can meet here is idle
       // or one a person or the advisor chose — a pause made while the turn
@@ -856,8 +821,6 @@ export class NativeHarnessSessionStore {
     } else if (eventName === names.resumed) {
       const { detail: _detail, ...rest } = record.session;
       record.session = { ...rest, status: "idle" };
-      if (body.unattended === true) record.resumedUnattended = true;
-      else delete record.resumedUnattended;
     } else if (eventName === names.steeringQueued) {
       this.#applySteeringQueued(threadId, decodeNativeHarnessSteeringQueued(payload).note);
     } else if (eventName === names.steeringDelivered) {

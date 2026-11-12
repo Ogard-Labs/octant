@@ -8,8 +8,51 @@ import {
 } from "@octant/contracts";
 import type { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 
-const prompt =
+/** What a thread is told when it continues a turn a restart cut off, by a person or by the host. */
+export const RESTART_CONTINUATION_PROMPT =
   "Octant restarted before your previous turn finished. Inspect the saved conversation and any work already performed, then continue the unfinished request. Do not blindly repeat operations that may already have taken effect. Ask again for any approval or answer still needed.";
+const prompt = RESTART_CONTINUATION_PROMPT;
+
+/**
+ * The one continuation identity a recovery identity ever gets, so a retried
+ * or repeated recovery lands on the record the first one wrote instead of
+ * starting a second continuation.
+ */
+export function restartContinuationId(recoveryIdentity: string): string {
+  const hash = createHash("sha256").update(`octant:restart:${recoveryIdentity}`).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+/**
+ * After the host continued a turn a restart cut off, lets the messages queued
+ * behind that turn follow the continuation. A restart holds every queue; this
+ * lifts only that hold, under the given scope, so the queue's own dispatch
+ * check still waits for the continuation to end and still holds on a failed
+ * or cancelled one. A queue the person paused stays paused.
+ */
+export async function releaseQueueBehindRestartContinuation(
+  queue: Pick<ThreadMessageQueueService, "read" | "execute">,
+  input: { readonly scopeId: WindowId; readonly threadId: string; readonly mode: OctantMode },
+): Promise<void> {
+  const scope = decodeThreadMessageQueueScope({ mode: input.mode, threadId: input.threadId });
+  const read = await queue.read(input.scopeId, scope);
+  if (
+    read.status !== "ready" ||
+    read.snapshot.items.length === 0 ||
+    read.snapshot.paused ||
+    read.snapshot.holdReason !== "host-restart"
+  )
+    return;
+  await queue.execute(
+    input.scopeId,
+    decodeThreadMessageQueueCommand({
+      kind: "resume",
+      scope,
+      requestId: randomUUID(),
+      expectedVersion: read.snapshot.version,
+    }),
+  );
+}
 
 /**
  * Use the existing durable queue receipt, not a window-local flag, to deduplicate recovery.
@@ -25,10 +68,7 @@ export async function queueRestartContinuation(
     readonly recoveryIdentity: string;
   },
 ): Promise<{ readonly kind: "queued" } | { readonly kind: "refused"; readonly message: string }> {
-  const hash = createHash("sha256")
-    .update(`octant:restart:${input.recoveryIdentity}`)
-    .digest("hex");
-  const messageId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  const messageId = restartContinuationId(input.recoveryIdentity);
   const scope = decodeThreadMessageQueueScope({ mode: input.mode, threadId: input.threadId });
   const refused = (message: string) => ({ kind: "refused" as const, message });
   const changed = () => refused("The message queue changed. Review it and try again.");

@@ -125,6 +125,8 @@ export interface SidebarContainerProps {
     | "setCodeThreadCoordinator"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
+    | "setCodeThreadRestartContinuation"
+    | "setChatThreadRestartContinuation"
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"
@@ -459,6 +461,10 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         void actions.snoozeChatThread(decodeChatThreadId(threadId), until).then(noteChatThreadRest),
       onWakeThread: (threadId) =>
         void actions.wakeChatThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
+      onSetRestartContinuation: (threadId, continueAfterRestart) =>
+        void actions
+          .setChatThreadRestartContinuation(decodeChatThreadId(threadId), continueAfterRestart)
+          .then(noteChatThreadRest),
       onMarkThreadRead: (threadId) => actions.markChatThreadRead(decodeChatThreadId(threadId)),
       onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
       onPinInPane: actions.pinChatThreadInPane,
@@ -496,6 +502,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           kind: "wake-work-thread",
           threadId: decodeWorkThreadId(threadId),
           expectedVersion,
+        })),
+      onSetRestartContinuation: (threadId, continueAfterRestart) =>
+        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "set-work-thread-restart-continuation",
+          threadId: decodeWorkThreadId(threadId),
+          expectedVersion,
+          continueAfterRestart,
         })),
       onPinInPane: actions.pinWorkThreadInPane,
       onAttachAsContext: (threadId) => {

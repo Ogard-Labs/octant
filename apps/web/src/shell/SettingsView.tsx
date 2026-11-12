@@ -1267,25 +1267,6 @@ function ActiveSectionContent({
                 </SettingRow>
               </div>
             </SettingsSection>
-            <SettingsSection title="After a restart">
-              <div className="setgroup">
-                <SettingRow
-                  description="When Octant restarts, a thread that was only waiting for an answer continues by itself. A thread whose turn was cut off always waits for you, because Octant cannot tell whether its last step took effect."
-                  focused={focusedSetting === settingId("resume-interrupted-turns")}
-                  label="Resume interrupted turns after a restart"
-                  scope="host"
-                  settingId="resume-interrupted-turns"
-                >
-                  <OctantSwitch
-                    checked={props.settings.resumeInterruptedTurns}
-                    label="Resume interrupted turns after a restart"
-                    onCheckedChange={(checked) =>
-                      props.onSettingsChange({ resumeInterruptedTurns: checked })
-                    }
-                  />
-                </SettingRow>
-              </div>
-            </SettingsSection>
           </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}

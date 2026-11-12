@@ -133,6 +133,7 @@ import {
   readCodeThreads,
   readCodeThreadView,
   reconcileCodeRestart,
+  type CodeTurnCutOffByRestart,
   type ProjectedCodeRuntimeWork,
 } from "./codeProjection";
 import { readProductFeedbackNote, readProductFeedbackNotes } from "./productFeedbackProjection";
@@ -274,6 +275,8 @@ export interface PersistenceService {
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
   ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
+  /** The provider turns this start found the previous host still running. */
+  readonly codeTurnsCutOffByRestart: ReadonlyArray<CodeTurnCutOffByRestart>;
   readonly readCodeReviewFinding: (findingId: CodeReviewFindingId) => CodeReviewFinding | undefined;
   readonly readCodeReviewFindings: (threadId: CodeThreadId) => ReadonlyArray<CodeReviewFinding>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
@@ -513,7 +516,11 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         `Octant removed ${sessionSweep.resumeIdentitiesRemoved} Claude resume identit(ies) and ${sessionSweep.transcriptsRemoved} Octant Harness transcript(s) that no thread or child run records.`,
       );
     }
-    reconcileCodeRestart({ connection, journal, reconciledAt: clock() });
+    const codeTurnsCutOffByRestart = reconcileCodeRestart({
+      connection,
+      journal,
+      reconciledAt: clock(),
+    });
 
     let status = databaseStatus({ connection, journal, projections, compatibility });
     // Lagging, inconsistent or quarantined projections over a journal that
@@ -657,6 +664,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         readCodeRuntimeWorkAggregateVersion(connection, workId),
       readCodeRuntimeWork: (workId) => readCodeRuntimeWork(connection, workId),
       readCodeRuntimeWorks: (threadId) => readCodeRuntimeWorks(connection, threadId),
+      codeTurnsCutOffByRestart,
       readCodeReviewFinding: (findingId) => readCodeReviewFinding(connection, findingId),
       readCodeReviewFindings: (threadId) => readCodeReviewFindings(connection, threadId),
       readCodeThreadView: (threadId) => readCodeThreadView(connection, threadId),

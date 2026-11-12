@@ -174,6 +174,7 @@ describe("octantSettingsRegistry", () => {
       "work-default-model",
       "work-default-access",
       "work-full-access-sandbox",
+      "work-restart-continuation",
     ]);
   });
 
@@ -242,7 +243,6 @@ describe("octantSettingsRegistry", () => {
       "automatic-model-decision-review",
       "stalled-turn-limit",
       "provider-tool-call-pause-limit",
-      "resume-interrupted-turns",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
@@ -260,6 +260,7 @@ describe("octantSettingsRegistry", () => {
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
       "code-default-diff-layout",
+      "code-restart-continuation",
       "code-language-services",
       "code-coordinator-starting",
       "code-coordinator-open-workers",
@@ -283,6 +284,7 @@ describe("octantSettingsRegistry", () => {
       "chat-research-enabled",
       "chat-research-backend",
       "chat-searxng-url",
+      "chat-restart-continuation",
     ]);
   });
 

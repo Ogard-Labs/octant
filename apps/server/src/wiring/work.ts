@@ -216,7 +216,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "runtimeForgeChanges"
     | "followUpCreation"
     | "restartContinuation"
-    | "unattendedRestartResume"
     | "nativeHarnessComposition"
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
@@ -276,7 +275,6 @@ export function wireWork(deps: WorkDependencies) {
     externalContentIngestionStore,
     followUpCreation,
     restartContinuation,
-    unattendedRestartResume,
     githubIssueContextService,
     goalService,
     imageGenerationOffers,
@@ -1442,10 +1440,16 @@ export function wireWork(deps: WorkDependencies) {
           mode,
         ),
       ...createThreadMessageQueueAuthority({
+        // The host's own scope is never a window. It reaches a queue only to
+        // let a thread's queued messages follow the continuation it started
+        // after a restart, in a Project of the thread's own mode.
         isLocalWindowLive: (windowId) =>
+          isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
         isPairedDevice: isPairedDeviceScope,
         localWindowCanAccess: (windowId, mode, projectId) => {
+          if (isRoutineHostScope(windowId) && mode === "work")
+            return projectId !== undefined && persistence.readProject(projectId)?.type === "work";
           if (mode === "chat")
             return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
           if (projectId === undefined) return false;
@@ -1546,11 +1550,6 @@ export function wireWork(deps: WorkDependencies) {
     yield* Effect.promise(() => workAttachments.recover());
     yield* Effect.promise(() => conversationInputTransfer.recover());
     const advanceMessageQueue = () => {
-      // Before the queue's own pass, so a continuation it queues is dispatched
-      // by this pass. It does nothing once every thread a restart cut is judged.
-      void unattendedRestartResume
-        .pass()
-        .catch(() => console.error("An interrupted thread could not be resumed."));
       void threadMessageQueue
         .tick()
         .catch(() => console.error("The message queue could not advance."));

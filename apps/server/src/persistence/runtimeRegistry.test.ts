@@ -775,7 +775,6 @@ describe("createPhase1RuntimeRegistries", () => {
       settings: {
         ...decodePersistedShellSettings(legacyPayload.settings),
         persistentBrowserOwner: false,
-        resumeInterruptedTurns: false,
       },
     });
     for (const [contextSidebarWidth, lastContextSurface, modeSwitcherPresentation] of [
@@ -809,7 +808,6 @@ describe("createPhase1RuntimeRegistries", () => {
           rememberedBrowserProfileSites: [],
           agentBrowserDownloads: false,
           persistentBrowserOwner: false,
-          resumeInterruptedTurns: false,
           computerUse: { enabled: false, automaticUpdates: false },
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
@@ -1060,7 +1058,6 @@ function validSettingsPayload() {
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
       persistentBrowserOwner: false,
-      resumeInterruptedTurns: false,
       computerUse: { enabled: true, automaticUpdates: true },
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "medium",

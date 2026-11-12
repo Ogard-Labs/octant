@@ -30,7 +30,11 @@ import type {
   ThreadMessageQueueInspection,
 } from "./threadMessageQueuePort";
 import { ThreadMessageQueueService } from "./threadMessageQueueService";
-import { queueRestartContinuation } from "../harness/restartContinuation";
+import {
+  queueRestartContinuation,
+  releaseQueueBehindRestartContinuation,
+} from "../harness/restartContinuation";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const now = "2026-10-03T18:00:00.000Z";
 const actor = decodeEventActor({ kind: "system", actorId: randomUUID() });
@@ -234,6 +238,62 @@ describe("durable ordinary thread queue", () => {
     expect(paused.items[0]?.payload?.prompt).toContain("Octant restarted");
     await f.service.tick(scope);
     expect(f.p.admit).not.toHaveBeenCalled();
+  });
+
+  it("sends a message queued behind a cut-off turn only after the host's continuation of it ends", async () => {
+    const before = fixture();
+    await before.service.execute(windowId, enqueue());
+    const path = before.database;
+    before.close();
+    const p = port();
+    p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "continuation", status: "active" },
+    });
+    const after = fixture(p, path);
+    await after.service.recover();
+    expect(await snapshot(after.service)).toMatchObject({ holdReason: "host-restart" });
+
+    const release = {
+      scopeId: ROUTINE_HOST_SCOPE_ID,
+      threadId: String(scope.threadId),
+      mode: "chat" as const,
+    };
+    await releaseQueueBehindRestartContinuation(after.service, release);
+    await after.service.tick(scope);
+    expect(p.admit).not.toHaveBeenCalled();
+
+    p.setInspection({
+      status: "ready",
+      binding: "authorized-target",
+      tail: { id: "continuation", status: "completed" },
+    });
+    await after.service.tick(scope);
+    expect(p.admit).toHaveBeenCalledOnce();
+    expect(String(p.admit.mock.calls[0]?.[0].windowId)).toBe(String(ROUTINE_HOST_SCOPE_ID));
+  });
+
+  it("keeps a queue the person paused before a restart paused after the host's continuation", async () => {
+    const before = fixture();
+    await before.service.execute(windowId, enqueue());
+    await before.service.execute(
+      windowId,
+      command("pause", (await snapshot(before.service)).version),
+    );
+    const path = before.database;
+    before.close();
+    const after = fixture(port(), path);
+    await after.service.recover();
+
+    await releaseQueueBehindRestartContinuation(after.service, {
+      scopeId: ROUTINE_HOST_SCOPE_ID,
+      threadId: String(scope.threadId),
+      mode: "chat",
+    });
+    await after.service.tick(scope);
+    expect(await snapshot(after.service)).toMatchObject({ paused: true });
+    expect(after.p.admit).not.toHaveBeenCalled();
   });
 
   it("keeps a continuation in the ordinary queue when its later mode admission is refused", async () => {

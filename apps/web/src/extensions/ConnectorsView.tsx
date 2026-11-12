@@ -202,6 +202,11 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             Vendor setup guide
                           </a>
                         </span>
+                        {entry.auth.kind === "sign-in" &&
+                        entry.auth.clientSetup !== "registered" &&
+                        entry.auth.permissionNotice !== undefined ? (
+                          <span className="connectors__detail">{entry.auth.permissionNotice}</span>
+                        ) : null}
                         {connection !== undefined && connectionNeedsAttention(connection.state) ? (
                           <ConnectionStatus connection={connection} />
                         ) : null}
@@ -241,6 +246,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                                   registration: {
                                     guideUrl: entry.auth.setupGuide,
                                     requestedScopes: entry.auth.requestedScopes ?? [],
+                                    ...(entry.auth.setupSteps === undefined
+                                      ? {}
+                                      : { setupSteps: entry.auth.setupSteps }),
                                     ...(entry.auth.permissionNotice === undefined
                                       ? {}
                                       : { permissionNotice: entry.auth.permissionNotice }),
