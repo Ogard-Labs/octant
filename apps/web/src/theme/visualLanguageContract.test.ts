@@ -1648,6 +1648,19 @@ describe("shared recipes against the global stylesheets", () => {
     }
   }
 
+  it("keeps a selected content tab's own button unfilled, since the tab wrapper carries the selected look", () => {
+    // The tab recipe now fills a selected tab (data-active). A content tab is a
+    // wrapper holding the select button and a close button, so its button opts
+    // out of that fill and ink or the selected tab would be filled twice.
+    const source = readFileSync(join(webRoot, "shell/SplitWorkspace.tsx"), "utf8");
+    const selects = source.match(/className="content-tab__select[^"]*"/g) ?? [];
+    expect(selects).toHaveLength(2);
+    for (const select of selects) {
+      expect(select).toContain("data-active:bg-transparent");
+      expect(select).toContain("data-active:text-inherit");
+    }
+  });
+
   it("lets a recipe's own type role size its heading, because no bare heading rule is unlayered", () => {
     // An unlayered `h2 { font-size }` beats every Tailwind utility, so a card's
     // title (text-base) was drawn at 44px. Bare heading defaults live in the base layer.
