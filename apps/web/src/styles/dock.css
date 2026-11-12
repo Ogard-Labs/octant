@@ -766,11 +766,17 @@
 }
 
 /* Tool tiles: several open tools drawn together beside a thread, each one
-   live. The dock's own ground is the tiles' ground, so a see-through theme
-   shows through them, and the dividers are hairlines. A tile is told apart by
-   its name, not by an outline: the focused one reads in the full ink and the
-   rest a step back, with no ring and no fill. */
+   live. In a narrow window each is a panel of its own (level 1 of the
+   material): a rounded fill with a sheen, a rim brighter along its top edge,
+   and a seat shadow, with a gap between neighbours. From 681px up the window
+   is a grid of panes, so a tile is square and shares its edges with its
+   neighbours: it draws the one line on its top and left, and the divider's hit
+   area straddles that line. A tile is told apart by its name, not by an
+   outline: the focused one reads in the full ink and the rest a step back. */
 .dock-tiles {
+  /* Half the gap between two narrow-window tiles: each shared edge is pulled
+     in by it (see DockTiles). Panes share their edges, so there it is 0. */
+  --octant-tile-inset: 4px;
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -793,9 +799,48 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  /* A tile has no fill of its own, so anything a tool paints past its box
-     would show in the next tile (a Files tree drawn over Vitals). It clips. */
+  /* The tile clips: anything a tool paints past its box would show in the
+     next tile (a Files tree drawn over Vitals). */
   overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-panel-fill);
+  box-shadow: var(--octant-shadow-panel-seat);
+}
+
+/* The rim is drawn above the tool: an inset shadow on the tile itself is
+   painted over by anything the tool fills. */
+.dock-tile::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--octant-shadow-panel-rim);
+  content: "";
+  pointer-events: none;
+}
+
+@media (min-width: 681px) {
+  .dock-tiles {
+    --octant-tile-inset: 0px;
+  }
+
+  /* Square, flat, and on the one pane fill; the line below is the only edge. */
+  .dock-tile {
+    border-radius: 0;
+    background: var(--octant-pane-fill);
+    box-shadow: none;
+  }
+
+  /* The line is drawn above the tool, on the tile's top and left edges: the
+     edge it shares with the tile above or beside it is that tile's bottom or
+     right, which draws nothing, so two tiles never show two lines. A border,
+     so forced colours keeps it. */
+  .dock-tile::after {
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 /* The tool gets a definite height to scroll within: the tile's body flexes to
@@ -854,7 +899,7 @@
   padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  border-bottom: 1px solid var(--oct-border);
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
@@ -892,6 +937,13 @@
   border: 0;
 }
 
+/* A tile's menu is open: the control is pressed into the bar, as the band's
+   toggles are, and not the pointed-at wash. */
+.dock-tile__control[aria-expanded="true"] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
 /* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
    stays whole and clear of the next tab and the New page button. The select
    was shrink-0, so the tab's box shrank around it and the close mark ran under
@@ -926,7 +978,8 @@
   padding: 0;
 }
 
-/* The hit area is the dock's own 7px edge; the line inside it is a hairline. */
+/* The hit area is 8px wide, centred on the edge between two tiles; the line
+   inside it is a hairline. */
 .dock-tiles__divider {
   position: absolute;
   z-index: 1;
@@ -943,30 +996,47 @@
 
 .dock-tiles__divider::before {
   position: absolute;
-  background: var(--oct-border);
+  background: transparent;
   content: "";
 }
 
 .dock-tiles__divider[data-orientation="vertical"]::before {
   top: 0;
   bottom: 0;
-  left: 3px;
+  left: 3.5px;
   width: 1px;
 }
 
 .dock-tiles__divider[data-orientation="horizontal"]::before {
-  top: 3px;
+  top: 3.5px;
   right: 0;
   left: 0;
   height: 1px;
 }
 
-/* At rest a hairline. It takes the quiet strong-divider role while hovered or
-   held, and nothing stays after a click. Keyboard focus is marked by the
+/* At rest the divider draws nothing: the tile below or beside it draws the
+   line. The line takes the quiet strong-divider role while hovered or held,
+   and nothing stays after a click. Keyboard focus is marked by the
    app's own outline recipe, not by a line drawn here. */
 .dock-tiles__divider:hover::before,
 .dock-tiles__divider:active::before {
   background: var(--octant-border-strong);
+}
+
+/* The panes' line is the tile's own first pixel, so the divider's line lies
+   on it, and takes the meta ink while grabbed. */
+@media (min-width: 681px) {
+  .dock-tiles__divider[data-orientation="vertical"]::before {
+    left: 4px;
+  }
+
+  .dock-tiles__divider[data-orientation="horizontal"]::before {
+    top: 4px;
+  }
+
+  .dock-tiles__divider:active::before {
+    background: var(--oct-meta);
+  }
 }
 
 /* Covers the dock body while a divider or a tab is being dragged: it keeps a

@@ -490,12 +490,13 @@ function ComposerThreadDropCue() {
 }
 
 /**
- * Send is a quiet tile until there is something to send, then the card's one
- * solid control. Filled with the accent at every moment, it was the loudest
- * thing on the page under an empty prompt.
+ * Send is a quiet raised tile until there is something to send, then the
+ * primary action: the accent as a gradient with a glow under it. Filled with
+ * the accent at every moment, it was the loudest thing on the page under an
+ * empty prompt.
  */
-function sendVariant(refused: boolean): "secondary" | "solid" {
-  return refused ? "secondary" : "solid";
+function sendVariant(refused: boolean): "secondary" | "default" {
+  return refused ? "secondary" : "default";
 }
 
 /**
