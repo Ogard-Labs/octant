@@ -6915,21 +6915,52 @@ describe("CodeOperationRuntime", () => {
       fixture.close();
     });
 
+    /**
+     * A pull request whose comments are what GitHub would hold: a post that
+     * loses its answer may still land, and the person's own comments are read
+     * back from the same list.
+     */
+    function commentingFixture(options: {
+      readonly alreadyThere?: ReadonlyArray<string>;
+      readonly firstPostLands: boolean;
+      readonly readable?: (read: number) => boolean;
+    }) {
+      const onPullRequest = [...(options.alreadyThere ?? [])];
+      let posts = 0;
+      let reads = 0;
+      const post = async (input: { readonly body: string }) => {
+        posts += 1;
+        if (posts > 1 || options.firstPostLands) onPullRequest.push(input.body);
+        return posts === 1
+          ? { status: "unavailable" as const, reason: "unavailable" as const }
+          : { status: "done" as const };
+      };
+      return {
+        onPullRequest,
+        ...actionFixture({
+          comment: post,
+          replyToReviewThread: post,
+          ownComments: async () =>
+            (options.readable?.(++reads) ?? true)
+              ? { status: "read" as const, bodies: [...onPullRequest] }
+              : { status: "unavailable" as const },
+        }),
+      };
+    }
+
+    const latestState = (fixture: ReturnType<typeof actionFixture>["fixture"], id: number) =>
+      fixture
+        .runtimeWorks()
+        .filter((work) => work.id === String(operationId(id)))
+        .at(-1)?.state;
+
     it.each([
-      ["is already on the pull request", ["Looks right."], 1, "completed"],
-      ["never reached the pull request", ["Something else."], 2, "failed"],
+      ["already reached the pull request", true, 1, "completed"],
+      ["never reached the pull request", false, 2, "failed"],
     ] as const)(
-      "looks for an unconfirmed comment before posting it again, and it %s",
-      async (_case, bodies, posts, earlierSettled) => {
-        let attempts = 0;
-        const { fixture, actions } = actionFixture({
-          // The first post loses its answer; GitHub may or may not have it.
-          comment: async () =>
-            ++attempts === 1
-              ? { status: "unavailable" as const, reason: "unavailable" as const }
-              : { status: "done" as const },
-          ownComments: async () => ({ status: "read" as const, bodies: [...bodies] }),
-        });
+      "looks for an unconfirmed comment before posting it again when it %s",
+      async (_case, firstPostLands, posts, earlierSettled) => {
+        const { fixture, actions, onPullRequest } = commentingFixture({ firstPostLands });
         try {
           const comment = {
             kind: "comment-pull-request" as const,
@@ -6937,12 +6968,7 @@ describe("CodeOperationRuntime", () => {
             authorization: approved(156),
           };
           await fixture.runtime.execute(windowId, { ...comment, ...scope(155) });
-          expect(
-            fixture
-              .runtimeWorks()
-              .filter((work) => work.id === String(operationId(155)))
-              .at(-1)?.state,
-          ).toBe("ambiguous");
+          expect(latestState(fixture, 155)).toBe("ambiguous");
 
           const retried = await fixture.runtime.execute(windowId, { ...comment, ...scope(157) });
 
@@ -6952,23 +6978,52 @@ describe("CodeOperationRuntime", () => {
             expect.any(AbortSignal),
           );
           expect(actions.comment).toHaveBeenCalledTimes(posts);
-          const latest = (id: number) =>
-            fixture
-              .runtimeWorks()
-              .filter((work) => work.id === String(operationId(id)))
-              .at(-1)?.state;
-          expect(latest(155)).toBe(earlierSettled);
-          expect(latest(157)).toBe("completed");
+          expect(onPullRequest).toEqual(["Looks right."]);
+          expect(latestState(fixture, 155)).toBe(earlierSettled);
+          expect(latestState(fixture, 157)).toBe("completed");
         } finally {
           fixture.close();
         }
       },
     );
 
+    it("does not take an older identical comment for an attempt that never landed", async () => {
+      // "Fixed." is the kind of reply a person posts more than once.
+      const { fixture, actions, onPullRequest } = commentingFixture({
+        alreadyThere: ["Fixed."],
+        firstPostLands: false,
+      });
+      try {
+        const comment = {
+          kind: "comment-pull-request" as const,
+          body: "Fixed.",
+          authorization: approved(163),
+        };
+        await fixture.runtime.execute(windowId, { ...comment, ...scope(162) });
+        expect(latestState(fixture, 162)).toBe("ambiguous");
+
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          ...scope(164),
+          maxDiffBytes: 1_024,
+        });
+        expect(latestState(fixture, 162)).toBe("failed");
+
+        expect(
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(165) }),
+        ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+        expect(actions.comment).toHaveBeenCalledTimes(2);
+        expect(onPullRequest).toEqual(["Fixed.", "Fixed."]);
+      } finally {
+        fixture.close();
+      }
+    });
+
     it("refuses to post again when an unconfirmed comment cannot be looked for", async () => {
-      const { fixture, actions } = actionFixture({
-        comment: async () => ({ status: "unavailable" as const, reason: "unavailable" as const }),
-        ownComments: async () => ({ status: "unavailable" as const }),
+      const { fixture, actions } = commentingFixture({
+        firstPostLands: false,
+        // Readable before the first post, unreachable at the retry.
+        readable: (read) => read === 1,
       });
       try {
         const comment = {
@@ -6981,19 +7036,25 @@ describe("CodeOperationRuntime", () => {
           await fixture.runtime.execute(windowId, { ...comment, ...scope(160) }),
         ).toMatchObject({ kind: "operation-failed", failure: { category: "failed" } });
         expect(actions.comment).toHaveBeenCalledOnce();
+        expect(latestState(fixture, 158)).toBe("ambiguous");
       } finally {
         fixture.close();
       }
     });
 
     it.each([
-      ["is among the person's own comments", ["Fixed in the next commit."], "completed"],
-      ["is not among them", ["Unrelated."], "failed"],
+      ["has one more of the person's comments with its text", 1, "completed"],
+      ["has no more than before", 0, "failed"],
     ] as const)(
-      "settles a review reply the host lost when its text %s, on the next look at the pull request",
-      async (_case, bodies, settled) => {
+      "settles a review reply the host lost when its thread %s, on the next look at the pull request",
+      async (_case, posted, settled) => {
         const { fixture, actions } = actionFixture({
-          ownComments: async () => ({ status: "read" as const, bodies: [...bodies] }),
+          ownComments: async () => ({
+            status: "read" as const,
+            bodies: ["Fixed in the next commit.", "Unrelated."].concat(
+              posted === 1 ? ["Fixed in the next commit."] : [],
+            ),
+          }),
         });
         try {
           const replyId = "90000000-0000-4000-8000-0000000000e3";
@@ -7006,6 +7067,8 @@ describe("CodeOperationRuntime", () => {
               action: "comment",
               commentDigest: pullRequestCommentDigest("Fixed in the next commit.\r\n"),
               reviewThreadId: "PRRT_abc",
+              pullRequest: { owner: "octant", name: "octant", number: 7 },
+              priorMatches: 1,
             },
           });
           await fixture.runtime.execute(windowId, {
@@ -7028,6 +7091,58 @@ describe("CodeOperationRuntime", () => {
         }
       },
     );
+
+    it("settles a lost comment against the pull request it was posted to, not the branch's newer one", async () => {
+      // The fixture's branch now carries pull request 7; the comment went to 5.
+      const { fixture, actions } = actionFixture({
+        ownComments: async (input) => ({
+          status: "read" as const,
+          bodies: input.number === 7 ? ["Looks right."] : [],
+        }),
+      });
+      try {
+        const original = "90000000-0000-4000-8000-0000000000e4";
+        const unrecorded = "90000000-0000-4000-8000-0000000000e5";
+        fixture.appendRuntimeWork({
+          id: original,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+            pullRequest: { owner: "octant", name: "octant", number: 5 },
+            priorMatches: 0,
+          },
+        });
+        // A record that never named its pull request cannot be judged at all.
+        fixture.appendRuntimeWork({
+          id: unrecorded,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+          },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          ...scope(166),
+          maxDiffBytes: 1_024,
+        });
+        expect(actions.ownComments.mock.calls.map(([input]) => input.number)).toEqual([5]);
+        const latest = (id: string) =>
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === id)
+            .at(-1)?.state;
+        expect(latest(original)).toBe("failed");
+        expect(latest(unrecorded)).toBe("ambiguous");
+      } finally {
+        fixture.close();
+      }
+    });
 
     it("merges on the person's approval only when the head and required checks match", async () => {
       const refusedFixture = actionFixture({});

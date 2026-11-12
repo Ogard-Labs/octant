@@ -67,6 +67,7 @@ import {
   type CodeRepositoryTestStatus,
   type CodeReviewFinding,
   type CodeThread,
+  type CodeRuntimeRemoteStep,
   type CodeRuntimeWork,
   type CodeThreadId,
   type AgentRun,
@@ -218,6 +219,13 @@ const REMOTE_STEP_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Se
   "comment-pull-request",
   "merge-pull-request",
 ]);
+function samePullRequest(
+  left: GhPullRequestIdentityRequest,
+  right: GhPullRequestIdentityRequest,
+): boolean {
+  return left.owner === right.owner && left.name === right.name && left.number === right.number;
+}
+
 /** The repository and number a forge call names a located pull request by. */
 function pullRequestTargetOf(
   pullRequest: CodeOperationPullRequestIdentity,
@@ -1259,6 +1267,15 @@ export interface CodeOperationServiceOptions {
   readonly unconfirmedSteps?: {
     readonly list: (threadId: CodeThread["id"]) => ReadonlyArray<CodeRuntimeWork>;
     readonly settle: (work: CodeRuntimeWork, state: "completed" | "failed") => void;
+    /**
+     * Record on a running step's work what it will be settled by, before the
+     * step reaches the remote: a comment's pull request and prior matches.
+     */
+    readonly describe: (
+      threadId: CodeThread["id"],
+      operationId: CodeOperationCommand["operationId"],
+      remoteStep: CodeRuntimeRemoteStep,
+    ) => void;
   };
   /**
    * The standing merge permissions the person has stored for this thread right
@@ -4675,48 +4692,59 @@ export class CodeOperationService {
     for (const work of steps.list(thread.id)) {
       const step = work.remoteStep;
       if (work.state !== "ambiguous" || step?.kind !== "pull-request") continue;
-      if (step.action !== "create" && step.action !== "comment") continue;
+      if (step.action === "comment") {
+        // Settled only against the pull request it was posted to, and only
+        // from a count taken before the post; a record without either stays
+        // unconfirmed rather than being judged against the wrong evidence.
+        if (
+          step.commentDigest === undefined ||
+          step.pullRequest === undefined ||
+          step.priorMatches === undefined
+        )
+          continue;
+        const matches = await this.#ownMatchingComments(
+          step.pullRequest,
+          step.commentDigest,
+          step.reviewThreadId,
+        );
+        if (matches !== undefined)
+          steps.settle(work, matches > step.priorMatches ? "completed" : "failed");
+        continue;
+      }
+      if (step.action !== "create") continue;
       const signal = new AbortController().signal;
       const open = await locate(thread.id, "open", signal);
       const found = open.status === "none" ? await locate(thread.id, "closed", signal) : open;
-      if (step.action === "create") {
-        if (found.status === "found") steps.settle(work, "completed");
-        else if (found.status === "none") steps.settle(work, "failed");
-        continue;
-      }
-      if (step.commentDigest === undefined) continue;
-      // No pull request at all means there was nothing to comment on.
-      if (found.status === "none") {
-        steps.settle(work, "failed");
-        continue;
-      }
-      if (found.status !== "found") continue;
-      const target = pullRequestTargetOf(found.pullRequest);
-      if (target === undefined) continue;
-      const posted = await this.#commentPosted(target, step.commentDigest, step.reviewThreadId);
-      if (posted !== "unknown") steps.settle(work, posted === "posted" ? "completed" : "failed");
+      if (found.status === "found") steps.settle(work, "completed");
+      else if (found.status === "none") steps.settle(work, "failed");
     }
   }
 
   /**
-   * Whether a comment with this text is among the signed-in person's own
-   * comments on the pull request (or in the review thread it answered).
+   * How many of the signed-in person's own comments on the pull request (or in
+   * the review thread a reply answered) carry this text, or `undefined` when
+   * they cannot be read. A count rather than a yes/no: the person may have
+   * posted the same short text before, and only a rise shows a new post.
    */
-  async #commentPosted(
+  async #ownMatchingComments(
     target: GhPullRequestIdentityRequest,
     commentDigest: string,
     reviewThreadId: string | undefined,
-  ): Promise<"posted" | "absent" | "unknown"> {
+  ): Promise<number | undefined> {
     const read = this.#options.pullRequests.actions?.ownComments;
-    if (read === undefined) return "unknown";
+    if (read === undefined) return undefined;
     const comments = await read(
-      { ...target, ...(reviewThreadId === undefined ? {} : { threadNodeId: reviewThreadId }) },
+      {
+        owner: target.owner,
+        name: target.name,
+        number: target.number,
+        ...(reviewThreadId === undefined ? {} : { threadNodeId: reviewThreadId }),
+      },
       new AbortController().signal,
     );
-    if (comments.status !== "read") return "unknown";
-    return comments.bodies.some((body) => pullRequestCommentDigest(body) === commentDigest)
-      ? "posted"
-      : "absent";
+    if (comments.status !== "read") return undefined;
+    return comments.bodies.filter((body) => pullRequestCommentDigest(body) === commentDigest)
+      .length;
   }
 
   async #gitObservation(
@@ -5465,14 +5493,28 @@ export class CodeOperationService {
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
     const already = await this.#settleEarlierComment(command, located.target);
-    if (already === "posted")
+    if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
-    if (already === "unknown")
+    if (already.status === "unknown")
       return this.#failed(
         command.operationId,
         "failed",
         "An earlier attempt at this comment may already be on GitHub, and Octant could not check. It was not posted again. Try again when GitHub can be reached.",
       );
+    // Durable before the post: a crash while posting leaves a record that
+    // names the pull request and the count to compare against.
+    this.#options.unconfirmedSteps?.describe(command.threadId, command.operationId, {
+      kind: "pull-request",
+      action: "comment",
+      commentDigest: pullRequestCommentDigest(command.body),
+      ...(command.reviewThreadId === undefined ? {} : { reviewThreadId: command.reviewThreadId }),
+      pullRequest: {
+        owner: located.target.owner,
+        name: located.target.name,
+        number: located.target.number,
+      },
+      ...(already.priorMatches === undefined ? {} : { priorMatches: already.priorMatches }),
+    });
     const signal = new AbortController().signal;
     const done =
       command.reviewThreadId === undefined
@@ -5489,34 +5531,49 @@ export class CodeOperationService {
   }
 
   /**
-   * An earlier attempt at the same comment whose outcome the host never
-   * learned may already be on GitHub, so it is looked for before posting
-   * again: posting blind would leave the person's comment there twice.
-   * `none-earlier` means there was no such attempt, or it did not land.
+   * An earlier attempt at the same comment on the same pull request whose
+   * outcome the host never learned may already be on GitHub, so it is looked
+   * for before posting again: posting blind would leave the person's comment
+   * there twice. It counts as posted only when more of the person's comments
+   * carry the text now than did before it was sent. `priorMatches` is that
+   * count for this attempt, taken now, before it posts.
+   *
+   * An earlier attempt recorded without its pull request or its prior count
+   * cannot be judged and stays unconfirmed; it does not hold this one back.
    */
   async #settleEarlierComment(
     command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
     target: GhPullRequestIdentityRequest,
-  ): Promise<"posted" | "none-earlier" | "unknown"> {
+  ): Promise<
+    | { readonly status: "posted" }
+    | { readonly status: "unknown" }
+    | { readonly status: "not-posted"; readonly priorMatches: number | undefined }
+  > {
     const steps = this.#options.unconfirmedSteps;
-    if (steps === undefined) return "none-earlier";
     const digest = pullRequestCommentDigest(command.body);
-    const earlier = steps.list(command.threadId).filter((work) => {
+    const earlier = (steps?.list(command.threadId) ?? []).flatMap((work) => {
       const step = work.remoteStep;
-      return (
-        work.state === "ambiguous" &&
+      return work.state === "ambiguous" &&
         String(work.id) !== String(command.operationId) &&
         step?.kind === "pull-request" &&
         step.action === "comment" &&
         step.commentDigest === digest &&
-        step.reviewThreadId === command.reviewThreadId
-      );
+        step.reviewThreadId === command.reviewThreadId &&
+        step.pullRequest !== undefined &&
+        samePullRequest(step.pullRequest, target) &&
+        step.priorMatches !== undefined
+        ? [{ work, priorMatches: step.priorMatches }]
+        : [];
     });
-    if (earlier.length === 0) return "none-earlier";
-    const posted = await this.#commentPosted(target, digest, command.reviewThreadId);
-    if (posted === "unknown") return "unknown";
-    for (const work of earlier) steps.settle(work, posted === "posted" ? "completed" : "failed");
-    return posted === "posted" ? "posted" : "none-earlier";
+    const matches = await this.#ownMatchingComments(target, digest, command.reviewThreadId);
+    if (matches === undefined)
+      return earlier.length === 0
+        ? { status: "not-posted", priorMatches: undefined }
+        : { status: "unknown" };
+    const landed = earlier.some((attempt) => matches > attempt.priorMatches);
+    for (const attempt of earlier)
+      steps?.settle(attempt.work, matches > attempt.priorMatches ? "completed" : "failed");
+    return landed ? { status: "posted" } : { status: "not-posted", priorMatches: matches };
   }
 
   async #mergePullRequest(

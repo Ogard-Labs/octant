@@ -5118,9 +5118,15 @@ or .zip>` write the same files, built by one host command
   anywhere else or absent it is `failed` and pushing again is safe, and an
   unreadable remote leaves it unconfirmed. Observing the pull request settles an
   unconfirmed creation by looking for the thread's pull request, open or closed,
-  and an unconfirmed comment or review reply by looking for its text among the
-  signed-in person's own comments there (the record keeps a SHA-256 of the
-  text, never the text). An unconfirmed update or merge stays unconfirmed.
+  and an unconfirmed comment or review reply from the signed-in person's own
+  comments on the pull request it was posted to. Before posting, the record
+  keeps that pull request's repository and number, a SHA-256 of the text (never
+  the text), and how many of the person's comments there already carried it;
+  only a higher count now shows the post landed, so an older identical comment
+  ("Fixed.") never stands in for it. A comment record without that pull request
+  or count, or one whose branch now carries a different pull request, is never
+  judged against another pull request: it stays unconfirmed. An unconfirmed
+  update or merge stays unconfirmed.
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
@@ -5130,11 +5136,11 @@ or .zip>` write the same files, built by one host command
   and is recorded `ambiguous`, to be settled from the remote branch like a lost
   push; only a refusal Git did report (a `[rejected]` or `[remote rejected]`
   ref such as a non-fast-forward or stale lease, refused credentials, a missing
-  repository) is `failed`. A comment posted again while an earlier attempt at
-  the same text is unconfirmed is looked for first: found, the earlier attempt
-  is settled `completed` and nothing is posted; absent, it is settled `failed`
-  and the comment is posted; unreadable, the comment is refused rather than
-  risked twice. Submissions of one push or pull request step under the same
+  repository) is `failed`. A comment posted again on the same pull request
+  while an earlier attempt at the same text is unconfirmed is looked for
+  first, by the same count: higher, the earlier attempt is settled `completed`
+  and nothing is posted; not higher, it is settled `failed` and the comment is
+  posted; unreadable, the comment is refused rather than risked twice. Submissions of one push or pull request step under the same
   operation id run once: a second arriving while the first still runs waits
   for it and is answered from the journal. A pull request creation is made
   safe to repeat by its operation id and by locating the thread's pull request

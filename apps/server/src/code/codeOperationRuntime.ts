@@ -1278,6 +1278,15 @@ export function createCodeOperationRuntime(
                   state,
                 }),
               ),
+            describe: (threadId, operationId, remoteStep) =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.describeRemoteStep({
+                  id: operationId,
+                  threadId,
+                  kind: "delivery",
+                  remoteStep,
+                }),
+              ),
           },
         }),
     ...(options.holdsServerThread === undefined

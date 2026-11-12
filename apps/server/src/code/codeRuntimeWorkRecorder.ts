@@ -177,6 +177,23 @@ export class CodeRuntimeWorkRecorder {
     return outcome;
   }
 
+  /**
+   * Record what an open unit's remote step turned out to be, once the host
+   * has resolved it. A comment learns its pull request and the prior count of
+   * matching comments only after the record opened, and both must be durable
+   * before the post, or a crash during the post leaves nothing to settle by.
+   */
+  describeRemoteStep(input: {
+    readonly id: CodeRuntimeWorkUnitId;
+    readonly threadId: CodeThreadId;
+    readonly kind: CodeRuntimeWorkKind;
+    readonly remoteStep: CodeRuntimeRemoteStep;
+  }): CodeRuntimeWorkRecordOutcome {
+    const current = this.#open.get(input.id);
+    if (current === undefined) return { status: "not-owned" };
+    return this.#record(input.id, input.threadId, input.kind, current.state, input.remoteStep);
+  }
+
   /** Whether this recorder currently owns an open record for the unit. */
   owns(id: CodeRuntimeWorkUnitId): boolean {
     return this.#open.has(id);
@@ -193,7 +210,11 @@ export class CodeRuntimeWorkRecorder {
     // One record per state change. A turn that reports `running` again after it
     // was opened has not moved, and a row saying so would push its work past
     // work that actually finished in between.
-    if (current?.state === state) return { status: "unchanged" };
+    if (
+      current?.state === state &&
+      JSON.stringify(current.remoteStep) === JSON.stringify(remoteStep)
+    )
+      return { status: "unchanged" };
     let expectedVersion: number;
     let work: CodeRuntimeWork;
     try {

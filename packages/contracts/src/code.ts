@@ -1115,6 +1115,24 @@ export const CodeRuntimeRemoteStep = Schema.Union(
     commentDigest: Schema.optional(CodeDigest),
     /** For a review reply: the review thread it answers. */
     reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
+    /**
+     * For a comment: the pull request it was posted to, recorded once the
+     * host resolved it and before posting. A lost comment is looked for there
+     * and nowhere else; the branch may since carry a different pull request.
+     */
+    pullRequest: Schema.optional(
+      Schema.Struct({
+        owner: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,100}$/)),
+        name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,100}$/)),
+        number: Schema.Int.pipe(Schema.positive()),
+      }).annotations(strict),
+    ),
+    /**
+     * For a comment: how many of the person's own comments there already had
+     * this text just before posting. Only a count above it shows the post
+     * landed; an older identical comment ("Fixed.") does not.
+     */
+    priorMatches: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
 );
 export type CodeRuntimeRemoteStep = typeof CodeRuntimeRemoteStep.Type;
