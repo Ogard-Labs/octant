@@ -53,7 +53,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 7       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
+| [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
@@ -2193,6 +2193,16 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
 Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+
+### Portable design tokens
+
+The design system can be reused outside the app from one generated token set, never from values copied by hand.
+
+- `packages/theme/tokens/tokens.css` and `tokens.json` are generated from the renderer's stylesheets and checked against the theme package's colour defaults; they keep the app's own names, and are never edited.
+- A repository check fails when the generated files are stale and names the command that regenerates them.
+- The minimum recipes (`recipes.css`) are built from the tokens only: no colour literal, a few tints mixed from exported colour tokens, and a test refuses a raw colour or an undefined token there.
+
+Status: Built. Since: 2026-11-12. Detail: [Design tokens and the app feel](design-tokens.md).
 
 ### Page shell and Settings organisation
 

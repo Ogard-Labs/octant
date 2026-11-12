@@ -1257,6 +1257,13 @@ The import order in `apps/web/src/styles.css` is load-bearing:
 variables are consumption aliases. Do not add a new raw colour, radius, shadow,
 or control recipe in a feature stylesheet.
 
+The portable projection of these layers, for a website or another app, is
+generated, not hand-kept: `bun run tokens:export` writes
+`packages/theme/tokens/tokens.css` and `tokens.json` from the stylesheets above,
+and `bun run tokens:check` fails when they are stale. How to load and use them,
+and the app-feel rules a consumer follows, are in
+[Design tokens and the app feel](docs/design/design-tokens.md).
+
 `bun run ui:check` enforces this on every `.css` file under `apps/web/src`
 (`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
 block that must depict one fixed scheme regardless of theme, such as the
