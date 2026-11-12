@@ -1,0 +1,47 @@
+name: Packaged Work confinement
+
+# Builds the ad-hoc signed Work confinement gate app and drives it through the
+# real App Sandbox, its XPC broker and a security-scoped folder selection:
+# a foreign client is refused, a stale or revoked grant is refused, and
+# absolute, traversal, link, mount, Unicode, race, archive, process and network
+# escapes from the selected folder are denied. The folder selection is typed
+# into the open panel through System Events, so the runner must already allow
+# UI scripting; the preflight fails the job rather than skipping it.
+#
+# It runs by hand only, on a runner (or Mac) the maintainer chooses. On the
+# hosted macos-15 runner the broker refuses to establish the gate host's
+# authority (trusted-peer: BootstrapRejected, November 2026), so a push
+# trigger would only report that runner, not the confinement.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaged-work-confinement-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Packaged Work confinement gate
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require existing native interaction permission
+        run: |
+          test "$(uname -m)" = arm64
+          test "$(osascript -e 'tell application "System Events" to get UI elements enabled')" = true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Package the gate and run every confinement stage
+        timeout-minutes: 10
+        run: bun run smoke:packaged-work-confinement

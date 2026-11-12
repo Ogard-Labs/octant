@@ -132,6 +132,9 @@ async function runWithTimeout(command: readonly string[], timeoutMilliseconds: n
   ]);
   clearTimeout(timeout);
   if (exitCode !== 0) {
+    // A stage runs as its own process, so its own failure message exists only
+    // in this stderr; without it a hosted run shows just the exit code.
+    process.stderr.write(stderr);
     throw new Error(
       `Work confinement host failed with category ProcessExit${exitCode}: ${stderr.length > 0 ? "stderr" : "no-stderr"}`,
     );

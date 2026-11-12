@@ -40,6 +40,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server preview over a throwaway SSH ser
       socket.on("data", () => socket.end());
     });
     tunnels = new ServerPreviewTunnels({
+      now: () => Date.now(),
       address: () => ({ server: { alias: ssh.alias, user: ssh.user }, identity: "same" }),
       ownerCurrent: () => true,
       agentSocket: () => ssh.agentSocket,

@@ -14,6 +14,7 @@ import {
 } from "@octant/contracts";
 import type { BrowserSessionTarget } from "@octant/contracts/browser-session-grants";
 import { decodeBrowserDownloadPermissionsCommand } from "@octant/contracts/browser-download-permissions";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { BrowserDownloadPermissions } from "./browserDownloadPermissions";
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
 const routineId = decodeAutomationId("20000000-0000-4000-8000-000000000001");
@@ -34,7 +35,7 @@ const target: BrowserSessionTarget = {
     extension: { kind: "core" },
   }),
 };
-async function fixture() {
+async function fixture(authorityNow?: () => number) {
   const directory = await mkdtemp(join(tmpdir(), "octant-download-permission-"));
   const root = join(directory, "reports");
   await mkdir(root);
@@ -49,7 +50,7 @@ async function fixture() {
   });
   const record = vi.fn();
   const service = new BrowserDownloadPermissions({
-    now: () => now,
+    now: authorityNow ?? (() => now),
     uuid: () => crypto.randomUUID(),
     isLocalWindow: () => local,
     canReview: () => true,
@@ -226,6 +227,30 @@ it.each(["revoke", "expire", "change", "erase"] as const)(
     }
   },
 );
+it("ends a download permission after its elapsed minutes even when the wall clock is set back", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const grantedAt = Date.UTC(2026, 10, 1);
+  vi.setSystemTime(grantedAt);
+  let elapsedMs = 1_000;
+  const clock = new ProcessAuthorityClock({
+    wallClock: () => Date.now(),
+    suspendAwareElapsedSource: () => elapsedMs,
+  });
+  const f = await fixture(clock.now());
+  try {
+    await f.grant();
+    const p = await f.service.prepare(f.input);
+    if (p === undefined) throw Error("Missing permission");
+    elapsedMs += 16 * 60_000;
+    vi.setSystemTime(grantedAt - 60 * 60 * 1_000);
+    f.service.revalidate();
+    expect(p.signal.aborted).toBe(true);
+    expect(p.reserve(f.facts, "https://reports.example")).toBe("denied");
+  } finally {
+    await f.cleanup();
+    vi.useRealTimers();
+  }
+});
 it("cannot promote another window's review or a review after local authority disappears", async () => {
   const f = await fixture();
   try {
