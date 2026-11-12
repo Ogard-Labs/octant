@@ -2,6 +2,7 @@ import {
   listRemoteThreadSurfaces,
   remoteThreadSurfaceReach,
   type MobileInboxMode,
+  type RemoteSessionStanding,
   type RemoteThreadSurfaceKind,
   type RemoteThreadSurfaceReach,
 } from "@octant/client-runtime";
@@ -29,13 +30,15 @@ export interface MobileThreadSurfaceOption {
  */
 export function listMobileThreadSurfaces(input: {
   readonly mode: MobileInboxMode;
+  /** What the host said of this session; absent reads as restricted. */
+  readonly session?: RemoteSessionStanding;
 }): ReadonlyArray<MobileThreadSurfaceOption> {
   return listRemoteThreadSurfaces()
     .filter((surface) => RENDERABLE_SURFACES.includes(surface.id))
     .map((surface) => ({
       id: surface.id,
       label: surface.id === "chat" ? conversationLabel(input.mode) : surface.label,
-      reach: remoteThreadSurfaceReach(surface),
+      reach: remoteThreadSurfaceReach(surface, input.session),
     }))
     .filter((surface) => surface.reach !== "unavailable");
 }

@@ -3,8 +3,11 @@ import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from 
 import {
   chatAttemptStatusLabel,
   mobileAttachmentOffer,
+  readRemoteSessionStanding,
+  RESTRICTED_REMOTE_SESSION,
   type MobileAttachmentSource,
   type MobileInboxRow,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
@@ -38,6 +41,7 @@ import { modelOptionForThread } from "./thread/pendingAttachments";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { appendTranscript } from "../voice/voiceDictation";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
+import { ThreadLevelPanel } from "./thread/ThreadLevelPanel";
 import { ThreadTranscript } from "./thread/ThreadTranscript";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
@@ -93,9 +97,23 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
+  // What the host says this phone's session is, asked per host. Until it
+  // answers, and whenever it does not, the session is shown as restricted.
+  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
+  useEffect(() => {
+    setStanding(RESTRICTED_REMOTE_SESSION);
+    if (transport === undefined || offlineDemo) return;
+    let current = true;
+    void readRemoteSessionStanding(transport).then((answer) => {
+      if (current) setStanding(answer);
+    });
+    return () => {
+      current = false;
+    };
+  }, [transport, offlineDemo]);
   const surfaces = useMemo(
-    () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat" }),
-    [selected?.mode],
+    () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
+    [selected?.mode, standing],
   );
   const activeSurface = surfaces.some((entry) => entry.id === surface) ? surface : "chat";
   const browserReach = surfaces.find((entry) => entry.id === "browser")?.reach ?? "unavailable";
@@ -358,6 +376,22 @@ export function ThreadScreen(props: ThreadScreenProps) {
               <Text style={styles.connectionStatus} testID="mobile-thread-notice">
                 {turnActions.notice}
               </Text>
+            ) : null}
+            {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+              code.thread !== undefined ? (
+              <ThreadLevelPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                onChanged={() => void code.refresh({ quiet: true })}
+                subject={{ mode: "code", thread: code.thread }}
+                transport={transport}
+              />
+            ) : selected.mode === "work" && work.thread !== undefined ? (
+              <ThreadLevelPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                onChanged={() => void work.refresh({ quiet: true })}
+                subject={{ mode: "work", thread: work.thread }}
+                transport={transport}
+              />
             ) : null}
             {!offlineDemo &&
             selected.mode === "code" &&
