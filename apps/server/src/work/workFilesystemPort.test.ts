@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -16,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readConfinedWorkFile } from "./workConfinedRead";
 import { writeConfinedWorkFile } from "./workConfinedWrite";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "./workFilesystemPort";
+import { DARWIN_CONFINED_RENAME_SCRIPT } from "../confinedPathOpen";
 import { readContainedWorkDirectoryNames, resolveContainedWorkPath } from "./workPathConfinement";
 
 const directories: string[] = [];
@@ -400,5 +402,33 @@ describe("an ancestor swapped for a link to a host folder during Work confinemen
       liveWorkFilesystem.rename(join(root, "dist", "app", "app.bin"), join(root, "app.bin")),
     ).rejects.toThrow();
     expect(readFileSync(join(root, "dist", "app", "app.bin"), "utf8")).toBe("built app");
+  });
+
+  it("refuses the macOS rename onto an existing folder instead of moving the entry into it", () => {
+    // The macOS path runs `mv`, which reads an existing folder at the new name
+    // as "move into it". Its guard runs before `mv`, so this shell can run it.
+    const root = fixture();
+    writeFileSync(join(root, "report.md"), "report");
+    mkdirSync(join(root, "archive"));
+    let exitCode = 0;
+    try {
+      execFileSync(
+        "/bin/sh",
+        [
+          "-c",
+          DARWIN_CONFINED_RENAME_SCRIPT,
+          "octant-confined-rename",
+          root,
+          "report.md",
+          "archive",
+        ],
+        { cwd: root, env: {} },
+      );
+    } catch (error) {
+      exitCode = (error as { readonly status: number }).status;
+    }
+    expect(exitCode).toBe(21);
+    expect(readFileSync(join(root, "report.md"), "utf8")).toBe("report");
+    expect(readdirSync(join(root, "archive"))).toEqual([]);
   });
 });

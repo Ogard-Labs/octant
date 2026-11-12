@@ -13024,7 +13024,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   name from the unsandboxed server. A Work rename stays within its directory
   and renames relative to that directory proved at its canonical path (on
   Linux under `/proc/self/fd/N`; on macOS by `mv -h` from a child whose working
-  directory `/bin/pwd -P` reports at that path), and a delete removes the name
+  directory `/bin/pwd -P` reports at that path, refusing first when the new
+  name is an existing folder, which `mv` would move the entry into), and a
+  delete removes the name
   as a mirror removal does. A harness write or edit takes Work's confined
   write: an existing file is opened where the open must land on its canonical
   path, and a new file and any missing folders are created under the existing

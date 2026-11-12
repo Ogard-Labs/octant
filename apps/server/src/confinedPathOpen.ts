@@ -184,7 +184,9 @@ export async function removeConfinedEntry(canonicalDirectory: string, name: stri
  * - Linux renames both names under `/proc/self/fd/N` of the proved directory.
  * - macOS runs `mv` from a child whose working directory `/bin/pwd -P` proves
  *   is the canonical directory. `-h` keeps a link planted at the new name from
- *   being followed into the folder it points to.
+ *   being followed into the folder it points to. `mv` reads an existing
+ *   directory at the new name as "move into it", which `rename(2)` never does,
+ *   so that case refuses before `mv` runs (see `DARWIN_CONFINED_RENAME_SCRIPT`).
  * - Elsewhere the rename refuses.
  *
  * Neither name's final link is followed: the entry itself is renamed, and an
@@ -204,7 +206,7 @@ export async function renameConfinedEntry(
         "/bin/sh",
         [
           "-c",
-          '[ "$(/bin/pwd -P)" = "$1" ] && exec /bin/mv -f -h -- "$2" "$3"',
+          DARWIN_CONFINED_RENAME_SCRIPT,
           "octant-confined-rename",
           canonicalDirectory,
           from,
@@ -229,6 +231,23 @@ export async function renameConfinedEntry(
     await directory.close().catch(() => undefined);
   }
 }
+
+/**
+ * The macOS confined rename, run by `/bin/sh` with the canonical directory, the
+ * old name and the new name as `$1`..`$3` and the working directory set to the
+ * canonical directory.
+ *
+ * Without the directory check, renaming `report.md` to an existing sibling
+ * folder `archive` moved the file to `archive/report.md` (overwriting a file of
+ * that name, because of `-f`), and the caller's rollback then renamed the whole
+ * folder. A directory created at the new name between the check and `mv` can
+ * still be moved into, but only inside this proved directory, so the race
+ * cannot reach outside the confinement.
+ */
+export const DARWIN_CONFINED_RENAME_SCRIPT =
+  '[ "$(/bin/pwd -P)" = "$1" ] || exit 1; ' +
+  'if [ -d "$3" ] && [ ! -L "$3" ]; then exit 21; fi; ' +
+  'exec /bin/mv -f -h -- "$2" "$3"';
 
 function isEntryName(name: string): boolean {
   return !(
