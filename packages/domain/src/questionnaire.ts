@@ -1,26 +1,56 @@
 import { Schema } from "effect";
 import {
+  CanvasChoiceResponse,
   MAX_QUESTIONNAIRE_ANSWER_LENGTH,
   QuestionnaireResponse,
   type Questionnaire,
 } from "@octant/contracts";
 
+export type QuestionnaireAnswerValidation =
+  | { readonly status: "valid"; readonly response: QuestionnaireResponse }
+  | { readonly status: "invalid"; readonly message: string };
+
 /** Validate against the exact ask before any answer can settle its request. */
 export function validateQuestionnaireAnswer(
   questionnaire: Questionnaire,
   text: string,
-):
-  | { readonly status: "valid"; readonly response: QuestionnaireResponse }
-  | { readonly status: "invalid"; readonly message: string } {
+): QuestionnaireAnswerValidation {
+  return validateAnswer(
+    questionnaire,
+    text,
+    QuestionnaireResponse,
+    MAX_QUESTIONNAIRE_ANSWER_LENGTH,
+  );
+}
+
+/**
+ * Validate a Canvas choice answer under the same per-question rules. The
+ * inline ask's answer-count and text-size ceilings belong to a conversation
+ * interruption; a Canvas form of any length is answered whole, and the thread's
+ * own message limit is what bounds what can be sent.
+ */
+export function validateCanvasChoiceAnswer(
+  questionnaire: Questionnaire,
+  text: string,
+): QuestionnaireAnswerValidation {
+  return validateAnswer(questionnaire, text, CanvasChoiceResponse, undefined);
+}
+
+function validateAnswer(
+  questionnaire: Questionnaire,
+  text: string,
+  schema: typeof QuestionnaireResponse | typeof CanvasChoiceResponse,
+  maxLength: number | undefined,
+): QuestionnaireAnswerValidation {
   const invalid = {
     status: "invalid" as const,
     message:
       "Answer each question using its offered choices or a written alternative, within the selection limits.",
   };
-  if (text.length > MAX_QUESTIONNAIRE_ANSWER_LENGTH) return invalid;
+  if (maxLength !== undefined && text.length > maxLength) return invalid;
   let response: QuestionnaireResponse;
   try {
-    response = Schema.decodeUnknownSync(QuestionnaireResponse)(JSON.parse(text));
+    response = Schema.decodeUnknownSync(schema)(JSON.parse(text));
   } catch {
     return invalid;
   }

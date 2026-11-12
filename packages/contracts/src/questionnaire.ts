@@ -42,10 +42,14 @@ export const QuestionnaireQuestion = Schema.Struct({
 export type QuestionnaireQuestion = typeof QuestionnaireQuestion.Type;
 export const MAX_QUESTIONNAIRE_QUESTIONS = 4;
 
-/** One to four questions with distinct ids, as a Canvas choice block carries them. */
-export const QuestionnaireQuestions = Schema.Array(QuestionnaireQuestion).pipe(
+/**
+ * The questions of a Canvas choice block. A Canvas is a page, so a form on it
+ * has no count of its own: a long decision list is the case it exists for.
+ * Only the inline questionnaire, which interrupts a conversation, stays at
+ * {@link MAX_QUESTIONNAIRE_QUESTIONS}.
+ */
+export const CanvasChoiceQuestions = Schema.Array(QuestionnaireQuestion).pipe(
   Schema.minItems(1),
-  Schema.maxItems(MAX_QUESTIONNAIRE_QUESTIONS),
   Schema.filter(
     (questions) => new Set(questions.map((question) => question.id)).size === questions.length,
     { message: () => "Question ids must be distinct." },
@@ -70,15 +74,24 @@ export const Questionnaire = Schema.Struct({
   .annotations(personDecides);
 export type Questionnaire = typeof Questionnaire.Type;
 
+const QuestionnaireAnswer = Schema.Struct({
+  questionId: Id,
+  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(8)),
+  customAnswer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+}).annotations(strict);
+
+const ResponseComment = Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)));
+
 export const QuestionnaireResponse = Schema.Struct({
   version: Schema.Literal(1),
-  answers: Schema.Array(
-    Schema.Struct({
-      questionId: Id,
-      selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(8)),
-      customAnswer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
-    }).annotations(strict),
-  ).pipe(Schema.minItems(1), Schema.maxItems(4)),
-  comment: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  answers: Schema.Array(QuestionnaireAnswer).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  comment: ResponseComment,
 }).annotations(strict);
 export type QuestionnaireResponse = typeof QuestionnaireResponse.Type;
+
+/** A Canvas choice answer: one entry per question, however many the block asks. */
+export const CanvasChoiceResponse = Schema.Struct({
+  version: Schema.Literal(1),
+  answers: Schema.Array(QuestionnaireAnswer).pipe(Schema.minItems(1)),
+  comment: ResponseComment,
+}).annotations(strict);

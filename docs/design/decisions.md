@@ -2567,7 +2567,8 @@ Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.
 
 A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
 
-- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- The block takes the inline questionnaire's per-question shape and bounds (a prompt, single or multiple selection, one to eight options), carries no answer, and is decoded strictly on the host. It has no limit on how many questions it holds: a Canvas is a page, and a long decision list is its case. Only the inline `ask-user` questionnaire keeps its four-question ceiling, and the two have separate schemas.
+- Agents are told to use a choice block whenever they need answers to more than four questions, and `ask-user` says so too.
 - Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
 - The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
 - Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.

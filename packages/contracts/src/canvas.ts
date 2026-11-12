@@ -24,7 +24,7 @@ import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ImageArtifactId } from "./imageGeneration";
 import { BrowserCaptureId } from "./browserAutomation";
-import { QuestionnaireQuestions } from "./questionnaire";
+import { CanvasChoiceQuestions } from "./questionnaire";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -2684,7 +2684,7 @@ export const CanvasChoiceBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("choice"),
   prompt: boundedNonEmptyText(CANVAS_MAX_CHOICE_PROMPT_LENGTH),
-  questions: QuestionnaireQuestions,
+  questions: CanvasChoiceQuestions,
 }).annotations(strict);
 export type CanvasChoiceBlock = typeof CanvasChoiceBlock.Type;
 

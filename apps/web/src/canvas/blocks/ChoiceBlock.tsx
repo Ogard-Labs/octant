@@ -1,6 +1,6 @@
 import type { CanvasChoiceBlock } from "@octant/contracts/canvas";
 import type { QuestionnaireResponse } from "@octant/contracts";
-import { validateQuestionnaireAnswer } from "@octant/domain";
+import { validateCanvasChoiceAnswer } from "@octant/domain";
 import { QuestionnaireCard } from "../../transcript/QuestionnaireCard";
 
 export type CanvasChoiceSendResult =
@@ -51,9 +51,10 @@ export function ChoiceBlock(props: {
         prompt={block.prompt}
         questionnaire={questionnaire}
         submitLabel={`Send to ${runtime.threadLabel}`}
+        validateAnswer={validateCanvasChoiceAnswer}
         onAnswer={async (encoded) => {
           // The card only enables Send for an answer this same rule admits.
-          const validated = validateQuestionnaireAnswer(questionnaire, encoded);
+          const validated = validateCanvasChoiceAnswer(questionnaire, encoded);
           if (validated.status === "invalid") return { refused: validated.message };
           const result = await runtime.onSend(block, validated.response);
           return result.status === "sent" ? true : { refused: result.message };

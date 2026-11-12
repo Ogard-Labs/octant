@@ -2611,15 +2611,9 @@ describe("choice block", () => {
     ).toThrow(/choice block requires Canvas schema version 27/);
   });
 
-  it("holds the questionnaire's bounds: one to four questions with distinct ids and valid limits", () => {
+  it("holds the questionnaire's per-question bounds: at least one question with distinct ids and valid limits", () => {
     const [first, second] = choice.questions;
     expect(() => decodeCanvasBlock({ ...choice, questions: [] })).toThrow();
-    expect(() =>
-      decodeCanvasBlock({
-        ...choice,
-        questions: [1, 2, 3, 4, 5].map((n) => ({ ...first, id: `q${String(n)}` })),
-      }),
-    ).toThrow();
     expect(() =>
       decodeCanvasBlock({ ...choice, questions: [first, { ...second, id: "rollout" }] }),
     ).toThrow();
@@ -2628,6 +2622,12 @@ describe("choice block", () => {
     ).toThrow();
     expect(() => decodeCanvasBlock({ ...choice, prompt: "" })).toThrow();
     expect(() => decodeCanvasBlock({ ...choice, prompt: "x".repeat(1_025) })).toThrow();
+  });
+
+  it("asks as many questions as a long decision list needs, unlike the four of an inline questionnaire", () => {
+    const [first] = choice.questions;
+    const questions = Array.from({ length: 40 }, (_, n) => ({ ...first, id: `q${String(n)}` }));
+    expect(decodeCanvasBlock({ ...choice, questions })).toMatchObject({ questions });
   });
 
   it("refuses an answer or any field the block does not define", () => {

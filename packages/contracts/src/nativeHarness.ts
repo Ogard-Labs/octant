@@ -602,7 +602,7 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "ask-user",
     description:
-      "Ask the person a question and wait for the answer. Offer options for one simple question. For up to four related decisions use questionnaire with stable question and option IDs, single or multiple selection, descriptions, selection limits and optional written alternatives. The person can add a comment. Never ask for credentials or use this as permission approval.",
+      "Ask the person a question and wait for the answer. Offer options for one simple question. For up to four related decisions use questionnaire with stable question and option IDs, single or multiple selection, descriptions, selection limits and optional written alternatives. The person can add a comment. For more than four decisions, put them in a Canvas choice block instead (when the Canvas tool is available), which has no question limit. Never ask for credentials or use this as permission approval.",
     inputSchema: {
       type: "object",
       properties: {

@@ -77,7 +77,7 @@ import {
   type CanvasVersion,
 } from "./canvas";
 import { ActorId, UtcTimestamp } from "./events";
-import { QuestionnaireQuestions } from "./questionnaire";
+import { CanvasChoiceQuestions } from "./questionnaire";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
@@ -1006,7 +1006,7 @@ export const CanvasStaticExportBlock = Schema.Union(
     ...exportBlockFields,
     kind: Schema.Literal("choice"),
     prompt: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_PROMPT_LENGTH)),
-    questions: QuestionnaireQuestions.pipe(
+    questions: CanvasChoiceQuestions.pipe(
       Schema.filter(
         (questions) =>
           questions.every(

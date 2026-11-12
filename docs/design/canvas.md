@@ -948,13 +948,22 @@ folder to bind.
 ## Choice block
 
 A `choice` block asks the person to decide from inside the Canvas. It holds a
-prompt (at most 1,024 characters) and one to four questions in exactly the
-inline questionnaire's shape and bounds (`QuestionnaireQuestions`: a distinct
-id, a prompt, `single` or `multiple` selection, one to eight options with a
-label, an optional description and recommended flag, optional
-`minSelections` and `maxSelections`, and `allowCustom: false` to withhold a
-written answer; see
+prompt (at most 1,024 characters) and one or more questions in the inline
+questionnaire's per-question shape (`CanvasChoiceQuestions`: a distinct id, a
+prompt, `single` or `multiple` selection, one to eight options with a label,
+an optional description and recommended flag, optional `minSelections` and
+`maxSelections`, and `allowCustom: false` to withhold a written answer; see
 [Workspace: inline questionnaires](workspace.md#inline-questionnaires)). The
+block has **no limit on how many questions it holds**, and its answer has no
+count or size ceiling of its own (`CanvasChoiceResponse`,
+`validateCanvasChoiceAnswer`). The inline questionnaire's four-question,
+16 KiB-answer ceiling protects a conversation from an interruption; a Canvas
+is a page, and a long decision list is its case. The two use separate schemas,
+so neither bound can leak into the other. The one limit left on a send is the
+thread message queue's own prompt bound, which the host refuses with its
+reason. Lifting the count changed no document shape, so it carries no new
+schema version: a reader older than this change refuses a block with more than
+four questions as invalid. The
 definition schema decodes it strictly, so a block that carries an answer or
 any other field is refused; it arrives with Canvas schema version 27. The
 block holds no answer, journals nothing, and grants nothing: it is a question,
@@ -1005,8 +1014,11 @@ question's options. HTML design frames are unchanged and still submit nothing
 
 The agent learns the block from `describe`: its guidance says the answer
 arrives as the person's next message in the thread, to wait for it rather than
-assume one, and to use the ask-user questionnaire instead when the question
-belongs in the conversation.
+assume one, to use the ask-user questionnaire instead when a few questions
+belong in the conversation, and to put the questions in a choice block
+whenever it needs answers to more than four, grouped under headings with each
+recommendation flagged, rather than asking in several rounds. The `ask-user`
+description and the always-visible Canvas description both point there too.
 
 ## Diagram boards and comments
 
