@@ -14,7 +14,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { canvasDecisionFormMessage } from "./../canvasChoiceMessage";
-import { ChoiceBlock, type CanvasChoiceRuntime } from "./ChoiceBlock";
+import { ChoiceBlock, type CanvasChoiceAnswersPort, type CanvasChoiceRuntime } from "./ChoiceBlock";
 
 const canvasId = "11111111-1111-4111-8111-111111111111";
 const person = decodeCanvasActor({
@@ -83,10 +83,7 @@ function host(options: { readonly refuse?: string } = {}) {
   return { port, revise };
 }
 
-const sendable = (
-  port: ReturnType<typeof host>["port"],
-  onSendForm = vi.fn(),
-): CanvasChoiceRuntime => ({
+const sendable = (port: CanvasChoiceAnswersPort, onSendForm = vi.fn()): CanvasChoiceRuntime => ({
   kind: "can-send",
   threadLabel: "the Work thread",
   answers: port,
@@ -165,6 +162,67 @@ describe("decision form", () => {
       onSendForm.mock.calls[0]?.[1].map((answer: { questionId: string }) => answer.questionId),
     ).toEqual(["who", "reach", "agents"]);
     expect(await screen.findByText(/Answers sent/)).toBeInTheDocument();
+  });
+
+  it("holds Send back while an edit is unsaved, then sends what the host now holds", async () => {
+    const user = userEvent.setup();
+    const { port } = host();
+    const onSendForm = vi.fn();
+    render(<ChoiceBlock block={form} runtime={sendable(port, onSendForm)} />);
+    const send = await screen.findByRole("button", { name: "Send to the Work thread" });
+    for (const name of ["Who may set it?", "How far does it reach?", "May an agent hold it?"]) {
+      await user.click(
+        within(screen.getByRole("radiogroup", { name })).getByRole("radio", { name: /Yes/ }),
+      );
+    }
+    await waitFor(() => expect(send).toBeEnabled());
+    // Typing a note is an edit the host does not hold yet: Send waits for it.
+    await user.type(screen.getAllByLabelText(/^Note/)[0] as HTMLElement, "Matches a local window");
+    expect(send).toBeDisabled();
+    expect(screen.getByText(/Waiting for your latest answers to save/)).toBeInTheDocument();
+    await waitFor(() => expect(send).toBeEnabled(), { timeout: 3_000 });
+    await user.click(send);
+    await waitFor(() => expect(onSendForm).toHaveBeenCalledTimes(1));
+    expect(onSendForm.mock.calls[0]?.[1][0]).toMatchObject({ note: "Matches a local window" });
+  });
+
+  it("keeps what the person typed while an earlier save is still with the host", async () => {
+    const user = userEvent.setup();
+    const { port } = host();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow = {
+      ...port,
+      revise: async (command: Parameters<typeof port.revise>[0]) => {
+        // The first note save waits; the pick before it does not.
+        if (command.changes.some((change) => change.kind === "set" && change.note === "one")) {
+          await gate;
+        }
+        return port.revise(command);
+      },
+    };
+    render(<ChoiceBlock block={form} runtime={sendable(slow)} />);
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /Yes/,
+        },
+      ),
+    );
+    await waitFor(() => expect(screen.getByText("1 of 4 answered")).toBeInTheDocument());
+    const note = screen.getAllByLabelText(/^Note/)[0] as HTMLTextAreaElement;
+    await user.type(note, "one");
+    await waitFor(() => expect(screen.getAllByText("Saving…").length).toBeGreaterThan(0), {
+      timeout: 3_000,
+    });
+    // Typing continues while that first save is still with the host.
+    await user.type(note, " two");
+    release();
+    await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
+    expect(note).toHaveValue("one two");
   });
 
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {

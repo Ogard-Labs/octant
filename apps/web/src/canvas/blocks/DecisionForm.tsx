@@ -132,12 +132,26 @@ export function DecisionForm(props: DecisionFormProps) {
         ...(accepted ? { acceptedRecommendation: true as const } : {}),
       };
     }
-    if (change === undefined) return;
+    // A draft is dropped only while it is still the one that was saved: the
+    // person may have kept typing while the host took this save, and a later
+    // keystroke must not be put back to the older text.
+    const dropIfUnchanged = () =>
+      setDrafts((current) => {
+        if (current[question.id] !== draft) return current;
+        const { [question.id]: _settled, ...rest } = current;
+        return rest;
+      });
+    if (change === undefined) {
+      // Nothing to save, and nothing displayed that the host lacks: a blank
+      // choice with no saved answer is not an unsaved edit.
+      if (!draft.custom && draft.selected.length === 0 && saved === undefined) dropIfUnchanged();
+      return;
+    }
     setStatus(question.id, { kind: "saving" });
     const result = await props.save([change]);
     if (result.status === "saved") {
       setStatus(question.id, { kind: "saved" });
-      setDrafts(({ [question.id]: _kept, ...rest }) => rest);
+      dropIfUnchanged();
     } else {
       setStatus(question.id, { kind: "refused", message: result.message });
     }
@@ -192,8 +206,14 @@ export function DecisionForm(props: DecisionFormProps) {
     }
   };
 
+  // What is on screen differs from what the host holds while a draft is
+  // waiting to save, a save is in flight, or a save was refused (its draft is
+  // kept). Sending then would put an older decision in front of the agent.
+  const unsaved =
+    Object.keys(drafts).length > 0 ||
+    Object.values(statuses).some((status) => status.kind === "saving");
   const send = async () => {
-    if (props.send === undefined || sendState.kind === "sending") return;
+    if (props.send === undefined || sendState.kind === "sending" || unsaved) return;
     setSendState({ kind: "sending" });
     const result = await props.send.onSend(
       form.questions.flatMap((entry) => (entry.answer === undefined ? [] : [entry.answer])),
@@ -244,7 +264,7 @@ export function DecisionForm(props: DecisionFormProps) {
               <OctantButton
                 type="button"
                 size="sm"
-                disabled={!form.canSend || sendState.kind === "sending"}
+                disabled={!form.canSend || unsaved || sendState.kind === "sending"}
                 onClick={() => void send()}
               >
                 {props.send.label}
@@ -264,6 +284,13 @@ export function DecisionForm(props: DecisionFormProps) {
         ) : null}
         {sendState.kind === "refused" ? (
           <OctantAlert tone="warning">{sendState.message}</OctantAlert>
+        ) : null}
+        {props.editable && unsaved ? (
+          <p className="canvas-choice__note" role="status">
+            {Object.values(statuses).some((status) => status.kind === "refused")
+              ? "Fix the answers that were not saved before you send."
+              : "Waiting for your latest answers to save before you can send."}
+          </p>
         ) : null}
         {props.editable && !form.canSend && sendState.kind === "idle" ? (
           <p className="canvas-choice__note">Answer every question that is not optional to send.</p>
