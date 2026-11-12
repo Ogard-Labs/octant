@@ -366,9 +366,7 @@ export function DecisionForm(props: DecisionFormProps) {
                     question={question}
                     draft={draftFor(question)}
                     answer={savedFor(question)}
-                    stale={form.questions.some(
-                      (entry) => entry.question.id === question.id && entry.stale !== undefined,
-                    )}
+                    stale={form.questions.find((entry) => entry.question.id === question.id)?.stale}
                     status={statuses[question.id]}
                     editable={props.editable}
                     onEdit={(draft, delay) => edit(question, draft, delay)}
@@ -386,7 +384,8 @@ function DecisionQuestion(props: {
   readonly question: Question;
   readonly draft: Draft;
   readonly answer: CanvasChoiceAnswer | undefined;
-  readonly stale: boolean;
+  /** An answer made against an earlier reading of this question; shown, never counted. */
+  readonly stale: CanvasChoiceAnswer | undefined;
   readonly status: QuestionStatus | undefined;
   readonly editable: boolean;
   readonly onEdit: (draft: Draft, delayed: boolean) => void;
@@ -533,12 +532,17 @@ function DecisionQuestion(props: {
           />
         </label>
       )}
+      {props.stale === undefined ? null : (
+        <p className="canvas-choice__note">
+          Earlier answer: {earlierAnswerText(question, props.stale)}
+        </p>
+      )}
       <p className="decision-form__status" role="status">
         {props.status?.kind === "saving"
           ? "Saving…"
           : props.status?.kind === "refused"
             ? `Not saved: ${props.status.message}`
-            : props.stale
+            : props.stale !== undefined
               ? "This question changed since you answered it. Answer it again."
               : accepted
                 ? "Accepted the recommendation"
@@ -548,4 +552,22 @@ function DecisionQuestion(props: {
       </p>
     </fieldset>
   );
+}
+
+/**
+ * An answer made before its question was revised, as the person gave it: their
+ * written answer, else the labels of the options that still exist, then their
+ * note. It is a reminder to adapt from, never an answer to the revised question.
+ */
+function earlierAnswerText(question: Question, answer: CanvasChoiceAnswer): string {
+  const labels = question.options
+    .filter((option) => answer.selectedOptionIds.includes(option.id))
+    .map((option) => option.label);
+  const chosen =
+    answer.customAnswer !== undefined
+      ? answer.customAnswer
+      : labels.length > 0
+        ? labels.join(", ")
+        : "its options have changed";
+  return answer.note === undefined ? chosen : `${chosen} (note: ${answer.note})`;
 }

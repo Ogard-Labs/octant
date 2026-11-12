@@ -375,6 +375,34 @@ describe("decision form", () => {
     expect(revise.mock.calls[1]?.[0].changes[0]).toMatchObject({ note: "Last words" });
   });
 
+  it("shows the earlier answer read-only when the agent has reworded the question, and counts it as unanswered", async () => {
+    const user = userEvent.setup();
+    const { port } = host();
+    const view = render(<ChoiceBlock block={form} runtime={sendable(port)} />);
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /Yes/,
+        },
+      ),
+    );
+    await waitFor(() => expect(screen.getByText("1 of 4 answered")).toBeInTheDocument());
+    await user.type((await screen.findAllByLabelText(/^Note/))[0] as HTMLElement, "Local window");
+    await user.tab();
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+    const reworded = decodeCanvasBlock({
+      ...form,
+      questions: form.questions.map((question) =>
+        question.id === "who" ? { ...question, prompt: "Who, now, may set it?" } : question,
+      ),
+    }) as CanvasChoiceBlock;
+    view.rerender(<ChoiceBlock block={reworded} runtime={sendable(port)} />);
+    expect(await screen.findByText("Earlier answer: Yes (note: Local window)")).toBeInTheDocument();
+    expect(screen.getByText(/changed since you answered it/)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 4 answered/)).toBeInTheDocument();
+  });
+
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {
     const user = userEvent.setup();
     const { port } = host({ refuse: "The thread is archived." });
