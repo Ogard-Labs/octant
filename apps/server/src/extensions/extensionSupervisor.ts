@@ -77,6 +77,12 @@ export interface ExtensionSeatbeltSandbox {
   readonly allowRead: ReadonlyArray<string>;
   readonly allowWrite: ReadonlyArray<string>;
   readonly allowNetwork: boolean;
+  /**
+   * Loopback ports the process may connect to and nothing else on the network.
+   * The profile cannot name a host, so a host-owned proxy on one of these ports
+   * is what limits a process to its listed hosts.
+   */
+  readonly allowLoopbackPorts?: ReadonlyArray<number>;
 }
 
 /**
