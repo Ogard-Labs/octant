@@ -108,7 +108,7 @@ At Full access, in Work and Code, nothing prompts, nothing expires into a refusa
 - Merge, plain force-push and push to the default branch, which follow the pull-request merge rules and the Project's "Agents may merge" switch.
 - Computer use: the first action in each application asks, once per thread, because it drives the person's real desktop.
 - The Browser on a signed-in profile: a site approval per origin and profile, which the person can remember or widen to "Allow all sites in this profile". A Private page needs none.
-- Paying, buying, or sending a message as the person.
+- Paying, buying, or sending a message as the person through the Browser or Computer (an email, a chat, a social post, a form that sends a message). A pull-request comment or review reply is not such a send and follows the pull-request rules.
 - Billed or off-machine desktops: the spend cap is mandatory, and inside it the confirmation of each billed or off-machine lease and each transfer to a cloud desktop is a setting, on by default.
 - Who may choose Full access: a local window, or an owner device the person marked. No other paired device and no agent grant raises a thread to it.
 - The one-time warning when a machine or a Project first picks Full access.

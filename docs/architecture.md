@@ -11668,7 +11668,11 @@ mechanisms are:
     4. The Browser on a signed-in profile: a site approval per origin and
        profile, which the person can remember or widen to "Allow all sites
        in this profile". A Private page needs none.
-    5. Paying, buying, or sending a message as the person.
+    5. Paying, buying, or sending a message as the person through the
+       Browser or Computer (an email, a chat, a social post, a form that
+       sends a message). A pull-request comment or review reply is not such
+       a send: it follows the pull-request rules, which do not ask at this
+       level.
     6. Billed or off-machine desktops: the spend cap is mandatory, and
        inside it the confirmation of each billed or off-machine lease and
        each transfer to a cloud desktop is a setting, on by default.
