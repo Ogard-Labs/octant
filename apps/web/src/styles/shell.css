@@ -23,13 +23,12 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  /* The window is a frame and one sheet. The rail and the title band are the
-     frame, painted here once; the sidebar, the stage, and the dock sit inside
-     it as one sheet (see "The frame and the sheet" below). When the host
-     resolved glass, both are the tint over the window's native material, so
-     the frost reaches the whole window and not the sidebar alone: with the
-     old floating cards the glass showed only in a sidebar strip, and an
-     opaque card covered everything a person worked in. */
+  /* The window is a frame and its panels. The rail, the title band, and the
+     sidebar's area are the frame (the ground), painted here once; the stage,
+     the dock's tiles, and the bottom panel are panels on it (see "The frame
+     and its panels" below). When the host resolved glass, the ground and the
+     panels are the tint over the window's native material, so the frost
+     reaches the whole window and not the sidebar alone. */
   background: var(--octant-window-surface);
   border: 0;
   border-radius: 0;
@@ -40,9 +39,22 @@
    included, so Settings wears the same frame and sheet as the window it
    replaces rather than a material of its own. */
 .shell {
-  --octant-window-surface: var(--octant-sidebar-opaque);
+  /* The ground panels sit on. In light the sidebar colour is a hair off the
+     panels' white, and a panel needs a ground it can be lighter than. */
+  --octant-ground-opaque: var(--octant-sidebar-opaque);
+  --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
+  /* Level 1, a panel: the fill is the sheet colour a step toward the ink, so
+     a panel is lighter than the ground even where the theme's workspace and
+     sidebar are one colour (an OLED page). */
+  --octant-panel-opaque: color-mix(
+    in srgb,
+    var(--octant-sheet-surface) var(--octant-panel-keep, 98%),
+    var(--octant-text-primary)
+  );
+  --octant-panel-surface: var(--octant-panel-opaque);
+  --octant-thread-underlay: linear-gradient(transparent, transparent);
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -50,10 +62,28 @@
    section, and a board card each sat as a near-black slab on the grey glass
    of an OLED preset. Menus, popovers, and dialogs render outside the shell,
    so they keep the opaque floating surface. */
+html[data-octant-theme-mode="light"] .shell {
+  --octant-ground-opaque: color-mix(
+    in srgb,
+    var(--octant-sidebar-opaque) 93%,
+    var(--octant-text-primary)
+  );
+  --octant-panel-keep: 99.5%;
+}
+
 .shell.shell--material-translucent {
   --octant-window-surface: var(--octant-sidebar-translucent);
   --octant-sheet-surface: var(--octant-workspace-translucent);
   --octant-stage-surface: var(--octant-workspace-translucent);
+  /* Panels are a tint of the theme colour over the window's native material,
+     not a blur of it: the packaged window's material is not re-blurred by a
+     backdrop filter. The thread's panel takes a second layer of the tint, so
+     the text a person reads stays on a quieter ground than a tool tile. */
+  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 90%, transparent);
+  --octant-thread-underlay: linear-gradient(
+    var(--octant-sheet-surface),
+    var(--octant-sheet-surface)
+  );
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
@@ -84,9 +114,11 @@
    levels; matching only the shell, it lost to them and left the glass on.
    The card colour inherits the theme's opaque one again. */
 html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
-  --octant-window-surface: var(--octant-sidebar-opaque);
+  --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
+  --octant-panel-surface: var(--octant-panel-opaque);
+  --octant-thread-underlay: linear-gradient(transparent, transparent);
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -106,9 +138,11 @@ html[data-octant-increased-contrast="true"] .shell {
 
 @media (prefers-reduced-transparency: reduce) {
   :is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy]) {
-    --octant-window-surface: var(--octant-sidebar-opaque);
+    --octant-window-surface: var(--octant-ground-opaque);
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
+    --octant-panel-surface: var(--octant-panel-opaque);
+    --octant-thread-underlay: linear-gradient(transparent, transparent);
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
@@ -1969,17 +2003,16 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* The frame and the sheet. The rail and the title band are one L-shaped
-   frame in the window surface, with no line where they meet. Inside it the
-   sidebar, the stage, and the dock form one sheet: it starts under the title
-   band, stops 8px short of the window's right and bottom edges, rounds the
-   corners where the frame turns and along the bottom, and divides its parts
-   with hairlines. The sidebar's side is a step lighter than the stage so the
-   turn of the frame reads. (They used to be separate rounded cards floating
-   8px apart on a back, which the glass could not reach.) Each part paints its
-   piece of the sheet below the title band from a pseudo-element, so headers
-   and dock tabs keep sitting in the band. The ground lies over the stage's
-   paint and under everything else. A narrow window keeps its overlay
+/* The frame and its panels. The title band and the sidebar are the frame:
+   the window's ground, painted once, with the sidebar's rows sitting on it and
+   no panel behind them. The thread stage, each tool tile in the dock, and the
+   bottom panel are separate rounded panels (level 1 of the material) with the
+   frame's 8px gap between them and 8px short of the window's right and bottom
+   edges. The gap is the frame showing through, so every panel reads as an
+   object seated on the ground and the glass shows between them. Each panel
+   paints below the title band from a pseudo-element or its own box, so
+   headers and dock tabs keep sitting in the band. The ground lies over the
+   stage's paint and under everything else. A narrow window keeps its overlay
    drawer. */
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
@@ -1991,11 +2024,7 @@ html[data-octant-native-host="true"]
     isolation: isolate;
   }
 
-  /* The sheet piece below draws the sidebar's edge. The recipe's border ran
-     the window's full height one pixel outside it: a stronger line through
-     the title band and the bottom inset, and a double line beside the
-     piece's own hairline, so the edge stepped where the band's rule crossed
-     it. */
+  /* The sidebar sits on the ground with no panel of its own. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
@@ -2003,51 +2032,28 @@ html[data-octant-native-host="true"]
     border-right: 0;
   }
 
-  .shell-frame > .sidebar::before {
-    --octant-sheet-lift: color-mix(in srgb, var(--oct-fg) 3%, transparent);
-    position: absolute;
-    z-index: -1;
-    inset: var(--oct-title-rail-h) 0 var(--octant-sheet-inset) 0;
-    border-radius: var(--oct-radius-md) 0 0 var(--oct-radius-md);
-    background-color: var(--octant-sheet-surface);
-    background-image: linear-gradient(var(--octant-sheet-lift), var(--octant-sheet-lift));
-    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
-    content: "";
-    pointer-events: none;
-  }
-
-  /* Under a ground that covers the sidebar too, the sidebar's piece of the
-     sheet lets a trace of it through. At 84% the ground's letters read as
-     text behind the Project and thread names; the list needs a quieter
-     surface than the stage. */
-  .shell--app-backdrop-sidebar.shell-frame > .sidebar::before {
-    background-color: color-mix(in srgb, var(--octant-sheet-surface) 94%, transparent);
-  }
-
-  /* Positioned for its sheet piece, but with no stacking context of its own:
-     the piece sits under the ground, which sits under the panes. */
+  /* The layer keeps the frame's gap on its left, right, and bottom, and
+     between the thread's panel and the bottom panel. */
   .shell-frame > .workspace-layer {
     position: relative;
-    padding: 0 var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
+    padding: 0 var(--octant-sheet-inset) var(--octant-sheet-inset);
+    row-gap: var(--octant-sheet-inset);
   }
 
+  /* The thread's panel. It is a grid item rather than an absolute piece, so it
+     follows the thread's column when the dock opens and stops where the bottom
+     panel starts, and sits at a negative level so the ground can lie over it. */
   .shell-frame > .workspace-layer::before {
-    position: absolute;
     z-index: -2;
-    inset: var(--oct-title-rail-h) var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
-    background: var(--octant-stage-surface);
-    box-shadow:
-      inset 0 1px 0 var(--octant-border-soft),
-      inset 0 -1px 0 var(--octant-border-soft),
-      inset -1px 0 0 var(--octant-border-soft);
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: var(--oct-title-rail-h);
+    border-radius: var(--oct-radius-md);
+    background:
+      var(--octant-panel-sheen), var(--octant-panel-surface), var(--octant-thread-underlay);
+    box-shadow: var(--octant-shadow-panel);
     content: "";
     pointer-events: none;
-  }
-
-  .shell--sidebar-collapsed.shell-frame > .workspace-layer::before {
-    border-radius: var(--oct-radius-md);
-    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
   }
 
   .shell-frame .right-utility-dock {
@@ -2055,22 +2061,25 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
-  .shell-frame .right-utility-dock::before {
+  /* The dock's resize edge is the frame's gap, so the thread's panel and the
+     first tile are 8px apart like every other pair. */
+  .shell-frame .right-utility-dock {
+    grid-template-columns: var(--octant-sheet-inset) minmax(0, 1fr);
+  }
+
+  /* Tool tiles are panels of their own (see dock.css). Before any tool is
+     open the dock shows its overview cards, and those sit on one panel. */
+  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::before {
     position: absolute;
     z-index: -1;
-    inset: var(--oct-title-rail-h) 0 0 0;
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
-    background: var(--octant-sheet-surface);
-    box-shadow:
-      inset 0 1px 0 var(--octant-border-soft),
-      inset 0 -1px 0 var(--octant-border-soft),
-      inset -1px 0 0 var(--octant-border-soft);
+    inset: var(--oct-title-rail-h) 0 0 var(--octant-sheet-inset);
+    border-radius: var(--oct-radius-md);
+    background: var(--octant-panel-sheen), var(--octant-panel-surface);
+    box-shadow: var(--octant-shadow-panel);
     content: "";
     pointer-events: none;
   }
 
-  /* The dock's surface inside its frame painted the opaque workspace colour
-     over the sheet piece, so the dock stayed solid under Glass. */
   .shell-frame .right-utility-dock__surface {
     background: transparent;
   }
@@ -2085,15 +2094,23 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
-  /* The dock's hairline divides the sheet, not the title band. */
+  /* The gap between the thread and the dock is the handle: no line at rest,
+     and the accent line while grabbed, inside the panels' height. */
   .shell-frame .right-utility-dock__resize::before {
     top: var(--oct-title-rail-h);
+    left: calc(var(--octant-sheet-inset) / 2 - 0.5px);
+    background: transparent;
+  }
+
+  .shell-frame .right-utility-dock__resize:hover::before,
+  .shell-frame .right-utility-dock__resize:focus-visible::before {
+    background: var(--octant-border-strong);
   }
 
   .shell-frame .bottom-utility-panel {
-    border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
-    background: var(--octant-sheet-surface);
-    box-shadow: inset 0 1px 0 var(--octant-border-soft);
+    border-radius: var(--oct-radius-md);
+    background: var(--octant-panel-sheen), var(--octant-panel-surface);
+    box-shadow: var(--octant-shadow-panel);
   }
 
   /* The window controls float over the workspace's first rail. A reader

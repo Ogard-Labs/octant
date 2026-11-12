@@ -706,10 +706,12 @@
 }
 
 /* Tool tiles: several open tools drawn together beside a thread, each one
-   live. The dock's own ground is the tiles' ground, so a see-through theme
-   shows through them, and the dividers are hairlines. A tile is told apart by
-   its name, not by an outline: the focused one reads in the full ink and the
-   rest a step back, with no ring and no fill. */
+   live and each one a panel of its own (level 1 of the material): a rounded
+   fill with a sheen, a rim brighter along its top edge, and a seat shadow, with
+   the frame's gap between neighbours. The gap is the divider's hit area, and
+   the line shows only while it is pointed at. A tile is told apart by its
+   name, not by an outline: the focused one reads in the full ink and the rest
+   a step back. */
 .dock-tiles {
   height: 100%;
   min-width: 0;
@@ -733,9 +735,13 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  /* A tile has no fill of its own, so anything a tool paints past its box
-     would show in the next tile (a Files tree drawn over Vitals). It clips. */
+  /* A tile is a panel, so the same recipe as the thread's. The tile clips:
+     anything a tool paints past its box would show in the next tile (a Files
+     tree drawn over Vitals), and its rounded corners are the clip. */
   overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-panel-sheen), var(--octant-panel-surface);
+  box-shadow: var(--octant-shadow-panel);
 }
 
 /* The tool gets a definite height to scroll within: the tile's body flexes to
@@ -786,7 +792,7 @@
   padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  border-bottom: 1px solid var(--oct-border);
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
@@ -850,26 +856,27 @@
 
 .dock-tiles__divider::before {
   position: absolute;
-  background: var(--oct-border);
+  background: transparent;
   content: "";
 }
 
 .dock-tiles__divider[data-orientation="vertical"]::before {
   top: 0;
   bottom: 0;
-  left: 3px;
+  left: 3.5px;
   width: 1px;
 }
 
 .dock-tiles__divider[data-orientation="horizontal"]::before {
-  top: 3px;
+  top: 3.5px;
   right: 0;
   left: 0;
   height: 1px;
 }
 
-/* At rest a hairline. It takes the quiet strong-divider role while hovered or
-   held, and nothing stays after a click. Keyboard focus is marked by the
+/* At rest the gap is empty: the frame shows between two panels. The line takes
+   the quiet strong-divider role while hovered or held, and nothing stays after
+   a click. Keyboard focus is marked by the
    app's own outline recipe, not by a line drawn here. */
 .dock-tiles__divider:hover::before,
 .dock-tiles__divider:active::before {

@@ -219,6 +219,23 @@ function arrange(
 const percent = (fraction: number) => `${fraction * 100}%`;
 
 /**
+ * The frame's gap between panels, which is also the width of a divider. A tile
+ * is a panel, so each edge it shares with a neighbour is pulled in by half the
+ * gap and the pair end up exactly one gap apart; an edge on the dock's own
+ * boundary stays put, on the same line as the thread's panel.
+ */
+const TILE_GAP = 8;
+const EDGE = 1e-4;
+const along = (start: number, size: number) => {
+  const before = start > EDGE ? TILE_GAP / 2 : 0;
+  const after = start + size < 1 - EDGE ? TILE_GAP / 2 : 0;
+  return {
+    start: `calc(${percent(start)} + ${before}px)`,
+    size: `calc(${percent(size)} - ${before + after}px)`,
+  };
+};
+
+/**
  * Open tools drawn together, each one live. Tiles are keyed by their tool, so
  * choosing another tile, resizing, adding or removing a neighbour never
  * remounts a tool that stays shown: a simulator or a page would lose its
@@ -404,11 +421,13 @@ function Tile(props: {
     };
   }, []);
   const { content, box } = props;
+  const across = along(box.left, box.width);
+  const down = along(box.top, box.height);
   const style: CSSProperties = {
-    left: percent(box.left),
-    top: percent(box.top),
-    width: percent(box.width),
-    height: percent(box.height),
+    left: across.start,
+    top: down.start,
+    width: across.size,
+    height: down.size,
   };
   return (
     <section
@@ -631,12 +650,17 @@ function TileDivider(props: {
   }
 
   const style: CSSProperties = vertical
-    ? { left: `calc(${percent(props.at)} - 3px)`, top: 0, height: "100%", width: 7 }
+    ? {
+        left: `calc(${percent(props.at)} - ${TILE_GAP / 2}px)`,
+        top: 0,
+        height: "100%",
+        width: TILE_GAP,
+      }
     : {
         left: percent(props.extent?.left ?? 0),
-        top: `calc(${percent(props.at)} - 3px)`,
+        top: `calc(${percent(props.at)} - ${TILE_GAP / 2}px)`,
         width: percent(props.extent?.width ?? 1),
-        height: 7,
+        height: TILE_GAP,
       };
   return (
     <div

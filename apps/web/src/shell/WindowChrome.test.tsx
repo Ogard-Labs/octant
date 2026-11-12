@@ -558,7 +558,7 @@ describe("WindowChrome", () => {
     expect(reducedTransparency).toContain(
       ":is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy])",
     );
-    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-ground-opaque);");
     expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
@@ -613,17 +613,17 @@ describe("WindowChrome", () => {
   });
 
   it("gives every popup one lit edge and the floating fill", () => {
-    // The overlay shadow carries the popup's whole edge in both themes: light
-    // along its top, then one thin line outside it. A popup that also set a
-    // border showed two edges, and the strong border made a menu's heavier
-    // than a dialog's.
+    // The overlay shadow carries the popup's whole edge in both themes: the
+    // brightest rim along its top, then one hairline outside it. A popup that
+    // also set a border showed two edges, and the strong border made a menu's
+    // heavier than a dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("inset 0 1px 0 var(--octant-bevel-strong)");
-      expect(overlay).toMatch(/(^|,)\s*0 0 0 1px rgb\(/);
+      expect(overlay).toContain("inset 0 1px 0 var(--octant-rim-float)");
+      expect(overlay).toMatch(/(^|,)\s*0 0 0 0\.5px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
     expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
@@ -847,15 +847,17 @@ describe("WindowChrome", () => {
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's pill is the glass surface, with the glass stroke as its
-    // ring; the frame around it and its rows draws nothing.
+    // The composer's pill is the glass surface. Its rim is part of the pill's
+    // own shadow, so a glass stroke beside it would draw two lines on one
+    // edge; the frame around it and its rows draws nothing.
     const surface =
       systemStyles.match(
         /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
+    expect(surface).toContain("box-shadow: var(--octant-shadow-md);");
+    expect(surface).not.toContain("--oct-glass-stroke");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
     // Under Window glass the pill is a step lighter than the glass around
     // it: the floor made it the darker of the two.
@@ -906,7 +908,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      "--octant-window-surface: var(--octant-sidebar-opaque);",
+      "--octant-window-surface: var(--octant-ground-opaque);",
     );
   });
 

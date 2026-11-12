@@ -148,6 +148,30 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("seats the thread, each tool tile and the bottom panel as panels on the frame, with the sidebar on the ground", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8").replace(/\s+/g, " ");
+    const panel = (selector: string) => {
+      const start = shell.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return shell.slice(start, shell.indexOf("}", start));
+    };
+    // The thread's panel follows its grid column and stops where the bottom
+    // panel starts; both draw the shared panel recipe, never a literal colour.
+    const thread = panel(".shell-frame > .workspace-layer::before");
+    expect(thread).toMatch(/grid-column:\s*1/);
+    expect(thread).toMatch(/box-shadow:\s*var\(--octant-shadow-panel\)/);
+    expect(thread).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
+    expect(panel(".shell-frame .bottom-utility-panel")).toMatch(
+      /box-shadow:\s*var\(--octant-shadow-panel\)/,
+    );
+    // Panels are 8px apart: the layer's row gap and its padding are the frame's.
+    expect(shell).toMatch(
+      /\.shell-frame > \.workspace-layer \{[^}]*row-gap: var\(--octant-sheet-inset\)/,
+    );
+    // The sidebar's rows sit on the ground: it draws no panel of its own.
+    expect(shell).not.toContain(".shell-frame > .sidebar::before {");
+  });
+
   it("does not flatten the Code composer into two hairline boxes", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
@@ -172,9 +196,9 @@ describe("the public-block visual language", () => {
     expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     // A raised step is light on its top edge, then the shadow that lifts it.
-    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-bevel\)/);
-    expect(darkShadow).toMatch(/0 12px 24px -8px/);
-    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 12px 24px -8px/s);
+    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-control-top\)/);
+    expect(darkShadow).toMatch(/0 14px 30px -14px/);
+    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 14px 28px -16px/s);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
@@ -1163,9 +1187,9 @@ describe("the public-block visual language", () => {
       );
     });
 
-    it("draws a divider as a hairline that never keeps an accent line after a click", () => {
+    it("leaves the gap between two tiles empty at rest and never keeps an accent line after a click", () => {
       const rule = (selector: string) => body(selector);
-      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*var\(--oct-border\)/);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*transparent/);
       const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
       expect(held).toMatch(/--octant-border-strong/);
       const dividerRules = dock.slice(
@@ -1182,8 +1206,13 @@ describe("the public-block visual language", () => {
       expect(dock).not.toContain("dock-tile__caption");
     });
 
-    it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
-      expect(body(".dock-tile")).not.toMatch(/background/);
+    it("draws a tile as a panel from the shared tokens, so a see-through theme still shows through", () => {
+      const tile = body(".dock-tile");
+      expect(tile).toMatch(
+        /background:\s*var\(--octant-panel-sheen\),\s*var\(--octant-panel-surface\)/,
+      );
+      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel\)/);
+      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
       expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
     });
   });
