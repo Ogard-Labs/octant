@@ -517,9 +517,7 @@ export class AgentPluginMcpSessionManager {
           }
           return {
             result: {
-              error: timedOut
-                ? "MCP tool call timed out."
-                : "MCP tool call failed.",
+              error: timedOut ? "MCP tool call timed out." : "MCP tool call failed.",
             },
             isError: true,
           };
