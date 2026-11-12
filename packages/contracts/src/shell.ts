@@ -858,7 +858,8 @@ export const ShellSettings = Schema.Struct({
    * Personal Browser profile. A pair, never an origin alone: a remembered
    * Private origin does not cover a signed-in page, and a pair for one profile
    * does not cover another. Grows only through the approval answer, like
-   * `rememberedBrowserOrigins`.
+   * `rememberedBrowserOrigins`. A pair whose origin is `ANY_BROWSER_ORIGIN` is
+   * the answer "Allow all sites in this profile".
    */
   rememberedBrowserProfileSites: Schema.optionalWith(
     Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),

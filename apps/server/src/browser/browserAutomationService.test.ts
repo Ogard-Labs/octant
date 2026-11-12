@@ -3627,6 +3627,61 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("opens a page that admits every site only for the agent at Full access, and never in a profile", async () => {
+    const everySite = { ...policy, allowedOrigins: ["*"] };
+    const denied = {
+      category: "policy-denied",
+      message: "Browser context policy exceeds host limits.",
+    };
+    // A window's own create names no Full access agent.
+    const fromWindow = harness();
+    expect(
+      (
+        await fromWindow.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy: everySite,
+        })
+      ).failure,
+    ).toEqual(denied);
+
+    const inProfile = harness();
+    expect(
+      (
+        await inProfile.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy: { ...everySite, profile: { kind: "personal" } },
+          fullAccessAgent: true,
+        })
+      ).failure,
+    ).toEqual(denied);
+
+    const agent = harness();
+    const opened = await agent.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: everySite,
+      fullAccessAgent: true,
+    });
+    expect(opened.context?.state).toBe("active");
+    const context = opened.context;
+    if (context === undefined) throw new Error("Missing context");
+    const moved = await agent.service.act({
+      windowId,
+      request: {
+        ...action(),
+        contextId: context.contextId,
+        kind: "navigate",
+        target: "https://elsewhere.example/page",
+      } as never,
+    });
+    expect(moved.failure).toBeUndefined();
+  });
+
   it("explains a new site's approval without navigating outside the existing origin", async () => {
     const fixture = harness();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });

@@ -1032,11 +1032,17 @@ describe("octant_browser profile argument", () => {
       readonly profileCaller?: "terminal-grant";
       readonly inspect?: BrowserAutomationSnapshot;
       readonly modelBindings?: Map<string, BrowserModelBinding>;
+      readonly fullAccess?: boolean;
+      readonly plan?: boolean;
     } = {},
   ) {
-    const create = vi.fn(async (input: { policy: { profile?: unknown } }) =>
-      activeContext(input.policy.profile),
+    const create = vi.fn(
+      async (input: {
+        policy: { profile?: unknown; allowedOrigins: ReadonlyArray<string> };
+        fullAccessAgent?: true;
+      }) => activeContext(input.policy.profile),
     );
+    const releaseThread = vi.fn(async () => snapshot());
     const act = vi.fn(async () =>
       snapshot({ status: "running", observation: { revision: 3 } as never }),
     );
@@ -1049,13 +1055,16 @@ describe("octant_browser profile argument", () => {
       resolveModelId: () => modelId,
       modelBindings: options.modelBindings ?? new Map(),
       resolveTaskProfile: () => options.defaultProfile,
-      executionPolicy: "approval-gated",
+      executionPolicy: options.plan === true ? "plan" : "approval-gated",
+      ...(options.fullAccess === undefined
+        ? {}
+        : { fullAccess: () => options.fullAccess === true }),
       resolveAuthority: () => workAuthority,
       browser: {
         inspectThread: () => options.inspect ?? snapshot(),
         create: create as never,
         act,
-        releaseThread: vi.fn(async () => snapshot()),
+        releaseThread,
       },
       approvals: {
         request,
@@ -1069,8 +1078,165 @@ describe("octant_browser profile argument", () => {
     });
     const run = (input: Record<string, unknown>) =>
       tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
-    return { create, act, request, run };
+    return { create, act, request, releaseThread, run };
   }
+
+  const everySiteContext = () => {
+    const open = activeContext();
+    return {
+      ...open,
+      context: {
+        ...open.context,
+        policy: { ...open.context?.policy, allowedOrigins: ["*"] },
+      },
+      observation: { url: "https://example.com/a", revision: 3 },
+    } as never as BrowserAutomationSnapshot;
+  };
+
+  it("opens a Private page at Full access without asking, free to navigate across origins", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+
+    const result = await run({ operation: "navigate", url: "https://example.com/a" });
+
+    expect(result.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      policy: { allowedOrigins: ["*"] },
+      fullAccessAgent: true,
+    });
+    expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+  });
+
+  it("navigates an open Private page to another origin at Full access without asking or reopening", async () => {
+    const { run, act, request, create, releaseThread } = fixture({
+      fullAccess: true,
+      inspect: everySiteContext(),
+    });
+
+    const result = await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    expect(result.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(releaseThread).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "navigate",
+          target: "https://elsewhere.example/b",
+        }),
+      }),
+    );
+  });
+
+  it("reopens a one-site Private page at Full access when the agent navigates elsewhere", async () => {
+    const { run, request, create, releaseThread } = fixture({
+      fullAccess: true,
+      inspect: activeContext(),
+    });
+
+    await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(releaseThread).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
+  });
+
+  it("still asks about the site and the profile on a signed-in page at Full access", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "personal" });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com", profile: { kind: "personal" } }),
+    );
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
+    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
+  });
+
+  it("opens nothing in a signed-in profile at Full access when the person declines the site", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+    request.mockResolvedValueOnce("denied" as never);
+
+    const result = await run({
+      operation: "navigate",
+      url: "https://example.com/a",
+      profile: "personal",
+    });
+
+    expect(result).toMatchObject({ isError: true, result: { error: "browser-approval-denied" } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("still asks for each origin on a Private page below Full access, and holds it to that origin", async () => {
+    const { run, create, request } = fixture({ fullAccess: false });
+
+    await run({ operation: "navigate", url: "https://example.com/a" });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com" }),
+    );
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
+    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
+  });
+
+  it("does not reopen a one-site Private page below Full access to reach another origin", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const { run, act, create, releaseThread } = fixture({
+      fullAccess: false,
+      inspect: activeContext(),
+      modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
+    });
+
+    await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    // The service refuses the navigation as `origin-not-approved`; the tool
+    // neither widens the page nor opens another.
+    expect(releaseThread).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(act).toHaveBeenCalledOnce();
+  });
+
+  it("stops using a page that admits every site once the thread is below Full access", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const bound = () => new Map([[contextId, { modelId, authority: workAuthority }]]);
+    const reading = fixture({
+      fullAccess: false,
+      inspect: everySiteContext(),
+      modelBindings: bound(),
+    });
+    expect(await reading.run({ operation: "snapshot" })).toMatchObject({
+      isError: true,
+      result: { error: "browser-navigation-required" },
+    });
+    expect(reading.act).not.toHaveBeenCalled();
+
+    const navigating = fixture({
+      fullAccess: false,
+      inspect: everySiteContext(),
+      modelBindings: bound(),
+    });
+    await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+    expect(navigating.releaseThread).toHaveBeenCalledOnce();
+    expect(navigating.request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://elsewhere.example" }),
+    );
+    expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
+      "https://elsewhere.example",
+    ]);
+  });
+
+  it("keeps reading a page that admits every site in Plan, where it cannot move", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const { run, act } = fixture({
+      plan: true,
+      inspect: everySiteContext(),
+      modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
+    });
+
+    expect((await run({ operation: "snapshot" })).isError).toBe(false);
+    expect(act).toHaveBeenCalledOnce();
+  });
 
   it("keeps a page Private when no profile is asked for", async () => {
     const { run, create, request } = fixture();

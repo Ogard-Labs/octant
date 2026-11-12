@@ -12,8 +12,10 @@ import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import {
+  browserCallOrigin,
   browserDownloadSavedResult,
   browserOperationRefusedInPlan,
+  browserPageReach,
   browserToolAction,
   browserToolResult,
   browserToolWantsScreenshot,
@@ -42,7 +44,11 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  ANY_BROWSER_ORIGIN,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
@@ -76,6 +82,12 @@ export interface BrowserAppManagedToolsOptions {
     mode: ToolActionAuthority["mode"],
   ) => ToolActionAuthority | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * Whether the thread's turn runs at Full access now, where a Private page
+   * needs no site approval. A Work turn's level is its `access`, which the
+   * composed `executionPolicy` does not carry; absent, that policy decides.
+   */
+  readonly fullAccess?: () => boolean;
   readonly toolConstraints?: ReadonlyArray<string>;
   readonly browser: {
     readonly inspectThread: (
@@ -88,6 +100,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly action: ToolActionRequest;
       readonly policy: BrowserContextPolicy;
       readonly profileCaller?: "terminal-grant";
+      /** The agent's own open at Full access; only it may ask for every site. */
+      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -287,16 +301,35 @@ export function createBrowserAppManagedTools(
       const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
       if (refusal !== undefined) return failure(refusal);
     }
-    const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+    const fullAccess = options.fullAccess?.() ?? options.executionPolicy === "full-access";
+    const defaultChoice = options.resolveTaskProfile?.();
+    let existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
     if (existing === undefined && snapshot.context !== undefined) {
       options.modelBindings.delete(String(snapshot.context.contextId));
     }
-    const origin =
-      existing === undefined
-        ? input.operation === "navigate"
-          ? allowedOrigin(input.url)
-          : undefined
-        : existing.policy.allowedOrigins.join(", ");
+    if (existing !== undefined) {
+      const reach = browserPageReach({
+        existing,
+        fullAccess,
+        plan: options.executionPolicy === "plan",
+        privateNavigation:
+          input.operation === "navigate" &&
+          (input.profile ?? defaultChoice ?? "private") === "private"
+            ? input.url
+            : undefined,
+      });
+      if (reach !== "kept") {
+        if (reach === "navigation-required" && input.operation !== "navigate") {
+          return failure("browser-navigation-required");
+        }
+        // The same stop and navigate the refusal would have asked the agent for.
+        options.modelBindings.delete(String(existing.contextId));
+        snapshot = await options.browser.releaseThread(options.windowId, options.threadId);
+        if (signal?.aborted) return failure("tool-interrupted");
+        existing = undefined;
+      }
+    }
+    const origin = browserCallOrigin(input, existing, snapshot.observation?.url);
     if (origin === undefined) {
       return failure(
         input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
@@ -315,7 +348,6 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-profile-differs-stop-first");
     }
-    const defaultChoice = options.resolveTaskProfile?.();
     const choice = input.operation === "navigate" ? (input.profile ?? defaultChoice) : undefined;
     const profile: StoredBrowserProfile | undefined =
       existing !== undefined
@@ -361,7 +393,10 @@ export function createBrowserAppManagedTools(
     const remembered =
       (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
       options.approvals?.isRemembered?.(origin, profile) === true;
-    if ((existing === undefined || !contextApproved) && !remembered) {
+    // At Full access a Private page needs no site approval; a page in a
+    // signed-in profile keeps its own at every level.
+    const needsNoSiteApproval = fullAccess && profile === undefined;
+    if ((existing === undefined || !contextApproved) && !remembered && !needsNoSiteApproval) {
       if (options.approvals === undefined) return failure("browser-approval-required");
       const outcome = await options.approvals.request({
         windowId: options.windowId,
@@ -385,7 +420,7 @@ export function createBrowserAppManagedTools(
         });
       }
     }
-    if (remembered && existing !== undefined)
+    if ((remembered || needsNoSiteApproval) && existing !== undefined)
       rememberModelBinding(options.modelBindings, String(existing.contextId), {
         modelId: options.modelId,
         authority,
@@ -398,9 +433,10 @@ export function createBrowserAppManagedTools(
         policy: {
           ...hostPolicy,
           ...(profile === undefined ? {} : { profile }),
-          allowedOrigins: [origin],
+          allowedOrigins: [needsNoSiteApproval ? ANY_BROWSER_ORIGIN : origin],
         },
         ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
+        ...(needsNoSiteApproval ? { fullAccessAgent: true as const } : {}),
       });
       snapshot = created;
       if (created.context?.state === "active") {
@@ -770,15 +806,6 @@ function actionRequest(
     intent: "Operate the thread-owned isolated browser.",
     approval: { kind: "not-required" },
   };
-}
-
-function allowedOrigin(value: string): string | undefined {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function failure(reason: string) {

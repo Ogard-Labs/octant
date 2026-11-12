@@ -168,6 +168,53 @@ describe("BrowserToolApprovalService", () => {
     }
   });
 
+  it("remembers the whole profile when the person allows all its sites, and only on a profile page", async () => {
+    const remembered: Array<unknown> = [];
+    let next = 0;
+    const service = new BrowserToolApprovalService({
+      uuid: () => `40000000-0000-4000-8000-00000000001${String(next++)}`,
+      now: () => Date.parse("2026-11-12T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberOrigin: (origin, _scope, profile) => remembered.push([origin, profile]),
+    });
+    const ask = (profile?: { readonly kind: "personal" }) =>
+      service.request({
+        windowId,
+        threadId: "50000000-0000-4000-8000-000000000002",
+        authority,
+        origin: "https://example.com",
+        ...(profile === undefined ? {} : { profile }),
+      });
+
+    const onProfile = ask({ kind: "personal" });
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000010" as never,
+      decision: "approved",
+      rememberProfile: true,
+    });
+    await expect(onProfile).resolves.toBe("approved");
+    expect(remembered).toEqual([["*", { kind: "personal" }]]);
+
+    // A Private page has no profile: the wider answer remembers nothing there.
+    const onPrivate = ask();
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000011" as never,
+      decision: "approved",
+      rememberProfile: true,
+    });
+    await expect(onPrivate).resolves.toBe("approved");
+    expect(remembered).toHaveLength(1);
+
+    const denied = ask({ kind: "personal" });
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000012" as never,
+      decision: "denied",
+      rememberProfile: true,
+    });
+    await expect(denied).resolves.toBe("denied");
+    expect(remembered).toHaveLength(1);
+  });
+
   it("a browser approval from a routine's Work turn reaches an open local window", async () => {
     const otherProjectWindow = "60000000-0000-4000-8000-000000000002" as never;
     const remembered: Array<unknown> = [];

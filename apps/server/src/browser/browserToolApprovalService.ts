@@ -5,6 +5,7 @@ import {
   type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
 import {
+  ANY_BROWSER_ORIGIN,
   decodeToolApprovalId,
   type StoredBrowserProfile,
   type ToolActionAuthority,
@@ -230,15 +231,25 @@ export class BrowserToolApprovalService {
     // becomes a remembered grant for the origin.
     if (
       decision.decision === "approved" &&
-      decision.remember === true &&
       pending.view.upload === undefined &&
       pending.view.download === undefined &&
       pending.view.signIn === undefined &&
       pending.view.script === undefined
     ) {
+      // "Allow all sites in this profile" remembers the profile under the
+      // any-site entry; a Private page has no profile, so there it remembers
+      // nothing wider than the origin the prompt showed.
+      const origin =
+        decision.rememberProfile === true && pending.view.profile !== undefined
+          ? ANY_BROWSER_ORIGIN
+          : decision.remember === true && pending.view.origin !== ANY_BROWSER_ORIGIN
+            ? pending.view.origin
+            : undefined;
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
-      this.#options.rememberOrigin?.(pending.view.origin, windowId, pending.view.profile);
+      if (origin !== undefined) {
+        this.#options.rememberOrigin?.(origin, windowId, pending.view.profile);
+      }
     }
     return true;
   }

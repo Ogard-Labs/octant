@@ -34,7 +34,7 @@ import {
   defaultShellSettings,
   defaultWindowWorkspace,
   enabledModes,
-  isBrowserProfileSiteRemembered,
+  browserProfileSiteListed,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -234,7 +234,7 @@ export class ShellService implements ShellServiceApi {
       const merged = current.rememberedBrowserProfileSites.concat(
         input.sites.filter(
           (site) =>
-            !isBrowserProfileSiteRemembered(
+            !browserProfileSiteListed(
               current.rememberedBrowserProfileSites,
               site.origin,
               site.profile,

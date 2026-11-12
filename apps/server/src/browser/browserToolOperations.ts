@@ -5,9 +5,12 @@ import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-sc
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
+  BrowserContextRecord,
   ProviderToolImage,
 } from "@octant/contracts";
+import { originAllowed, storedBrowserProfile } from "@octant/domain";
 import {
+  ANY_BROWSER_ORIGIN,
   BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
@@ -912,6 +915,70 @@ export function signInPageRefusal(snapshot: BrowserAutomationSnapshot): string |
   const context = snapshot.context;
   if (context === undefined || context.state !== "active") return undefined;
   return context.presentation === "native-live" ? undefined : "sign-in-needs-the-app-browser";
+}
+
+/**
+ * Whether a page admits every site: the Private page an agent opened at Full
+ * access, which needs no site approval and may navigate across origins.
+ */
+export function browserPageAdmitsEverySite(context: BrowserContextRecord | undefined): boolean {
+  return context?.policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) === true;
+}
+
+/**
+ * Whether a call needs a new page in place of the open one, because the open
+ * page's reach no longer fits the thread's level. An any-site page was opened
+ * at Full access and has no site approval to stand on below it; Plan only
+ * reads it where it is, so it stays. A Private page opened below Full access
+ * holds one site, and at Full access a navigation elsewhere reopens it rather
+ * than being refused.
+ */
+export function browserPageReach(input: {
+  readonly existing: BrowserContextRecord;
+  readonly fullAccess: boolean;
+  readonly plan: boolean;
+  /** The address a `navigate` asks for, when the call is one that stays Private. */
+  readonly privateNavigation: string | undefined;
+}): "kept" | "reopen" | "navigation-required" {
+  const everySite = browserPageAdmitsEverySite(input.existing);
+  if (everySite && !input.fullAccess && !input.plan) return "navigation-required";
+  if (
+    !everySite &&
+    input.fullAccess &&
+    storedBrowserProfile(input.existing.policy.profile) === undefined &&
+    input.privateNavigation !== undefined &&
+    httpOrigin(input.privateNavigation) !== undefined &&
+    !originAllowed(input.privateNavigation, input.existing.policy.allowedOrigins)
+  ) {
+    return "reopen";
+  }
+  return "kept";
+}
+
+/**
+ * The site a call concerns, which an ask names. A page that admits every site
+ * has no approved origin to name, so it is where the call navigates or where
+ * the page is.
+ */
+export function browserCallOrigin(
+  input: { readonly operation: string; readonly url?: string },
+  existing: BrowserContextRecord | undefined,
+  pageUrl: string | undefined,
+): string | undefined {
+  const target = input.operation === "navigate" ? httpOrigin(input.url) : undefined;
+  if (existing === undefined) return target;
+  if (!browserPageAdmitsEverySite(existing)) return existing.policy.allowedOrigins.join(", ");
+  return input.operation === "navigate" ? target : (httpOrigin(pageUrl) ?? ANY_BROWSER_ORIGIN);
+}
+
+function httpOrigin(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** What one operation answered, as an executor returns it. */

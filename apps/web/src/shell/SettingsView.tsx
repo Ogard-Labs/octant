@@ -19,6 +19,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import {
+  ANY_BROWSER_ORIGIN,
   type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
@@ -1706,7 +1707,7 @@ function RememberedBrowserOriginsPanel(props: {
               ? "1 site always allowed"
               : `${props.origins.length + props.profileSites.length} sites always allowed`,
       }}
-      description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
+      description="Granted with “Always allow” or “Allow all sites in this profile” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
       {props.origins.length === 0 && props.profileSites.length === 0 ? (
@@ -1721,11 +1722,17 @@ function RememberedBrowserOriginsPanel(props: {
                 : site.profile.kind === "account"
                   ? `Account ${String(site.profile.profileId).slice(0, 8)} profile`
                   : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+            // "Allow all sites in this profile" is stored as the any-site entry.
+            const everySite = site.origin === ANY_BROWSER_ORIGIN;
             return (
               <SettingRow
-                description={`Browser acts as you on this site in the ${profileName}, without asking.`}
+                description={
+                  everySite
+                    ? `Browser acts as you on every site in the ${profileName}, without asking.`
+                    : `Browser acts as you on this site in the ${profileName}, without asking.`
+                }
                 key={key}
-                label={`${site.origin} · ${profileName}`}
+                label={`${everySite ? "All sites" : site.origin} · ${profileName}`}
                 scope="host"
                 settingId="browser-site-approvals"
               >

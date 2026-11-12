@@ -30,8 +30,10 @@ export interface TerminalBrowserApprovalPromptProps {
  * In Code, the host's Browser approval service is asked by a terminal's
  * Browser grant, and by the thread's own agent only to hand the page over for
  * a sign-in: a managed Code turn's site asks go through its own operation
- * approval. A site ask listed here came from a terminal, and the card says so,
- * because the person must not mistake it for the thread's own agent.
+ * approval. A Private site ask listed here came from a terminal, and the card
+ * says so, because the person must not mistake it for the thread's own agent.
+ * A site ask that names a signed-in profile is the agent's: a terminal's grant
+ * cannot reach a profile.
  */
 export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalPromptProps) {
   const [approvals, setApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
@@ -78,7 +80,7 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
     );
   }
 
-  const decide = async (decision: "approved" | "denied", remember?: boolean) => {
+  const decide = async (decision: "approved" | "denied", remember?: "site" | "profile") => {
     if (busy || props.client.decideApproval === undefined) return;
     setBusy(true);
     setMessage(undefined);
@@ -87,7 +89,8 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
       const settled = await props.client.decideApproval({
         approvalId: pending.approvalId,
         decision,
-        ...(remember === true ? { remember: true } : {}),
+        ...(remember === "site" ? { remember: true } : {}),
+        ...(remember === "profile" ? { rememberProfile: true } : {}),
       });
       setApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pending.approvalId),
@@ -98,7 +101,7 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
             ? `The agent's sign-in request for ${pending.origin} had already ended.`
             : `The terminal's request to open ${pending.origin} had already ended, so nothing was let through.`,
         );
-      } else if (decision === "approved" && remember === true) {
+      } else if (decision === "approved" && remember !== undefined) {
         announceShellSettingsWritten();
       }
     } catch {
@@ -167,12 +170,23 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
           {pending.script === undefined ? (
             <OctantButton
               disabled={busy}
-              onClick={() => void decide("approved", true)}
+              onClick={() => void decide("approved", "site")}
               size="sm"
               type="button"
               variant="secondary"
             >
               Always allow
+            </OctantButton>
+          ) : null}
+          {pending.script === undefined && pending.profile !== undefined ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved", "profile")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Allow all sites in this profile
             </OctantButton>
           ) : null}
           <OctantButton
@@ -187,10 +201,24 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
         </>
       }
       {...(props.className === undefined ? {} : { className: props.className })}
-      detail={`Asked by a program in a terminal of “${props.threadTitle}”, not by this thread's agent`}
+      // A terminal's grant reaches Private pages only, so a site ask that
+      // names a profile is the thread's own agent on a signed-in page.
+      detail={
+        pending.profile === undefined
+          ? `Asked by a program in a terminal of “${props.threadTitle}”, not by this thread's agent`
+          : browserApprovalDetail(pending)
+      }
       error={message}
-      label="Browser request from a terminal"
-      summary={`Let the terminal open ${pending.origin} in the Browser?`}
+      label={
+        pending.profile === undefined
+          ? "Browser request from a terminal"
+          : "Browser origin approval"
+      }
+      summary={
+        pending.profile === undefined
+          ? `Let the terminal open ${pending.origin} in the Browser?`
+          : browserApprovalSummary(pending)
+      }
     />
   );
 }

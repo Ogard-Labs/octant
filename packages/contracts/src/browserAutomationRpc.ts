@@ -125,6 +125,13 @@ export const BrowserToolApprovalDecision = Schema.Struct({
    * asking again, until the person forgets it in Settings.
    */
   remember: Schema.optional(Schema.Boolean),
+  /**
+   * "Allow all sites in this profile": on a site approval for a page in a
+   * stored profile, the host remembers the profile itself, so no later site in
+   * that profile asks until the person forgets it in Settings. Ignored on a
+   * Private page, which has no profile to remember.
+   */
+  rememberProfile: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserToolApprovalDecision = typeof BrowserToolApprovalDecision.Type;
 

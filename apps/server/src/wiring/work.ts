@@ -511,6 +511,9 @@ export function wireWork(deps: WorkDependencies) {
               resolveTaskProfile: () =>
                 workThreadProjection.read(input.thread.id)?.browserTaskProfile,
               executionPolicy: "approval-gated",
+              // The level the running turn has; with no turn running, none.
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>
