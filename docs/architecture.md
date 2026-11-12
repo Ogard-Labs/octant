@@ -7704,7 +7704,9 @@ or a history the read could not complete. Nothing is journaled and no
 session starts.
 
 **Chat branch.** A branch (`branch-chat-thread`, also behind a Chat
-checkpoint's restore) copies message text and never the source's session, so
+checkpoint's restore) copies message text, each copied turn keeping its
+submission id so the record of who sent it still applies, and never the
+source's session, so
 on a provider that keeps its conversation in a session of its own the branch
 has no session to resume. It is created, and its first turn starts a new
 session with the carried conversation as a `branch` handoff (framed as the

@@ -11,7 +11,11 @@ import {
 import { SidebarThreadRowContent } from "../projects/SidebarThreadRowContent";
 import type { AgentAccessAdministrationBridge } from "../shell/hostBridge";
 import { AgentAccessSettingsSection } from "./AgentAccessSettingsSection";
-import { AgentThreadAttributionProvider } from "./agentThreadAttribution";
+import {
+  AgentThreadAttributionProvider,
+  AgentTurnSender,
+  useAgentTurnSenders,
+} from "./agentThreadAttribution";
 
 const grantId = "63000000-0000-4000-8000-000000000001";
 const projectId = "63000000-0000-4000-8000-000000000002";
@@ -136,5 +140,40 @@ describe("Started by", () => {
     );
     expect(await screen.findByText("Started by Home bot")).toBeTruthy();
     expect(screen.getAllByText(/Started by/)).toHaveLength(1);
+  });
+});
+
+describe("Sent by", () => {
+  function Prompt(props: {
+    readonly threadId: string;
+    readonly turnKey: string;
+    readonly copied?: boolean;
+  }) {
+    const sender = useAgentTurnSenders();
+    return <AgentTurnSender agentName={sender(props.threadId, props.turnKey, props.copied)} />;
+  }
+
+  it("names the outside agent under each turn it sent, by the id the turn keeps, also once copied into a branch, and nothing under others", async () => {
+    const agentTurn = "64000000-0000-4000-8000-000000000001";
+    const personTurn = "64000000-0000-4000-8000-000000000002";
+    const client: AgentGrantClient = {
+      grants: async () => ({ kind: "grants", grants: [] }),
+      revoke: async () => ({ kind: "done" }),
+      threads: async () => ({
+        threads: [],
+        turns: [{ threadId: "t-project", turnKey: agentTurn, agentName: "Home bot" }],
+      }),
+    };
+    render(
+      <AgentThreadAttributionProvider client={client}>
+        <Prompt threadId="t-project" turnKey={agentTurn} />
+        <Prompt threadId="t-project" turnKey={personTurn} />
+        <Prompt threadId="t-other" turnKey={agentTurn} />
+        <Prompt threadId="t-branch" turnKey={agentTurn} copied />
+        <Prompt threadId="t-branch" turnKey={personTurn} copied />
+      </AgentThreadAttributionProvider>,
+    );
+    expect(await screen.findAllByText("Sent by Home bot")).toHaveLength(2);
+    expect(screen.getAllByText(/Sent by/)).toHaveLength(2);
   });
 });

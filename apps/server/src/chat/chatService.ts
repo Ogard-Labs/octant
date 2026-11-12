@@ -3218,6 +3218,11 @@ export class ChatService {
           userMessageRef: userMessage.reference,
           attachmentIds: [],
           ...(originalInputs.length === 0 ? {} : { originalInputs }),
+          // The copy keeps the submission it came from, so a reader can still
+          // tell which copied prompt an outside agent sent rather than the person.
+          ...(sourceTurn.submissionId === undefined
+            ? {}
+            : { submissionId: sourceTurn.submissionId }),
           attempts,
           createdAt: sourceTurn.createdAt,
         }),
