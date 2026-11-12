@@ -6009,8 +6009,10 @@ describe("App", () => {
     await user.click(first);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     // The explicit gesture is opening a terminal from its button: pressing the
-    // restored one closes it, and pressing again opens a fresh one.
-    await user.click(bandTool("Terminal"));
+    // restored one minimises it, so it is closed from the button's menu, and
+    // pressing again opens a fresh one.
+    await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Close Terminal" }));
     await user.click(bandTool("Terminal"));
     await user.click(second);
     expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
@@ -6153,6 +6155,53 @@ describe("App", () => {
     await new Promise((done) => setTimeout(done, 50));
     expect(terminal).toHaveFocus();
     expect(terminal).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("minimises a pressed Browser button to a card on the shelf and restores it on the next press", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(
+      await within(await screen.findByRole("toolbar", { name: "Tools" })).findByRole("button", {
+        name: "Files",
+      }),
+    );
+    await user.click(bandTool("Browser"));
+    await screen.findByRole("region", { name: "Browser" });
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(bandTool("Browser"));
+    const shelf = await screen.findByRole("group", { name: "Minimised tools" });
+    expect(within(shelf).getByRole("region", { name: "Minimised Browser" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Browser" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "false");
+    expect(bandTool("Browser")).toHaveAttribute("aria-description", "Minimised to a card");
+
+    await user.click(bandTool("Browser"));
+    await screen.findByRole("region", { name: "Browser" });
+    expect(screen.queryByRole("group", { name: "Minimised tools" })).toBeNull();
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "true");
+    const [filesTile, browserTile] = [
+      screen.getByRole("region", { name: "Files" }),
+      screen.getByRole("region", { name: "Browser" }),
+    ];
+    expect(
+      filesTile.compareDocumentPosition(browserTile) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("arranges and closes a tool from its button's context menu", async () => {

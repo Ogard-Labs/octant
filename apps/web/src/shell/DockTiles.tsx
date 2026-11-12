@@ -56,6 +56,8 @@ export interface DockTileContent {
   /** The tool's own panel: its class names and inset marker. */
   readonly bodyClassName: string;
   readonly inset: boolean;
+  /** The tool can stand as a card on the shelf, so its caption offers to minimise it. */
+  readonly minimisable?: boolean;
 }
 
 export interface DockTilesProps {
@@ -68,7 +70,8 @@ export interface DockTilesProps {
   readonly renderTile: (tabId: string) => DockTileContent | undefined;
   readonly onFocusTile: (tabId: string) => void;
   readonly onHideTile: (tabId: string) => void;
-  /** Closes the tool, as its strip tab's close does. */
+  readonly onMinimiseTile?: (tabId: string) => void;
+  /** Closes the tool, as its button's Close does. */
   readonly onCloseTile: (tabId: string) => void;
   readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
   readonly onShowTileAlone: (tabId: string) => void;
@@ -329,6 +332,9 @@ export function DockTiles(props: DockTilesProps) {
               }}
               onClose={() => props.onCloseTile(tabId)}
               onHide={() => props.onHideTile(tabId)}
+              {...(props.onMinimiseTile === undefined || content.minimisable !== true
+                ? {}
+                : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
               onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
@@ -405,6 +411,7 @@ function Tile(props: {
   readonly onClose: () => void;
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
+  readonly onMinimise?: () => void;
   readonly onMove: (direction: DockTileMove) => void;
   readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
@@ -499,6 +506,14 @@ function Tile(props: {
                   >
                     <span>Hide from view</span>
                   </OctantMenuItem>
+                  {props.onMinimise === undefined ? null : (
+                    <OctantMenuItem
+                      className="workspace-disclosure__action window-no-drag"
+                      onClick={props.onMinimise}
+                    >
+                      <span>Minimise to card</span>
+                    </OctantMenuItem>
+                  )}
                 </OctantMenuPopup>
               </OctantMenuPositioner>
             </OctantMenuPortal>

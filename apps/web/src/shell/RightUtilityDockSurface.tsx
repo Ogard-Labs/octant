@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { DockShelf, type DockShelfEntry } from "./DockShelf";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockToolButtons, type DockToolButtonsProps } from "./DockToolButtons";
 import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
@@ -17,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import {
+  MINIMISABLE_DOCK_SURFACES,
   moveUtilityTile,
   type DockTileLayout,
   type DockTileMove,
@@ -43,7 +45,15 @@ export interface DockTileControls {
   readonly narrow: boolean;
   /** Each tile answers for its own tool: the dock's one resolution is the focused tile's. */
   readonly resolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
+  /**
+   * The open tabs whose tool stands as a card on the shelf instead of in a
+   * tile. The modal presentation draws no shelf, so there the tool is shown
+   * as any other.
+   */
+  readonly minimised?: ReadonlyArray<string>;
   readonly onHideTile: (tabId: string) => void;
+  /** Takes a Browser or Terminal tool out of view as a card on the shelf. */
+  readonly onMinimise: (tabId: string) => void;
   readonly onMove: (tabId: string, direction: DockTileMove) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -51,6 +61,12 @@ export interface DockTileControls {
   readonly onShowAlone: (tabId: string) => void;
   readonly onShowBelow: (tabId: string) => void;
   readonly onShowBeside: (tabId: string) => void;
+}
+
+/** What a card does with the dock around it, so the keyboard never falls to the page. */
+export interface DockCardControls {
+  readonly onHide: () => void;
+  readonly onShow: () => void;
 }
 
 export interface RightUtilityDockSurfaceProps {
@@ -77,6 +93,20 @@ export interface RightUtilityDockSurfaceProps {
   readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  /**
+   * The cards at the foot of the dock, and how each is drawn. The surface owns
+   * where the shelf stands and when it is absent; the cards' own reads belong
+   * to whoever renders them.
+   */
+  readonly shelf?: {
+    readonly entries: ReadonlyArray<DockShelfEntry>;
+    /** The surface hands each card controls that keep the keyboard's place. */
+    readonly renderCard: (entry: DockShelfEntry, controls: DockCardControls) => ReactNode;
+    /** Brings the card's tool back. */
+    readonly onShow: (tabId: string) => void;
+    /** Takes the card away, leaving the tool open. */
+    readonly onHide: (tabId: string) => void;
+  };
   readonly sideChat?: ReactNode;
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
@@ -114,15 +144,44 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // modal, whatever the focused tool's own state: each tile resolves itself, so
   // one unavailable tool never takes the others off screen.
   const tiled = tiles !== undefined && layout !== undefined && !tiles.narrow;
+  // The shelf is the modal presentation's one omission: there is no room, and
+  // the state is kept for the dock that has.
+  const shelfDrawn = tiles !== undefined && !tiles.narrow;
+  const shelfEntries = shelfDrawn ? (props.shelf?.entries ?? []) : [];
   const draggedTool = useDraggedDockTool();
   const [dropZone, setDropZone] = useState<"beside" | "below" | "replace">();
   const root = useRef<HTMLDivElement>(null);
   // Hiding a tile or closing a tool unmounts the control that held keyboard
   // focus; the tool's button in the title band takes it, so the keyboard keeps
   // its place.
-  const [refocus, setRefocus] = useState<{ readonly surface?: RightUtilityDockSurfaceId }>();
+  const [refocus, setRefocus] = useState<{
+    readonly surface?: RightUtilityDockSurfaceId;
+    /** A tool that became a card: its card's first control takes the focus. */
+    readonly card?: RightUtilityDockSurfaceId;
+  }>();
   useEffect(() => {
     if (refocus === undefined) return;
+    if (refocus.card !== undefined) {
+      // The card mounts a beat after the tool leaves its tile. Focus goes to it
+      // only while it is still free: on the page body, or in the menu that
+      // closes; anywhere the person has since put it, it stays.
+      const wantedCard = refocus.card;
+      const takeCard = () => {
+        const card = root.current?.querySelector<HTMLElement>(
+          `[data-dock-card="${wantedCard}"] .dock-mini-card__action`,
+        );
+        const current = document.activeElement;
+        const free =
+          current === null ||
+          current === document.body ||
+          current.closest('[role="menu"]') !== null;
+        if (card?.isConnected === true && free && current !== card) card.focus();
+      };
+      const cardTimers = [0, 60, 250].map((delay) => setTimeout(takeCard, delay));
+      return () => {
+        for (const timer of cardTimers) clearTimeout(timer);
+      };
+    }
     const buttonOf = (surface: RightUtilityDockSurfaceId | undefined) =>
       surface === undefined
         ? undefined
@@ -179,6 +238,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     tabs: props.tabs.map((tab) => ({ id: tab.id, surface: dockTabSurface(tab).id })),
     ...(activeTabId === undefined ? {} : { active: activeTabId }),
     ...(layout === undefined ? {} : { layout }),
+    ...(tiles?.minimised === undefined || tiles.minimised.length === 0
+      ? {}
+      : { minimised: [...tiles.minimised] }),
   };
   function zoneAt(event: DragEvent<HTMLElement>): "beside" | "below" | "replace" {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -293,6 +355,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         down: movable("down"),
       },
       bodyClassName: `right-utility-dock__tool${pages ? " right-utility-dock__tool--pages" : ""}`,
+      minimisable: shelfDrawn && MINIMISABLE_DOCK_SURFACES.has(tool.id),
       inset: tool.id === "plan" || tool.id === "delivery" || tool.id === "agents",
       children:
         available.kind === "surface" ? (
@@ -347,7 +410,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           )}
         </div>
       </header>
-      <div className="dock-body right-utility-dock__content">
+      <div
+        className="dock-body right-utility-dock__content"
+        data-shelf={shelfEntries.length === 0 ? undefined : "true"}
+      >
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
           quickToolsProjectId === undefined ? (
             <ShellState state="neutral" title="Tools open once the task starts" />
@@ -380,6 +446,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               if (surface !== undefined) setRefocus({ surface });
               tiles?.onHideTile(tabId);
             }}
+            onMinimiseTile={(tabId) => {
+              const surface = surfaceOfTab(tabId);
+              if (surface !== undefined) setRefocus({ card: surface });
+              tiles?.onMinimise(tabId);
+            }}
             onMoveTile={(tabId, direction) => tiles?.onMove(tabId, direction)}
             onResizeColumn={(index, shares) => tiles?.onResizeColumn(index, shares)}
             onResizeColumns={(shares) => tiles?.onResizeColumns(shares)}
@@ -409,6 +480,26 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             )}
           </div>
         ) : null}
+        {shelfEntries.length === 0 || props.shelf === undefined ? null : (
+          <DockShelf
+            entries={shelfEntries}
+            renderCard={(entry) =>
+              props.shelf?.renderCard(entry, {
+                // The card unmounts as the tool is restored; the tool's button
+                // in the row takes the focus the card held.
+                onShow: () => {
+                  setRefocus({ surface: entry.surface });
+                  props.shelf?.onShow(entry.tabId);
+                },
+                // A card that goes away hands the keyboard to the tool's button.
+                onHide: () => {
+                  setRefocus({ surface: entry.surface });
+                  props.shelf?.onHide(entry.tabId);
+                },
+              })
+            }
+          />
+        )}
       </div>
     </div>
   );

@@ -9,6 +9,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadActivityEnvironment } from "./ThreadActivityEnvironment";
 import { within } from "@testing-library/react";
 import { ThreadActivityPictureInPicture } from "./ThreadActivityPictureInPicture";
+import {
+  agentBrowserCardContext,
+  dismissLiveBrowserCard,
+  resetBrowserCardActivityForTests,
+} from "./browserCardActivity";
+
+afterEach(resetBrowserCardActivityForTests);
 
 const threadId = "20000000-0000-4000-8000-000000000001";
 const otherThreadId = "20000000-0000-4000-8000-000000000002";
@@ -192,7 +199,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     expect(onOpenBrowser).toHaveBeenCalledWith({ sessionIds: [contextId] });
   });
@@ -214,7 +221,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     await waitFor(() =>
       expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(2),
@@ -240,12 +247,12 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     const { unmount } = render(ui);
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     unmount();
 
     render(ui);
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
     expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [contextId] });
   });
@@ -285,7 +292,7 @@ describe("ThreadActivityPictureInPicture", () => {
       first.resolve(browserSnapshot());
       await first.promise;
     });
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
 
     await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -293,16 +300,14 @@ describe("ThreadActivityPictureInPicture", () => {
       idle.resolve(ready);
       await idle.promise;
     });
-    await waitFor(() =>
-      expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeUndefined());
 
     await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(3));
     await act(async () => {
       later.resolve(nextSession);
       await later.promise;
     });
-    expect(await screen.findByRole("button", { name: /Open Browser/ })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeDefined());
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
     expect(onOpenBrowser).toHaveBeenNthCalledWith(1, { sessionIds: [contextId] });
     expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [nextContextId] });
@@ -348,15 +353,15 @@ describe("ThreadActivityPictureInPicture", () => {
     expect(onOpenSecond).toHaveBeenCalledOnce();
   });
 
-  it("hides the Browser preview for a session and keeps it hidden after the pane remounts", async () => {
-    const user = userEvent.setup();
+  it("tells the dock about a live Browser session and whether the Browser is in sight, and asks the host for no picture", async () => {
     const hiddenSession = "33000000-0000-4000-8000-000000000009";
     const browser = {
       inspectThread: vi.fn(async () => browserSnapshot(threadId, hiddenSession)),
     } as unknown as BrowserAutomationClient;
-    const ui = (
+    const ui = (visible: boolean) => (
       <ThreadActivityPictureInPicture
         browserClient={browser}
+        browserVisible={visible}
         pollIntervalMs={60_000}
         threadId={threadId as never}
       >
@@ -364,24 +369,25 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>
     );
 
-    const { unmount } = render(ui);
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    expect(preview.querySelector("img")).toHaveAttribute("src", "data:image/jpeg;base64,AQID");
-    expect(browser.inspectThread).toHaveBeenCalledWith({ threadId }, expect.any(AbortSignal));
-
-    await user.click(screen.getByRole("button", { name: "Hide Browser preview" }));
-    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
-    unmount();
-
-    render(ui);
-    // Once the session is known to be one the person hid, no picture is asked for.
-    await waitFor(() =>
-      expect(browser.inspectThread).toHaveBeenLastCalledWith(
-        { threadId, freshPicture: false },
-        expect.any(AbortSignal),
-      ),
+    const { rerender, unmount } = render(ui(false));
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBe(hiddenSession));
+    expect(browser.inspectThread).toHaveBeenCalledWith(
+      { threadId, freshPicture: false },
+      expect.any(AbortSignal),
     );
     expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+
+    rerender(ui(true));
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeUndefined());
+    rerender(ui(false));
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBe(hiddenSession));
+
+    // A card the person closed stays closed after the pane remounts.
+    dismissLiveBrowserCard(threadId);
+    unmount();
+    render(ui(false));
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(agentBrowserCardContext(threadId)).toBeUndefined();
   });
 
   it("filters Computer Use to the exact thread and keeps approval and stop visible", async () => {
@@ -538,16 +544,12 @@ describe("ThreadActivityPictureInPicture", () => {
     expect(computerUse.decide).not.toHaveBeenCalled();
   });
 
-  it("fails closed for another thread and never renders stale Browser pixels", async () => {
-    const stale = {
-      ...browserSnapshot(),
-      observation: { ...browserSnapshot().observation!, stale: true },
-    };
+  it("fails closed for another thread's answer and reports nothing for it", async () => {
     const browser = {
       inspectThread: vi
         .fn()
-        .mockResolvedValueOnce({ ...stale, threadId: otherThreadId })
-        .mockResolvedValue(stale),
+        .mockResolvedValueOnce({ ...browserSnapshot(), threadId: otherThreadId })
+        .mockResolvedValue(browserSnapshot()),
     } as unknown as BrowserAutomationClient;
     const { rerender } = render(
       <ThreadActivityPictureInPicture
@@ -560,7 +562,8 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+    expect(agentBrowserCardContext(threadId)).toBeUndefined();
+    expect(agentBrowserCardContext(otherThreadId)).toBeUndefined();
 
     rerender(
       <ThreadActivityPictureInPicture
@@ -571,12 +574,10 @@ describe("ThreadActivityPictureInPicture", () => {
         <div>Conversation</div>
       </ThreadActivityPictureInPicture>,
     );
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    expect(preview.querySelector("img")).toBeNull();
-    expect(preview.querySelector(".skeleton")).not.toBeNull();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBe(contextId));
   });
 
-  it("removes Browser pixels when a later authority poll fails", async () => {
+  it("withdraws the live session when a later authority poll fails", async () => {
     const failedPoll = deferred<BrowserAutomationSnapshot>();
     const browser = {
       inspectThread: vi
@@ -596,15 +597,13 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBe(contextId));
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(2));
     failedPoll.reject(new Error("host disconnected"));
-    await waitFor(() =>
-      expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeUndefined());
   });
 
-  it("never carries a preview across a thread authority change", async () => {
+  it("never carries a session across a thread authority change", async () => {
     const nextThreadPoll = deferred<BrowserAutomationSnapshot>();
     const browser = {
       inspectThread: vi
@@ -622,7 +621,7 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBe(contextId));
     rerender(
       <ThreadActivityPictureInPicture
         browserClient={browser}
@@ -633,11 +632,12 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
+    expect(agentBrowserCardContext(otherThreadId)).toBeUndefined();
+    await waitFor(() => expect(agentBrowserCardContext(threadId)).toBeUndefined());
   });
 });
 
-describe("Browser preview", () => {
+describe("Browser activity", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     try {
@@ -669,7 +669,7 @@ describe("Browser preview", () => {
     } as unknown as BrowserAutomationClient;
   }
 
-  it("stays out of the way while the Browser is on screen and asks for no picture", async () => {
+  it("asks the host for no picture, whether or not the Browser is on screen", async () => {
     const browser = liveBrowser("34000000-0000-4000-8000-000000000001");
     renderPreview(browser, { browserVisible: true });
 
@@ -708,183 +708,6 @@ describe("Browser preview", () => {
 
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(3));
     expect(onShowBrowser).not.toHaveBeenCalled();
-  });
-
-  it("appears when the Browser is closed and a session is live, then opens the Browser on click", async () => {
-    const user = userEvent.setup();
-    const onShowBrowser = vi.fn();
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000002");
-    renderPreview(browser, { onShowBrowser });
-
-    const open = await screen.findByRole("button", { name: "Open Browser: Example" });
-    await user.click(open);
-    expect(onShowBrowser).toHaveBeenCalledOnce();
-  });
-
-  it("goes away as soon as the Browser becomes visible and asks for a picture again when it closes", async () => {
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000003");
-    const ui = (visible: boolean) => (
-      <ThreadActivityPictureInPicture
-        browserClient={browser}
-        browserVisible={visible}
-        pollIntervalMs={60_000}
-        threadId={threadId as never}
-      >
-        <div>Conversation</div>
-      </ThreadActivityPictureInPicture>
-    );
-    const { rerender } = render(ui(false));
-    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
-
-    rerender(ui(true));
-    expect(screen.queryByRole("group", { name: "Browser preview" })).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(browser.inspectThread).toHaveBeenLastCalledWith(
-        { threadId, freshPicture: false },
-        expect.any(AbortSignal),
-      ),
-    );
-
-    rerender(ui(false));
-    expect(await screen.findByRole("group", { name: "Browser preview" })).toBeVisible();
-    await waitFor(() =>
-      expect(browser.inspectThread).toHaveBeenLastCalledWith({ threadId }, expect.any(AbortSignal)),
-    );
-  });
-
-  it("holds a neutral skeleton, with no status words, until the first picture arrives", async () => {
-    const waiting = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000004");
-    const { screenshotDataUrl: _picture, ...bare } = waiting.observation!;
-    const browser = {
-      inspectThread: vi.fn(async () => ({ ...waiting, observation: bare })),
-    } as unknown as BrowserAutomationClient;
-    renderPreview(browser);
-
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    expect(preview.querySelector(".skeleton")).not.toBeNull();
-    expect(preview.querySelector("img")).toBeNull();
-    expect(screen.queryByText(/waiting|snapshot|stale/i)).not.toBeInTheDocument();
-  });
-
-  it("shows the active page and counts the pages the session has open", async () => {
-    const first = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000005");
-    const other = browserSnapshot(threadId, "34000000-0000-4000-8000-000000000006");
-    const browser = {
-      inspectThread: vi.fn(async () => ({
-        ...first,
-        contexts: [
-          { context: first.context!, observation: first.observation! },
-          { context: other.context!, observation: other.observation! },
-        ],
-      })),
-    } as unknown as BrowserAutomationClient;
-    renderPreview(browser);
-
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    expect(preview.querySelectorAll("img")).toHaveLength(1);
-    expect(within(preview).getByText("2")).toBeVisible();
-  });
-
-  it("asks for pictures less often while the page does not change", async () => {
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000007");
-    renderPreview(browser, { pollIntervalMs: 20 });
-
-    await screen.findByRole("group", { name: "Browser preview" });
-    await new Promise((done) => setTimeout(done, 400));
-    // Without a backoff a 20 ms cadence would read about twenty times.
-    expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeLessThan(10);
-    expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("takes no picture while the window is hidden", async () => {
-    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000008");
-    renderPreview(browser, { pollIntervalMs: 10 });
-
-    await new Promise((done) => setTimeout(done, 80));
-    expect(browser.inspectThread).not.toHaveBeenCalled();
-
-    hidden.mockReturnValue("visible");
-    document.dispatchEvent(new Event("visibilitychange"));
-    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
-  });
-
-  it("remembers the corner it was moved to, with the arrow keys as the keyboard route", async () => {
-    const user = userEvent.setup();
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000010");
-    const { unmount } = renderPreview(browser);
-
-    const open = await screen.findByRole("button", { name: /Open Browser/ });
-    expect(screen.getByRole("group", { name: "Browser preview" })).toHaveAttribute(
-      "data-corner",
-      "top-right",
-    );
-    open.focus();
-    await user.keyboard("{ArrowDown}{ArrowLeft}");
-    expect(screen.getByRole("group", { name: "Browser preview" })).toHaveAttribute(
-      "data-corner",
-      "bottom-left",
-    );
-    unmount();
-
-    renderPreview(browser);
-    expect(await screen.findByRole("group", { name: "Browser preview" })).toHaveAttribute(
-      "data-corner",
-      "bottom-left",
-    );
-  });
-
-  it("settles into the nearest corner after a drag and does not open the Browser", async () => {
-    const onShowBrowser = vi.fn();
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000011");
-    renderPreview(browser, { onShowBrowser });
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    const open = screen.getByRole("button", { name: /Open Browser/ });
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: Element) {
-        // The frame is 800 by 600; the dragged preview ends low and to the left.
-        return (
-          this === preview
-            ? { left: 20, top: 400, width: 264, height: 165, right: 284, bottom: 565 }
-            : { left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }
-        ) as DOMRect;
-      },
-    );
-
-    fireEvent.pointerDown(open, { button: 0, clientX: 600, clientY: 40, pointerId: 1 });
-    fireEvent.pointerMove(open, { clientX: 100, clientY: 400, pointerId: 1 });
-    fireEvent.pointerUp(open, { clientX: 100, clientY: 400, pointerId: 1 });
-    fireEvent.click(open);
-
-    expect(preview).toHaveAttribute("data-corner", "bottom-left");
-    expect(window.localStorage.getItem("octant.browserPreview.corner")).toBe("bottom-left");
-    expect(onShowBrowser).not.toHaveBeenCalled();
-  });
-
-  it("rests a bottom corner above the composer instead of over it", async () => {
-    const browser = liveBrowser("34000000-0000-4000-8000-000000000012");
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: Element) {
-        return (
-          this.classList.contains("thread-composer")
-            ? { left: 0, top: 480, width: 800, height: 120, right: 800, bottom: 600 }
-            : { left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 }
-        ) as DOMRect;
-      },
-    );
-    render(
-      <ThreadActivityPictureInPicture
-        browserClient={browser}
-        pollIntervalMs={60_000}
-        threadId={threadId as never}
-      >
-        <div className="thread-composer">Composer</div>
-      </ThreadActivityPictureInPicture>,
-    );
-
-    const preview = await screen.findByRole("group", { name: "Browser preview" });
-    // 600 - 480 of composer, plus the clearance kept above it.
-    expect(preview.style.getPropertyValue("--browser-pip-bottom")).toBe("132px");
   });
 });
 

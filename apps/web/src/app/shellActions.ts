@@ -224,8 +224,14 @@ export type ShellActions = {
   readonly selectChatThread: (threadId: string) => void;
   readonly selectCodeThread: (threadId: string) => void;
   readonly selectDockTab: (tabId: string) => void;
-  /** Takes a tile out of view; the tool stays open in the strip. */
+  /** Takes a tile out of view; the tool stays open, its button in the row. */
   readonly hideDockTile: (tabId: string) => void;
+  /** Takes a Browser or Terminal tool out of its tile as a small live card at the foot of the dock. */
+  readonly minimiseDockTool: (tabId: string) => void;
+  /** Brings a minimised tool back from its card, to the place it was minimised from while that place exists. */
+  readonly restoreDockTool: (tabId: string) => void;
+  /** Takes a minimised tool's card away; the tool stays open, its button in the row. */
+  readonly hideDockCard: (tabId: string) => void;
   readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
