@@ -15,7 +15,8 @@ import { CanvasThreadReferenceCard as CanvasReferenceRow } from "./CanvasThreadR
 import { CanvasView } from "./CanvasView";
 import { canvasDigest } from "./canvasDigest";
 import { useCanvasDefinition } from "./useCanvasDefinition";
-import { designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { designDrawnInHere, designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
 const EXPANDED_KEY = "octant.canvas.expanded.v1";
@@ -137,6 +138,18 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
   const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
   // A prototype in the thread waits for the person to press Run.
   const loadedVersionId = loaded.kind === "ready" ? String(loaded.versionId) : undefined;
+  // The switch is set in the sidebar; a prototype here still says when its
+  // Canvas's network is on, because the host serves this page the same way.
+  const network = useCanvasNetworkAccess({
+    client,
+    canvasId: card.canvasId,
+    offered:
+      designDrawnInHere() === "frame" &&
+      loaded.kind === "ready" &&
+      loaded.definition.blocks.some(
+        (block) => block.kind === "design" && block.runsScript === true,
+      ),
+  });
   const designRunRuntime = useMemo(
     () =>
       loadedVersionId === undefined
@@ -145,8 +158,9 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
             canvasId: card.canvasId,
             versionId: loadedVersionId,
             runsOnOpen: false,
+            networkOn: network.allowed === true,
           }),
-    [card.canvasId, client, loadedVersionId],
+    [card.canvasId, client, loadedVersionId, network.allowed],
   );
   const [clipped, setClipped] = useState(false);
   const [wheelInCanvas, setWheelInCanvas] = useState(false);

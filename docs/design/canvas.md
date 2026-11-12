@@ -1655,24 +1655,30 @@ destination rule below.
 **Turning it on shares the Canvas with the internet.** A page with the switch
 on can send anything it holds (its own markup, the images the host wrote into
 it, and whatever the person types into it) to any public address. That is the
-accepted consequence of the switch, and the confirmation says so. What stays
-protected is everything outside the page: Octant's API and renderer, the
-window credential, the person's files, loopback services, the local network,
-cloud metadata addresses, and this host's own listeners
+accepted consequence of the switch, and the dialog that holds the switch says
+so. What stays protected is everything outside the page: Octant's API and
+renderer, the window credential, the person's files, loopback services, the
+local network, cloud metadata addresses, and this host's own listeners
 ([threat model](../security/canvas-html-frames-threat-model.md), F16 to F19).
 
 **The switch.** `GET /api/canvas/network-access?canvasId=` reads it and `POST
 /api/canvas/network-access` sets it, under the window authorization `get` runs
-for that Canvas. Only a local window may set it: a paired device and an agent
-grant are refused by the route and the remote gateway forwards neither path,
-the agent's Canvas tool has no action for it, and nothing a Canvas holds can
-ask for it, because the bridge grants nothing and a page holds no credential.
-A change is journaled as `canvas.network-access-changed@1` with the local
-person as its actor, on one host-wide aggregate that is replayed at start, so
-the choice survives a restart. Turning it on asks once, in the window, with
-the sentence above. While it is on, the Canvas header shows **Network on**
-beside the switch, and each running prototype of that Canvas shows the same
-label in its host chrome.
+for that Canvas. Only a local window may set it: the route refuses any other
+principal (a paired device, an agent grant), the remote product classifier
+gives a paired device neither path although one is a `GET`, the agent's Canvas
+tool has no operation for it, and nothing a Canvas holds can ask for it,
+because the bridge grants nothing and a page holds no credential. A change is
+journaled as `canvas.network-access-changed@1` with the local person as its
+actor, on an aggregate of the Canvas's own (`canvas-network-access`, keyed by
+the Canvas), so the choice survives a restart and is erased with the Canvas
+when its thread or Project is erased. In the sidebar the Canvas's More menu offers **Allow
+network…** on a Canvas that holds a prototype; it opens a dialog that states
+the consequence above in one sentence beside the switch, so the person reads
+what they are choosing where they choose it. While it is on, the Canvas header
+shows **Network on** (which opens the same dialog), and every prototype of
+that Canvas, in the sidebar and in the thread, says **Network on** in its own
+chrome, running or not. A page keeps the policy it was served with, so turning
+the switch on reaches a prototype when it is run again.
 
 **How a page reaches the proxy.** `design-run` marks a ticket as
 network-capable only when a local window asked for it and the Canvas's switch
@@ -1701,7 +1707,9 @@ attachment`, `Cache-Control: no-store`, and `Access-Control-Allow-Origin: *`.
 Of the fetched response it passes on the status, the content type, and the
 body; `Set-Cookie` and every other header are dropped. On every request it
 checks the Canvas's switch again, so a token outlives the switch for no
-request at all.
+request at all. A request a session carried to the route (one the remote
+gateway forwarded for a paired device) is refused whatever token it names: the
+proxy answers a frame on this machine.
 
 **The destination rule** (`canvasNetworkUrlRefusal` and
 `canvasNetworkAddressRefusal` in `packages/domain`). An address is fetched
@@ -1869,6 +1877,18 @@ keeps an import from adding an unmarked channel to an agent's context.
   outside-content record in `canvasOutsideContentMark.test.ts`; the paired
   device refusal in `apps/server/src/authenticatedProductRoutes.test.ts`; and
   the panel in `apps/web/src/canvas/CanvasCards.test.tsx`.
+
+- Allow network: the destination rule and each refused class in
+  `packages/domain/src/canvasNetworkPolicy.test.ts`; pinning, redirects,
+  headers, and bounds in `apps/server/src/canvas/canvasNetworkProxy.test.ts`;
+  the journaled switch and its tokens in `canvasNetworkAccessService.test.ts`;
+  the page policy and the host's fetch script in `canvasDesignPage.test.ts`;
+  the routes, revocation, and who may not set the switch or get a proxy in
+  `apps/server/src/canvasRoutes.test.ts` (`canvas network routes`) and
+  `authenticatedProductRoutes.test.ts`; the renderer in
+  `apps/web/src/canvas/CanvasNetworkPanel.test.tsx`, `CanvasWorkspaceTab.test.tsx`,
+  and `blocks/DesignBlock.test.tsx`; and a real browser's enforcement of the
+  page policy in `apps/server/src/canvas/canvasNetworkBrowser.smoke.ts`.
 
 ## Renderer loading
 

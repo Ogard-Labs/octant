@@ -854,6 +854,34 @@ describe("design block", () => {
 });
 
 describe("running prototype", () => {
+  it("says on a prototype that its Canvas's network is on, before and while it runs", async () => {
+    const { runtime } = runRuntime({ networkOn: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Checkout, Phone prototype" });
+    expect(within(region).getByText(/Network on/)).toBeVisible();
+    fireEvent.click(within(region).getByRole("button", { name: "Run" }));
+    await within(region).findByTitle("Checkout, running prototype");
+    expect(within(region).getByText(/Network on/)).toBeVisible();
+  });
+
+  it("says nothing about a network on a prototype whose Canvas has it off", () => {
+    const { runtime } = runRuntime();
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    expect(screen.queryByText(/Network on/)).toBeNull();
+  });
+
   it("starts in the thread only when the person presses Run, and says where it is not network-contained", async () => {
     const { start, runtime } = runRuntime({ contained: false });
     render(

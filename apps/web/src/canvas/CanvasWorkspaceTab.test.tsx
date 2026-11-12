@@ -1197,6 +1197,90 @@ describe("CanvasWorkspaceTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Revise" }));
     await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(2));
   });
+  describe("Allow network", () => {
+    const withPrototype = {
+      ...readyVersion,
+      version: {
+        ...readyVersion.version,
+        definition: {
+          ...readyVersion.version.definition,
+          blocks: [
+            {
+              blockId: "live" as never,
+              schemaVersion: 18 as const,
+              kind: "design" as const,
+              title: "Live board",
+              size: "document" as const,
+              runsScript: true as const,
+              frames: [{ frameId: "board" as never, title: "Board", html: "<p>Board</p>" }],
+            },
+          ],
+        },
+      },
+    };
+    const switchOf = (allowed: boolean) => ({
+      runDesign: vi.fn(async () => ({ kind: "refused" as const, reason: "Not run in this test." })),
+      networkAccess: vi.fn(async () => ({
+        kind: "canvas-network-access" as const,
+        canvasId: quarterlyCanvasId,
+        allowed,
+      })),
+      setNetworkAccess: vi.fn(async (command: { readonly allowed: boolean }) => ({
+        kind: "canvas-network-access" as const,
+        canvasId: quarterlyCanvasId,
+        allowed: command.allowed,
+      })),
+    });
+
+    it("offers the switch on a Canvas with a prototype and shows Network on while it holds", async () => {
+      const user = userEvent.setup();
+      const host = switchOf(false);
+      render(
+        <CanvasWorkspaceTab
+          client={createCanvasClient(withPrototype, undefined, host)}
+          tab={canvasTab}
+        />,
+      );
+      await screen.findByRole("region", { name: /Live board/ });
+      expect(screen.queryByRole("button", { name: "Network on" })).toBeNull();
+
+      await openCanvasTool("Allow network…");
+      await user.click(await screen.findByRole("switch", { name: "Allow network" }));
+      expect(host.setNetworkAccess).toHaveBeenCalledWith(
+        expect.objectContaining({ canvasId: quarterlyCanvasId, allowed: true }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("switch", { name: "Allow network" })).toBeChecked(),
+      );
+      await user.keyboard("{Escape}");
+      expect(await screen.findByRole("button", { name: "Network on" })).toBeVisible();
+      expect(screen.getByText(/Network on: this prototype can fetch/)).toBeVisible();
+    });
+
+    it("offers no switch on a Canvas with no prototype, or where the host has none", async () => {
+      const host = switchOf(true);
+      const { unmount } = render(
+        <CanvasWorkspaceTab
+          client={createCanvasClient(readyVersion, undefined, host)}
+          tab={canvasTab}
+        />,
+      );
+      await screen.findByRole("button", { name: /^Version history/ });
+      expect(host.networkAccess).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Network on" })).toBeNull();
+      unmount();
+
+      render(<CanvasWorkspaceTab client={createCanvasClient(withPrototype)} tab={canvasTab} />);
+      await screen.findByRole("region", { name: /Live board/ });
+      expect(screen.queryByRole("button", { name: "Network on" })).toBeNull();
+      const more = screen.queryByRole("button", { name: "More Canvas actions" });
+      if (more !== null) {
+        await userEvent.setup().click(more);
+        expect(screen.queryByRole("menuitem", { name: "Allow network…" })).toBeNull();
+      }
+    });
+  });
+
   it("sends this window's frame theme with an HTML export of a Canvas that holds a design, and with no other export", async () => {
     const offers = (formats: ReadonlyArray<string>) =>
       vi.fn(async () => ({

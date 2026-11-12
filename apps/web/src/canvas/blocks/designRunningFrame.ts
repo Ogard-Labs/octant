@@ -67,6 +67,12 @@ export interface DesignRunRuntime {
   readonly contained: boolean;
   readonly drawnIn: DesignDrawnIn;
   readonly runsOnOpen: boolean;
+  /**
+   * The person turned on this Canvas's "Allow network" switch, so a page run
+   * from here may fetch public addresses through the host. Each prototype
+   * says so in its own chrome while it is true.
+   */
+  readonly networkOn?: boolean;
 }
 
 export type DesignDrawnIn = "desktop-surface" | "frame";
@@ -89,7 +95,12 @@ export function designDrawnInHere(): DesignDrawnIn {
  */
 export function designRunRuntimeFor(
   client: Pick<CanvasClient, "runDesign"> | undefined,
-  input: { readonly canvasId: CanvasId; readonly versionId: string; readonly runsOnOpen: boolean },
+  input: {
+    readonly canvasId: CanvasId;
+    readonly versionId: string;
+    readonly runsOnOpen: boolean;
+    readonly networkOn?: boolean;
+  },
 ): DesignRunRuntime | undefined {
   if (client?.runDesign === undefined) return undefined;
   const drawnIn = designDrawnInHere();
@@ -106,6 +117,7 @@ export function designRunRuntimeFor(
     contained: drawnIn === "desktop-surface",
     drawnIn,
     runsOnOpen: input.runsOnOpen,
+    ...(input.networkOn === true ? { networkOn: true } : {}),
   };
 }
 

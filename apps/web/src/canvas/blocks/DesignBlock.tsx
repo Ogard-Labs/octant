@@ -883,6 +883,14 @@ function RunningDesignBlock({
           way to stop one, so a prototype there can still connect to another
           computer. The desktop app runs the page in a process with no network
           and no resolver, and the preview browser has no route out either. */}
+      {/* The person's own choice for this Canvas, said on every prototype it
+          covers for as long as it holds, running or not. */}
+      {runtime?.networkOn === true ? (
+        <p className="canvas-design__notice" role="note">
+          Network on: this prototype can fetch public addresses through this computer and send them
+          what this Canvas holds.
+        </p>
+      ) : null}
       {runtime === undefined ? null : contained ? (
         <p className="canvas-design__notice">A prototype runs with no network connection.</p>
       ) : (
