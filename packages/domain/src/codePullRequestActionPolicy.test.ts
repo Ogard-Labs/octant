@@ -139,19 +139,43 @@ describe("pull-request merge policy", () => {
     expect(pullRequestChangeNeedsPerActApproval("unwatch")).toBe(false);
   });
 
-  it("posts a comment unasked at Full access whatever the Project chose", () => {
+  it("posts a comment unasked at Full access whatever the Project chose or the thread has read", () => {
     for (const projectAllowsComments of [true, false]) {
-      expect(decidePullRequestComment({ fullAccess: true, projectAllowsComments })).toBe("post");
+      for (const readOutsideContent of [true, false]) {
+        expect(
+          decidePullRequestComment({ fullAccess: true, projectAllowsComments, readOutsideContent }),
+        ).toBe("post");
+      }
     }
   });
 
   it("asks for each comment below Full access until the Project's choice stands in for the ask", () => {
-    expect(decidePullRequestComment({ fullAccess: false, projectAllowsComments: false })).toBe(
-      "ask",
-    );
-    expect(decidePullRequestComment({ fullAccess: false, projectAllowsComments: true })).toBe(
-      "post-on-project-choice",
-    );
+    expect(
+      decidePullRequestComment({
+        fullAccess: false,
+        projectAllowsComments: false,
+        readOutsideContent: false,
+      }),
+    ).toBe("ask");
+    expect(
+      decidePullRequestComment({
+        fullAccess: false,
+        projectAllowsComments: true,
+        readOutsideContent: false,
+      }),
+    ).toBe("post-on-project-choice");
+  });
+
+  it("still asks below Full access on a thread that has read outside content, even where the Project lets agents comment", () => {
+    for (const projectAllowsComments of [true, false]) {
+      expect(
+        decidePullRequestComment({
+          fullAccess: false,
+          projectAllowsComments,
+          readOutsideContent: true,
+        }),
+      ).toBe("ask");
+    }
   });
 
   it("opens the default branch to an ordinary push when the Project allows it, never to a force", () => {

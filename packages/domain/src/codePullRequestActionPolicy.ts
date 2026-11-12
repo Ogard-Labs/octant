@@ -145,13 +145,21 @@ export type PullRequestCommentDecision = "post" | "post-on-project-choice" | "as
 /**
  * Whether an agent's comment or review reply, which posts under the person's
  * name, asks first. Full access never asks. Below it the Project's stored
- * choice stands in for the ask; without that choice each post asks, and the
- * approval shows the whole text. Plan is refused before this is reached.
+ * choice stands in for the ask only on a thread that has read no outside
+ * content: text from outside could otherwise have its words posted under the
+ * person's name on a choice made before it arrived. Without that choice, or
+ * once the thread is marked, each post asks, and the approval shows the whole
+ * text. Plan is refused before this is reached.
+ *
+ * `fullAccess` is the level the turn runs at, not the thread's stored level.
  */
 export function decidePullRequestComment(input: {
   readonly fullAccess: boolean;
   readonly projectAllowsComments: boolean;
+  readonly readOutsideContent: boolean;
 }): PullRequestCommentDecision {
   if (input.fullAccess) return "post";
-  return input.projectAllowsComments ? "post-on-project-choice" : "ask";
+  return input.projectAllowsComments && !input.readOutsideContent
+    ? "post-on-project-choice"
+    : "ask";
 }

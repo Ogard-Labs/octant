@@ -3570,6 +3570,7 @@ describe("the pull request as an agent tool", () => {
     answer: "approved" | "denied" = "approved",
     standingMerge?: () => "project" | "routine" | undefined,
     projectAllowsComments?: () => boolean,
+    threadReadOutsideContent?: () => boolean,
   ) {
     const request = vi.fn(async () =>
       answer === "approved"
@@ -3604,6 +3605,7 @@ describe("the pull request as an agent tool", () => {
       pullRequestApproval: { request },
       ...(standingMerge === undefined ? {} : { standingMerge }),
       ...(projectAllowsComments === undefined ? {} : { projectAllowsComments }),
+      ...(threadReadOutsideContent === undefined ? {} : { threadReadOutsideContent }),
     });
     return { tools, request, executeOperation };
   }
@@ -3759,6 +3761,7 @@ describe("the pull request as an agent tool", () => {
       "approved",
       undefined,
       () => true,
+      () => false,
     );
     const replied = await tools.execute({
       name: CODE_PULL_REQUEST_TOOL_NAME,
@@ -3781,6 +3784,54 @@ describe("the pull request as an agent tool", () => {
       inputJson: JSON.stringify({ operation: "update", title: "Renamed" }),
     });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("still asks before a comment below Full access once the thread has read outside content, though the Project lets agents comment", async () => {
+    // An unknown mark is read as marked: the choice stands in for the ask
+    // only on a thread the host knows has read nothing from outside.
+    for (const threadReadOutsideContent of [() => true, undefined]) {
+      const { tools, request, executeOperation } = pullRequestTools(
+        { executionPolicy: "approval-gated" },
+        "approved",
+        undefined,
+        () => true,
+        threadReadOutsideContent,
+      );
+      await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+      });
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        windowId,
+        expect.objectContaining({
+          kind: "comment-pull-request",
+          authorization: { kind: "approved", approvalId },
+        }),
+      );
+    }
+  });
+
+  it("comments unasked at Full access on a thread that has read outside content", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "full-access" },
+      "approved",
+      undefined,
+      () => true,
+      () => true,
+    );
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        authorization: { kind: "full-access" },
+      }),
+    );
   });
 
   it("merges without asking when a stored choice allows it, which lets no comment through below Full access", async () => {

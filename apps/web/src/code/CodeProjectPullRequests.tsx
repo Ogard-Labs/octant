@@ -782,34 +782,23 @@ function ProjectSettingsItems(props: {
           Agents may merge
         </OctantMenuCheckboxItem>
       )}
+      {/* `defaultBranchPush` has no item: no agent tool pushes to the default
+          branch yet, so a switch here would change nothing an agent does. The
+          server keeps the setting and its rule for when one exists. */}
       {props.agentForgeChoices === undefined ? null : (
-        <>
-          <OctantMenuCheckboxItem
-            aria-label={`Let agents comment on ${project.projectName} pull requests`}
-            checked={props.agentForgeChoices.comments.enabledFor(project.projectId)}
-            // An authority closes on one activation, as Agents may merge does.
-            closeOnClick
-            disabled={props.busy}
-            label="Agents may comment on pull requests"
-            onCheckedChange={(enabled) =>
-              void props.agentForgeChoices?.comments.setEnabled(project.projectId, enabled)
-            }
-          >
-            Agents may comment on pull requests
-          </OctantMenuCheckboxItem>
-          <OctantMenuCheckboxItem
-            aria-label={`Let agents push to the default branch of ${project.projectName}`}
-            checked={props.agentForgeChoices.defaultBranchPush.enabledFor(project.projectId)}
-            closeOnClick
-            disabled={props.busy}
-            label="Agents may push to the default branch"
-            onCheckedChange={(enabled) =>
-              void props.agentForgeChoices?.defaultBranchPush.setEnabled(project.projectId, enabled)
-            }
-          >
-            Agents may push to the default branch
-          </OctantMenuCheckboxItem>
-        </>
+        <OctantMenuCheckboxItem
+          aria-label={`Let agents comment on ${project.projectName} pull requests`}
+          checked={props.agentForgeChoices.comments.enabledFor(project.projectId)}
+          // An authority closes on one activation, as Agents may merge does.
+          closeOnClick
+          disabled={props.busy}
+          label="Agents may comment on pull requests"
+          onCheckedChange={(enabled) =>
+            void props.agentForgeChoices?.comments.setEnabled(project.projectId, enabled)
+          }
+        >
+          Agents may comment on pull requests
+        </OctantMenuCheckboxItem>
       )}
       <OctantMenuItem
         aria-label={`Refresh ${project.projectName}`}

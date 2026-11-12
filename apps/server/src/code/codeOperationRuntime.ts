@@ -1307,6 +1307,12 @@ export function createCodeOperationRuntime(
     ...(options.projectForgeChoices === undefined
       ? {}
       : { projectForgeChoices: options.projectForgeChoices }),
+    ...(options.readThreadExternalContentTaint === undefined
+      ? {}
+      : {
+          threadReadOutsideContent: (thread: CodeThread) =>
+            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false,
+        }),
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordReviewContent: options.recordExternalContentIngestion }),
@@ -4898,6 +4904,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          threadReadOutsideContent: () =>
+            this.#options.readThreadExternalContentTaint?.(active.thread.id)
+              .externalContentIngested !== false,
           ...(pullRequestWatch === undefined
             ? {}
             : {

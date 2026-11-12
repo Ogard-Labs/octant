@@ -1608,9 +1608,10 @@ number and linked threads.
 With grouping on, each repository has a slim header: its name, the count and a
 "..." menu. That menu holds what the old Project header held: **Auto-refresh**
 and **Agents may merge**, with the same labels and the same setters as before,
-then **Agents may comment on pull requests** and **Agents may push to the
-default branch**, which are off until chosen, close the menu on one activation
-as Agents may merge does, and show no chip, and Refresh. With grouping off those switches are in the page's **Repository
+then **Agents may comment on pull requests**, which is off until chosen, closes
+the menu on one activation as Agents may merge does, and shows no chip, and
+Refresh. **Agents may push to the default branch** is not in the menu until an
+agent push path to the default branch exists (maintainer decision, 2026-11-12). With grouping off those switches are in the page's **Repository
 settings** menu, one group per connected repository, because they act on a
 Project and must stay one step from the list; they are never in Filter, which
 only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
