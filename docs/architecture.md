@@ -11311,9 +11311,12 @@ that is not yet effective for the thread is refused and never reaches the model.
   unknown-session HTTP 404, failed network request or unreadable response
   retires that transport and removes its tools immediately. The existing
   transport-close path records the component unavailable without guessing a
-  vendor-specific cause. A normal JSON-RPC application refusal keeps the
-  healthy session. Cleanup is best effort, bounded and idempotent; a late call
-  from the old transport cannot evict a replacement session.
+  vendor-specific cause. Every Streamable HTTP POST and session cleanup DELETE
+  goes only to the configured address and refuses redirects, so a server cannot
+  forward a request body, configured header, or session id to another address.
+  A normal JSON-RPC application refusal keeps the healthy session. Cleanup is
+  best effort, bounded and idempotent; a late call from the old transport cannot
+  evict a replacement session.
 
   The failed call is never replayed: a response can disappear after the server
   committed a write, so its outcome may be unknown. Only a later authoritative
