@@ -600,7 +600,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Canvas documents, desig
 Frames run nothing unless a design declares script, and a running design never runs where it could reach the network unless the person turned on that Canvas's "Allow network" switch.
 
 - A static frame never gets script permission, and no frame has both script and same-origin permission.
-- On desktop a running design runs in a prototype host process with no network route and no resolver; if that closure cannot be verified, the prototype does not run. A design or prototype has a per-Canvas "Allow network" switch that only the person sets, off by default (maintainer request, 2026-11-12). Not built yet: today no such switch exists and a running design never has a network route.
+- On desktop a running design runs in a prototype host process with no network route and no resolver; if that closure cannot be verified, the prototype does not run. A Canvas has an "Allow network" switch that only the person sets from a local window, off by default and journaled (maintainer decision, 2026-11-12). While it is on, a running page reaches the network only through the host's filtering proxy, which refuses loopback, private, link-local and overlay addresses and the host's own listeners, pins the resolved address, re-checks redirects, sends no credential and is bounded per Canvas; turning it off revokes the page's token at once, and no share, export or public link carries it. Built for a browser on the host's machine. Not built yet: the desktop prototype host has no route to the proxy, so there the switch is not offered and a prototype has no connection.
 - A remote browser cannot network-contain a running frame; that exposure is accepted and the Run control says so.
 - Import HTML is a create like any other, bounded to 256 KiB; nothing it references is fetched, and a paired device may not import.
 - A share carries a design only with the sharer's acknowledgement. A public link is off by default and published only from a local approval card, never by an agent.
@@ -2618,7 +2618,7 @@ A design is the author's own markup in sandboxed frames. A design that runs scri
 
 - A static frame never gets `allow-scripts`, and no frame has both `allow-scripts` and `allow-same-origin`.
 - Design markup refuses remote images, stylesheets and fonts, embedded documents and any link that is not a fragment.
-- A running design runs only on Run, with the network blocked on desktop unless the person turned on that Canvas's "Allow network" switch, which only the person sets and is off by default (maintainer request, 2026-11-12); not built yet: today the network is always blocked on desktop. In a browser the prototype is not network-contained and says so.
+- A running design runs only on Run, with the network blocked on desktop unless the person turned on that Canvas's "Allow network" switch, which only the person sets and is off by default (maintainer decision, 2026-11-12); not built yet on desktop: there the network is always blocked. In a browser on the host's machine the switch is built: a page then fetches public addresses through the host's filtering proxy and nothing else ([Canvas: Allow network](canvas.md#allow-network)). In a browser the prototype is not network-contained and says so.
 - Sharing design markup needs the person's acknowledgement that it leaves as written.
 
 Status: Partly built. Since: —. Detail: [Canvas: Design block](canvas.md#design-block).

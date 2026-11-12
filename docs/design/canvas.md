@@ -1513,12 +1513,11 @@ renderer named) and serves the page with
 script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
 font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
 form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
-`Cache-Control: no-store`; a refusal carries the same headers. A design or
-prototype has a per-Canvas **Allow network** switch, off by default, that only
-the person sets, never an agent, a routine, or a paired device; while it is
-on, that Canvas's running page is served with a policy that lets it make
-network requests, and nothing else about its sandbox changes (maintainer
-request, 2026-11-12). Not built yet: today no design page reaches the network. Declared
+`Cache-Control: no-store`; a refusal carries the same headers. A Canvas has
+an **Allow network** switch, off by default, that only the person sets; while
+it is on, a running page of that Canvas may ask the host to fetch public
+addresses for it, and nothing else about its sandbox changes
+([Allow network](#allow-network)). Declared
 images are resolved under the version's provenance and written in as `data:`
 images: every image once, and a repeated reference only while the page's
 images stay within the design's 5 MiB as base64, after which it draws a
@@ -1644,6 +1643,124 @@ a hostile page in the prototype host reaches no UDP, TCP, HTTP, or host
 listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
+
+### Allow network
+
+A running design has no connection. A person can give one Canvas's running
+pages a filtered one: the **Allow network** switch, per Canvas, off by default
+(maintainer decision, 2026-11-12). The page never gets a route of its own. It
+asks the host, and the host fetches public addresses on its behalf under the
+destination rule below.
+
+**Turning it on shares the Canvas with the internet.** A page with the switch
+on can send anything it holds (its own markup, the images the host wrote into
+it, and whatever the person types into it) to any public address. That is the
+accepted consequence of the switch, and the confirmation says so. What stays
+protected is everything outside the page: Octant's API and renderer, the
+window credential, the person's files, loopback services, the local network,
+cloud metadata addresses, and this host's own listeners
+([threat model](../security/canvas-html-frames-threat-model.md), F16 to F19).
+
+**The switch.** `GET /api/canvas/network-access?canvasId=` reads it and `POST
+/api/canvas/network-access` sets it, under the window authorization `get` runs
+for that Canvas. Only a local window may set it: a paired device and an agent
+grant are refused by the route and the remote gateway forwards neither path,
+the agent's Canvas tool has no action for it, and nothing a Canvas holds can
+ask for it, because the bridge grants nothing and a page holds no credential.
+A change is journaled as `canvas.network-access-changed@1` with the local
+person as its actor, on one host-wide aggregate that is replayed at start, so
+the choice survives a restart. Turning it on asks once, in the window, with
+the sentence above. While it is on, the Canvas header shows **Network on**
+beside the switch, and each running prototype of that Canvas shows the same
+label in its host chrome.
+
+**How a page reaches the proxy.** `design-run` marks a ticket as
+network-capable only when a local window asked for it and the Canvas's switch
+is on. When a browser frame redeems that ticket (`Sec-Fetch-Dest: iframe`) and
+the switch is still on, the host mints a network token (32 random bytes, held
+in memory only, at most 8 per Canvas, 12 hours at the longest) and serves the
+page with one directive changed: `connect-src` names
+`<this host's loopback origin>/api/canvas/network/<token>/` in place of
+`'none'`. Every other directive, the `sandbox`, and the parent frame's sandbox
+are unchanged, so the page still has an opaque origin, no cookie or storage,
+no image, font, media, frame, or form destination, and no path on the host but
+that one. After the bridge the host writes one more script, which sends a
+`fetch` of an absolute `http:` or `https:` address to that path instead; a
+page can also call the path itself. Only `GET` is offered, and the page's own
+request headers are not passed on.
+
+**The proxy.** `GET /api/canvas/network/<token>/fetch?url=` is answered for a
+live token alone; the token is the whole authority and names one Canvas. The
+route reads no cookie, window credential, or Octant header, and attaches none:
+the outgoing request carries `Accept: */*`, `Host`, and nothing else. It
+answers only a script's request (`Sec-Fetch-Dest: empty` when the browser says
+what it is loading), so a proxied page is never drawn as a document on the
+host's origin, and every answer carries `Content-Security-Policy: sandbox;
+default-src 'none'`, `X-Content-Type-Options: nosniff`, `Content-Disposition:
+attachment`, `Cache-Control: no-store`, and `Access-Control-Allow-Origin: *`.
+Of the fetched response it passes on the status, the content type, and the
+body; `Set-Cookie` and every other header are dropped. On every request it
+checks the Canvas's switch again, so a token outlives the switch for no
+request at all.
+
+**The destination rule** (`canvasNetworkUrlRefusal` and
+`canvasNetworkAddressRefusal` in `packages/domain`). An address is fetched
+only if all of these hold, for the first request and for every redirect:
+
+- the scheme is `http` or `https`, on that scheme's own port (80 or 443), with
+  no user name or password, and the address is at most 2,048 characters;
+- the name is not `localhost` or under `.localhost`, and is not a name this
+  host's own listener answers to;
+- every address the name resolves to is public. Refused: loopback
+  (`127.0.0.0/8`, `::1`), private ranges (`10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `fc00::/7`), link-local (`169.254.0.0/16`, which holds
+  the cloud metadata address, and `fe80::/10`), carrier-grade NAT
+  (`100.64.0.0/10`, where overlay networks put their members), the
+  unspecified addresses, multicast, the other blocks the IANA registries mark
+  not globally reachable, and the IPv4-mapped, NAT64, 6to4, and Teredo forms
+  of any of them, judged by the IPv4 address they carry;
+- no address it resolves to is one of this machine's own interface addresses,
+  whatever the port, so no Octant listener (the loopback server, the private
+  listener, the remote gateway) is reachable through the proxy even on a
+  machine with a public address. A hub and every member host are reached only
+  at private or overlay addresses (a join refuses any other origin), so the
+  classes above already refuse them.
+
+The host resolves a name once per connection, judges every address it got, and
+connects only to those addresses; nothing resolves the name a second time, so
+a name that answers public and then private is refused when it next resolves,
+never connected. A redirect is not followed by the transport: the host reads
+its `Location` and runs the whole rule again, at most 5 times.
+
+**Bounds**, per Canvas, as constants in `canvasNetworkPolicy.ts`: a response
+of at most 5 MiB (a larger one is refused, not cut short), 30 seconds for a
+request with all its redirects, 4 requests at once, and 60 requests a minute.
+A request past a bound is refused with a reason the page can read.
+
+**Turning it off** forgets every network token of that Canvas in the same
+call, before the change is answered, so a page already running loses the
+proxy at its next request.
+
+**What never carries the permission.** The switch belongs to the Canvas on
+this host and travels with nothing. A shared snapshot's prototype, a published
+page's snapshot, the agent's preview, an exported or saved HTML file, and a
+public link are ticketed or written without it: their page policy stays
+`connect-src 'none'` and no token is minted, so a reader of a share or a
+public link never fetches through the person's host.
+
+**Where it works today.** In a browser on the host's own machine. Not built
+yet: the desktop app draws a prototype from the prototype host, which has no
+route to the host at all, so there the switch is not shown and a prototype
+stays without a connection until the main process relays the page's requests
+to this route; a paired device's browser is not offered the switch and its
+pages are served without a token.
+
+Rationale: a looser page policy (`connect-src https:`) was rejected because a
+browser would then connect from the person's machine, with its address, to
+anything, private addresses included, and nothing could bound or revoke it. A
+proxy path named by the page policy keeps one revocable door that the host
+judges. `GET` alone keeps a page from driving a form or an API with a body
+through the person's address; widening that is a later decision.
 
 ## HTML import
 

@@ -1192,9 +1192,19 @@ document as a future version. Frames follow the
   cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
-  shipped. A design or prototype also has a per-Canvas "Allow network" switch
-  that only the person sets, off by default (maintainer request, 2026-11-12;
-  not built yet: today no running frame is given a connection).
+  shipped. A Canvas also has an "Allow network" switch that only the person
+  sets from a local window, off by default and journaled (maintainer
+  decision, 2026-11-12). While it is on, a running page of that Canvas may ask
+  the host to fetch for it through one token-bound proxy path its page policy
+  names; the host fetches only `http` and `https` addresses that resolve to
+  public addresses, never loopback, a private, link-local, or overlay range,
+  or one of its own listeners, pins the resolved address for the connection,
+  judges every redirect again, attaches no cookie, credential, or Octant
+  header, and bounds size, time, and rate per Canvas. Turning it off revokes
+  the token at once, and no share, export, or public link carries it. Built
+  for a browser on the host's machine; not built yet: the desktop prototype
+  host has no route to the proxy, so there the switch is not offered
+  ([Canvas: Allow network](design/canvas.md#allow-network)).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a
   new Canvas holding one `document`-size `design`. It is a create in every
