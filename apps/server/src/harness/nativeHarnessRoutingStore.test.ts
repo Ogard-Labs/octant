@@ -668,6 +668,53 @@ describe("native harness session store", () => {
     await expect(child).resolves.toBe("denied");
   });
 
+  it("stops answering with an always grant once the thread's permissions change, and asks again", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000028";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    let posture = "auto";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      posture: (thread) => (thread === threadId ? posture : undefined),
+    });
+    const ask = () =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    const idAt = (index: number) => String(sessions.read(threadId)?.approvals?.[index]?.id);
+
+    const first = ask();
+    expect(approvals.decide(threadId, idAt(0), "approve-always")).toBe("decided");
+    await expect(first).resolves.toBe("approved");
+    await expect(ask()).resolves.toBe("approved");
+    expect(approvals.remembers(threadId, "shell-commands", false)).toBe(true);
+
+    // Narrowed: the grant given under the wider posture no longer answers.
+    posture = "ask-first";
+    expect(approvals.remembers(threadId, "shell-commands", false)).toBe(false);
+    const narrowed = ask();
+    expect(sessions.read(threadId)?.approvals?.[1]).toMatchObject({ status: "pending" });
+    expect(approvals.decide(threadId, idAt(1), "deny")).toBe("decided");
+    await expect(narrowed).resolves.toBe("denied");
+
+    // Back on the posture it was granted under, the grant still holds.
+    posture = "auto";
+    await expect(ask()).resolves.toBe("approved");
+    expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+  });
+
   it("expires an approval the clock has passed, though its timer has not fired yet", async () => {
     // A timer fires late behind a busy event loop or across a machine's
     // sleep, so the clock, not the timer, decides when an approval's time is up.

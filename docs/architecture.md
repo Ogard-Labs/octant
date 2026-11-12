@@ -12274,6 +12274,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   decided against the one the thread holds now. Re-presenting the same
   approval rather than minting a new one keeps one identity per provider
   call and needs no new answer route.
+  A native-harness "always" grant follows the same rule: it records the
+  posture it was granted under and answers a later ask in its class only
+  while the thread still holds that posture. After a permissions change the
+  class asks again (a remembered grant never answers under a posture it was
+  not granted under), and an "always" given under the new posture remembers
+  it afresh; returning to the original posture lets the original grant answer
+  again, since that is the posture the person decided against. Rationale: a
+  remembered grant is an allow answered in advance, so it must not outlive
+  the posture it was given under any more than a pending answer may.
 
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
