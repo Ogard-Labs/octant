@@ -83,6 +83,8 @@ function openHost(
     readonly package?: { version: string; digest: string };
     /** `stdio` is a server Octant launches itself under its supervisor. */
     readonly transport?: "streamable-http" | "stdio";
+    /** The publisher key the host verified for each package version, by version. */
+    readonly signedBy?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -200,6 +202,7 @@ function openHost(
       threadTainted: (threadId) =>
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
       outsideContent: (threadId) => readApprovalOutsideContent(connection, threadId),
+      verifiedPublisherKey: (version) => options.signedBy?.[version.version],
     }),
     recordExternalContentIngestion: (input) => taint.record(input),
   });
@@ -779,6 +782,38 @@ describe("an MCP tool a person always allows in a Project", () => {
       updated.grants.revokeForLifecycleChange({ kind: "uninstall-package", extensionId }),
     ).toBe(1);
     expect(updated.grants.list()).toEqual([]);
+  });
+
+  it("keeps a server's approval across an update the same publisher key signed, and asks again for a new or missing key", async () => {
+    const key = `ed25519:${"1".repeat(64)}`;
+    const directory = temporaryDirectory();
+    const host = openHost(directory, { signedBy: { "1.0.0": key } });
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    await host.close();
+
+    const update = { version: "1.1.0", digest: `sha256:${"e".repeat(64)}` };
+    const sameKey = openHost(directory, {
+      package: update,
+      signedBy: { "1.0.0": key, "1.1.0": key },
+    });
+    await expect(
+      sameKey.unprompted({ threadId: threadTwo, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await sameKey.close();
+
+    for (const signedBy of [
+      { "1.0.0": key, "1.1.0": `ed25519:${"2".repeat(64)}` },
+      { "1.0.0": key },
+    ]) {
+      const changed = openHost(directory, { package: update, signedBy });
+      const call = changed.call({ threadId: threadThree, projectId: projectA, tool: "delete" });
+      expect(await changed.prompt()).toMatchObject({ mcpToolName: "delete" });
+      expect(await changed.deny()).toBe(true);
+      await call;
+      await changed.close();
+    }
   });
 
   it("refuses an answer for the whole server on a host-run turn and keeps the call waiting", async () => {

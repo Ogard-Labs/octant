@@ -41,6 +41,16 @@ export function createExtensionToolCallAuthorizer(options: {
   readonly threadTainted: (threadId: string) => boolean;
   /** The sources that marked the thread, which its prompt names. */
   readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
+  /**
+   * The publisher key whose signature of one retained package version the
+   * host verified, or `undefined` for an unsigned one. An update signed by
+   * the key that signed the approved version keeps the approval.
+   */
+  readonly verifiedPublisherKey?: (version: {
+    readonly extensionId: string;
+    readonly version: string;
+    readonly digest: string;
+  }) => string | undefined;
 }): (call: ExtensionToolCall) => Promise<boolean> {
   const allowedOnMarkedThread = new Set<string>();
   const judge = (
@@ -57,6 +67,14 @@ export function createExtensionToolCallAuthorizer(options: {
     };
     const stored = options.grants.read({ ...server, mcpToolName: call.mcpToolName });
     const storedForServer = options.grants.read(server);
+    const signedBy = (version: { readonly version: string; readonly digest: string }) => {
+      const publisherKey = options.verifiedPublisherKey?.({
+        extensionId: call.extensionId,
+        version: version.version,
+        digest: version.digest,
+      });
+      return publisherKey === undefined ? {} : { publisherKey };
+    };
     return {
       server,
       decision: decideExtensionToolGrant({
@@ -67,7 +85,7 @@ export function createExtensionToolCallAuthorizer(options: {
         fullAccessTurn: call.thread.fullAccessTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,
-        offered: offeredBinding(call),
+        offered: { ...offeredBinding(call), ...signedBy(call) },
         // A tool's row always carries its listing digest; the payload schema
         // refuses a tool name without one.
         grant:
@@ -77,6 +95,7 @@ export function createExtensionToolCallAuthorizer(options: {
                 version: stored.version,
                 digest: stored.digest,
                 definitionDigest: stored.definitionDigest,
+                ...signedBy(stored),
                 revoked: stored.revocationReason !== undefined,
               },
         serverGrant:
@@ -85,6 +104,7 @@ export function createExtensionToolCallAuthorizer(options: {
             : {
                 version: storedForServer.version,
                 digest: storedForServer.digest,
+                ...signedBy(storedForServer),
                 revoked: storedForServer.revocationReason !== undefined,
               },
         serverAllowedOnMarkedThread: allowedOnMarkedThread.has(markedThreadKey(call)),

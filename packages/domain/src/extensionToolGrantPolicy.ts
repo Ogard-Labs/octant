@@ -13,6 +13,11 @@ export interface ExtensionToolBinding {
   readonly version: string;
   readonly digest: string;
   readonly definitionDigest: string;
+  /**
+   * The publisher key whose signature of this package version the host
+   * verified. Absent for an unsigned version.
+   */
+  readonly publisherKey?: string;
 }
 
 export interface ExtensionToolGrantFacts {
@@ -51,7 +56,9 @@ export interface ExtensionToolGrantFacts {
    * person never saw.
    */
   readonly serverGrant:
-    | (Pick<ExtensionToolBinding, "version" | "digest"> & { readonly revoked: boolean })
+    | (Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey"> & {
+        readonly revoked: boolean;
+      })
     | undefined;
   /**
    * A person already answered this server's prompt on this thread after the
@@ -129,14 +136,12 @@ export function decideExtensionToolGrant(
   }
   const answerCovers = answerKept ? "server" : "call";
   // Whole-server rule. The person allowed every tool of this server, so the
-  // tool's own listing is not compared; the package still is, because an
-  // update is different code under the same name.
+  // tool's own listing is not compared; the package still is.
   const serverGrant = facts.serverGrant;
   if (
     serverGrant !== undefined &&
     !serverGrant.revoked &&
-    serverGrant.version === facts.offered.version &&
-    serverGrant.digest === facts.offered.digest
+    approvedPackage(serverGrant, facts.offered)
   ) {
     return { kind: "covered" };
   }
@@ -150,10 +155,7 @@ export function decideExtensionToolGrant(
     };
   }
   if (grant.revoked) return { kind: "ask", reason: "revoked", answerCovers };
-  // Update rule. A grant is for the package the person approved; an update
-  // is different code under the same name, so it asks again. This branch is
-  // the whole rule.
-  if (grant.version !== facts.offered.version || grant.digest !== facts.offered.digest) {
+  if (!approvedPackage(grant, facts.offered)) {
     return { kind: "ask", reason: "package-changed", answerCovers };
   }
   if (grant.definitionDigest !== facts.offered.definitionDigest) {
@@ -163,11 +165,26 @@ export function decideExtensionToolGrant(
 }
 
 /**
+ * Update rule. A grant is for the package the person approved. An update is
+ * different code under the same name, so it asks again, unless the key that
+ * signed the approved version signed the update too: the person's answer was
+ * given to that publisher's server, and the host verified both signatures.
+ * An update with a new key, or with none, asks again. This is the whole rule.
+ */
+function approvedPackage(
+  granted: Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey">,
+  offered: Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey">,
+): boolean {
+  if (granted.version === offered.version && granted.digest === offered.digest) return true;
+  return granted.publisherKey !== undefined && granted.publisherKey === offered.publisherKey;
+}
+
+/**
  * Why a package lifecycle change ends every remembered approval of that
  * package's tools, or `undefined` when the grants stay stored. Uninstall,
  * withdrawn trust, and rollback revoke, so installing or trusting again
  * restores nothing. Disabling a plugin or a component only leaves the grants
- * unused, and an update is caught by the package digest at the next call.
+ * unused, and an update is judged against the grant at the next call.
  */
 export function extensionToolGrantRevocationReason(change: {
   readonly kind: string;

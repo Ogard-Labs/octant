@@ -191,6 +191,75 @@ describe("remembered MCP tool approval", () => {
     });
   });
 
+  it("keeps an approval across an update signed by the key that signed the approved version", () => {
+    const key = `ed25519:${"1".repeat(64)}`;
+    const updated = { ...seen, version: "1.3.0", digest: `sha256:${"c".repeat(64)}` };
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered: { ...updated, publisherKey: key },
+          grant: { ...seen, publisherKey: key, revoked: false },
+        }),
+      ),
+    ).toEqual({ kind: "covered" });
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered: { ...updated, publisherKey: key },
+          grant: undefined,
+          serverGrant: {
+            version: seen.version,
+            digest: seen.digest,
+            publisherKey: key,
+            revoked: false,
+          },
+        }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it.each([
+    ["a new signing key", `ed25519:${"2".repeat(64)}`, `ed25519:${"1".repeat(64)}`],
+    ["no signing key on the update", undefined, `ed25519:${"1".repeat(64)}`],
+    ["no signing key on either version", undefined, undefined],
+  ] as const)("asks again after an update with %s", (_name, offeredKey, grantedKey) => {
+    const offered = {
+      ...seen,
+      version: "1.3.0",
+      ...(offeredKey === undefined ? {} : { publisherKey: offeredKey }),
+    };
+    const granted = grantedKey === undefined ? {} : { publisherKey: grantedKey };
+    expect(
+      decideExtensionToolGrant(facts({ offered, grant: { ...seen, ...granted, revoked: false } })),
+    ).toEqual({ kind: "ask", reason: "package-changed", answerCovers: "server" });
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered,
+          grant: undefined,
+          serverGrant: { version: seen.version, digest: seen.digest, ...granted, revoked: false },
+        }),
+      ),
+    ).toEqual({ kind: "ask", reason: "package-changed", answerCovers: "server" });
+  });
+
+  it("still asks when a same-key update lists the tool differently", () => {
+    const key = `ed25519:${"1".repeat(64)}`;
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered: {
+            ...seen,
+            version: "1.3.0",
+            definitionDigest: `sha256:${"d".repeat(64)}`,
+            publisherKey: key,
+          },
+          grant: { ...seen, publisherKey: key, revoked: false },
+        }),
+      ),
+    ).toEqual({ kind: "ask", reason: "tool-definition-changed", answerCovers: "server" });
+  });
+
   it("asks again when the tool's description or input schema changed since the approval", () => {
     expect(
       decideExtensionToolGrant(

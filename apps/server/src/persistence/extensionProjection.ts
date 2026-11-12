@@ -621,6 +621,37 @@ function holdsProviderDriver(manifest: ExtensionPackageManifest): boolean {
   return manifest.components.some((component) => component.kind === "provider-driver");
 }
 
+/**
+ * The publisher key whose signature of one retained version the host
+ * verified, when it is the key the person pinned for the package. Only a
+ * package that holds a provider driver has its signature checked on the way
+ * in, and an author of such a package who states a key is refused; any other
+ * package's manifest could merely claim one, so it reads as unsigned.
+ */
+export function readVerifiedPublisherKey(
+  connection: SqliteConnection,
+  target: {
+    readonly extensionId: string;
+    readonly version: string;
+    readonly digest: string;
+  },
+): ExtensionPublisherKeyFingerprint | undefined {
+  const record = readExtensionRecord(connection, target.extensionId);
+  if (record === undefined || record.tombstoned || record.publisherPin === undefined) {
+    return undefined;
+  }
+  const retained = record.versions.find(
+    (version) =>
+      version.verified &&
+      !version.quarantined &&
+      version.manifest.version === target.version &&
+      version.manifest.digest === target.digest,
+  );
+  if (retained === undefined || !holdsProviderDriver(retained.manifest)) return undefined;
+  const key = retained.manifest.provenance.publisherKey;
+  return key === record.publisherPin ? key : undefined;
+}
+
 function isProviderDriverComponent(record: ProjectedExtensionRecord, componentId: string): boolean {
   return (
     record.current?.components.some(
@@ -712,7 +743,7 @@ const OUTSIDE_DRIVER_QUARANTINE: ExtensionDiagnostic = {
   message: "An outside provider driver stays quarantined until you trust its source.",
 };
 
-function hasCapabilityExpansion(
+export function hasCapabilityExpansion(
   previous: ExtensionPackageManifest,
   next: ExtensionPackageManifest,
 ): boolean {

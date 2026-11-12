@@ -20,6 +20,7 @@ import {
   EXTENSION_AGGREGATE_TYPE,
   EXTENSION_LIFECYCLE_EVENT,
   readExtensionRecord,
+  readVerifiedPublisherKey,
 } from "../persistence/extensionProjection";
 import {
   calculateExtensionPackageDigest,
@@ -117,6 +118,58 @@ function inspection(
   });
 }
 
+const publisherKey = `ed25519:${"a".repeat(64)}`;
+
+/** An outside provider driver as the host stores it, signed by `signedBy` or by nobody. */
+function driverInspection(
+  version: string,
+  signedBy: string | undefined,
+  capabilities: ReadonlyArray<"network"> = [],
+) {
+  const entries: ReadonlyArray<ExtensionArchiveEntry> = [
+    { path: "dist/driver.mjs", kind: "file", content: new TextEncoder().encode(version) },
+  ];
+  const manifest = {
+    manifestVersion: 1,
+    extensionId,
+    packageId,
+    slug: "lifecycle-driver",
+    displayName: "Lifecycle driver",
+    version,
+    digest: `sha256:${"0".repeat(64)}`,
+    source: { kind: "local-folder", sourceRef: "local-driver" },
+    provenance: {
+      canonicalUrl: "https://example.com/lifecycle-driver",
+      publisher: "Example Publisher",
+      ...(signedBy === undefined ? {} : { publisherKey: signedBy }),
+      reviewed: false,
+    },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: { platforms: ["macos"], modes: ["code"], providerFamilies: [] },
+    declaredCapabilities: capabilities,
+    primaryComponentId: "driver",
+    components: [
+      {
+        id: "driver",
+        kind: "provider-driver",
+        displayName: "Driver",
+        declaredCapabilities: capabilities,
+        entryPoint: "dist/driver.mjs",
+      },
+    ],
+  };
+  manifest.digest = calculateExtensionPackageDigest(manifest as never, entries);
+  return inspectExtensionPackage({
+    format: "zip",
+    archiveBytes: 512,
+    manifest: manifest as never,
+    entries,
+    expectedDigest: manifest.digest as never,
+    appVersion: "1.0.0",
+    platform: "darwin",
+  });
+}
+
 async function setup(
   options: {
     readonly fault?: ((point: ExtensionLifecycleFaultPoint) => void) | undefined;
@@ -179,6 +232,15 @@ function debugAdapterComponent(declaration: Record<string, unknown> = {}) {
       ...declaration,
     },
   };
+}
+
+function lifecycleKinds(context: Awaited<ReturnType<typeof setup>>): ReadonlyArray<string> {
+  const rows = context.connection
+    .prepare("SELECT payload_json FROM event_journal WHERE event_name = ? ORDER BY global_sequence")
+    .all(EXTENSION_LIFECYCLE_EVENT) as ReadonlyArray<{ readonly payload_json: string }>;
+  return rows.map(
+    (row) => (JSON.parse(row.payload_json) as { payload: { kind: string } }).payload.kind,
+  );
 }
 
 function appendLifecycle(
@@ -293,6 +355,65 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
       activation: { trusted: false, pluginDesired: false, quarantined: true },
       components: [{ activation: { componentDesired: false } }],
     });
+  });
+
+  it("keeps trust and the on switch across an update the pinned publisher key signed, and journals it", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+    appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+    expect(readExtensionRecord(context.connection, extensionId)).toMatchObject({
+      trusted: true,
+      publisherPin: publisherKey,
+    });
+
+    const updated = await service.update(driverInspection("1.1.0", publisherKey));
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true, quarantined: false },
+    });
+    expect(lifecycleKinds(context).slice(-4)).toEqual([
+      "update-prepared",
+      "update-committed",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+    ]);
+    for (const version of ["1.0.0", "1.1.0"]) {
+      expect(
+        readVerifiedPublisherKey(
+          context.connection,
+          targetFor(driverInspection(version, publisherKey)),
+        ),
+      ).toBe(publisherKey);
+    }
+  });
+
+  it.each([
+    ["a new signing key", `ed25519:${"b".repeat(64)}`],
+    ["no signature", undefined],
+  ] as const)("asks for trust again after an update with %s", async (_name, signedBy) => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+
+    const updated = await service.update(driverInspection("1.1.0", signedBy));
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: false, pluginDesired: false },
+    });
+    expect(lifecycleKinds(context).at(-1)).toBe("update-committed");
+    expect(
+      readVerifiedPublisherKey(context.connection, targetFor(driverInspection("1.1.0", signedBy))),
+    ).toBeUndefined();
+  });
+
+  it("asks for trust again after a same-key update that widens what the driver may do", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+
+    const updated = await service.update(driverInspection("1.1.0", publisherKey, ["network"]));
+    expect(updated.packages[0]?.activation.trusted).toBe(false);
   });
 
   it("journals independent trust and desired state with optimistic replay-safe updates", async () => {

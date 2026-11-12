@@ -6,6 +6,7 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   EXTENSION_AGGREGATE_TYPE,
   EXTENSION_LIFECYCLE_EVENT,
+  hasCapabilityExpansion,
   readExtensionRecord,
   readExtensionRecords,
   readExtensionSnapshot,
@@ -17,6 +18,7 @@ import type { ExtensionPackageStore, ExtensionVersionReference } from "./extensi
 import {
   decideOutsideDriverNewPublisher,
   outsideDriverPublisherPinAtTrust,
+  outsideDriverUpdateKeepsTrust,
 } from "@octant/domain/outside-driver-publisher-policy";
 import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
 
@@ -152,7 +154,29 @@ export class ExtensionLifecycleService {
         "Extension version is already retained.",
       );
     }
-    return this.#promote(inspection, "update");
+    // An outside driver's update is held until it is trusted again, because
+    // trust is given to one digest. An update the pinned publisher key signed
+    // keeps the trust and the on switch the package had: both are journaled
+    // again after the update's own commit, so the journal shows why the new
+    // version runs. A new or missing key stays held and asks.
+    const keepsTrust =
+      existing.current !== undefined &&
+      holdsProviderDriver(inspection.manifest) &&
+      outsideDriverUpdateKeepsTrust({
+        trusted: existing.trusted,
+        pinned: existing.publisherPin,
+        updated: inspection.manifest.provenance.publisherKey,
+        capabilitiesWidened: hasCapabilityExpansion(existing.current, inspection.manifest),
+      });
+    const updated = await this.#promote(inspection, "update");
+    if (!keepsTrust) return updated;
+    this.#append(inspection.manifest.extensionId, [
+      { kind: "source-trust-changed", trusted: true },
+      ...(existing.pluginDesired
+        ? [{ kind: "plugin-desired-state-changed" as const, desired: true }]
+        : []),
+    ]);
+    return this.snapshot();
   }
 
   async rollback(target: ExtensionVersionReference): Promise<ExtensionSnapshot> {

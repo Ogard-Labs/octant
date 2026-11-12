@@ -42,6 +42,27 @@ export function outsideDriverPublisherPinAtTrust<Key extends string>(
   return pinned === undefined ? selected : undefined;
 }
 
+/**
+ * Whether an update keeps the trust the package already had. It does when
+ * the key pinned for the package signed the updated version: the person
+ * trusted that publisher, and the host verified the signature. A new key, a
+ * missing signature, or a package with no pin asks again, and so does an
+ * update that may do more than the version the person reviewed.
+ */
+export function outsideDriverUpdateKeepsTrust(input: {
+  readonly trusted: boolean;
+  readonly pinned: string | undefined;
+  readonly updated: string | undefined;
+  readonly capabilitiesWidened: boolean;
+}): boolean {
+  return (
+    input.trusted &&
+    !input.capabilitiesWidened &&
+    input.pinned !== undefined &&
+    outsideDriverPublisherStanding(input.pinned, input.updated).kind === "pinned-publisher"
+  );
+}
+
 export type OutsideDriverNewPublisherDecision<Key extends string = string> =
   | { readonly kind: "replace"; readonly previous: Key; readonly next: Key }
   | {
