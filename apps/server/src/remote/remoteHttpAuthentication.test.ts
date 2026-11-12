@@ -87,6 +87,13 @@ const signOutRoute: RemoteRouteDefinition = {
   methods: ["POST"],
   allowQuery: false,
 };
+const ownDeviceRoute: RemoteRouteDefinition = {
+  id: "remote-auth-device",
+  match: { kind: "exact", path: "/api/remote/auth/device" },
+  surface: "authenticated-product",
+  methods: ["GET"],
+  allowQuery: false,
+};
 const rotateKeyRoute: RemoteRouteDefinition = {
   id: "remote-auth-rotate-key",
   match: { kind: "exact", path: "/api/remote/auth/rotate-key" },
@@ -660,6 +667,31 @@ describe("remote HTTP authentication boundary", () => {
         admittedBy,
       });
       expect(Object.isFrozen(dispatched[0]?.principal)).toBe(true);
+      connection.close();
+    }
+  });
+
+  it("tells a device whether its session acts as the host's own person, from the host's record", async () => {
+    for (const [admittedBy, expected] of [
+      ["host-person", true],
+      ["hub-roster", false],
+      [undefined, false],
+    ] as const) {
+      const { auth, privateKey, connection } = setup({
+        withSelfService: true,
+        withDispatch: true,
+        ...(admittedBy === undefined ? {} : { deviceAdmittedBy: () => admittedBy }),
+      });
+      const { session } = await issueSessionOverHttp(auth, privateKey);
+
+      const response = await auth.handleAuthenticated(
+        productRequest(session, privateKey, { method: "GET", target: "/api/remote/auth/device" }),
+        transport,
+        ownDeviceRoute,
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ deviceId, actsAsHostPerson: expected });
       connection.close();
     }
   });

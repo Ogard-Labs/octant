@@ -167,6 +167,11 @@ export interface FakeRemoteServerConfig {
   readonly credentialFailure?: "expired" | "revoked";
   /** Reject `/api/remote/auth/rotate-key` with this status instead of rotating. */
   readonly rotateKeyStatus?: number;
+  /**
+   * What the own-device answer says of the session. Absent answers as a host
+   * built before it said so, which a client reads as a restricted session.
+   */
+  readonly actsAsHostPerson?: boolean;
   readonly handleProductRequest?: (input: {
     readonly method: string;
     readonly path: string;
@@ -496,6 +501,9 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         state: "active",
         sessionIdleExpiresAt: sessionFacts.idleExpiresAt,
         sessionAbsoluteExpiresAt: sessionFacts.absoluteExpiresAt,
+        ...(config.actsAsHostPerson === undefined
+          ? {}
+          : { actsAsHostPerson: config.actsAsHostPerson }),
       });
     }
 

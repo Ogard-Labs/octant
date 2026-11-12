@@ -25,6 +25,7 @@ import {
 } from "@octant/contracts";
 import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remote-request-proof";
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
+import { isAgentGrantSession, principalActsAsHostPerson } from "../clientPrincipal";
 import {
   RemoteRequestProofError,
   type RemoteRequestProofService,
@@ -581,7 +582,7 @@ export function createRemoteHttpAuthentication(
       }
 
       if (isOwnDeviceRoute) {
-        const response = await handleOwnDeviceRoute(handoff, options);
+        const response = await handleOwnDeviceRoute(handoff, sessionId, options);
         registryRelease?.();
         registryRelease = undefined;
         return response;
@@ -815,6 +816,10 @@ function refusedRelay(reason: RemoteServerProxyRefusalReason): {
 
 async function handleOwnDeviceRoute(
   handoff: RemoteClientPrincipalHandoff,
+  // The authenticated session, read from the cookie before the handoff: the
+  // handed-off request has its cookie stripped, and reading the session from
+  // it refused every own-device read (observed as a 401 in the route's test).
+  sessionId: string,
   options: RemoteHttpAuthenticationOptions,
 ): Promise<Response> {
   const service = options.credentialSelfService;
@@ -824,9 +829,7 @@ async function handleOwnDeviceRoute(
   if (principal.kind !== "remote-device") {
     throw new RemoteHttpAuthFailure(403, "invalid");
   }
-  const session = options.proofService.describeSession(
-    readSessionCookie(handoff.request.headers) ?? "",
-  );
+  const session = options.proofService.describeSession(sessionId);
   try {
     const metadata = issueWithServiceErrors(() =>
       readOwnDevice({
@@ -841,7 +844,12 @@ async function handleOwnDeviceRoute(
             }),
       }),
     );
-    return jsonResponse(200, metadata);
+    // The same reading of the principal the product routes decide by, so a
+    // client never offers a control this session would be refused.
+    return jsonResponse(200, {
+      ...metadata,
+      actsAsHostPerson: principalActsAsHostPerson(principal) && !isAgentGrantSession(principal),
+    });
   } catch (error) {
     throw mapCredentialServiceError(error);
   }
