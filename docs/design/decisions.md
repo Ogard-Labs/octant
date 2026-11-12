@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **250**   | **162** | **83**       | **5**               |
+| **All areas**                                                                         | **251**   | **163** | **83**       | **5**               |
 
 ## Principles and hard lines
 
