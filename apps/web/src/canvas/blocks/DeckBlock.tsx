@@ -8,10 +8,18 @@ import {
   canvasMockupCallouts,
   canvasMockupFrames,
 } from "@octant/domain";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import { MockupFrame } from "./MockupBlock";
@@ -29,6 +37,8 @@ export function DeckBlock(props: {
   readonly block: CanvasDeckBlock;
   readonly blocks: ReadonlyArray<CanvasBlock>;
   readonly designAssetRuntime?: DesignAssetRuntime;
+  /** The document's design system colours; the player opens outside the document. */
+  readonly designSystemStyle?: CSSProperties;
 }) {
   const [presenting, setPresenting] = useState(false);
   const presentButton = useRef<HTMLButtonElement>(null);
@@ -86,18 +96,23 @@ export function DeckBlock(props: {
           </li>
         ))}
       </ol>
-      {presenting && slides.length > 0 ? (
-        <DeckPlayer
-          block={props.block}
-          slides={slides}
-          {...(props.designAssetRuntime === undefined
-            ? {}
-            : { designAssetRuntime: props.designAssetRuntime })}
-          hasNotes={notes}
-          onClose={() => setPresenting(false)}
-          restoreFocus={presentButton}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {presenting && slides.length > 0 ? (
+          <DeckPlayer
+            block={props.block}
+            slides={slides}
+            {...(props.designAssetRuntime === undefined
+              ? {}
+              : { designAssetRuntime: props.designAssetRuntime })}
+            hasNotes={notes}
+            {...(props.designSystemStyle === undefined
+              ? {}
+              : { designSystemStyle: props.designSystemStyle })}
+            onClose={() => setPresenting(false)}
+            restoreFocus={presentButton}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }
@@ -110,6 +125,7 @@ function DeckPlayer(props: {
   }>;
   readonly designAssetRuntime?: DesignAssetRuntime;
   readonly hasNotes: boolean;
+  readonly designSystemStyle?: CSSProperties;
   readonly onClose: () => void;
   readonly restoreFocus: RefObject<HTMLButtonElement | null>;
 }) {
@@ -175,7 +191,11 @@ function DeckPlayer(props: {
       open
       restoreFocus={props.restoreFocus}
     >
-      <div className="canvas-deck-player__body" ref={fullscreen.ref}>
+      <div
+        className="canvas-deck-player__body"
+        ref={fullscreen.ref}
+        style={props.designSystemStyle}
+      >
         <header className="canvas-deck-player__bar">
           <span className="canvas-deck-player__title">{props.block.title}</span>
           <span aria-live="polite" className="canvas-deck-player__position">

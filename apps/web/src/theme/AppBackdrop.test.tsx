@@ -37,6 +37,26 @@ describe("AppBackdrop", () => {
     expect(container.querySelector("[data-octant-app-backdrop]")).toBeNull();
   });
 
+  it("draws the flowing field on its own canvas and asks for no picture", () => {
+    const fetcher = vi.fn();
+    const { container } = render(
+      <AppBackdrop
+        fetcher={fetcher}
+        placement="welcome"
+        resolved={{ ...dials, kind: "flowing", backgroundId: null, backgroundAnimated: true }}
+      />,
+    );
+    const ground = container.querySelector("[data-octant-app-backdrop]");
+    expect(ground).toHaveAttribute("data-octant-app-backdrop", "flowing");
+    const field = container.querySelector(".app-backdrop__flowing");
+    expect(field).not.toBeNull();
+    expect(field).toHaveAttribute("data-animated", "true");
+    expect(container.querySelector(".app-backdrop__flowing-canvas")).not.toBeNull();
+    expect(container.querySelector(".app-backdrop__flowing-fallback")).not.toBeNull();
+    expect(container.querySelector(".app-backdrop__photo")).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("draws the dithered pixel field on its own canvas and asks for no picture", () => {
     const fetcher = vi.fn();
     const { container } = render(

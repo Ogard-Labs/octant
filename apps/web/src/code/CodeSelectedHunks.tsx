@@ -14,6 +14,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { parseUnifiedDiff } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
 
@@ -347,20 +348,22 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
               </OctantButton>
             ) : null}
           </div>
-          {confirming ? (
-            <OctantConfirmDialog
-              title="Reverse selected hunks?"
-              confirmLabel="Reverse hunks"
-              cancelLabel="Keep changes"
-              destructive
-              pending={pending}
-              onCancel={() => setConfirming(false)}
-              onConfirm={() => void apply("reverse")}
-            >
-              Reverse {selected.length} selected unstaged hunks? These uncommitted changes will be
-              lost. Other hunks and the index are kept.
-            </OctantConfirmDialog>
-          ) : null}
+          <OctantDialogPresence>
+            {confirming ? (
+              <OctantConfirmDialog
+                title="Reverse selected hunks?"
+                confirmLabel="Reverse hunks"
+                cancelLabel="Keep changes"
+                destructive
+                pending={pending}
+                onCancel={() => setConfirming(false)}
+                onConfirm={() => void apply("reverse")}
+              >
+                Reverse {selected.length} selected unstaged hunks? These uncommitted changes will be
+                lost. Other hunks and the index are kept.
+              </OctantConfirmDialog>
+            ) : null}
+          </OctantDialogPresence>
         </>
       )}
     </details>

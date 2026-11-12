@@ -7,6 +7,7 @@ export * from "./fallback";
 export * from "./import";
 export * from "./export";
 export * from "./backgrounds";
+export * from "./flowingBackground";
 export * from "./typography";
 export * from "./editorColors";
 export * from "./terminalColors";

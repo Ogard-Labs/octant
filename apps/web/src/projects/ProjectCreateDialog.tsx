@@ -10,6 +10,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { FolderPicker } from "./FolderPicker";
@@ -607,27 +608,29 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           {status}
         </p>
       </OctantDialog>
-      {browsing !== undefined &&
-      props.folderBrowseClient !== undefined &&
-      props.hostId !== undefined ? (
-        <FolderPicker
-          client={props.folderBrowseClient}
-          {...(browsing === "destination"
-            ? {
-                hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
-                title: "Choose clone destination",
-              }
-            : {})}
-          hostId={props.hostId}
-          mode="code"
-          onCancel={() => {
-            if (browsing === "destination") settleDestinationChoice(undefined);
-            else setBrowsing(undefined);
-          }}
-          onSelect={onFolderBrowserSelection}
-          showGitInit={browsing === "create"}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {browsing !== undefined &&
+        props.folderBrowseClient !== undefined &&
+        props.hostId !== undefined ? (
+          <FolderPicker
+            client={props.folderBrowseClient}
+            {...(browsing === "destination"
+              ? {
+                  hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
+                  title: "Choose clone destination",
+                }
+              : {})}
+            hostId={props.hostId}
+            mode="code"
+            onCancel={() => {
+              if (browsing === "destination") settleDestinationChoice(undefined);
+              else setBrowsing(undefined);
+            }}
+            onSelect={onFolderBrowserSelection}
+            showGitInit={browsing === "create"}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </>
   );
 }

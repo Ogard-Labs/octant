@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CanvasDesignSystemPanel } from "./CanvasDesignSystemPanel";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ProjectId } from "@octant/contracts";
 import {
@@ -41,6 +42,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { CanvasCommentsPanel, canvasCommentAnchorChoices } from "./CanvasCommentsPanel";
 import { CanvasToolRail } from "./CanvasToolRail";
 import { CanvasToolSurface } from "./CanvasToolSurface";
@@ -88,7 +90,7 @@ import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
-const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export"] as const;
+const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export", "design-system"] as const;
 const CHOICE_MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
@@ -943,6 +945,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
+    // A switch is a version of the head, like a drag; an older version on
+    // screen offers none.
+    ...(props.client?.applyDesignSystem === undefined ||
+    definition === undefined ||
+    definition.provenance.projectId === null ||
+    selectedVersionId === undefined ||
+    String(selectedVersionId) !== tipVersionId
+      ? []
+      : [{ label: "Design system…", value: "design-system" }]),
     ...(exportOffers !== undefined &&
     selectedVersionId !== undefined &&
     String(selectedVersionId) === String(exportOffers.versionId)
@@ -1278,6 +1289,25 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         ) : null}
       </OctantDialog>
       <OctantDialog
+        label="Design system"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "design-system"}
+      >
+        {props.client === undefined || definition === undefined ? null : (
+          <CanvasDesignSystemPanel
+            canvasId={props.tab.canvasId}
+            client={props.client}
+            current={definition.designSystem}
+            expectedSequence={expectedSequence}
+            onApplied={async () => {
+              await loadCanvas();
+              await loadHistory();
+              await loadExportOffers();
+            }}
+          />
+        )}
+      </OctantDialog>
+      <OctantDialog
         label="Refresh canvas"
         onClose={() => setDialog(undefined)}
         open={dialog === "refresh"}
@@ -1354,17 +1384,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           />
         ) : null}
       </OctantDialog>
-      <OctantDialog
-        label="Compare versions"
-        onClose={() => setCompare(undefined)}
-        open={compare !== undefined}
-      >
-        {compare?.kind === "ready" ? (
-          <CanvasVersionCompare earlier={compare.earlier} later={compare.later} />
-        ) : compare?.kind === "unavailable" ? (
-          <p className="canvas-compare__note">The earlier version is unavailable.</p>
+      <OctantDialogPresence>
+        {compare !== undefined ? (
+          <OctantDialog label="Compare versions" onClose={() => setCompare(undefined)} open>
+            {compare?.kind === "ready" ? (
+              <CanvasVersionCompare earlier={compare.earlier} later={compare.later} />
+            ) : compare?.kind === "unavailable" ? (
+              <p className="canvas-compare__note">The earlier version is unavailable.</p>
+            ) : null}
+          </OctantDialog>
         ) : null}
-      </OctantDialog>
+      </OctantDialogPresence>
     </div>
   );
 }

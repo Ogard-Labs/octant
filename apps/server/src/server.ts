@@ -639,6 +639,7 @@ export function startOctantServer(
       agentProfileRoutes,
       archivedWorktreeRoutes,
       buildCodeService,
+      diskCleanupRoutes,
       canAccessCodeProject,
       codeAttachments,
       codeFileWatch,
@@ -1332,6 +1333,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      designSystemRoutes,
       fleetActivityRoutes,
       pendingRequestRoutes,
       sidebarBackgroundRoutes,
@@ -1669,6 +1671,7 @@ export function startOctantServer(
       agentMessageRoutes,
       agentProfileRoutes,
       archivedWorktreeRoutes,
+      diskCleanupRoutes,
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
@@ -1688,6 +1691,7 @@ export function startOctantServer(
       codeRoutes,
       computerUseRoutes,
       desktopPaneRoutes,
+      designSystemRoutes,
       contextRoutes,
       diagnosticsExportRoutes,
       discoveryRoutes,

@@ -139,8 +139,9 @@
    and one it closes with `data-ending-style` until the transition ends, then
    takes it out of the document. A dialog or sheet that a feature mounts
    already open gets no starting mark, so `@starting-style` gives it the same
-   arrival; one a feature unmounts to close leaves at once, because nothing
-   in a stylesheet can hold an element that is no longer there. */
+   arrival. Nothing in a stylesheet can hold an element that is no longer
+   there, so a dialog a feature stops rendering is kept mounted through its
+   exit by `OctantDialogPresence`; without one it leaves at once. */
 :is(
   [data-slot="dropdown-menu-content"],
   [data-slot="context-menu-content"],

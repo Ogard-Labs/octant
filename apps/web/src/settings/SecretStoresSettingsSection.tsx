@@ -11,6 +11,7 @@ import type {
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { GoogleCliAccountSettings } from "./GoogleCliAccountSettings";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
@@ -385,24 +386,26 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
         />
       ) : null}
 
-      {unlinking === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel={`Unlink ${unlinking.label}`}
-          destructive
-          onCancel={() => setUnlinking(undefined)}
-          onConfirm={() => {
-            const store = unlinking;
-            setUnlinking(undefined);
-            setChecked(undefined);
-            void run({ kind: "unlink-store", store: store.kind });
-          }}
-          pending={busy}
-          title={`Unlink ${unlinking.label}?`}
-        >
-          Providers whose key points at an item in {unlinking.label} stop getting their key until
-          you link it again. Nothing in {unlinking.label} is changed or deleted.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {unlinking === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel={`Unlink ${unlinking.label}`}
+            destructive
+            onCancel={() => setUnlinking(undefined)}
+            onConfirm={() => {
+              const store = unlinking;
+              setUnlinking(undefined);
+              setChecked(undefined);
+              void run({ kind: "unlink-store", store: store.kind });
+            }}
+            pending={busy}
+            title={`Unlink ${unlinking.label}?`}
+          >
+            Providers whose key points at an item in {unlinking.label} stop getting their key until
+            you link it again. Nothing in {unlinking.label} is changed or deleted.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
       <CommandCredentialBindingsSettings
         client={client.commandBindings}
         projectNames={props.projectNames ?? new Map()}

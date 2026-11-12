@@ -7,6 +7,7 @@ import type {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { automationAuthoritySummary } from "./automationCenterModel";
 import type { AutomationCenterController } from "./useAutomationCenterController";
 
@@ -127,42 +128,48 @@ export function AutomationEventSourceStatus(props: {
           Review and re-arm
         </OctantButton>
       ) : null}
-      <OctantDialog
-        open={review !== undefined}
-        onClose={() => {
-          if (!busy) setReview(undefined);
-        }}
-        label="Review event input"
-      >
-        <p>{review?.taskPrompt}</p>
-        <p>{review?.deliveryTarget.summary}</p>
-        {review === undefined ? null : <p>{automationAuthoritySummary(review.authorityProfile)}</p>}
-        <p>
-          Finish and review existing tasks and their output. Re-arming skips all held events,
-          establishes a new baseline and restores the automatic allowance. It starts no task for
-          existing events.
-        </p>
-        {message === undefined && !stale ? null : (
-          <OctantAlert tone="warning">
-            {message ?? "The routine changed. Close this review and refresh its current state."}
-          </OctantAlert>
-        )}
-        <OctantButton
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() => setReview(undefined)}
-        >
-          Cancel
-        </OctantButton>
-        <OctantButton
-          type="button"
-          disabled={busy || stale || unconfirmed}
-          onClick={() => void rearm()}
-        >
-          Re-arm and skip held events
-        </OctantButton>
-      </OctantDialog>
+      <OctantDialogPresence>
+        {review !== undefined ? (
+          <OctantDialog
+            open
+            onClose={() => {
+              if (!busy) setReview(undefined);
+            }}
+            label="Review event input"
+          >
+            <p>{review?.taskPrompt}</p>
+            <p>{review?.deliveryTarget.summary}</p>
+            {review === undefined ? null : (
+              <p>{automationAuthoritySummary(review.authorityProfile)}</p>
+            )}
+            <p>
+              Finish and review existing tasks and their output. Re-arming skips all held events,
+              establishes a new baseline and restores the automatic allowance. It starts no task for
+              existing events.
+            </p>
+            {message === undefined && !stale ? null : (
+              <OctantAlert tone="warning">
+                {message ?? "The routine changed. Close this review and refresh its current state."}
+              </OctantAlert>
+            )}
+            <OctantButton
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setReview(undefined)}
+            >
+              Cancel
+            </OctantButton>
+            <OctantButton
+              type="button"
+              disabled={busy || stale || unconfirmed}
+              onClick={() => void rearm()}
+            >
+              Re-arm and skip held events
+            </OctantButton>
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }

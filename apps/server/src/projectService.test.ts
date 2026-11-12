@@ -1520,6 +1520,34 @@ describe("ProjectService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
+  it("journals a person's swap of the Project's design system and refuses one outside its folders", async () => {
+    const project = codeProject();
+    const fixture = fixtureService({ projects: [project] });
+    const folder = project.binding.canonicalRoot;
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-project-design-system",
+      projectId: project.id,
+      expectedVersion: 1,
+      designSystem: { kind: "file", folder, path: "apps/site/DESIGN.md" },
+    });
+    expect(result).toMatchObject({
+      kind: "project-design-system-changed",
+      project: { designSystem: { kind: "file", folder, path: "apps/site/DESIGN.md" }, version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.design-system-changed@1",
+    );
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-project-design-system",
+        projectId: project.id,
+        expectedVersion: 2,
+        designSystem: { kind: "file", folder: "/elsewhere", path: "DESIGN.md" },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a desktop recipe the recipe schema refuses and journals nothing", async () => {
     // The host offers the recipe's provider, so only the schema can refuse.
     const fixture = fixtureService({

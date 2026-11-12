@@ -66,6 +66,7 @@ export type RoutesDependencies = {
     CodeWiring,
     | "agentProfileRoutes"
     | "archivedWorktreeRoutes"
+    | "diskCleanupRoutes"
     | "codeProjectAccess"
     | "folderBrowseRoutes"
     | "projectRoutes"
@@ -141,6 +142,7 @@ export type RoutesDependencies = {
   Pick<BenchmarksWiring, "benchmarkRoutes"> &
   Pick<
     WorkRequestsWiring,
+    | "designSystemRoutes"
     | "fleetActivityRoutes"
     | "pendingRequestRoutes"
     | "sidebarBackgroundRoutes"
@@ -160,6 +162,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentMessageRoutes,
     agentProfileRoutes,
     archivedWorktreeRoutes,
+    diskCleanupRoutes,
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
@@ -179,6 +182,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     codeRoutes,
     computerUseRoutes,
     desktopPaneRoutes,
+    designSystemRoutes,
     contextRoutes,
     diagnosticsExportRoutes,
     discoveryRoutes,
@@ -317,6 +321,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await workThreadRoutes(request)) ??
     (await workTurnRoutes(request)) ??
     (await workOverviewRoutes(request)) ??
+    (await designSystemRoutes(request)) ??
     (await workMutationRoutes(request)) ??
     (await workFileListingRoutes(request)) ??
     (await previewRoutes(request)) ??
@@ -347,6 +352,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
     (await archivedWorktreeRoutes(request)) ??
+    (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??

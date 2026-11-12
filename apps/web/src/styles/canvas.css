@@ -2552,7 +2552,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   padding: 4px 8px;
   width: 100%;
@@ -4506,7 +4506,7 @@
   justify-content: space-between;
   gap: var(--oct-space-2);
   height: var(--oct-space-6);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-bg);
   padding: 0 var(--oct-space-2);

@@ -481,6 +481,10 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
+  readonly onDesignSystemChange?: (
+    projectId: ProjectId,
+    designSystem: import("@octant/contracts/design-systems").DesignSystemChoice | null,
+  ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
@@ -2511,6 +2515,9 @@ function renderNonCodeTab(
         {...(props.onBrandKitChange === undefined
           ? {}
           : { onBrandKitChange: props.onBrandKitChange })}
+        {...(props.onDesignSystemChange === undefined
+          ? {}
+          : { onDesignSystemChange: props.onDesignSystemChange })}
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}

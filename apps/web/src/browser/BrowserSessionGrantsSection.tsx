@@ -11,6 +11,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -210,134 +211,136 @@ export function BrowserSessionGrantsSection(props: {
       ))}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {!editing && error !== undefined ? <OctantAlert tone="danger">{error}</OctantAlert> : null}
-      {!editing ? null : (
-        <OctantConfirmDialog
-          title={
-            review === undefined
-              ? "Review Browser session permission"
-              : "Grant Browser session permission?"
-          }
-          confirmLabel={review === undefined ? "Review permission" : "Grant session permission"}
-          pending={pending}
-          confirmDisabled={
-            review === undefined &&
-            (chosenTarget === undefined || chosenProfile === undefined || origins.trim() === "")
-          }
-          onCancel={() => {
-            if (!pending) {
-              setEditing(false);
-              setReview(undefined);
+      <OctantDialogPresence>
+        {!editing ? null : (
+          <OctantConfirmDialog
+            title={
+              review === undefined
+                ? "Review Browser session permission"
+                : "Grant Browser session permission?"
             }
-          }}
-          onConfirm={() => {
-            if (review !== undefined) {
-              void act({ kind: "grant", reviewId: review.reviewId });
-              return;
+            confirmLabel={review === undefined ? "Review permission" : "Grant session permission"}
+            pending={pending}
+            confirmDisabled={
+              review === undefined &&
+              (chosenTarget === undefined || chosenProfile === undefined || origins.trim() === "")
             }
-            if (chosenTarget !== undefined && chosenProfile !== undefined)
-              void act({
-                kind: "review",
-                grantee: chosenTarget.grantee,
-                profile: chosenProfile.profile,
-                origins: origins.split(/[\s,]+/).filter(Boolean),
-                durationMinutes: selectedDuration,
-              });
-          }}
-          details={
-            <>
-              <p>
-                Permissions end at the displayed expiry, on revocation or when this host restarts.
-                Granting starts no task or routine.
-              </p>
-              {review === undefined ? null : (
+            onCancel={() => {
+              if (!pending) {
+                setEditing(false);
+                setReview(undefined);
+              }
+            }}
+            onConfirm={() => {
+              if (review !== undefined) {
+                void act({ kind: "grant", reviewId: review.reviewId });
+                return;
+              }
+              if (chosenTarget !== undefined && chosenProfile !== undefined)
+                void act({
+                  kind: "review",
+                  grantee: chosenTarget.grantee,
+                  profile: chosenProfile.profile,
+                  origins: origins.split(/[\s,]+/).filter(Boolean),
+                  durationMinutes: selectedDuration,
+                });
+            }}
+            details={
+              <>
                 <p>
-                  {review.grant.continuesWithoutWindow === true
-                    ? "This permission can keep using the native Browser when all windows close. Turning off background Browser ownership or quitting Octant ends its execution lease; a new owner requires another review."
-                    : "This permission requires an open local window. Turning on background Browser ownership later does not extend it."}
+                  Permissions end at the displayed expiry, on revocation or when this host restarts.
+                  Granting starts no task or routine.
                 </p>
-              )}
-              {review === undefined ? (
-                <div className="flex flex-col gap-3">
-                  <label className="field">
-                    <span className="field__label">Caller</span>
-                    <OctantSelectField
-                      aria-label="Caller"
-                      value={targetId}
-                      placeholder="Choose a caller"
-                      onValueChange={setTargetId}
-                      options={targets.map((target) => ({
-                        id: JSON.stringify(target.grantee),
-                        label: `${target.grantee.kind === "child" ? "Child" : target.grantee.kind === "routine" ? "Routine" : "Terminal"} · ${target.label}`,
-                      }))}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field__label">Profile</span>
-                    <OctantSelectField
-                      aria-label="Profile"
-                      value={profileId}
-                      placeholder="Choose a profile"
-                      onValueChange={setProfileId}
-                      options={props.profiles.map((profile) => ({
-                        id: browserProfileKey(profile.profile),
-                        label: profile.label,
-                      }))}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field__label">HTTPS origins</span>
-                    <OctantInput
-                      aria-label="HTTPS origins"
-                      aria-describedby={error === undefined ? undefined : errorId}
-                      value={origins}
-                      maxLength={32_768}
-                      placeholder="https://example.com"
-                      onChange={(event) => setOrigins(event.target.value)}
-                    />
-                  </label>
+                {review === undefined ? null : (
                   <p>
-                    Exact HTTPS origins, separated by spaces or commas. Include a port when needed;
-                    omit paths and query values.
+                    {review.grant.continuesWithoutWindow === true
+                      ? "This permission can keep using the native Browser when all windows close. Turning off background Browser ownership or quitting Octant ends its execution lease; a new owner requires another review."
+                      : "This permission requires an open local window. Turning on background Browser ownership later does not extend it."}
                   </p>
-                  <label className="field">
-                    <span className="field__label">Expires after</span>
-                    <OctantSelectField
-                      aria-label="Permission duration"
-                      value={String(selectedDuration)}
-                      onValueChange={(value) => setDuration(Number(value))}
-                      options={durationChoices}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <dl className="grid gap-2">
-                  <dt>Caller</dt>
-                  <dd>{review.grant.target.label}</dd>
-                  <dt>Profile</dt>
-                  <dd>{review.grant.profileLabel}</dd>
-                  <dt>Sites</dt>
-                  <dd className="break-all">{review.grant.origins.join(", ")}</dd>
-                  <dt>Model</dt>
-                  <dd>{review.grant.target.modelId}</dd>
-                  <dt>Execution host</dt>
-                  <dd>This host</dd>
-                  <dt>Expires</dt>
-                  <dd>{new Date(review.grant.expiresAt).toLocaleString()}</dd>
-                </dl>
-              )}
-              {error === undefined ? null : (
-                <div id={errorId}>
-                  <OctantAlert tone="danger">{error}</OctantAlert>
-                </div>
-              )}
-            </>
-          }
-        >
-          This caller can act as the account already signed in to this profile on the listed sites.
-          Grant only the intended task. Other sites, callers, login actions and file transfers are
-          not authorized.
-        </OctantConfirmDialog>
-      )}
+                )}
+                {review === undefined ? (
+                  <div className="flex flex-col gap-3">
+                    <label className="field">
+                      <span className="field__label">Caller</span>
+                      <OctantSelectField
+                        aria-label="Caller"
+                        value={targetId}
+                        placeholder="Choose a caller"
+                        onValueChange={setTargetId}
+                        options={targets.map((target) => ({
+                          id: JSON.stringify(target.grantee),
+                          label: `${target.grantee.kind === "child" ? "Child" : target.grantee.kind === "routine" ? "Routine" : "Terminal"} · ${target.label}`,
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field__label">Profile</span>
+                      <OctantSelectField
+                        aria-label="Profile"
+                        value={profileId}
+                        placeholder="Choose a profile"
+                        onValueChange={setProfileId}
+                        options={props.profiles.map((profile) => ({
+                          id: browserProfileKey(profile.profile),
+                          label: profile.label,
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field__label">HTTPS origins</span>
+                      <OctantInput
+                        aria-label="HTTPS origins"
+                        aria-describedby={error === undefined ? undefined : errorId}
+                        value={origins}
+                        maxLength={32_768}
+                        placeholder="https://example.com"
+                        onChange={(event) => setOrigins(event.target.value)}
+                      />
+                    </label>
+                    <p>
+                      Exact HTTPS origins, separated by spaces or commas. Include a port when
+                      needed; omit paths and query values.
+                    </p>
+                    <label className="field">
+                      <span className="field__label">Expires after</span>
+                      <OctantSelectField
+                        aria-label="Permission duration"
+                        value={String(selectedDuration)}
+                        onValueChange={(value) => setDuration(Number(value))}
+                        options={durationChoices}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <dl className="grid gap-2">
+                    <dt>Caller</dt>
+                    <dd>{review.grant.target.label}</dd>
+                    <dt>Profile</dt>
+                    <dd>{review.grant.profileLabel}</dd>
+                    <dt>Sites</dt>
+                    <dd className="break-all">{review.grant.origins.join(", ")}</dd>
+                    <dt>Model</dt>
+                    <dd>{review.grant.target.modelId}</dd>
+                    <dt>Execution host</dt>
+                    <dd>This host</dd>
+                    <dt>Expires</dt>
+                    <dd>{new Date(review.grant.expiresAt).toLocaleString()}</dd>
+                  </dl>
+                )}
+                {error === undefined ? null : (
+                  <div id={errorId}>
+                    <OctantAlert tone="danger">{error}</OctantAlert>
+                  </div>
+                )}
+              </>
+            }
+          >
+            This caller can act as the account already signed in to this profile on the listed
+            sites. Grant only the intended task. Other sites, callers, login actions and file
+            transfers are not authorized.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

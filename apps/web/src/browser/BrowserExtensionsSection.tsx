@@ -13,6 +13,7 @@ import { BrowserExtensionImportDialog } from "./BrowserExtensionImportDialog";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface BrowserExtensionsSectionProps {
@@ -237,73 +238,79 @@ export function BrowserExtensionsSection(props: BrowserExtensionsSectionProps) {
           </OctantButton>
         </div>
       ) : null}
-      {importing ? (
-        <BrowserExtensionImportDialog
-          client={client}
-          onClose={(outcome) => {
-            setImporting(false);
-            if (outcome === undefined) return;
-            setNotice(outcome);
-            void refresh();
-          }}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {importing ? (
+          <BrowserExtensionImportDialog
+            client={client}
+            onClose={(outcome) => {
+              setImporting(false);
+              if (outcome === undefined) return;
+              setNotice(outcome);
+              void refresh();
+            }}
+          />
+        ) : null}
+      </OctantDialogPresence>
       {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
-      {pending?.kind === "enable" ? (
-        <OctantConfirmDialog
-          confirmLabel="Enable"
-          details={
-            <ul aria-label="What this extension can do">
-              {describeExtensionAccess(
-                pending.extension.addedAccess !== undefined &&
-                  pending.extension.needsConfirmation.some(
-                    (profile) =>
-                      browserProfileKey(profile) === browserProfileKey(pending.profile.profile),
-                  )
-                  ? pending.extension.addedAccess
-                  : pending.extension.access,
-              ).map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          }
-          onCancel={() => setPending(undefined)}
-          onConfirm={() =>
-            void run(
-              {
-                kind: "enable",
-                extensionId: pending.extension.id,
-                profile: pending.profile.profile,
-                contentHash: pending.extension.contentHash,
-              },
-              `Turned ${pending.extension.name} on in ${pending.profile.label}.`,
-            )
-          }
-          pending={busy}
-          title={`Enable ${pending.extension.name} in ${pending.profile.label}?`}
-        >
-          {pending.extension.addedAccess !== undefined
-            ? "This update asks for more than the version you allowed. It can:"
-            : "While it is on, this extension can see and change what pages show in this profile, including what an agent reads there. It can:"}
-        </OctantConfirmDialog>
-      ) : null}
-      {pending?.kind === "remove" ? (
-        <OctantConfirmDialog
-          confirmLabel="Remove"
-          destructive
-          onCancel={() => setPending(undefined)}
-          onConfirm={() =>
-            void run(
-              { kind: "remove", extensionId: pending.extension.id },
-              `Removed ${pending.extension.name}.`,
-            )
-          }
-          pending={busy}
-          title={`Remove ${pending.extension.name}?`}
-        >
-          It turns off in every profile and its copy is deleted.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {pending?.kind === "enable" ? (
+          <OctantConfirmDialog
+            confirmLabel="Enable"
+            details={
+              <ul aria-label="What this extension can do">
+                {describeExtensionAccess(
+                  pending.extension.addedAccess !== undefined &&
+                    pending.extension.needsConfirmation.some(
+                      (profile) =>
+                        browserProfileKey(profile) === browserProfileKey(pending.profile.profile),
+                    )
+                    ? pending.extension.addedAccess
+                    : pending.extension.access,
+                ).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            }
+            onCancel={() => setPending(undefined)}
+            onConfirm={() =>
+              void run(
+                {
+                  kind: "enable",
+                  extensionId: pending.extension.id,
+                  profile: pending.profile.profile,
+                  contentHash: pending.extension.contentHash,
+                },
+                `Turned ${pending.extension.name} on in ${pending.profile.label}.`,
+              )
+            }
+            pending={busy}
+            title={`Enable ${pending.extension.name} in ${pending.profile.label}?`}
+          >
+            {pending.extension.addedAccess !== undefined
+              ? "This update asks for more than the version you allowed. It can:"
+              : "While it is on, this extension can see and change what pages show in this profile, including what an agent reads there. It can:"}
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {pending?.kind === "remove" ? (
+          <OctantConfirmDialog
+            confirmLabel="Remove"
+            destructive
+            onCancel={() => setPending(undefined)}
+            onConfirm={() =>
+              void run(
+                { kind: "remove", extensionId: pending.extension.id },
+                `Removed ${pending.extension.name}.`,
+              )
+            }
+            pending={busy}
+            title={`Remove ${pending.extension.name}?`}
+          >
+            It turns off in every profile and its copy is deleted.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

@@ -27,6 +27,7 @@ import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./un
 import { UnifiedDiffList } from "./UnifiedDiffList";
 import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -602,19 +603,21 @@ function AvailableDiff(
                 </OctantButton>
               ) : null}
             </div>
-            {confirmingDiscard === selected.path && trackedPath !== undefined ? (
-              <OctantConfirmDialog
-                title="Discard changes?"
-                confirmLabel="Discard changes"
-                cancelLabel="Keep changes"
-                destructive
-                pending={discarding}
-                onCancel={() => setConfirmingDiscard(undefined)}
-                onConfirm={() => void discard(trackedPath)}
-              >
-                Discard uncommitted changes to {selected.path}? This cannot be undone.
-              </OctantConfirmDialog>
-            ) : null}
+            <OctantDialogPresence>
+              {confirmingDiscard === selected.path && trackedPath !== undefined ? (
+                <OctantConfirmDialog
+                  title="Discard changes?"
+                  confirmLabel="Discard changes"
+                  cancelLabel="Keep changes"
+                  destructive
+                  pending={discarding}
+                  onCancel={() => setConfirmingDiscard(undefined)}
+                  onConfirm={() => void discard(trackedPath)}
+                >
+                  Discard uncommitted changes to {selected.path}? This cannot be undone.
+                </OctantConfirmDialog>
+              ) : null}
+            </OctantDialogPresence>
             {discardMessage === undefined ? null : (
               <p className="code-diff-pane__discard-message" role="status">
                 {discardMessage}

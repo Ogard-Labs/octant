@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { validateQuestionnaireAnswer } from "@octant/domain";
@@ -665,6 +666,16 @@ export interface CodeOperationRuntimeOptions {
    * or Work turn in the Project does. Absent gives none.
    */
   readonly projectMemoryEntries?: (thread: CodeThread) => ReadonlyArray<string>;
+  /**
+   * The Project's design system as this turn should see it, read from the
+   * folder the runtime works in (a worktree carries its own `DESIGN.md`).
+   * Absent, or undefined, gives none.
+   */
+  readonly designSystemContext?: (input: {
+    readonly thread: CodeThread;
+    readonly root: string;
+    readonly extraFolders: ReadonlyArray<string>;
+  }) => Promise<DesignSystemTurnContext | undefined>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -2542,6 +2553,8 @@ interface ActiveTurn {
   readonly providerRoot: string;
   readonly folderCurrent?: () => boolean;
   readonly checkoutRoot: string;
+  /** Read once as the turn starts, so `#launch` stays synchronous. */
+  readonly designSystem?: DesignSystemTurnContext;
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
@@ -3361,6 +3374,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // Extensions' tools act on this host; the server tool set is the turn's whole set.
       await input.extensionTools?.close?.().catch(() => undefined);
     }
+    const providerRoot = input.providerRoot ?? input.checkoutRoot;
+    const extraFolders = [
+      ...new Set([
+        ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
+        ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
+          ? [input.checkoutRoot]
+          : []),
+      ]),
+    ].filter((folder) => folder !== providerRoot);
+    // Read before the final admission check, which must not yield before the
+    // turn is owned. A server Project's folder is on another machine, so its
+    // design system is the runtime's to read there.
+    const designSystem = remoteThread
+      ? undefined
+      : await this.#options
+          .designSystemContext?.({ thread: input.thread, root: providerRoot, extraFolders })
+          .catch(() => undefined);
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (
       input.folderCurrent?.() === false ||
@@ -3401,6 +3431,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(feedback?.attachments ?? []),
     ];
     const active: ActiveTurn = {
+      ...(designSystem === undefined ? {} : { designSystem }),
       ...(inputGuards.length === 0
         ? {}
         : { inputsCurrent: () => inputGuards.every((current) => current()) }),
@@ -3427,19 +3458,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ? previous.sessionId
           : input.sessionId,
       requestedSessionId: input.sessionId,
-      providerRoot: input.providerRoot ?? input.checkoutRoot,
+      providerRoot,
       ...(input.folderCurrent === undefined ? {} : { folderCurrent: input.folderCurrent }),
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
-      extraFolders: [
-        ...new Set([
-          ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
-          ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
-            ? [input.checkoutRoot]
-            : []),
-        ]),
-      ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
+      extraFolders,
       driver,
       firstTurn:
         !priorTurn &&
@@ -5142,6 +5166,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
+      ...(active.designSystem === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: active.designSystem.instructions }]),
       ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
         kind: "instructions" as const,
         text: line.text,
@@ -5159,9 +5186,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? []
         : [{ kind: "person-memory" as const, text: personMemoryText }];
     // After person memory, as in Chat and Work, and counted with it.
-    const projectMemory = (this.#options.projectMemoryEntries?.(active.thread) ?? []).map(
-      (text) => ({ kind: "project-memory" as const, text }),
-    );
+    const projectMemory = [
+      ...(this.#options.projectMemoryEntries?.(active.thread) ?? []).map((text) => ({
+        kind: "project-memory" as const,
+        text,
+      })),
+      // Keyed, so a session that holds this file is sent it again only once it changed.
+      ...(active.designSystem?.system === undefined
+        ? []
+        : [
+            {
+              kind: "project-memory" as const,
+              key: active.designSystem.system.key,
+              text: active.designSystem.system.text,
+            },
+          ]),
+    ];
     const fullContext = [
       ...harnessContext,
       ...hostGuidance,
