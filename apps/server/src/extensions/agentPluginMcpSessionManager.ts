@@ -1087,63 +1087,91 @@ function duplicatedMcpToolNames(tools: ReadonlyArray<McpToolDefinition>): Readon
   return duplicates;
 }
 
-const SINGLE_NESTED_SCHEMA_KEYWORDS = [
-  "additionalItems",
-  "additionalProperties",
-  "contains",
-  "contentSchema",
-  "else",
-  "if",
-  "items",
-  "not",
-  "propertyNames",
-  "then",
-  "unevaluatedItems",
-  "unevaluatedProperties",
-] as const;
-const ARRAY_NESTED_SCHEMA_KEYWORDS = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
-const MAP_NESTED_SCHEMA_KEYWORDS = [
-  "$defs",
-  "definitions",
-  "dependencies",
-  "dependentSchemas",
-  "properties",
-] as const;
-
 /**
  * JavaScript regular expressions can exhibit catastrophic backtracking. MCP
  * schemas are server-controlled and Ajv evaluates them synchronously on the
  * control-plane event loop, so regex-bearing schemas are not safe to execute.
  */
-function mcpInputSchemaUsesRegularExpressions(schema: unknown): boolean {
-  if (Array.isArray(schema)) return schema.some(mcpInputSchemaUsesRegularExpressions);
-  if (schema === null || typeof schema !== "object") return false;
-  const record = schema as Readonly<Record<string, unknown>>;
-  if (
-    Object.prototype.hasOwnProperty.call(record, "pattern") ||
-    Object.prototype.hasOwnProperty.call(record, "patternProperties")
-  ) {
-    return true;
-  }
-  for (const keyword of SINGLE_NESTED_SCHEMA_KEYWORDS) {
-    if (mcpInputSchemaUsesRegularExpressions(record[keyword])) return true;
-  }
-  for (const keyword of ARRAY_NESTED_SCHEMA_KEYWORDS) {
-    const nested = record[keyword];
-    if (Array.isArray(nested) && nested.some(mcpInputSchemaUsesRegularExpressions)) return true;
-  }
-  for (const keyword of MAP_NESTED_SCHEMA_KEYWORDS) {
-    const nested = record[keyword];
+function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
+  const visited = new Set<unknown>();
+  const visit = (candidate: unknown): boolean => {
+    if (Array.isArray(candidate)) return candidate.some(visit);
+    if (candidate === null || typeof candidate !== "object") return false;
+    if (visited.has(candidate)) return false;
+    visited.add(candidate);
+    const record = candidate as Readonly<Record<string, unknown>>;
     if (
-      nested !== null &&
-      typeof nested === "object" &&
-      !Array.isArray(nested) &&
-      Object.values(nested).some(mcpInputSchemaUsesRegularExpressions)
+      Object.prototype.hasOwnProperty.call(record, "pattern") ||
+      Object.prototype.hasOwnProperty.call(record, "patternProperties")
     ) {
       return true;
     }
+    for (const keyword of ["$ref", "$dynamicRef", "$recursiveRef"] as const) {
+      if (typeof record[keyword] !== "string") continue;
+      const referenced = localJsonPointerTarget(schema, record[keyword]);
+      // Ajv can resolve more reference forms than this bounded inspector. Omit
+      // those tools instead of compiling a schema whose regex use is unknown.
+      if (referenced === undefined || visit(referenced)) return true;
+    }
+    for (const keyword of [
+      "additionalItems",
+      "additionalProperties",
+      "contains",
+      "contentSchema",
+      "else",
+      "if",
+      "items",
+      "not",
+      "propertyNames",
+      "then",
+      "unevaluatedItems",
+      "unevaluatedProperties",
+    ] as const) {
+      if (visit(record[keyword])) return true;
+    }
+    for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+      const nested = record[keyword];
+      if (Array.isArray(nested) && nested.some(visit)) return true;
+    }
+    for (const keyword of [
+      "$defs",
+      "definitions",
+      "dependencies",
+      "dependentSchemas",
+      "properties",
+    ] as const) {
+      const nested = record[keyword];
+      if (
+        nested !== null &&
+        typeof nested === "object" &&
+        !Array.isArray(nested) &&
+        Object.values(nested).some(visit)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return visit(schema);
+}
+
+function localJsonPointerTarget(root: unknown, reference: string): unknown {
+  if (reference === "#") return root;
+  if (!reference.startsWith("#/")) return undefined;
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(reference.slice(2));
+  } catch {
+    return undefined;
   }
-  return false;
+  let target = root;
+  for (const encodedToken of pointer.split("/")) {
+    if (target === null || typeof target !== "object") return undefined;
+    const token = encodedToken.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!Object.prototype.hasOwnProperty.call(target, token)) return undefined;
+    target = (target as Readonly<Record<string, unknown>>)[token];
+  }
+  return target;
 }
 
 function prepareMcpTool(
@@ -1159,12 +1187,12 @@ function prepareMcpTool(
     ) {
       return undefined;
     }
-    if (mcpInputSchemaUsesRegularExpressions(tool.inputSchema)) return undefined;
     const providerDefinition = decodeProviderToolDefinition({
       name: toolQualifiedName(record, tool.name),
       ...boundedToolDescription(tool.description),
       inputSchema: tool.inputSchema,
     });
+    if (mcpInputSchemaIsUnsafeToValidate(providerDefinition.inputSchema)) return undefined;
     const validateInput = new AjvJsonSchemaValidator(
       new Ajv2020({
         allErrors: false,
