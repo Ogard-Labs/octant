@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 3       | 6            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 1       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 11      | 5            | 0                   |
@@ -59,7 +59,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Canvas](#canvas)                                                                     | 11        | 3       | 8            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
-| [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
+| [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **248**   | **133** | **110**      | **5**               |
+| **All areas**                                                                         | **248**   | **131** | **112**      | **5**               |
 
 ## Principles and hard lines
 
@@ -425,7 +425,7 @@ Status: Partly built. Detail: [Architecture: Current Release Boundary](../archit
 
 ### Scope hold until the Full access rule is built
 
-Bots, the Nightly shared-host client, public Canvas links, Browser upload and download manifests, and Windows building blocks beyond running Work and Code at Full access take no new scope until [The Full access rule](#the-full-access-rule) is built (maintainer request, 2026-11-12).
+Bots, the Nightly shared-host client, public Canvas links, Browser upload and download manifests, and Windows building blocks take no new scope until [The Full access rule](#the-full-access-rule) is built (maintainer request, 2026-11-12). Running Work and Code at Full access on Windows is not an exception to the hold: it is tracked as its own work and needs Windows forms of the confined launches first (maintainer decision, 2026-11-12).
 
 - The hold adds no rule to those features and removes none: their entries keep their current text and status.
 - The hosted relay is not held: it was canceled on 2026-10-30, and its specification, code and decision entry are removed.
@@ -2149,11 +2149,11 @@ Each artifact replica entry is signed by a per-host device signing key, and memb
 
 - The signing key lives in a credential namespace provider credentials cannot reach, and is not a paired client's device key; an entry whose signature or key does not verify is journaled as unreadable.
 - A new computer joins by a signed request that a member in good standing approves by name; only a computer that brought another in can revoke it, and a member leaves by signing a left record.
-- Store setup, joining, revoking and leaving happen on the host, never from a paired phone; store credentials live in the host credential store.
+- Store setup, joining, revoking and leaving are the person's, at a local window or a paired device (maintainer decision, 2026-11-12; not built yet: today they happen on the host, never from a paired phone); store credentials live in the host credential store.
 - A bucket endpoint must be `https` with no path, query or user info and must not be link-local; loopback and private ranges stay allowed.
 - The storage provider can read synced content, and Settings and the guide say so before sync is turned on; a replica import appends versions only and delegates no host authority.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority, Artifact replica membership](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Artifact replica membership](../architecture.md#security-and-authority).
 
 ## Updates and development
 
@@ -2862,14 +2862,14 @@ Status: Built. Since: —. Detail: [Provider runtimes: key provider sandbox](pro
 
 A key provider's artifact publishing is off for every account until the person enables it on the host, and Canvas stays the default. The launch lifts exactly one telemetry guard, only for the sessions that need it.
 
-- The switch is per account, changed only from the host's own window, and refused for API-key accounts and for hosts that export their own telemetry opt-out.
+- The switch is per account, changed from the host's own window or a paired device (maintainer decision, 2026-11-12; not built yet: today only from the host's own window), and refused for API-key accounts and for hosts that export their own telemetry opt-out.
 - Enabling shows a confirmation that says it also turns on the provider's usage telemetry; error reports and conversation uploads stay off.
 - The launch offers the tool only in a Work or Code session outside Plan, on a subscription sign-in, for a thread that chose it. Every other launch keeps the full guard set.
 - The person's own opt-out always wins over the setting, and a host-level umbrella opt-out is never removed.
 - The environment is fixed when the runtime starts (once per turn), so turning either choice off takes effect on the next turn.
 - Each publish asks below Full access, and at Full access nothing asks, publishing included ([Hosted artifact publishing](#hosted-artifact-publishing)). Plan never publishes, and published pages are reported as outside content.
 
-Status: Built. Since: 2026-10-28. Detail: [Provider runtimes: artifact launch](provider-runtimes.md#claude-code) and [Model endpoints: provider artifacts](model-endpoints.md#claude-artifacts).
+Status: Partly built. Since: 2026-10-28. Detail: [Provider runtimes: artifact launch](provider-runtimes.md#claude-code) and [Model endpoints: provider artifacts](model-endpoints.md#claude-artifacts).
 
 ### Lightweight-runtime app tools
 
@@ -3205,11 +3205,11 @@ Status: Partly built. Since: 2026-11-05. Detail: [Octant Nightly: one host serve
 A Code thread's editor gets diagnostics and go-to-definition from separately launched language servers that run under Code Project and thread authority. They are an executable component kind on the activation ladder.
 
 - Language servers are Code only, quarantined until reviewed, and installing one never trusts or enables it.
-- A `static` server reads the checkout read-only with no network and no exec, needs no approval, and serves Plan; a `repo-tooling` server runs confined like a terminal with per-checkout approval, proxied network, and is refused in Plan.
+- A `static` server reads the checkout read-only with no network and no exec, needs no approval, and serves Plan; a `repo-tooling` server runs confined like a terminal with per-checkout approval, proxied network, and is refused in Plan; at Full access it starts with no approval, read from the level the turn runs at (the Full access rule; not built yet: today the approval is asked at every level).
 - The repository never chooses what runs; executable, arguments, environment and class come only from the enabled component.
 - The bundled native language server is on by default for Code, with a Settings switch; a per-Project setting "Use the Project's own toolchain" uses the Project's own copy of that language toolchain instead (maintainer request, 2026-11-12); not built yet: today the Project's own copy is not used.
-- Paired devices may read results; starting a `repo-tooling` server stays local-host only.
-- Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that never starts a `repo-tooling` server and may read through one that is already approved and running (maintainer request, 2026-11-12); not built yet: today it never reads through one (real-provider smoke owed).
+- Paired devices read results, start and approve a `repo-tooling` server as a local window does, and may switch "Use the Project's own toolchain" (maintainer decision, 2026-11-12); not built yet: today starting or approving one is local-host only.
+- Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that below Full access never starts a `repo-tooling` server and may read through one that is already approved and running (maintainer request, 2026-11-12); not built yet: today it never reads through one (real-provider smoke owed).
 - `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places, `references` and `diagnostics` stop before their list passes 48 KiB so a result fits the provider's tool result budget, and each says when it was cut.
 - The editor's acknowledged-document read seam also serves capability-checked completion, hover, signatures, symbols and formatting; replies contain bounded text and ranges, never server commands or edits to other files. Shared Work/Code editing, recovery, conflict comparison, reviewed replacements and selection-to-agent drafts follow [Workspace: File editing](workspace.md#file-editing).
 - Octant hosts no other editor's extension API.
