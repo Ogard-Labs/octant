@@ -278,26 +278,35 @@ describe("pending request route", () => {
     expect(response?.status).toBe(400);
   });
 
-  it("refuses a paired device even when its request reaches the route", async () => {
+  it("lists for a device the host's own person paired under the device's own scope, and refuses a hub-introduced device and an unproved pairing", async () => {
     const { route, sources } = fixture();
-    const remote = new Request("http://127.0.0.1/api/pending-requests");
-    bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
-        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
-      }),
-      scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
-    });
-    const response = await route(remote);
-    expect(response?.status).toBe(403);
+    const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
+    const fromDevice = (admittedBy?: "host-person" | "hub-roster") => {
+      const remote = new Request("http://127.0.0.1/api/pending-requests");
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+          deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: deviceScope,
+      });
+      return remote;
+    };
+    for (const restricted of [undefined, "hub-roster"] as const) {
+      expect((await route(fromDevice(restricted)))?.status).toBe(403);
+    }
     expect(sources.work).not.toHaveBeenCalled();
     expect(sources.code).not.toHaveBeenCalled();
     expect(sources.chat).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("host-person")))?.status).toBe(200);
+    expect(sources.code).toHaveBeenCalledWith(deviceScope);
   });
 
   it("refuses a caller that names a window or any other parameter", async () => {

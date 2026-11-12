@@ -3,6 +3,8 @@ import {
   decodeProtectedFilesResult,
   type ProtectedFilesCommand,
 } from "@octant/contracts/protected-files";
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import type { ProtectedFilesService } from "./protectedFilesService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -71,7 +73,9 @@ export function createProtectedFilesRouteHandler(dependencies: ProtectedFilesRou
       return json(dependencies.service.settings(), 200, origin);
     }
     if (url.pathname === PROTECTED_FILES_COMMAND_PATH && request.method === "POST") {
-      if (principal.kind !== "local-window") {
+      // The list is the person's own: changed at a window on this computer
+      // or on a device that person paired, which the journal then names.
+      if (!principalActsAsHostPerson(principal)) {
         return json(
           decodeProtectedFilesResult({
             kind: "protected-files-refused",
@@ -99,7 +103,10 @@ export function createProtectedFilesRouteHandler(dependencies: ProtectedFilesRou
           origin,
         );
       }
-      const result = dependencies.service.change(command);
+      const result =
+        principal.kind === "remote-device"
+          ? dependencies.service.change(command, eventActorForPrincipal(principal))
+          : dependencies.service.change(command);
       return json(result, result.kind === "protected-files-refused" ? 409 : 200, origin);
     }
     return json({ error: "Protected files route is not found." }, 404, origin);

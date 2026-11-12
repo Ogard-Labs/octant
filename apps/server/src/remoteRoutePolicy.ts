@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
+import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
@@ -990,6 +991,41 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path,
     methods: ["POST"] as const,
   })),
+  // The person's own reads and lists, for a device that person paired: every
+  // approval and question their scope can answer and putting one off, the
+  // fleet read, provider limits and an asked-for refresh, and the protected
+  // files list and its changes. None has a catalogued action.
+  ...[PENDING_REQUESTS_PATH, "/api/fleet-activity", "/api/provider-usage-limits"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  {
+    kind: "exact" as const,
+    path: `${PENDING_REQUESTS_PATH}/defer`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/provider-usage-limits/refresh",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
   // Host control, for a device the host's own person paired: status, the
   // data map and the retention windows are reads; service lifecycle, backup,
   // memory limits, retention and purge are changes the route holds to 8 KiB.

@@ -289,10 +289,6 @@ describe("remote route policy", () => {
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
     }
-    // Every approval and question across the host's Projects is a local-window
-    // read; the remote listener never forwards it.
-    expect((await fixture.route(request("/api/pending-requests"))).status).toBe(404);
-    expect((await fixture.route(request("/api/fleet-activity"))).status).toBe(404);
 
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();
@@ -1001,6 +997,39 @@ describe("remote route policy", () => {
     for (const method of ["GET", "POST"]) {
       expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
     }
+  });
+
+  it("forwards the person's own reads and lists for the product dispatch to judge: pending requests, fleet activity, provider limits and protected files", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const [path, method] of [
+      ["/api/pending-requests", "GET"],
+      ["/api/pending-requests/defer", "POST"],
+      ["/api/fleet-activity", "GET"],
+      ["/api/provider-usage-limits", "GET"],
+      ["/api/provider-usage-limits/refresh", "POST"],
+      ["/api/protected-files", "GET"],
+      ["/api/protected-files/commands", "POST"],
+    ] as const) {
+      expect(inspect(path, method)).toMatchObject(forwarded);
+      expect(inspect(path, method === "GET" ? "POST" : "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
+    }
+    expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
   it("admits a paired device's reply detail read and nothing that could change it", () => {
