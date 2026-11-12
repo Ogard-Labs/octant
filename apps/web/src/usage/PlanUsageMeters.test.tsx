@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerPlanUsage } from "./ComposerPlanUsage";
 import { PlanUsageProvider } from "./PlanUsageContext";
-import { PlanUsageMeters, pixelBarCells } from "./PlanUsageMeters";
+import { PlanUsageMeters, closestToLimit, pixelBarCells } from "./PlanUsageMeters";
 
 afterEach(cleanup);
 
@@ -165,5 +165,42 @@ describe("usage bar style", () => {
     expect(half.has(9)).toBe(false);
     expect(pixelBarCells(100).every((cell) => cell.lit)).toBe(true);
     expect(pixelBarCells(0).some((cell) => cell.lit)).toBe(false);
+  });
+});
+
+describe("the compact plan meter beside the composer's row", () => {
+  const five = {
+    window: "five_hour",
+    short: "5h",
+    name: "5-hour limit",
+    percent: 85,
+    level: "ok",
+  } as const;
+  const week = {
+    window: "seven_day",
+    short: "Week",
+    name: "7-day limit",
+    percent: 43,
+    level: "ok",
+  } as const;
+
+  it("draws one meter for the window closest to its limit and names both windows", () => {
+    render(<PlanUsageMeters compact windows={[five, week]} />);
+    const group = screen.getByRole("group", { name: "Plan usage left" });
+    const meters = within(group).getAllByRole("img");
+    expect(meters).toHaveLength(1);
+    expect(meters[0]).toHaveAccessibleName("5-hour limit, 85% left; 7-day limit, 43% left");
+    expect(meters[0]).toHaveTextContent("43%");
+  });
+
+  it("speaks for the shorter window when both have the same share left", () => {
+    render(<PlanUsageMeters compact windows={[five, { ...week, percent: 85 }]} />);
+    expect(screen.getByRole("img")).toHaveTextContent("85%");
+    expect(closestToLimit([five, { ...week, percent: 85 }])).toBe(five);
+  });
+
+  it("keeps one window as it was, named by its own window", () => {
+    render(<PlanUsageMeters compact windows={[week]} />);
+    expect(screen.getByRole("img")).toHaveAccessibleName("7-day limit, 43% left");
   });
 });

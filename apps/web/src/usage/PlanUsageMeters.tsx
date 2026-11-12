@@ -62,10 +62,15 @@ function meterName(short: string): string {
  * the accessible name say which window. Two meters side by side each lead
  * with a quiet name, because two bare figures cannot be told apart.
  */
-function PlanUsageMeter(props: { readonly window: ComposerLimitWindow; readonly named: boolean }) {
+function PlanUsageMeter(props: {
+  readonly window: ComposerLimitWindow;
+  readonly named: boolean;
+  /** Replaces the meter's name and tooltip, where one meter speaks for several windows. */
+  readonly label?: string;
+}) {
   const style = useUsageBarStyle();
   const { window } = props;
-  const label = `${window.name}, ${String(window.percent)}% left`;
+  const label = props.label ?? `${window.name}, ${String(window.percent)}% left`;
   return (
     <OctantTooltip label={label} side="top">
       <span
@@ -114,10 +119,43 @@ function PlanUsageMeter(props: { readonly window: ComposerLimitWindow; readonly 
  * reported no window figure gets nothing, because a bar without a figure
  * would invent one.
  */
-export function PlanUsageMeters(props: { readonly windows: ReadonlyArray<ComposerLimitWindow> }) {
+/**
+ * The window a compact meter speaks for: the one closest to its limit (the
+ * least share left), the shorter window when two are level.
+ */
+export function closestToLimit(
+  shown: ReadonlyArray<ComposerLimitWindow>,
+): ComposerLimitWindow | undefined {
+  return shown.reduce<ComposerLimitWindow | undefined>(
+    (closest, window) =>
+      closest === undefined || window.percent < closest.percent ? window : closest,
+    undefined,
+  );
+}
+
+export function PlanUsageMeters(props: {
+  readonly windows: ReadonlyArray<ComposerLimitWindow>;
+  /**
+   * One small meter for the window closest to its limit, with every window in
+   * its tooltip and accessible name. The composer's row has room for one.
+   */
+  readonly compact?: boolean;
+}) {
   const span = windowSpan(props.windows);
   if (span === undefined) return null;
   const shown = span.inner === undefined ? [span.outer] : [span.inner, span.outer];
+  if (props.compact === true) {
+    const closest = closestToLimit(shown);
+    if (closest === undefined) return null;
+    const label = shown
+      .map((window) => `${window.name}, ${String(window.percent)}% left`)
+      .join("; ");
+    return (
+      <span aria-label="Plan usage left" className="plan-usage plan-usage--compact" role="group">
+        <PlanUsageMeter label={label} named={false} window={closest} />
+      </span>
+    );
+  }
   return (
     <span aria-label="Plan usage left" className="plan-usage" role="group">
       {shown.map((window) => (

@@ -866,10 +866,11 @@ Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
 three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
 1px gaps, lit in the same accent, whose last four columns thin out in steps (two
 thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
-Neither animates, so reduced motion needs no variant. The composer row keeps its
-controls: the access chip carries its shield icon beside the label, the model
-button names the model with a chosen effort in muted ink, the microphone sits
-just before send, and send is the round accent-filled button with an up arrow.
+Neither animates, so reduced motion needs no variant. The row under the box
+([The row under the box](#welcome-and-composer)) keeps its controls: the
+approval mode is its shield icon alone, the model button names the model with a
+chosen effort in muted ink and no chevron, the microphone sits just before send,
+and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
@@ -987,7 +988,7 @@ one line where the text fits, its tone tint, the callout's own hairline) so
 the box stays the one strong shape. With nothing of that pending, nothing
 stands above the box. The composer is the box and one quiet row under it. A
 standing fact about access is not a card: that a thread has read outside content
-is a chip in that row, directly after the access control, a globe and the words
+is a chip in that row, directly after the surface's own icons, a globe and the words
 "Outside content" in the warning ink with no fill or edge at rest, shown for as
 long as the fact applies. Pressing it opens a popover with the full sentence and
 the Review action; in a narrow row (under 560px) the chip keeps the globe and
@@ -1015,25 +1016,40 @@ box's corners (a rounded bar in a rounded box, with thin uneven gaps), made the
 box a tall lopsided shape, and read as part of the message being typed; with
 the cards above it, the empty box is 44px tall in every state, and the
 microphone's failure no longer has to be cut to fit beside it. The person's
-own attachments and the message queue are not notices and keep their place. How the
-thread runs is one quiet line under the box, with no fill or edge
-of its own, in reading order: a thread's own context (Project, branch,
-checkout), the surface's row (image and access leading; the model and then
-the context ring trailing), the plan meters, and the Thread info icon
-button. The context ring ends the row's run: it is the one figure there, and
-at the end it does not move when the model's name changes length. Icon
-controls in the line stay square tiles with the control corner, as the
-box's own controls are. The line is one row in a split pane as narrow as 520px: a Work
-Project made from a folder names that folder once, not as Project and folder
-both, and a context with nothing in it holds no place. At a phone's width the
-line is two rows, the context with Thread info at its trailing edge and the
-surface's row under them. A thread with no place to name is two rows there too: the
-surface's row on two lines, with Thread info at the end of the second. Only the
-surface's row gives its controls the row's one quiet treatment; the checkout's
-actions and the info panel's fields keep their own. With that row inside
-it the card was a third taller than its prompt and read as a form; an empty
-composer now stands 44px tall, where a reply box stood 114px before the prompt
-went to one line.
+own attachments and the message queue are not notices and keep their place. **The row under the box.** How the thread runs is one quiet row under the
+box, with no fill or edge of its own, 28px high and one spacing token (4px)
+below the box, so the space under a composer is the same on a thread, a start
+screen, a side chat and a split pane. It repeats the box's columns. Both sides
+have the box's own 8px inset. A leading cell as wide as attach (28px) holds the
+Project's icon, centred under attach, and the Project's name starts where the
+prompt's text does (44px in). The trailing cells are as wide as send (28px): the
+context ring is last, centred under send, and the approval control stands under
+the microphone where there is one. Measured in a render, the centres and the
+text edge agree within half a pixel. Left to right the row holds the Project
+control (its icon in the leading cell, then its name; in Code the checkout's
+branch, diff and pull-request icon follow it), the surface's own icons (Create
+image, Plan, Web research), then, right-aligned, the plan meters where there
+are any, the model's name in meta ink with no chevron, the approval mode as one
+icon-only button (Full access adds its words), and the context ring. The approval button's accessible name
+and tooltip state the mode ("Mode: Ask first"); each mode has its own icon, and
+Full access alone keeps its words beside it, in the warning ink (danger without
+the sandbox), so it cannot be read as asking first. Labels are the 12px meta step
+in the meta ink, icons are 16px, nothing is filled at rest, and the standard
+hover fill answers the pointer. A long Project name ends in an ellipsis and
+never pushes the right side under it. Where a Work thread names its Project,
+the name is the Thread info button: the panel opens above it from its leading
+edge, and "Review required" follows the name while a row waits. Chat and Code
+keep the small info icon after the Project (a Code checkout has actions of its
+own), in the leading cell where there is no Project. The overflow menu is gone:
+Mark done and the document-delivery choice are a group of the add menu. Reading
+order is visual order. A Work Project made from a folder names that folder once,
+not as Project and folder both. At a phone's width the row is two rows, the
+Project with Thread info beside it and the controls under them, still on the
+same columns, so the ring stays under send. Only the surface's row gives its
+controls the row's one quiet treatment; the checkout's actions and the info
+panel's fields keep their own. A card as tall as the box plus two rows under it
+read as four layers, and the row's old two lines of mixed icons and words read
+as loose text.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
@@ -1963,12 +1979,12 @@ beside the Project. Access is
 a titled menu in the row under the prompt card, and carries the
 "Remember for this Project" switch.
 Every composer's row under the card is two groups with the row's free space
-between them, in one order on a new task and in the thread it becomes: what
-the person adds on the left (Create image in an open thread once an image
-profile is ready, access, a surface's own extras such as Web or Task actions),
-then how the turn runs on the right (the context meter, the model,
-dictation). Attach and send are in the card. A control never changes sides
-between the two composers.
+between them, in one order on a new task and in the thread it becomes: where the
+thread runs and a surface's own icons on the left (Create image in an open
+thread once an image profile is ready, Plan, Web), then how the turn runs on the
+right (the model, the approval control, the context ring). Attach, dictation and
+send are in the card, and the add menu holds the thread's own actions as a
+group (Mark done). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
@@ -3886,7 +3902,7 @@ Chat has no bottom panel. With the dock closed, the conversation uses the availa
 workspace width. A Chat
 Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
 Code's quiet transcript edge: Browser is a dock tool and completion lives in the
-composer's compact Task actions menu, preserving its confirmation flow.
+add menu's Mark done, preserving its confirmation flow.
 
 ### Readability and scroll containment
 
