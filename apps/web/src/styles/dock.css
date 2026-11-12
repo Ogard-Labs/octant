@@ -559,6 +559,63 @@
   padding: 0;
 }
 
+/* A narrow tile cannot hold the delivery head's title and its one-line note
+   side by side: the note ran under the title and out of the tile. The head
+   wraps and the note takes the line below. The pane measures itself because a
+   tile's width is not the viewport's. */
+.right-utility-dock__tool .code-delivery-pane {
+  container: delivery-pane / inline-size;
+}
+
+@container delivery-pane (max-width: 419px) {
+  .right-utility-dock__tool .code-delivery-pane__toolbar {
+    flex-wrap: wrap;
+    gap: var(--oct-space-1) var(--oct-space-3);
+  }
+
+  .right-utility-dock__tool .code-delivery-pane__toolbar p {
+    flex: 1 1 auto;
+    white-space: normal;
+  }
+}
+
+/* The working-tree view's lines and cards were children of a list with no
+   padding of their own, while its segmented control and findings head were
+   inset, so half the lines sat on the tile's edge. The list owns one gutter
+   and the delivery pane inside it stops adding its own. */
+.right-utility-dock__tool .git-history__list--changes {
+  padding-inline: var(--oct-space-3);
+}
+
+.right-utility-dock__tool
+  .git-history__list--changes
+  :is(
+    .code-delivery-pane__toolbar,
+    .code-delivery-pane__notice,
+    .code-delivery-pane > [role="alert"],
+    .code-delivery-pane > [role="status"]
+  ) {
+  padding-inline: 0;
+}
+
+/* Review's three views are one segmented control. At a tile's narrowest its
+   segments share the width instead of running past the tile's edge. */
+.right-utility-dock__tool .git-history {
+  container: git-history / inline-size;
+}
+
+@container git-history (max-width: 359px) {
+  .right-utility-dock__tool .git-history__toolbar [data-slot="toggle-group"] {
+    max-width: 100%;
+  }
+
+  .right-utility-dock__tool .git-history__toolbar [data-slot="toggle-group-item"] {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-inline: var(--oct-space-2);
+  }
+}
+
 .right-utility-dock__tool .browser-workspace {
   grid-template-rows: minmax(var(--oct-title-rail-h), auto) minmax(0, 1fr);
 }
@@ -773,6 +830,14 @@
   flex: 1 1 0;
 }
 
+/* A tool that does not scroll itself (an unavailable state, the agents card)
+   ran past a short tile and was cut with no way to reach the rest. The tile
+   scrolls it, down only: a tool that fits, or scrolls inside itself, shows no
+   bar. */
+.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) {
+  overflow: hidden auto;
+}
+
 .dock-tile > .right-utility-dock__tool[data-dock-inset="true"] {
   overflow: auto;
 }
@@ -847,6 +912,31 @@
 .dock-tile__control[aria-expanded="true"] {
   background: var(--octant-control);
   box-shadow: var(--octant-shadow-control-pressed);
+}
+
+/* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
+   stays whole and clear of the next tab and the New page button. The select
+   was shrink-0, so the tab's box shrank around it and the close mark ran under
+   the button beside it. */
+.dock-tile__lead > .dock-browser-pages {
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__close {
+  flex: none;
 }
 
 .dock-tile__control {

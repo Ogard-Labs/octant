@@ -105,6 +105,7 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
         triggerClassName="browser-profile-control"
         triggerDisabled={props.disabled === true}
         triggerLabel={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
+        triggerTitle={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
         value={props.profile}
       />
       <OctantDialogPresence>
