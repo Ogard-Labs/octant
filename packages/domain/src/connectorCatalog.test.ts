@@ -165,4 +165,16 @@ describe("the connectors catalog", () => {
     expect(featured.map((entry) => entry.id)).toContain("doop");
     expect(featured.some((entry) => entry.auth.kind === "none")).toBe(true);
   });
+
+  it("gives every entry that needs an app you register numbered steps that end at Sign in", () => {
+    const registered = connectorCatalog().filter(
+      (entry) => entry.auth.kind === "sign-in" && entry.auth.clientSetup === "registered",
+    );
+    expect(registered.length).toBeGreaterThan(0);
+    for (const entry of registered) {
+      const steps = entry.auth.kind === "sign-in" ? (entry.auth.setupSteps ?? []) : [];
+      expect(steps.length, entry.id).toBeGreaterThanOrEqual(3);
+      expect(steps.at(-1), entry.id).toMatch(/Sign in/);
+    }
+  });
 });

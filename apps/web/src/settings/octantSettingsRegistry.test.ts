@@ -176,6 +176,7 @@ describe("octantSettingsRegistry", () => {
       "work-default-model",
       "work-default-access",
       "work-full-access-sandbox",
+      "work-restart-continuation",
     ]);
   });
 
@@ -259,6 +260,7 @@ describe("octantSettingsRegistry", () => {
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
       "code-default-diff-layout",
+      "code-restart-continuation",
       "code-language-services",
       "code-coordinator-starting",
       "code-coordinator-open-workers",
@@ -282,6 +284,7 @@ describe("octantSettingsRegistry", () => {
       "chat-research-enabled",
       "chat-research-backend",
       "chat-searxng-url",
+      "chat-restart-continuation",
     ]);
   });
 

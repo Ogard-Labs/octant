@@ -774,6 +774,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // Whether the host may continue a turn by itself after a restart is
+          // a choice about this computer's unattended work, made at it.
+          if (
+            command !== undefined &&
+            callerKind !== "local-window" &&
+            (command.kind === "set-code-thread-restart-continuation" ||
+              (command.kind === "update-code-settings" &&
+                command.restartContinuation !== undefined))
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Continue after restart is set at a window on this computer.",
+              },
+              403,
+              origin,
+            );
+          }
           if (command?.kind === "change-code-thread-browser-profile") {
             return failureResponse(
               {

@@ -623,6 +623,8 @@ export class CodeOperationEventStore {
         readonly priorTurn: boolean;
         readonly priorTurnSettled: boolean;
         readonly session?: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }>;
+        /** The turn whose launch recorded `session`; each turn records its own. */
+        readonly sessionOperationId?: CodeOperationId;
         /**
          * What fills the window, from the last usage report of the prior turn.
          * Absent when that turn reported none or the report said nothing of it.
@@ -706,7 +708,9 @@ export class CodeOperationEventStore {
         status: "ok",
         priorTurn: priorStart !== undefined,
         priorTurnSettled,
-        ...(session?.kind === "provider-session-ready" ? { session } : {}),
+        ...(session?.kind === "provider-session-ready" && sessionRecord !== undefined
+          ? { session, sessionOperationId: sessionRecord.frame.operationId }
+          : {}),
         ...(priorTurnBreakdown === undefined || priorUsageRecord === undefined
           ? {}
           : { priorTurnBreakdown, priorTurnReportSequence: priorUsageRecord.globalSequence }),

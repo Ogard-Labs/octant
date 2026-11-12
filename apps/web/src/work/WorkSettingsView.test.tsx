@@ -55,6 +55,30 @@ describe("WorkSettingsView", () => {
     expect(work.update).toHaveBeenCalledWith({ defaultAccess: "full-access" });
   });
 
+  it("turns off Continue after restart for every Work thread and shows the stored choice", () => {
+    const work = controller();
+    const { rerender } = render(<WorkSettingsView controller={work} />);
+
+    const toggle = screen.getByRole("switch", { name: "Continue after restart" });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(work.update).toHaveBeenCalledWith({ restartContinuation: false });
+
+    rerender(
+      <WorkSettingsView
+        controller={controller({
+          settings: {
+            defaultAccess: "ask-first",
+            restartContinuation: false,
+            version: 4 as never,
+            updatedAt: "2026-09-25T12:01:00.000Z" as never,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Continue after restart" })).not.toBeChecked();
+  });
+
   it("says so while the host has not answered, instead of showing controls that cannot save", () => {
     render(<WorkSettingsView controller={controller({ settings: undefined })} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading Work settings");

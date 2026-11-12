@@ -844,7 +844,12 @@ const CreatePullRequest = Schema.Struct({
   body: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
   draft: Schema.optional(Schema.Boolean),
   baseBranch: Schema.optional(GitBranchName),
-  idempotencyKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/)),
+  /**
+   * Accepted from older clients and ignored. A create is made safe to repeat
+   * by its operation id instead: submissions with one id run once, and the
+   * host looks for the thread's pull request before it opens another.
+   */
+  idempotencyKey: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/))),
   authorization: GitAuthorization,
 }).annotations(strict);
 /**
@@ -1337,6 +1342,13 @@ const GitMutationResult = Schema.Struct({
    * when the command produced no usable stderr.
    */
   detail: Schema.optional(Schema.String.pipe(Schema.maxLength(2_048))),
+  /**
+   * Set on a failed push whose outcome Git never reported: the connection
+   * broke or the command ran out of time after the push started, so the
+   * commits may have reached the remote. A rejection Git did report (a
+   * non-fast-forward, a stale lease, refused credentials) never carries it.
+   */
+  unconfirmed: Schema.optional(Schema.Literal(true)),
   headOid: Schema.optional(GitObjectId),
   /**
    * The state this mutation replaced, recorded before it ran. Present on a
