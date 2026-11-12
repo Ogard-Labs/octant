@@ -1500,7 +1500,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 
 One journaled session per thread is the only state, and every surface reads and changes it through one route. A person redirects running work only through ordered steering notes and version-checked goal revisions.
 
-- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the setting "Resume interrupted turns after a restart" is on (off by default) and the turn has no uncertain side effect, when it resumes by itself (maintainer request, 2026-11-12); not built yet: today a person always resumes it. Lost turns and dead approvals are journaled.
+- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the host lifts it to continue a turn a restart cut off ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off), on by default); a turn whose last effect is uncertain still waits for a person (maintainer request, 2026-11-12). Lost turns and dead approvals are journaled.
 - The lead's approvals and questions block until any surface answers, do not expire, and are capped at 32 waiting (maintainer request, 2026-11-12); not built yet: today they expire after ten minutes. A pending one marks the thread as needing the person.
 - Built: the provider-neutral app-owned `ask-user` tool can collect up to four related single-choice or multiple-choice questions inline in Chat, Work and Code, with selection limits, unselected recommendations, written alternatives and an optional comment. It creates no Canvas and grants no permissions.
 - Unsent questionnaire choices and comments remain in memory on their source screen across navigation and deferral. They do not transfer to another window, survive a screen reload, or carry into a changed, settled, cancelled or recovered request; restoring them sends nothing.
@@ -2419,7 +2419,7 @@ Status: Built. Since: —. Detail: [Workspace: Sidebar thread status](workspace.
 
 ### Resuming after a host restart
 
-A turn cut off by a host restart shows a notice with an explicit Resume. Nothing continues automatically unless the person turned on "Resume interrupted turns after a restart" (off by default): then a turn with no uncertain side effect resumes by itself, and a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today nothing continues automatically.
+A turn cut off by a host restart continues by itself unless its thread is held ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)); a held thread shows a notice with an explicit Resume (maintainer request, 2026-11-12).
 
 - Resume queues one host-written continuation in the same thread, after re-checking window, provider and Project authority.
 - A second window, repeated click or lost response cannot queue a second continuation.

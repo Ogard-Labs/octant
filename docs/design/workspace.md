@@ -38,12 +38,11 @@ A conversation whose turn was cut off by a host restart shows a notice above
 its composer: "Octant restarted before this turn finished. Review any changes
 before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
-connection alone do not show it. By default no interrupted turn continues by
-itself. One setting, "Resume interrupted turns after a restart", off by
-default, changes that: when it is on, a turn with no uncertain side effect
-resumes by itself, and a turn whose last effect is uncertain still waits for
-the person (maintainer request, 2026-11-12). Not built yet: today the setting
-does not exist and every interrupted turn waits for Resume.
+connection alone do not show it. A turn a restart cut off continues by
+itself, once, as the host, unless its thread is held: Continue after restart is
+off in Settings or for the thread, its last effect is uncertain, or its provider
+cannot resume it. Only a held thread shows this notice (maintainer request,
+2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.
