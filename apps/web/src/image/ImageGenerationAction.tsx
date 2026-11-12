@@ -145,15 +145,13 @@ export function ImageGenerationContent(
             setJob(undefined);
             setErrorMessage(undefined);
           }}
-          size="sm"
+          size={iconOnly ? "icon" : "sm"}
           {...(iconOnly ? { title: "Create image…" } : {})}
           type="button"
           variant="ghost"
         >
-          <ImageIcon aria-hidden="true" size={14} />
-          {/* The composer's form is short, not wordless: a bare picture glyph
-              among other bare glyphs did not say it made one. */}
-          <span>{iconOnly ? "Image" : "Create image…"}</span>
+          <ImageIcon aria-hidden="true" size={iconOnly ? 16 : 14} />
+          {iconOnly ? null : <span>Create image…</span>}
         </OctantButton>
       ) : iconOnly ? null : (
         // A composer offers no image button until a profile is ready: a dimmed

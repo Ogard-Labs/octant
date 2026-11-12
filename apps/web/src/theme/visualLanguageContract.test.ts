@@ -667,7 +667,7 @@ describe("the public-block visual language", () => {
     );
     expect(system).toMatch(/\.composer\.thread-composer \{[^}]*margin:\s*24px auto 12px;/);
     expect(system).toMatch(
-      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
+      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: var\(--oct-composer-cell\);\n  height: var\(--oct-composer-cell\);/,
     );
     expect(chat).not.toMatch(/\.chat-transcript \.turn-user/);
     expect(chat).not.toMatch(/\.chat-composer__status \{/);

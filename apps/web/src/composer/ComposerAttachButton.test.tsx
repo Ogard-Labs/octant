@@ -44,6 +44,32 @@ describe("Composer attachment", () => {
   });
 });
 
+describe("Composer thread actions", () => {
+  it("offers the thread's own actions as a group of the add menu and runs the one chosen", async () => {
+    const user = userEvent.setup();
+    const markDone = vi.fn();
+    const choose = vi.fn();
+    render(
+      <ComposerAttachButton
+        onFileSelected={vi.fn()}
+        onRefused={vi.fn()}
+        threadActions={[
+          { label: "Mark done", onSelect: markDone },
+          { label: "Use Canvas instead of Claude artifacts", onSelect: choose, disabled: true },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
+    expect(await screen.findByRole("menuitem", { name: "Choose file…" })).toBeVisible();
+    expect(
+      screen.getByRole("menuitem", { name: "Use Canvas instead of Claude artifacts" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await user.click(screen.getByRole("menuitem", { name: "Mark done" }));
+    expect(markDone).toHaveBeenCalledOnce();
+    expect(choose).not.toHaveBeenCalled();
+  });
+});
+
 describe("Composer window capture", () => {
   const png = new Uint8Array([137, 80, 78, 71]);
 

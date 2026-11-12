@@ -81,7 +81,7 @@ export function ThreadPlanWindows() {
   if (limits.length === 0) return null;
   return (
     <div className="thread-plan-windows">
-      <PlanUsageMeters windows={limits} />
+      <PlanUsageMeters compact windows={limits} />
     </div>
   );
 }

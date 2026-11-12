@@ -80,11 +80,14 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet icon button named **Thread info** at the end of the line under the
-follow-up composer, after the plan meters and the model. Its name is its
-tooltip and its accessible name; written out, its two words wrapped the line in
-a split pane and left the button on a line of its own. It opens one menu above
-the line, drawn as every other menu the line opens: the same edge, corner and
+a quiet button named **Thread info** at the leading edge of the row under the
+follow-up composer. Where the surface names the thread's Project in that row
+(Work), the Project's own control is the button: its icon in the leading cell,
+then its name, with "Review required" after the name while a row waits, so the
+row has one control where it had a name and an icon. Elsewhere it is a small
+icon after the Project (or in the leading cell). Its name is its tooltip and
+its accessible name. It opens one menu above the row from its leading edge,
+drawn as every other menu the row opens: the same edge, corner and
 4px inset, 288px wide and never wider than the line, with rows 30px tall that
 answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
@@ -101,8 +104,8 @@ the access level in force and where it came from (Work and Code) with its
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
-from one message to the next (attach, access, model) and had grown to eleven
-controls, several of them bare glyphs. Nothing else about
+from one message to the next (the model, the approval mode) and had grown to
+eleven controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
 composer; these rows had each been added to the page on their own, at four
 places, two of them outside the reading column.
@@ -1287,9 +1290,10 @@ Project dock show a server-reported availability fact: available (read-only in
 Plan), omitted with its specific tool-transport, task-constraint or host-capability
 reason and an existing recovery action, or Unknown when disconnected/unreported.
 The same policy composes the Browser tool; the renderer never infers permission.
-At 720px and below the status keeps its accessible name and recovery action as
-an icon. Site approvals, Take over, Hand back and the active-agent indicator
-retain their existing behavior. This fact is a reading, never a grant. The provider remedy opens the owning
+The status is an icon after the address field whose name and tooltip carry the
+sentence (drawn only while a page is open, loading, or the agent cannot use the Browser; at rest the sentence is in the
+profile icon's tooltip); its recovery action is an item in the toolbar's More menu. Site approvals,
+Take over, Hand back and the active-agent indicator retain their existing behavior. This fact is a reading, never a grant. The provider remedy opens the owning
 thread's existing provider/model picker. A constraints remedy opens that task's
 access report; saved profile constraints cannot be removed by raising its access
 level, so the report directs the person to start a task with a permitting profile.
@@ -1309,17 +1313,18 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the control at the left of the address field, whose menu also signs out of a
-stored profile. A puzzle-piece extensions button follows it when an extension is
+the profile icon after the address field, which names a signed-in profile beside
+itself (a Private page stays an icon) and whose menu also signs out of a
+stored profile. A puzzle-piece extensions button precedes it when an extension is
 enabled in the page's profile: it lists them, opens a popup or options page, and
-carries a count while the agent drives the page; the driver indicator and the
+carries a count while the agent drives the page; the status icon and the
 Browser card name a stored profile while the agent drives it. **Take over.**
-While a page is open, the toolbar carries a **Take over** control beside the
-driver indicator (an icon and the words, the icon alone below 720px). One click
-holds every agent Browser call on the page; the indicator then reads "You have
-the page" (hidden below 720px, where the button's own name and tooltip say it)
-and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
-neither shows. The person's typing and clicking in the page while the agent
+While a page is open, the toolbar carries a **Take over** icon button after the
+address field (in the More menu when the trailing icons do not fit). One click
+holds every agent Browser call on the page; the status icon then reads "You have
+the page" and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
+neither shows. While a remote owner holds the page, **Reclaim locally** is the trailing
+button in place of Take over and Hand back, which moves into the More menu. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".
 The rules are in [Browser for agents](browser-agent-tool.md#person-and-agent-together). The Project
 browser dock has the same controls. The rules are in
@@ -1342,10 +1347,13 @@ the one Browser surface scoped to a Project rather than a thread, and the
 person's own page already lives there, so it is where several threads' pages
 sit side by side without giving any thread a view of another's. The tabs use
 the shared tab rail, which wraps rather than scrolls so no tab hides off the
-edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
-Screenshot button (a camera icon beside Open in default browser) that keeps the
+edge of a narrow dock. **Browser toolbar.** One row under the tile bar: plain back, forward and reload
+icons, the address field (the control corner, never a pill) with only the
+connection mark inside its start, then trailing icon buttons (status, Take over,
+extensions, profile) and a More menu; the exact rules are in [Design system](../../DESIGN.md). **Browser captures.** The Browser pane toolbar has a
+Screenshot item in its More menu (a camera icon, with Open in default browser) that keeps the
 page's picture with the thread, and, in a Work or Code thread's Browser, a
-**Draw on page** button (a pen-line icon beside it) that keeps the same capture,
+**Draw on page** item (a pen-line icon after it) that keeps the same capture,
 shows it still in place of the page, and floats a drawing bar ("Drawing tools":
 Select, Pen, Box, Arrow, Text, one ink control, one stroke toggle, Undo, Redo,
 Delete, then **Add to chat** and **Discard drawing**) over its bottom centre; **Add to chat** puts the
@@ -1538,7 +1546,7 @@ deleted, and the host keeps deriving the board data and status policy
 thread rows, the dock overview, the planner board read, the sibling-thread
 tools and side tasks read the same projections. Turning the plugin on again
 brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
-task's Task actions menu, with no confirmation, and the card moves to Done and
+add menu under attach, with no confirmation, and the card moves to Done and
 stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
