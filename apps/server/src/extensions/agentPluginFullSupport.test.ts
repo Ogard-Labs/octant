@@ -789,7 +789,7 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
-  it("omits MCP tools whose names repeat or whose input schemas are invalid", async () => {
+  it("omits MCP tools whose names repeat or whose input schemas are invalid or unsafe", async () => {
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",
