@@ -350,6 +350,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
     | "worktreePreparation"
@@ -692,6 +693,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (checkout?.kind !== "managed-worktree") return undefined;

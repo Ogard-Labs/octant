@@ -45,7 +45,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
 | [Providers](#providers)                                                               | 7         | 6       | 1            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
-| [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
+| [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
+| **All areas**                                                                         | **247**   | **165** | **77**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1418,7 +1418,7 @@ Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.
 Direct-endpoint providers run under the native harness, which owns the agent loop and the conversation. Drivers supply only a transport through the provider SDK endpoint port.
 
 - A local model endpoint must be a loopback origin, and every request names its context window.
-- A model is offered Octant's tools only after tool verification passed for that model. Verification runs automatically the first time the model is used, as a capability probe and not a grant, and the manual Verify tools button stays (maintainer request, 2026-11-12). Not built yet: today it runs only when a person runs Verify tools on that model. Only the host-run command writes the record, and a tool call in a turn widens nothing.
+- A model is offered Octant's tools only after tool verification passed for that model. Verification runs automatically the first time the model is used, as a capability probe and not a grant, and the manual Verify tools button stays (maintainer request, 2026-11-12). The automatic run never blocks the use: a model that does not call the test tool, or a run that fails, takes the turn without tools, and the endpoint's model row says why. A run that did not finish is tried again at the next use, one check at most per turn start; a model that answered without calling the tool is asked again only from the button, after a configuration change, or after a restart. The check is one small request, billed by the endpoint and not counted by spend ceilings. Only the host-run check writes the record, and a tool call in a turn widens nothing.
 - GPT-6 Luna function-tool requests through Chat Completions use its supported `none` reasoning mode, for both verification and real turns. Other models and plain-text requests keep their defaults.
 - The conversation is journaled step by step. Resume closes interrupted calls as safe or unsafe to replay, and nothing is silently re-run.
 - When a request outgrows the endpoint, the loop first compacts earlier turns tool-less on the session's own endpoint, then trims. The lead can read cut exchanges back through a read-only journal lookup.
@@ -1427,7 +1427,7 @@ Direct-endpoint providers run under the native harness, which owns the agent loo
 - After any context reduction or summary, the goal, its acceptance criteria and the recently edited files are restored to the request. Reduction changes only the assembled request, never the journal. _Here only._
 - The harness's standing instructions include one fixed About Octant block, the same in every mode: the modes and what each may touch, Projects and the board, that an agent never marks a thread Done, access levels and read-only Plan mode, Project memory, skills, Canvas and helper agents, each tool named only as "when offered".
 
-Status: Partly built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
+Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
 ### Harness tool authority and taint
 

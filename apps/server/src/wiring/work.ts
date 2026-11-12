@@ -194,6 +194,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "imageJobService"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
   > &
@@ -382,6 +383,7 @@ export function wireWork(deps: WorkDependencies) {
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       observeRuntime: (threadId) => ({
         ...observeWorkThreadRuntime(threadId),
         ...liveTurns.read(String(threadId)),

@@ -253,6 +253,41 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("checks the thread's model for tools by itself where a provider turn starts, whatever the check answers", async () => {
+    const verifyModelToolsOnFirstUse = vi.fn(async () => {
+      throw new Error("The endpoint did not answer.");
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      verifyModelToolsOnFirstUse,
+    });
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(21),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    // The check failed and the turn started all the same.
+    await vi.waitFor(() => expect(connection.start).toHaveBeenCalled());
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(
+      thread().providerInstanceId,
+      thread().modelId,
+    );
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(22),
+      threadId,
+      checkoutId,
+    });
+    fixture.close();
+  });
+
   it("does not record runtime work for a command outside the window's Project scope", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     fixture.access.mockResolvedValue(false);
@@ -9023,6 +9058,9 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  verifyModelToolsOnFirstUse?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["verifyModelToolsOnFirstUse"];
   feedbackScope?: Parameters<typeof createProductFeedbackTurnPort>[0]["resolveScope"];
   onFeedbackDelivered?: () => void;
   inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
@@ -9367,6 +9405,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(directory) }),

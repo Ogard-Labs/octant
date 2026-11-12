@@ -135,7 +135,7 @@ import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
-import { ChatService, ChatServiceError } from "./chatService";
+import { ChatService, ChatServiceError, type ChatServiceOptions } from "./chatService";
 import { createCheckpointChatPort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -235,6 +235,7 @@ function withProbe(
 
 function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
+  readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
@@ -708,6 +709,9 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options?.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
@@ -1263,6 +1267,37 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
+  it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
+    const order: Array<string> = [];
+    const verifyModelToolsOnFirstUse = vi.fn(async () => {
+      order.push("check");
+      throw new Error("The endpoint did not answer.");
+    });
+    const { service, fakeDriver } = openFixture({ verifyModelToolsOnFirstUse });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "First use",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(verifyModelToolsOnFirstUse).not.toHaveBeenCalled();
+
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    order.push(`sent:${String(fakeDriver.sentTurns.length)}`);
+
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(
+      created.thread.providerInstanceId,
+      created.thread.modelId,
+    );
+    expect(order[0]).toBe("check");
+  });
+
   it("ignores a Browser selection from an older draft and sends the Chat turn without Browser", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000010");
     const { service, fakeDriver } = openFixture();

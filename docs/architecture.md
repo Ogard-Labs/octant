@@ -8502,7 +8502,29 @@ the model at another size.
   Harness says the same for a slot's chosen model. The host also runs the
   verification by itself the first time a model is used, because it is a
   capability probe, not a grant; the manual action stays (maintainer request,
-  2026-11-12; not built yet: today only the Verify tools action runs it).
+  2026-11-12). `verifyModelToolsOnFirstUse` on the provider service is that
+  run: the same host-run check, writing the same record, called once where a
+  use starts (a Chat send, a Code provider turn's start, and a Work thread's
+  model selection, which is where Work first needs the tools). An endpoint
+  the host has not looked at since it started has its connection checked
+  first. It never fails the use: a model that does not call the test tool, or
+  a run that fails or is interrupted, leaves the model unverified, so the
+  turn runs without tools (and Work refuses the selection) exactly as for an
+  unverified model. Uses that arrive together share one request. A run that
+  did not finish is tried again at the next use. A model that answered
+  without calling the tool is not asked again by the host until its
+  endpoint's configuration changes, the host restarts, or a person presses
+  Verify tools: asking on every use would bill a request per turn for an
+  answer that does not change. The last run that left a model without tools
+  is reported with the runtime as `toolChecks` (model, `unsupported` or
+  `failed`, the reason, the time), kept in host memory, and the endpoint's
+  model row shows it beside "Chat only · Verify tools"; it grants and
+  withholds nothing, since admission reads the verified set alone. The check
+  is one request holding the echo tool and a two-word prompt. The endpoint
+  may bill it, and spend ceilings do not count it, as they never counted the
+  button's: a ceiling sums the usage turns record, and this request belongs
+  to no turn. It is bounded by the rule above, at most one per model until
+  something changes, or one per use start while the endpoint keeps failing.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open

@@ -150,6 +150,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "imageJobService"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
+    | "verifyModelToolsOnFirstUse"
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
@@ -393,6 +394,7 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
