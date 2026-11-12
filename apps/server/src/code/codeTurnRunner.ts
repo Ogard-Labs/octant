@@ -480,8 +480,8 @@ export class CodeTurnRunner {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-result") {
                   // The Watcher reads what the adapter saw of the page. Like
-                  // the read it follows, it runs before the budget or a
-                  // cancel is looked at.
+                  // the read it follows, it runs before the budget is looked
+                  // at.
                   if (
                     outsideContentMarks.watch(String(input.thread.id), event).status === "refused"
                   ) {
@@ -493,8 +493,8 @@ export class CodeTurnRunner {
                   return;
                 }
                 if (event.kind === "outside-content-read") {
-                  // Marked before the budget or a cancel is looked at: what
-                  // the runtime read reached its model either way. The tool
+                  // Marked before the budget is looked at, and after a cancel
+                  // too: what the runtime read reached its model either way. The tool
                   // start before it is the transcript's record of the call.
                   const marked = outsideContentMarks.mark(String(input.thread.id), event);
                   if (marked.status === "refused") {
@@ -513,7 +513,7 @@ export class CodeTurnRunner {
                       .pipe(Effect.catchAll(() => Effect.void));
                     return yield* fail("interrupted", RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP);
                   }
-                  if (input.signal?.aborted !== true) return;
+                  return;
                 }
                 if (event.kind === "tool-start" && event.argument !== undefined) {
                   input.forgeChanges?.observe({
@@ -527,12 +527,6 @@ export class CodeTurnRunner {
                     .interrupt(input.sessionId)
                     .pipe(Effect.catchAll(() => Effect.void));
                   return yield* fail("failed", "Code turn exceeded the bounded event budget.");
-                }
-                if (input.signal?.aborted) {
-                  yield* connection
-                    .interrupt(input.sessionId)
-                    .pipe(Effect.catchAll(() => Effect.void));
-                  return yield* fail("interrupted", "Code turn was cancelled.");
                 }
                 if (
                   (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
@@ -785,6 +779,11 @@ export class CodeTurnRunner {
           isCodeTurnFailure(error) ? Effect.fail(error) : failForProvider(error, fail),
         ),
       );
+      // A cancel asks the runtime to stop once, here, and the turn ends when
+      // the runtime answers. Until then what the runtime sends is still this
+      // turn's, and its own terminal event settles it. Ending the turn on the
+      // next event instead asked again and waited again on every event, so a
+      // runtime that never answered held its later completion out of reach.
       const waitForAbort =
         input.signal === undefined
           ? Effect.never

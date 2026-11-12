@@ -1371,11 +1371,15 @@ Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
 (`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
 answers `interrupted` with "Stop was not confirmed. The provider may still be
-running this turn." On a shared-process runtime it also journals the turn
-interrupted with that reason, records its changed files first, drops what the
-runtime sends afterwards, and frees the thread for a new turn; on a runtime
-with Force stop the turn stays live and the answer adds that Force stop can
-end it. A busy host cannot hold Stop back either: every Chat, Work and Code
+running this turn." The turn stays live and holds its thread until the
+runtime itself reports how it ended: its tool activity meanwhile is still
+journaled (streamed reply text after a Stop is not kept), an approval it asks for is declined rather than put to the person,
+host-run tools under the turn already see it cancelled, and its own completed,
+failed or interrupted event, or its late answer to the interrupt, is the turn's
+one terminal outcome. On a runtime with Force stop the answer adds that Force
+stop can end it. Rationale: recording a shared-process turn interrupted at the
+bound freed the thread under work that was still running, and a late
+completion then landed on a turn that already read as ended. A busy host cannot hold Stop back either: every Chat, Work and Code
 turn hands the event loop back (one `setImmediate`) after 10 ms of processing
 provider events (`PROVIDER_EVENT_SLICE_MS`). Rationale: a provider streaming
 deltas as fast as they could be pulled kept each turn's work on one unbroken

@@ -2608,8 +2608,6 @@ interface ActiveTurn {
   deniedApprovals: number;
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
   interruptMessage?: string;
-  /** The turn was recorded as a Stop its runtime never confirmed; later provider events are dropped. */
-  unconfirmedStop?: boolean;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   /** The `operation-state` value and reason last journaled, whichever path wrote the frame. */
   lastPersistedState?: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -3990,6 +3988,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#persistNormalized(active, event);
       return;
     }
+    // A runtime that has not yet answered a Stop can keep working and ask for
+    // more. The person asked for the turn to end, so nothing new is put to
+    // them; the request is declined and the turn waits for the runtime.
+    if (active.abort.signal.aborted) {
+      await Effect.runPromise(
+        active.connection
+          .answerApproval({
+            sessionId: active.sessionId as never,
+            requestId,
+            approved: false,
+            scope: "once",
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+      return;
+    }
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
@@ -4800,12 +4814,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ),
         this.#options.stopConfirmationMs ?? CODE_STOP_CONFIRMATION_MS,
       );
-      // A Stop is only a request. A runtime that owns its process stays live
-      // so the person can reach for Force stop; one that shares its process
-      // cannot be killed alone, so its turn is recorded as a Stop the runtime
-      // never confirmed: the thread is freed without claiming the work ended.
+      // A Stop is only a request, and the caller hears back within the bound.
+      // The turn stays live and holds the thread until the runtime itself
+      // reports how it ended: recording it interrupted here while a runtime
+      // that shares its process kept working let a late completion land on a
+      // turn that already read as ended, and freed the thread under work
+      // that was still running. A runtime that owns its process can also be
+      // ended by Force stop.
       if (!confirmed) {
-        if (connection.forceStop === undefined) void this.#settleUnconfirmedStop(active);
         return {
           ...turnState("interrupted", {
             category: "failed",
@@ -4819,53 +4835,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }
     }
     return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
-  }
-
-  /**
-   * Journals the terminal frame a runner stuck on an unanswered interrupt
-   * never writes, and lets the thread take a new turn. The change list goes
-   * in first, as for any outcome. The reason is set where the runner reads it
-   * too, so if it does settle later its frame matches this one and is not
-   * written twice; anything the runtime sends meanwhile is dropped, since the
-   * turn already reads as ended.
-   */
-  async #settleUnconfirmedStop(active: ActiveTurn): Promise<void> {
-    const stillOpen = (): boolean =>
-      active.closed !== true &&
-      (active.lastPersistedState === undefined ||
-        active.lastPersistedState === "running" ||
-        active.lastPersistedState === "waiting");
-    if (!stillOpen()) return;
-    await this.#recordChangedFiles(active);
-    // The runner may have settled the turn after all while that await ran.
-    if (!stillOpen()) return;
-    active.unconfirmedStop = true;
-    active.interruptMessage =
-      active.interruptMessage === undefined
-        ? STOP_UNCONFIRMED_MESSAGE
-        : `${STOP_UNCONFIRMED_MESSAGE} ${active.interruptMessage}`;
-    // Worded exactly as the runner's own settlement would word it.
-    const reason = withLostTextNote(active, active.interruptMessage);
-    const message =
-      reason === undefined
-        ? undefined
-        : boundProviderFailureMessage(
-            sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
-          );
-    try {
-      this.#persistOutcome(
-        active,
-        "interrupted",
-        message === undefined ? undefined : { category: "failed", message },
-      );
-    } catch {
-      // A journal that cannot take the frame leaves the turn to restart
-      // reconciliation, as a crash would; the thread is still freed.
-    }
-    active.closed = true;
-    active.reviewCapture?.close();
-    if (this.#active.get(String(active.thread.id)) === active)
-      this.#active.delete(String(active.thread.id));
   }
 
   async closeAll(): Promise<void> {
@@ -5713,7 +5682,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {
-    if (active.unconfirmedStop === true) return;
     if (event.category === "message" || event.category === "reasoning") {
       this.#bufferDelta(active, event.category, event.text ?? " ");
       return;
@@ -6271,7 +6239,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
  * How long a Stop waits for the runtime to confirm the turn ended: the same
  * grace Chat gives a shared-process runtime and the renderer waits before it
  * offers Force stop. A runtime that never answers the interrupt otherwise
- * held the Stop request, and the turn, open indefinitely.
+ * left the person's Stop request waiting indefinitely; the turn itself stays
+ * open until the runtime reports how it ended.
  */
 export const CODE_STOP_CONFIRMATION_MS = 10_000;
 
