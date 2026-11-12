@@ -18,7 +18,7 @@ export type InputProps = ComponentProps<"input"> & {
 const frameRecipe = cn("h-[round(2.154rem,2px)] px-2 py-1", fieldPaint);
 
 const fieldRecipe =
-  "w-full min-w-0 text-base text-foreground outline-none transition-colors selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm";
+  "w-full min-w-0 text-base text-foreground outline-none transition-colors selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-(--oct-space-5) file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm";
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { className, type = "text", unstyled, ...props },

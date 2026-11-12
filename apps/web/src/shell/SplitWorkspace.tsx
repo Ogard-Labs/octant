@@ -18,6 +18,7 @@ import type {
 import { GripVertical, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
+import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -862,6 +863,10 @@ function PaneMenu(props: {
   readonly title: string;
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
+  // The thread's coordinator rows carry icons; the pane's own rows reserve the
+  // column when they are shown with them, so the words keep one edge.
+  const slot =
+    props.threadItems === undefined || props.threadItems === null ? null : <OctantMenuIconSlot />;
   return (
     <OctantContextMenuContent>
       <OctantContextMenuGroup>
@@ -871,6 +876,7 @@ function PaneMenu(props: {
         label={focusLabel}
         onClick={() => (props.focused ? props.onClearFocus() : props.onFocus())}
       >
+        {slot}
         {focusLabel}
       </OctantContextMenuItem>
       {/* A focused pane is presented alone, so a split made now would land
@@ -878,13 +884,16 @@ function PaneMenu(props: {
       {props.canSplit && !props.focused ? (
         <>
           <OctantContextMenuItem label="Split right" onClick={() => props.onSplit("horizontal")}>
+            {slot}
             Split right
           </OctantContextMenuItem>
           <OctantContextMenuItem label="Split down" onClick={() => props.onSplit("vertical")}>
+            {slot}
             Split down
           </OctantContextMenuItem>
           {props.onShowSideBySide === undefined ? null : (
             <OctantContextMenuItem label="Show side by side" onClick={props.onShowSideBySide}>
+              {slot}
               Show side by side
             </OctantContextMenuItem>
           )}
@@ -898,6 +907,7 @@ function PaneMenu(props: {
       )}
       <OctantContextMenuSeparator />
       <OctantContextMenuItem label="Close pane" onClick={props.onClose}>
+        {slot}
         Close pane
       </OctantContextMenuItem>
     </OctantContextMenuContent>

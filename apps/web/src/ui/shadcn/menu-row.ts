@@ -19,8 +19,9 @@ export const menuRow =
 /** The 16px box an icon stands in, so labels without one can reserve it. */
 export const menuIconColumn = "flex size-(--oct-icon-md) shrink-0 items-center justify-center";
 
-/** A group's heading is the navigation group label, on the rows' inset so its words line up with theirs. */
-export const menuGroupLabel = "oct-nav-group px-(--oct-menu-row-inset) py-1";
+/** A group's heading is the navigation group label, on the rows' inset so its words line up with theirs, and 24px tall so the heading is a whole pixel at any type size. */
+export const menuGroupLabel =
+  "oct-nav-group flex h-(--oct-space-6) items-center px-(--oct-menu-row-inset)";
 
 /** One hairline, as wide as the rows: it stands in from the popup's edge by the same inset as they do. */
 export const menuSeparator = "my-1 h-px bg-border";

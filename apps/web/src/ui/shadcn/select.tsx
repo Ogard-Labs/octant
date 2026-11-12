@@ -69,14 +69,14 @@ export function SelectItem({
 }: ComponentProps<typeof SelectPrimitive.Item>) {
   return (
     <SelectPrimitive.Item
-      // The trailing inset is the check mark's column.
-      className={cn(menuRow, "w-full pr-8", className)}
+      // The trailing padding is the check mark's column: its inset, its 16px and the row gap.
+      className={cn(menuRow, "w-full pr-(--oct-menu-row-trail)", className)}
       data-slot="select-item"
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-(--oct-icon-sm) items-center justify-center">
-        <Check aria-hidden="true" />
+      <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-(--oct-icon-md) items-center justify-center">
+        <Check aria-hidden="true" className="size-(--oct-icon-sm)" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
   );

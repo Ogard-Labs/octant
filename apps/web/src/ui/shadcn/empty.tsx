@@ -16,7 +16,7 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
 }
 
 const emptyStateMediaVariants = cva(
-  "grid size-7 shrink-0 place-items-center rounded-lg border border-border bg-secondary text-muted-foreground",
+  "grid size-[round(1.846rem,2px)] shrink-0 place-items-center rounded-lg border border-border bg-secondary text-muted-foreground",
   {
     variants: {
       tone: {

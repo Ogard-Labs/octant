@@ -1823,14 +1823,19 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .workspace-disclosure__action {
   display: flex;
   /* 28px, the control step; 29 fitted no other row or button. */
-  min-height: 28px;
+  min-height: var(--oct-menu-row-h);
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-secondary);
+  gap: var(--oct-menu-row-gap);
+  padding: 0 var(--oct-menu-row-inset);
+  /* The Menu option role: this row is a menu row where it stands in a menu and
+     a button where it stands in the tool strip's overflow list. */
+  color: var(--oct-fg);
   border-radius: var(--oct-radius-sm);
   cursor: default;
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-align: left;
 }
 

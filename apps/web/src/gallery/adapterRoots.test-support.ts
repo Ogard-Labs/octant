@@ -76,6 +76,7 @@ export const ADAPTER_ROOTS: Readonly<Record<string, AdapterRoot>> = {
     portalled: true,
   },
   OctantMenuSeparator: { selector: '[data-slot="dropdown-menu-separator"]', portalled: true },
+  OctantMenuIconSlot: { selector: '[data-slot="menu-icon-slot"]', portalled: true },
   OctantNumberStepper: { selector: ".octant-number-stepper" },
   OctantPopover: { selector: '[data-slot="popover-trigger"]' },
   OctantPreviewCard: { selector: '[data-slot="preview-card-trigger"]' },

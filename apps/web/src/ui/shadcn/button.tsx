@@ -70,8 +70,9 @@ const buttonVariants = cva(
           "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
     },
-    // A chip sizes itself, so its height and padding follow the label rather
-    // than a size step, which would otherwise win over the variant.
+    // A chip is one line on the small button's height (24px at the default
+    // size), so a row of suggestions shares one height with the controls beside
+    // it. Its own padding and height win over the size step.
     compoundVariants: [
       {
         variant: "chip",

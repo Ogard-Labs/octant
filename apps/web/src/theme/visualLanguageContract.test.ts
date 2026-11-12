@@ -246,16 +246,44 @@ describe("the public-block visual language", () => {
     expect(theme).toMatch(/--spacing:\s*4px;/);
 
     const scale = new Set([0, 4, 8, 12, 16, 20, 24, 28, 32, 48]);
+    // Every utility Tailwind multiplies by the spacing step: padding, margin,
+    // gap, the logical and inset forms, scroll offsets, sizes, and the
+    // numeric forms of leading, columns and auto rows.
     const step =
-      /(?<![\w-])-?(?:[\w[\]()=:&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|inset|inset-x|inset-y|space-x|space-y|translate-x|translate-y|basis|indent)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
-    const strays = ["tsx", "ts"]
+      /(?<![\w-])-?(?:[\w[\]()=:&>*#.,'^-]+:)*(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|h|w|size|min-h|min-w|max-h|max-w|top|left|right|bottom|start|end|inset|inset-x|inset-y|inset-s|inset-e|space-x|space-y|translate-x|translate-y|basis|indent|scroll-m|scroll-mx|scroll-my|scroll-mt|scroll-mb|scroll-ml|scroll-mr|scroll-p|scroll-px|scroll-py|scroll-pt|scroll-pb|scroll-pl|scroll-pr|leading|columns|auto-rows|auto-cols)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+    // A class fragment that builds a step at run time cannot be scanned.
+    const built =
+      /className=\{?[`"][^`"]*(?<![\w-])(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|h|w|size|leading)-\$\{/;
+    const files = ["tsx", "ts"]
       .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
-      .filter((path) => !path.includes(".test."))
-      .flatMap((path) =>
-        [...readFileSync(path, "utf8").matchAll(step)]
-          .filter((match) => !scale.has(Number(match[1]) * 4))
-          .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
-      );
+      .filter((path) => !path.includes(".test."));
+    const strays = files.flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(step)]
+        .filter((match) => !scale.has(Number(match[1]) * 4))
+        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+    );
+    const buildsAStep = files
+      .filter((path) =>
+        readFileSync(path, "utf8")
+          .split("\n")
+          .some((line) => built.test(line)),
+      )
+      .map((path) => relative(webRoot, path));
+    expect(buildsAStep).toEqual([]);
+    expect(strays).toEqual([]);
+  });
+
+  it("takes a shared recipe's control height in rem so it follows the interface size", () => {
+    // Spacing is pixels now, so `h-7` would draw a 28px control that no longer
+    // grows with the interface size. A recipe's height is `round(…rem,2px)` or a
+    // pixel token; a bare step of 20px or more is a control height.
+    const height =
+      /(?<![\w-])(?:[\w[\]()=:&>*#.,'^-]+:)*(?:min-h|h|size)-(\d+(?:\.\d+)?)(?![\w.%/\])-])/g;
+    const strays = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(height)]
+        .filter((match) => Number(match[1]) >= 5)
+        .map((match) => `${relative(webRoot, path)}: ${match[0]}`),
+    );
 
     expect(strays).toEqual([]);
   });
@@ -1454,6 +1482,12 @@ describe("the public-block visual language", () => {
       expect(row).toMatch(/menuGroupLabel =\s*"oct-nav-group /);
       // One separator, as wide as the rows: no negative margin, no inset of its own.
       expect(row).toMatch(/menuSeparator = "my-1 h-px bg-border"/);
+      expect(system).toMatch(
+        /--oct-menu-row-trail:\s*calc\(\s*var\(--oct-menu-row-inset\) \+ var\(--oct-icon-md\) \+ var\(--oct-menu-row-gap\)\s*\);/,
+      );
+      expect(readFileSync(join(webRoot, "ui/shadcn/select.tsx"), "utf8")).toContain(
+        "pr-(--oct-menu-row-trail)",
+      );
 
       for (const recipe of ["dropdown-menu", "context-menu"]) {
         const source = readFileSync(join(webRoot, "ui/shadcn", `${recipe}.tsx`), "utf8");
@@ -1468,6 +1502,21 @@ describe("the public-block visual language", () => {
         expect(source, adapter).toContain("oct-menu-detail");
       }
 
+      // No call site gives a menu row its own padding, height, gap or type.
+      const itemTag =
+        /<(?:Octant[A-Za-z]*Menu[A-Za-z]*(?:Item|SubTrigger)|(?:Dropdown|Context)Menu[A-Za-z]*(?:Item|SubTrigger))\b(?:(?!\/?>)[\s\S])*?className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
+      const ownLayout =
+        /(?:^|\s)(?:p|px|py|pt|pb|pl|pr|gap|gap-x|gap-y|h|min-h|leading-\S+|text-(?:xs|sm|base|lg)|font-\S+)(?:-\S+)?(?=\s|$)/;
+      const overrides = ["tsx"]
+        .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+        .filter((path) => !path.includes(".test.") && !path.includes("/ui/"))
+        .flatMap((path) =>
+          [...readFileSync(path, "utf8").matchAll(itemTag)]
+            .filter((match) => ownLayout.test(match[1] ?? match[2] ?? ""))
+            .map((match) => `${relative(webRoot, path)}: ${match[1] ?? match[2] ?? ""}`),
+        );
+      expect(overrides).toEqual([]);
+
       // A feature stylesheet gives its menu's rows no size, gap or type of their own.
       const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
       const threadMenu = shell.slice(
@@ -1479,7 +1528,11 @@ describe("the public-block visual language", () => {
       const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
       const rule = (selector: string) =>
         styles.match(new RegExp(`${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`))?.[1] ?? "";
-      expect(rule(".workspace-disclosure__action")).not.toContain("font-size");
+      const disclosure = rule(".workspace-disclosure__action");
+      expect(disclosure).toContain("font-size: var(--oct-text-detail);");
+      expect(disclosure).toContain("font-weight: var(--oct-weight-medium);");
+      expect(disclosure).toContain("min-height: var(--oct-menu-row-h);");
+      expect(disclosure).toContain("gap: var(--oct-menu-row-gap);");
       const model = rule(".composer-model-picker__model");
       expect(model).toContain("gap: var(--oct-menu-row-gap);");
       expect(model).toContain("min-height: var(--oct-menu-row-h);");

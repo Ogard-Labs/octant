@@ -147,7 +147,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
           changing them.
         </p>
       </OctantCardHeader>
-      <OctantCardContent className="grid min-w-0 gap-4">
+      <OctantCardContent className="grid min-w-0 gap-3">
         {capabilities.map(({ title, Icon, state, description, preview, settings, action }) => (
           <section key={title} className="flex min-w-0 flex-col gap-2">
             <h3 className="first-run__capability-title">
