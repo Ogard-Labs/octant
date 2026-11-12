@@ -159,9 +159,11 @@ through `serve-sim` as before. **Repair input** is a fifth input kind,
 offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input
-reconnects it. It rides the same Allow input grant as a tap, never runs
-automatically, and is refused unless a person (`local-user` or
-`remote-device`) requested it; `octant_apple` does not offer it.
+reconnects it. It rides the same Allow input grant as a tap, whoever asks: a live
+grant or a one-shot approval covers it, and without either it is refused as
+approval-required (maintainer decision, 2026-11-12). It never runs
+automatically. Not built yet: `octant_apple` does not offer it, so an agent
+has no way to send it.
 
 ## Open URL
 

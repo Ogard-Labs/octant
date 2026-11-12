@@ -3043,7 +3043,7 @@ Status: Built. Since: —. Detail: [Device workbench: input channel](device-work
 
 ### Device effects
 
-Open URL, Rotate, Record screen and Repair input are effects, not input. A person or an agent may request them, and Allow input never covers them (maintainer request, 2026-11-12).
+Open URL, Rotate and Record screen are effects, not input. A person or an agent may request them, and Allow input never covers them (maintainer request, 2026-11-12). Repair input is input: a live Allow input grant covers it whoever asks (maintainer decision, 2026-11-12); the agent's Simulator tool does not offer it yet.
 
 - An agent's request is unasked at Full access and approval-gated below it; the host asking on its own is refused. Not built yet: today only a person may request them, an agent or the host asking is refused, and the agent tools do not offer these actions.
 - Plan refuses them, Full access sends them unasked, and an approval-gated thread raises its own confirmation for each.
