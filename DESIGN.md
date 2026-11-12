@@ -1997,8 +1997,10 @@ rule:
   deliberately stronger edge stays: a field's border, a focus edge, a status
   tint, and a Project tile's initial (22%, 40% on hover), which is an
   identity mark rather than a divider.
-- _A slider's track is the soft ink_ (`--oct-fg-soft`, as the `.range` recipe
-  draws it), so it shows on a dark card; the card colour made it vanish.
+- _A slider's track is the stronger hairline_ (`--oct-hairline-strong`, 14% ink),
+  so it shows on a dark card; the control fill it used is the card's own colour
+  there. Measured against the card, the track is 1.5:1 in dark and 1.3:1 in
+  light, and the thumb carries the value.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on

@@ -18,7 +18,7 @@ export const Slider = forwardRef<HTMLInputElement, ComponentProps<"input">>(func
   return (
     <input
       className={cn(
-        "octant-slider h-1 w-full cursor-default appearance-none rounded-full bg-(--oct-fg-soft) outline-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)",
+        "octant-slider h-1 w-full cursor-default appearance-none rounded-full bg-(--oct-hairline-strong) outline-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)",
         className,
       )}
       data-slot="slider"

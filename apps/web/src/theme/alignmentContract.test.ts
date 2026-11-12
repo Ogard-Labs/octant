@@ -291,8 +291,11 @@ describe("the shell's edges and gaps", () => {
     );
   });
 
-  it("paints a slider's track in the soft ink, so it shows on a dark card as on a light one", () => {
-    expect(slider).toContain("bg-(--oct-fg-soft)");
+  it("paints a slider's track in the stronger hairline ink, so it shows on a dark card as on a light one", () => {
+    // The control fill is the card's own colour in dark, and the soft ink was
+    // 1.2:1 against it; the stronger hairline is 1.5:1 there.
+    expect(slider).toContain("bg-(--oct-hairline-strong)");
+    expect(slider).not.toContain("bg-(--oct-fg-soft)");
     expect(slider).not.toContain("bg-secondary");
   });
 
