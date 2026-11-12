@@ -187,8 +187,11 @@ export const ThreadEgressRuleRevokedPayload = Schema.Struct({
 export type ThreadEgressRuleRevokedPayload = typeof ThreadEgressRuleRevokedPayload.Type;
 
 /**
- * Project rules come only from a person at a local window whose workspace
- * holds the Project, answering on a thread that is not tainted.
+ * Project rules come only from the host's own person, at a local window whose
+ * workspace holds the Project or on a device that person paired, answering on
+ * a thread that is not tainted. The host decides which devices those are
+ * before it journals; a record from before a device could grant names only a
+ * local window.
  */
 export const ProjectEgressRuleGrantedPayload = Schema.Struct({
   ruleId: ToolEgressRuleId,
@@ -197,7 +200,7 @@ export const ProjectEgressRuleGrantedPayload = Schema.Struct({
   host: ToolEgressRuleHost,
   port: ToolEgressPort,
   expiresAt: UtcTimestamp,
-  principal: Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+  principal: ToolEgressPersonPrincipal,
   approvalId: NativeHarnessApprovalId,
   threadTainted: Schema.Literal(false),
 }).annotations(strict);

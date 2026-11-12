@@ -596,8 +596,8 @@ export function wireHarness(deps: HarnessDependencies) {
       );
     },
     followUps: followUpActions,
-    answerQuestion: ({ threadId, questionId, answer }) =>
-      nativeHarnessQuestions.answer(threadId, questionId, answer),
+    answerQuestion: ({ threadId, questionId, answer, actor }) =>
+      nativeHarnessQuestions.answer(threadId, questionId, answer, actor),
     decideApproval: ({ threadId, approvalId, decision, answer }) =>
       nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
     steer: ({ threadId, command }) => {

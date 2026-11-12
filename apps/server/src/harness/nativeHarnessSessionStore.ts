@@ -401,6 +401,8 @@ export class NativeHarnessSessionStore {
       readonly status: Exclude<NativeHarnessApprovalStatus, "pending">;
       readonly remembered?: boolean;
     },
+    /** Who decided, when a person did; an expiry or a cancellation names nobody. */
+    actor?: typeof EventActor.Type,
   ): NativeHarnessApproval | "approval-not-found" | "already-settled" | "withdrawn" {
     const record = this.#records.get(threadId);
     const index = record?.approvals.findIndex((entry) => entry.id === approvalId) ?? -1;
@@ -417,13 +419,19 @@ export class NativeHarnessSessionStore {
       ...(outcome.remembered === true ? { remembered: true } : {}),
       settledAt,
     });
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, {
-      sessionId: record.session.id,
-      approvalId,
-      status: outcome.status,
-      ...(outcome.remembered === true ? { remembered: true } : {}),
-      settledAt,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled,
+      {
+        sessionId: record.session.id,
+        approvalId,
+        status: outcome.status,
+        ...(outcome.remembered === true ? { remembered: true } : {}),
+        settledAt,
+      },
+      actor,
+    );
     record.approvals[index] = settled;
     return settled;
   }
@@ -558,6 +566,8 @@ export class NativeHarnessSessionStore {
       readonly status: Exclude<NativeHarnessQuestionStatus, "pending">;
       readonly answer?: string;
     },
+    /** Who answered, when a person did; an expiry or a cancellation names nobody. */
+    actor?: typeof EventActor.Type,
   ): NativeHarnessQuestion | "question-not-found" | "already-settled" | "invalid-answer" {
     const record = this.#records.get(threadId);
     const index = record?.questions.findIndex((entry) => entry.id === questionId) ?? -1;
@@ -579,13 +589,19 @@ export class NativeHarnessSessionStore {
         : {}),
       settledAt,
     });
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled, {
-      sessionId: record.session.id,
-      questionId,
-      status: outcome.status,
-      ...(settled.answer === undefined ? {} : { answer: settled.answer }),
-      settledAt,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
+      {
+        sessionId: record.session.id,
+        questionId,
+        status: outcome.status,
+        ...(settled.answer === undefined ? {} : { answer: settled.answer }),
+        settledAt,
+      },
+      actor,
+    );
     record.questions[index] = settled;
     return settled;
   }
@@ -703,7 +719,15 @@ export class NativeHarnessSessionStore {
     });
   }
 
-  #append(record: SessionRecord, threadId: string, eventName: string, payload: unknown): void {
+  #append(
+    record: SessionRecord,
+    threadId: string,
+    eventName: string,
+    payload: unknown,
+    // What the host records about a run names the store's own actor; a
+    // person's decision names who decided.
+    actor: typeof EventActor.Type = this.#actor,
+  ): void {
     const aggregateId = decodeAggregateId(threadId);
     this.#journal.append({
       aggregate: { aggregateType: NATIVE_HARNESS_SESSION_AGGREGATE_TYPE, aggregateId },
@@ -714,7 +738,7 @@ export class NativeHarnessSessionStore {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: this.#actor,
+          actor,
           occurredAt: this.#clock(),
           payload,
         },
