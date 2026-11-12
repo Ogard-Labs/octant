@@ -87,14 +87,20 @@
   flex: 0 1 auto;
   min-width: 0;
 }
+/* At rest the share reads like the row's other text: meta ink, regular
+   weight, tabular figures. Only a window near its limit or spent is louder. */
 .plan-usage--compact .plan-usage__percent {
   min-width: 0;
+  color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 .plan-usage--compact .plan-usage__meter[data-level="near"] .plan-usage__percent {
   color: var(--oct-warn-fg);
+  font-weight: var(--oct-weight-medium);
 }
 .plan-usage--compact .plan-usage__meter[data-level="spent"] .plan-usage__percent {
   color: var(--oct-danger-fg);
+  font-weight: var(--oct-weight-medium);
 }
 @container composer-under (max-width: 440px) {
   .plan-usage--compact .plan-usage__bar {

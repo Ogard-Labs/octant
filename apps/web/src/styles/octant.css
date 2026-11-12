@@ -4797,6 +4797,9 @@ input.switch:checked::after {
 .composer-row > .composer-actions {
   flex: 0 1 auto;
   min-width: 0;
+  /* The row's gap (4px) and this make one --oct-space-2 between the left group
+     and the right, at every width; the labels that shorten give the room. */
+  padding-inline-start: calc(var(--oct-space-2) - var(--oct-space-1));
 }
 .composer-actions > .thread-plan-windows {
   /* The compact meter is small, and its figure never shrinks under what follows. */
