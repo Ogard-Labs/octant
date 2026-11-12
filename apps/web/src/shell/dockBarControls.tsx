@@ -79,7 +79,6 @@ export function useDockBarControls(items: ReadonlyArray<DockBarItem>): boolean {
     );
     return () => host.set(undefined);
     // `shape` stands for everything but the callbacks and icons.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [host, shape]);
   return host !== undefined;
 }
