@@ -329,7 +329,7 @@ The key providers run inside Octant as they run on their own, with their native 
 
 - Where a native feature reaches beyond Octant's view, the level decides its default: off until the person turns it on at Guarded and Reviewed, on at Full access, in Work and Code alike.
 - Plan stays read-only and Chat's filesystem and shell stay withheld at every level.
-- Turning a native feature on never turns on a provider's own memory, telemetry or self-update. The provider's own memory has a setting of its own per key provider account, off by default; telemetry and self-update stay off (maintainer request, 2026-11-12). Not built yet: today no such setting exists and provider memory stays off.
+- Turning a native feature on never turns on a provider's own memory, telemetry or self-update. The provider's own memory has a setting of its own per key provider account, off by default; telemetry and self-update stay off (maintainer request, 2026-11-12). Built for Claude Code (its auto-memory) and Codex (its memories), in Work and Code sessions outside Plan: only a person at a window on the host sets it, the change is journaled, and Run as itself, a trusted Project and Full access never turn it on. OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant sets, so their accounts carry no setting. Not built yet: Chat, where it stays off at every setting.
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
 - A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
@@ -695,7 +695,7 @@ Chat's missing file and shell authority is withheld by rule, not only in today's
 - Provider runtimes launch confined with exec and fork denied or with no execution environment, and a sandbox that only blocks writes is not enough because reads never escalate.
 - Octant-managed tools (research, Canvas) are unaffected because they run on the host.
 - A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex), or for one thread with its own-setup choice.
-- Provider-owned memory stays off in every mode unless the person turns it on, because a provider's global memory follows its own rules into every Project, outside Octant's controls: a setting per key provider account, off by default, turns that provider's own memory on (maintainer request, 2026-11-12). Not built yet: today no such setting exists and it stays off. Octant's own person memory is the cross-Project layer.
+- Provider-owned memory stays off in every mode unless the person turns it on, because a provider's global memory follows its own rules into every Project, outside Octant's controls: a setting per key provider account, off by default, turns that provider's own memory on (maintainer request, 2026-11-12). Built for Work and Code on Claude Code and Codex; a Plan launch keeps it off at every setting, because Plan may write no memory folder a later session would load. Not built yet: Chat, where it stays off at every setting, because no confined Chat launch has been run with a provider's memory on. Octant's own person memory is the cross-Project layer.
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1789,7 +1789,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbo
 
 Each non-essential channel of a key provider's runtime is kept off by its own switch on every launch, version read included, rather than by one blanket switch.
 
-- Guarded channels are usage metrics, error reports, self-update, bug and feedback upload, the session survey, auto-memory, built-in agents and marketplace auto-install. Auto-memory alone has a setting per key provider account, off by default, that turns the provider's own memory on; telemetry and self-update stay off (maintainer request, 2026-11-12). Not built yet: today no such setting exists and auto-memory is always guarded.
+- Guarded channels are usage metrics, error reports, self-update, bug and feedback upload, the session survey, auto-memory, built-in agents and marketplace auto-install. Auto-memory alone has a setting per key provider account, off by default, that turns the provider's own memory on; telemetry and self-update stay off (maintainer request, 2026-11-12). Built: a Work or Code launch outside Plan on an account whose setting is on goes without the auto-memory guard and keeps every other one; a Plan launch, a Chat launch and the version read keep it. Not built yet: Chat.
 - The query opens with no setting sources, plugins, skills, agents or MCP servers, and strict MCP configuration keeps the account's hosted connectors out.
 - A host that exports its own non-essential-traffic or telemetry opt-out keeps it on every launch; the person's own opt-out always wins.
 - Octant never reads, stores or injects the runtime's subscription tokens; a leftover helper-token envelope is deleted on upgrade.

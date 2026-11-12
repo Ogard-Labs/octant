@@ -1485,12 +1485,34 @@ environment.
 
 Provider-owned memory stays off in every mode unless the person turns it on
 for that key provider account, a setting that is off by default (maintainer
-request, 2026-11-12; not built yet: today it is off with no setting). A provider's global memory
-follows its own rules into every Project, outside Octant's controls: Codex runs
+request, 2026-11-12). A provider's global memory
+follows its own rules into every Project, outside Octant's controls: with the
+setting off Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
-sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
+sandbox's readable roots, and Claude runs with its auto-memory guard and no
+setting sources. Octant keeps
 two memories of its own instead: Project memory, scoped to one Project, and
 person memory below.
+
+The setting is **Use <provider>'s own memory** in Settings › Providers, beside
+Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
+provider account, changed only by `set-provider-own-memory` from a window on
+this computer (a paired device is refused) and journaled as
+`provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
+and Full access never turn it on. Each driver reads it when it launches a
+process: a Claude Code launch goes without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`
+and keeps every other guard, and a Codex process is leased without the
+`features.memories=false` override, so Codex's own configuration decides and
+Octant never forces the feature on; that lease is a process of its own, like
+the one that runs Codex's subagents. It applies to Work and Code sessions
+outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+nothing a later session would load, and the runtime's memory folder is exactly
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
+sets, so their accounts carry no setting. Not built yet: Chat, where a
+provider's memory stays off at every setting, because no confined Chat launch
+has been run with it on. Live check owed: no real Claude Code or Codex turn
+has yet run with the setting on.
 
 ### Project memory
 
@@ -12590,8 +12612,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
   built-in agents, and marketplace auto-install. The provider's own memory
   alone has a setting per key provider account, off by default, that turns
-  it on (maintainer request, 2026-11-12; not built yet: today it is off on
-  every launch); telemetry and self-update stay off. The runtime's release-note,
+  it on (maintainer request, 2026-11-12; built for Work and Code launches
+  outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
+  without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
+  (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
+  account's configuration directory, in `projects/<session folder>/memory/`.
+  A Plan launch, a Chat launch, and the version read keep the guard.
+  Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
   Feature-flag fetching stays off: Anthropic's environment-variable reference

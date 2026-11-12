@@ -218,6 +218,7 @@ function harness(
     readonly configDirectory?: string;
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
+    readonly ownMemory?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
@@ -354,6 +355,7 @@ function harness(
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
+      ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       process,
       sdk,
@@ -3250,9 +3252,11 @@ describe("Claude artifact delivery", () => {
     authentication: ClaudeAuthentication,
     artifactDelivery: () => boolean,
     hostEnvironment: NodeJS.ProcessEnv = { PATH: "/usr/bin", HOME: "/Users/someone" },
+    ownMemory?: () => boolean,
   ) {
     return harness(authentication, "current-session", {
       artifactDelivery,
+      ...(ownMemory === undefined ? {} : { ownMemory }),
       configDirectory: "/Users/someone/.claude-accounts/personal",
       makeEnvironmentScope: (selected, options) =>
         Effect.succeed({
@@ -3309,6 +3313,36 @@ describe("Claude artifact delivery", () => {
     const other = await launch(on, "work", "approval-gated", false);
     expect(other.tools).not.toContain("Artifact");
     expectEveryGuard(other.environment);
+  });
+
+  it("lifts only the auto-memory guard for a Work or Code launch outside Plan on an account whose person turned its memory on", async () => {
+    const memoryGuard = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+    const everyOtherGuard = Object.fromEntries(
+      Object.entries(REQUIRED_GUARDS).filter(([name]) => name !== memoryGuard),
+    );
+    let on = true;
+    const f = guardedHarness(
+      "subscription",
+      () => false,
+      undefined,
+      () => on,
+    );
+    for (const [mode, policy] of [
+      ["work", "approval-gated"],
+      ["code", "full-access"],
+    ] as const) {
+      const launched = await launch(f, mode, policy, false);
+      expect(launched.environment, `${mode} ${policy}`).not.toHaveProperty(memoryGuard);
+      expect(launched.environment).toMatchObject(everyOtherGuard);
+    }
+    // Plan may write nothing a later session would load, and Chat is confined
+    // the same way, so both keep the guard with the setting on.
+    expectEveryGuard((await launch(f, "code", "plan", false)).environment);
+    expectEveryGuard((await launch(f, "chat", "approval-gated", false)).environment);
+    // The next launch after the person turns it off is guarded again, and
+    // Full access alone never lifts it.
+    on = false;
+    expectEveryGuard((await launch(f, "code", "full-access", false)).environment);
   });
 
   it("keeps every guard for a turn the tool is not offered to", async () => {

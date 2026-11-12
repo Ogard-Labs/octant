@@ -86,6 +86,12 @@ export type CodexLaunchAuthority =
        * parent's approval path on their own thread ids, at every level.
        */
       readonly ownSubagents?: true;
+      /**
+       * The person turned this account's own memory on, and this is a Work or
+       * Code lease outside Plan. Codex then keeps its memories as it does on
+       * its own.
+       */
+      readonly ownMemory?: true;
     };
 
 export interface CodexProcessPort {
@@ -311,17 +317,21 @@ function parseCodexVersion(output: string): string | undefined {
  * on, codex-cli 0.159.2 put the user's global memory summary into every
  * thread's instructions, told the model to search `~/.codex/memories`, and
  * added that folder to the sandbox's readable roots, so a memory from any
- * other workspace reached every Octant thread in every mode.
+ * other workspace reached every Octant thread in every mode. That is what a
+ * person asks for when they turn the account's own memory on, so a lease for
+ * such an account leaves the override out and Codex's own configuration
+ * decides, as in Codex itself. Octant never forces the feature on.
  */
 export function codexAppServerArgs(
   version: string,
-  options: { readonly ownSubagents?: true } = {},
+  options: { readonly ownSubagents?: true; readonly ownMemory?: true } = {},
 ): readonly string[] {
+  const memories = options.ownMemory === true ? [] : ["-c", "features.memories=false"];
   // A lease for a thread whose person let Codex run its own subagents leaves
-  // Codex's own defaults for them, as in Codex itself. Its memories stay off
-  // either way.
+  // Codex's own defaults for them, as in Codex itself. Its memories follow
+  // the account's own setting either way.
   if (options.ownSubagents === true) {
-    return ["app-server", "--listen", "stdio://", "-c", "features.memories=false"];
+    return ["app-server", "--listen", "stdio://", ...memories];
   }
   return [
     "app-server",
@@ -331,8 +341,7 @@ export function codexAppServerArgs(
     "features.multi_agent=false",
     "-c",
     "features.multi_agent_v2=false",
-    "-c",
-    "features.memories=false",
+    ...memories,
     ...(isAtLeastRelease(version, [0, 145, 0]) ? ["-c", "agents.enabled=false"] : []),
   ];
 }
@@ -1081,8 +1090,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               binaryPath,
               args: codexAppServerArgs(
                 probe.version,
-                authority.kind === "thread" && authority.ownSubagents === true
-                  ? { ownSubagents: true }
+                authority.kind === "thread"
+                  ? {
+                      ...(authority.ownSubagents === true ? { ownSubagents: true } : {}),
+                      ...(authority.ownMemory === true ? { ownMemory: true } : {}),
+                    }
                   : {},
               ),
               authority,

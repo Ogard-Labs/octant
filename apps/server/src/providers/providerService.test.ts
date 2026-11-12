@@ -2437,6 +2437,57 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({ failure: { category: "unsupported" } });
   });
 
+  it("journals a Claude Code account's own-memory switch without restarting it, and refuses an account with no such memory", async () => {
+    const piId = decodeProviderInstanceId("70000000-0000-4000-8000-0000000000ab");
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        decodeProviderInstance({
+          id: piId,
+          displayName: "Pi",
+          driverKind: "pi",
+          configuration: { kind: "pi-rpc", binaryPath: "/opt/homebrew/bin/pi" },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: "2026-07-14T10:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z",
+        }),
+      ],
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-own-memory",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: true } });
+    expect(fixture.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "provider.instance-own-memory-changed@1" })],
+      }),
+    );
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      ownMemory: true,
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).not.toHaveProperty("nativeSetup");
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-own-memory",
+        instanceId: piId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {

@@ -425,6 +425,16 @@ export function makeConfiguredProviderDriver(
             candidate.driverKind === "claude" &&
             candidate.configuration.artifactDelivery === true,
         ) === true,
+      // Read from the journal at every launch, so the next process a Claude
+      // Code or Codex account starts follows the person's current switch.
+      // The getter the artifact switch reads holds every account, Codex's too.
+      providerOwnMemory: (instanceId) =>
+        options.claudeInstances?.some(
+          (candidate) =>
+            String(candidate.id) === String(instanceId) &&
+            (candidate.driverKind === "claude" || candidate.driverKind === "codex") &&
+            candidate.ownMemory === true,
+        ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
         ? {}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { providerNativeSetupIsOn, resolveProviderNativeSetup } from "./providerNativeSetupPolicy";
+import {
+  providerNativeSetupIsOn,
+  providerOwnMemoryLaunches,
+  resolveProviderNativeSetup,
+} from "./providerNativeSetupPolicy";
 
 const everything = {
   subagents: true,
@@ -180,5 +184,36 @@ describe("a key provider running as itself", () => {
         threadChoice: "on",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("a provider's own memory", () => {
+  it("launches in Work and Code only when the person turned the account's setting on", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of [
+        "approval-gated",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
+        expect(providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy })).toBe(
+          true,
+        );
+        // Full access turns the provider's own setup on, never its memory.
+        expect(providerOwnMemoryLaunches({ accountAllows: false, mode, executionPolicy })).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("stays off in Plan, in Chat, and for a session that names no mode, with the setting on", () => {
+    expect(
+      providerOwnMemoryLaunches({ accountAllows: true, mode: "code", executionPolicy: "plan" }),
+    ).toBe(false);
+    for (const mode of ["chat", undefined] as const) {
+      expect(
+        providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy: "approval-gated" }),
+      ).toBe(false);
+    }
   });
 });

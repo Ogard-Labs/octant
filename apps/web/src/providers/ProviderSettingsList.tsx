@@ -29,7 +29,9 @@ import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import {
   ProviderNativeSetupSetting,
+  ProviderOwnMemorySetting,
   type ProviderNativeSetupSettingProps,
+  type ProviderOwnMemorySettingProps,
 } from "./ProviderNativeSetupSetting";
 import { ModelContextWindowField } from "./ModelContextWindowField";
 import { hostCredentialStore, useHostPlatform } from "../platform";
@@ -123,6 +125,7 @@ export type ProviderSettingsListProps = Pick<
   | "onSetEnabled"
   | "onSetClaudeArtifactDelivery"
   | "onSetProviderNativeSetup"
+  | "onSetProviderOwnMemory"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
   | "onModelContextWindowChange"
@@ -412,6 +415,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         {...(props.onSetProviderNativeSetup === undefined
           ? {}
           : { onSetProviderNativeSetup: props.onSetProviderNativeSetup })}
+        {...(props.onSetProviderOwnMemory === undefined
+          ? {}
+          : { onSetProviderOwnMemory: props.onSetProviderOwnMemory })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined
@@ -756,6 +762,7 @@ interface ProviderRowProps {
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
   readonly onSetClaudeArtifactDelivery?: ProviderSettingsViewProps["onSetClaudeArtifactDelivery"];
   readonly onSetProviderNativeSetup?: ProviderSettingsViewProps["onSetProviderNativeSetup"];
+  readonly onSetProviderOwnMemory?: ProviderSettingsViewProps["onSetProviderOwnMemory"];
   readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onModelContextWindowChange?: ProviderSettingsViewProps["onModelContextWindowChange"];
@@ -880,6 +887,7 @@ function ProviderRow(props: ProviderRowProps) {
     ? props.instance
     : undefined;
   const keyProviderInstance = keyProviderAccount(props.instance);
+  const ownMemoryInstance = ownMemoryAccount(props.instance);
   const isPi = props.instance.driverKind === "pi";
   const isOhMyPi = props.instance.driverKind === "oh-my-pi";
   const isOllama = props.instance.driverKind === "ollama";
@@ -1823,6 +1831,17 @@ function ProviderRow(props: ProviderRowProps) {
                     }
                   />
                 )}
+                {ownMemoryInstance === undefined ||
+                props.onSetProviderOwnMemory === undefined ? null : (
+                  <ProviderOwnMemorySetting
+                    disabled={disabled}
+                    instance={ownMemoryInstance}
+                    onChange={(enabled) =>
+                      props.onSetProviderOwnMemory?.(props.instance.id, enabled) ??
+                      Promise.resolve(false)
+                    }
+                  />
+                )}
                 {acpInstance === undefined ? null : (
                   <div
                     className={`provider-card__facts provider-card__facts--${acpInstance.driverKind}`}
@@ -2227,6 +2246,19 @@ function keyProviderAccount(
     ...("nativeSetup" in instance && instance.nativeSetup === true
       ? { nativeSetup: true as const }
       : {}),
+  };
+}
+
+/** The account an own-memory switch belongs to: only Claude Code and Codex keep such a memory. */
+function ownMemoryAccount(
+  instance: ProviderInstance,
+): ProviderOwnMemorySettingProps["instance"] | undefined {
+  if (instance.driverKind !== "claude" && instance.driverKind !== "codex") return undefined;
+  return {
+    id: String(instance.id),
+    displayName: instance.displayName,
+    driverKind: instance.driverKind,
+    ...(instance.ownMemory === true ? { ownMemory: true as const } : {}),
   };
 }
 

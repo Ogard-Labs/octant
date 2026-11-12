@@ -151,6 +151,7 @@ import {
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
   ProviderInstanceNativeSetupChanged,
+  ProviderInstanceOwnMemoryChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -555,6 +556,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
     .register("provider.instance-native-setup-changed@1", 1, ProviderInstanceNativeSetupChanged)
+    .register("provider.instance-own-memory-changed@1", 1, ProviderInstanceOwnMemoryChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
