@@ -1,0 +1,430 @@
+/* Octant minimum recipes: the app's controls and surfaces in plain CSS.
+ *
+ * Hand-written, and built from the tokens in tokens.css only. It holds no
+ * colour literal, radius or shadow of its own (a few tints are mixed from
+ * exported colour tokens), so it follows a token change and the light/dark
+ * switch. A test refuses a raw colour here and a token
+ * this file reads that tokens.css does not define.
+ *
+ * Load tokens.css first. Put `class="oct-root"` on the page's root element.
+ * The guide is docs/design/design-tokens.md. */
+
+/* ── Page ──────────────────────────────────────────────────────────────
+   A window, not a page: the arrow cursor, no selection on chrome, platform
+   face, the interface size. Reading matter opts back in with .oct-selectable. */
+.oct-root {
+  margin: 0;
+  background: var(--oct-bg);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-body);
+  font-size: var(--octant-ui-font-size);
+  line-height: var(--oct-leading-body);
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.oct-root *,
+.oct-root *::before,
+.oct-root *::after {
+  box-sizing: border-box;
+}
+.oct-selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* Keyboard focus draws one inset edge in the foreground; a pointer press does
+   not match :focus-visible, so clicking paints nothing. */
+.oct-root :focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: -2px;
+}
+
+/* ── Type roles ────────────────────────────────────────────────────────── */
+.oct-type-title {
+  margin: 0;
+  font-family: var(--oct-role-title-family);
+  font-size: var(--oct-role-title-size);
+  font-weight: var(--oct-role-title-weight);
+  letter-spacing: var(--oct-role-title-tracking);
+  line-height: var(--oct-role-title-leading);
+  text-wrap: balance;
+}
+.oct-type-page-title {
+  margin: 0;
+  font-family: var(--oct-role-page-title-family);
+  font-size: var(--oct-role-page-title-size);
+  font-weight: var(--oct-role-page-title-weight);
+  letter-spacing: var(--oct-role-page-title-tracking);
+  line-height: var(--oct-role-page-title-leading);
+}
+.oct-type-section-label {
+  margin: 0;
+  color: var(--oct-muted);
+  font-family: var(--oct-role-section-label-family);
+  font-size: var(--oct-role-section-label-size);
+  font-weight: var(--oct-role-section-label-weight);
+  letter-spacing: var(--oct-role-section-label-tracking);
+  line-height: var(--oct-role-section-label-leading);
+}
+.oct-type-row-label {
+  font-size: var(--oct-role-row-label-size);
+  font-weight: var(--oct-role-row-label-weight);
+  line-height: var(--oct-role-row-label-leading);
+}
+.oct-type-row-detail {
+  color: var(--oct-muted);
+  font-size: var(--oct-role-row-detail-size);
+  line-height: var(--oct-role-row-detail-leading);
+}
+.oct-type-meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-role-meta-size);
+  line-height: var(--oct-role-meta-leading);
+}
+.oct-type-meta-mono {
+  color: var(--oct-meta);
+  font-family: var(--oct-role-meta-mono-family);
+  font-size: var(--oct-role-meta-size);
+  letter-spacing: var(--oct-role-meta-mono-tracking);
+  line-height: var(--oct-role-meta-leading);
+}
+
+/* ── Button ────────────────────────────────────────────────────────────
+   A filled button is a raised tile: light on its top edge, a short shadow
+   under it. Pressing darkens the fill and sinks the shadow; nothing moves.
+   Ghost draws no tile. */
+.oct-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-1);
+  height: var(--oct-rail-button-h);
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-control);
+  color: var(--oct-fg);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+  box-shadow: var(--octant-shadow-control);
+  transition:
+    background-color var(--oct-dur-base) var(--oct-ease-color),
+    box-shadow var(--oct-dur-base) var(--oct-ease-color);
+}
+.oct-button:hover {
+  background: color-mix(in oklab, var(--octant-control), var(--octant-text-primary) 5%);
+}
+.oct-button:active {
+  background: var(--octant-control-pressed);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+.oct-button:active,
+.oct-icon-button:active {
+  transition-duration: 0s;
+}
+.oct-button--primary {
+  background: var(--octant-accent-sheen), var(--octant-accent);
+  color: var(--octant-primary-foreground);
+  box-shadow: var(--octant-shadow-primary);
+}
+.oct-button--primary:hover {
+  background: var(--octant-accent-sheen), color-mix(in srgb, var(--octant-accent) 88%, transparent);
+}
+.oct-button--primary:active {
+  background: var(--octant-accent);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+.oct-button--primary:focus-visible {
+  outline-color: var(--oct-focus-edge-on-accent);
+}
+.oct-button--ghost {
+  background: transparent;
+  box-shadow: none;
+}
+.oct-button--ghost:hover {
+  background: var(--octant-control);
+}
+.oct-button--ghost:active {
+  background: var(--octant-control-pressed);
+  box-shadow: none;
+}
+.oct-button:disabled {
+  opacity: var(--oct-disabled-opacity);
+  pointer-events: none;
+}
+
+/* ── Icon button ───────────────────────────────────────────────────────
+   A square with the control's height; the glyph is centred in it, so its
+   centre is the control's centre. */
+.oct-icon-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  cursor: default;
+  transition:
+    background-color var(--oct-dur-base) var(--oct-ease-color),
+    color var(--oct-dur-base) var(--oct-ease-color);
+}
+.oct-icon-button:hover {
+  background: var(--octant-control);
+  color: var(--oct-fg);
+}
+.oct-icon-button:active {
+  background: var(--octant-control-pressed);
+}
+.oct-icon-button svg {
+  width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Field ─────────────────────────────────────────────────────────────
+   The strong border and no fill at rest, a darker edge on hover, the hover
+   tone on keyboard focus. A field is a well, not a tile: it has no shadow. */
+.oct-field {
+  height: var(--oct-rail-button-h);
+  padding: 0 var(--oct-space-2);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-fg);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+  transition:
+    border-color var(--oct-dur-base) var(--oct-ease-color),
+    background-color var(--oct-dur-base) var(--oct-ease-color);
+}
+.oct-field::placeholder {
+  color: var(--oct-meta);
+}
+.oct-field:hover {
+  border-color: var(--octant-text-muted);
+}
+.oct-field:focus-visible {
+  background: var(--octant-control-hover);
+}
+
+/* ── Card ──────────────────────────────────────────────────────────────
+   A discrete object on a pane: the card fill, a rim brighter along its top
+   edge, a short drop. Rows inside it are divided by a hairline inset by the
+   card's own padding, so the line starts where the text does. */
+.oct-card {
+  overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  box-shadow: var(--octant-shadow-sm);
+}
+.oct-card__body {
+  padding: var(--oct-space-4);
+}
+.oct-card__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-height: var(--oct-nav-row-h);
+  padding: var(--oct-space-2) var(--oct-space-4);
+}
+.oct-card__row + .oct-card__row::before {
+  position: absolute;
+  inset: 0 var(--oct-space-4) auto;
+  height: 1px;
+  background: var(--oct-hairline);
+  content: "";
+}
+
+/* ── Well ──────────────────────────────────────────────────────────────
+   Cut in: darker than what it sits in, an inner top shadow, a light line
+   under its bottom edge. What is chosen in a well is a raised control again. */
+.oct-well {
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-well);
+  box-shadow: var(--octant-shadow-well);
+}
+.oct-segmented {
+  display: inline-flex;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+}
+.oct-segmented__item {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--oct-rail-button-h) - var(--oct-space-2));
+  padding: 0 var(--oct-space-3);
+  border: 0;
+  border-radius: calc(var(--oct-radius-sm) - 2px);
+  background: transparent;
+  color: var(--oct-muted);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  cursor: default;
+}
+.oct-segmented__item[aria-pressed="true"] {
+  background: var(--octant-control);
+  color: var(--oct-fg);
+  box-shadow: var(--octant-shadow-control);
+}
+
+/* ── Menu ──────────────────────────────────────────────────────────────
+   A floating surface, frosted over whatever is behind it: the float fill
+   at partial strength over a blur, a sheen along the lit top edge, and the pop
+   shadow, which draws the rim, the one outer hairline and the lift (the menu
+   sets no border). Rows are at the shared menu row height, standing in from the
+   edge by the menu inset, at the control radius. A reduced-transparency
+   preference puts the opaque float fill back. */
+.oct-menu {
+  display: inline-flex;
+  min-width: calc(var(--oct-space-12) * 4);
+  flex-direction: column;
+  padding: var(--oct-menu-inset);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-float-sheen), var(--octant-float-glass);
+  backdrop-filter: var(--octant-float-blur);
+  -webkit-backdrop-filter: var(--octant-float-blur);
+  box-shadow: var(--octant-shadow-pop);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .oct-menu {
+    background: var(--octant-float);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+.oct-menu__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-menu-row-h);
+  padding: 0 var(--oct-menu-row-inset);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+  cursor: default;
+}
+.oct-menu__row:hover {
+  background: var(--octant-float-hover);
+}
+.oct-menu__row svg {
+  flex: none;
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.oct-menu__rule {
+  height: 1px;
+  margin: var(--oct-menu-inset) calc(var(--oct-menu-inset) * -1);
+  background: var(--octant-float-line);
+}
+
+/* ── Panes ─────────────────────────────────────────────────────────────
+   Square and flush, sharing edges. The title band and the sidebar are the
+   ground, with no panel behind their rows; the stage is a pane one step
+   lighter, divided from the ground by one 1px line on its top and left edges
+   (--oct-hairline, the ink at 10%). No rim and no seat shadow: a shadow would
+   fall on the neighbour. */
+.oct-panes {
+  display: grid;
+  grid-template-columns: var(--oct-sidebar-w) minmax(0, 1fr);
+  min-height: calc(var(--oct-space-12) * 7);
+  background: var(--octant-sidebar-opaque);
+  overflow: hidden;
+}
+.oct-panes__sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--oct-space-2);
+}
+.oct-panes__stage {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.oct-panes__band {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-2);
+  height: var(--oct-title-rail-h);
+  padding: 0 var(--oct-space-4);
+}
+.oct-panes__body {
+  flex: 1;
+  padding: var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
+  border-left: 1px solid var(--oct-hairline);
+  background: var(--octant-workspace);
+}
+
+/* A navigation row: one icon column, one text edge, one row height. The row
+   being shown is a tile raised out of the list; the pointed-at one a flat wash. */
+.oct-nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  height: var(--oct-nav-row-h);
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  cursor: default;
+}
+.oct-nav-row__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--oct-icon-lg);
+  height: var(--oct-icon-lg);
+  color: var(--oct-muted);
+}
+.oct-nav-row__icon svg {
+  width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.oct-nav-row:hover {
+  background: var(--oct-fg-soft);
+}
+.oct-nav-row[aria-current="page"] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-selected);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oct-root *,
+  .oct-root *::before,
+  .oct-root *::after {
+    transition-duration: 0.01ms !important;
+  }
+}

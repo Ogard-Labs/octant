@@ -39,7 +39,7 @@ describe("a settings section", () => {
     // token's. The clear border is what forced colours draw in their place.
     expect(card).toMatch(/border:\s*1px solid transparent/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
-    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-xs\)/);
+    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     // Menus and popovers inside a row have to escape the card, so it never clips.
     expect(card).toMatch(/overflow:\s*visible/);
     expect(card).not.toMatch(/overflow:\s*hidden/);
