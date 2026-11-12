@@ -4517,9 +4517,9 @@ input.switch:checked::after {
   /* The card role is white on the light well and the floating step in
      dark, so the composer is the one raised object in both modes. */
   background: var(--octant-card);
-  box-shadow:
-    var(--octant-shadow-md),
-    inset 0 0 0 1px var(--oct-border);
+  /* The box's own rim is part of the shadow token, so a second ring here
+     would draw two lines on one edge. */
+  box-shadow: var(--octant-shadow-md);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] .thread-composer__surface {
@@ -6828,9 +6828,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
       .composer:not(.composer--carded) {
-      box-shadow:
-        inset 0 0 0 1px var(--oct-glass-stroke),
-        var(--octant-shadow-md);
+      box-shadow: var(--octant-shadow-md);
     }
     /* Over a ground or under Glass the box is the glass surface: floor,
        thick tint, blur, and the glass stroke as its ring. The opaque border
@@ -6842,9 +6840,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-      box-shadow:
-        var(--octant-shadow-md),
-        inset 0 0 0 1px var(--oct-glass-stroke);
+      box-shadow: var(--octant-shadow-md);
     }
     /* The notice card above the box is the same glass: an opaque callout
        ground beside a translucent box read as a block. A tone is its tint

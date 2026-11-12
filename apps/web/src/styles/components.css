@@ -110,18 +110,211 @@
   --oct-border: var(--octant-float-line);
 }
 
-/* Product menus and dialogs use the opaque shadcn popover recipe. */
+/* Level 4, floating: frosted over the page content behind it (a blur and a
+   saturation lift), the brightest rim, a short shadow that seats it and a long
+   one that lifts it. The rim and both shadows are one token, so a surface that
+   also set a border or a ring drew two lines on one edge: the border is gone.
+   The frost is for content behind the window's own page; it is not asked to
+   blur the desktop. */
 .octant-menu__popup,
 .octant-dialog__popup,
+.octant-sheet__popup,
 .window-chrome__disclosure,
 .project-dialog,
-.folder-picker {
-  background: var(--popover);
-  /* The edge is the light rim of a floating surface; the dark line outside
-     it and the lift are the shadow's. */
-  border: 1px solid var(--octant-bevel);
+.folder-picker,
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"],
+[data-slot="popover-content"],
+[data-slot="select-content"],
+[data-slot="combobox-content"],
+.octant-preview-card,
+.thread-info__panel,
+.palette,
+.toast {
+  background: var(--octant-float-sheen), var(--octant-float-glass);
+  border: 0;
   box-shadow: var(--octant-shadow-pop);
+  backdrop-filter: var(--octant-float-blur);
+  -webkit-backdrop-filter: var(--octant-float-blur);
+}
+
+html[data-octant-reduced-transparency="true"]
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ),
+html[data-octant-increased-contrast="true"]
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ) {
+  background: var(--octant-float);
   backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ) {
+    background: var(--octant-float);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Level 2, a card on a panel: a fill a step above the panel, a rim brighter
+   along its top, and a shadow that seats it. These were drawn as a hairline
+   box with no depth. */
+.turn-user .bubble,
+.approval-row,
+.provider-question-card {
+  border: 0;
+  background: var(--octant-card);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+/* Level 3, a well: a place cut into the surface (a segmented switch's track,
+   a capsule of history buttons, a command block), darker than what it is in,
+   with an inner top shadow and a light line under its bottom edge. What sits
+   in a well and is chosen is a raised control again. */
+.modeswitch__tray,
+.browser-workspace__history,
+.approval-cmd {
+  background: var(--octant-well);
+  box-shadow: var(--octant-shadow-well);
+}
+
+.modeswitch__tray > .mode[aria-current="page"] {
+  background: var(--octant-control);
+}
+
+/* A chip is a raised control; the suggestion chip (a button variant) stays quiet
+   until it is pointed at. */
+.octant-chip {
+  background: var(--octant-control);
+  border: 0;
+  box-shadow: var(--octant-shadow-control);
+}
+
+.octant-chip:hover {
+  background: var(--octant-control-hover);
+}
+
+.octant-chip[aria-pressed="true"],
+.octant-chip[data-active="true"] {
+  background: var(--octant-control-pressed);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
+/* Edges that do not depend on a shadow. The rim is a shadow, and forced colours
+   drops every shadow, so a popup, a card and a chip would have no edge at all;
+   increased contrast keeps the flat fill and takes the strong border main drew.
+   A border is drawn only here, so the normal box keeps its size, and the chip
+   that is pressed is told from one at rest by the system highlight. */
+@media (forced-colors: active) {
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ),
+  .turn-user .bubble,
+  .approval-row,
+  .provider-question-card,
+  .octant-chip {
+    border: 1px solid CanvasText;
+  }
+
+  .octant-chip[aria-pressed="true"],
+  .octant-chip[data-active="true"] {
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+    outline: 1px solid HighlightText;
+    outline-offset: -3px;
+  }
+}
+
+html[data-octant-increased-contrast="true"]
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ),
+html[data-octant-increased-contrast="true"]
+  :is(.turn-user .bubble, .approval-row, .provider-question-card) {
+  border: 1px solid var(--octant-border-strong);
+}
+
+/* A pending approval keeps its warning edge: the colour is its meaning. It
+   takes the card's depth, not its rim. */
+.approval {
+  background: var(--octant-card);
+  box-shadow: var(--octant-card-drop);
 }
 
 /* ── Overlay motion ────────────────────────────────────────────────── */

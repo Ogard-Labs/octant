@@ -222,6 +222,30 @@ function arrange(
 const percent = (fraction: number) => `${fraction * 100}%`;
 
 /**
+ * The width of a divider's hit area, centred on the edge between two tiles. In
+ * a narrow window a tile is a panel and each edge it shares with a neighbour
+ * is pulled in by half a gap (`--octant-tile-inset`, set in dock.css), so the
+ * pair end up a gap apart; from 681px up the inset is 0 and tiles share the
+ * edge. An edge on the dock's own boundary never moves.
+ */
+const DIVIDER_HIT = 8;
+const EDGE = 1e-4;
+const INSET = "var(--octant-tile-inset, 0px)";
+const along = (start: number, size: number) => {
+  const before = start > EDGE;
+  const after = start + size < 1 - EDGE;
+  return {
+    start: before ? `calc(${percent(start)} + ${INSET})` : `calc(${percent(start)} + 0px)`,
+    size:
+      before && after
+        ? `calc(${percent(size)} - 2 * ${INSET})`
+        : before || after
+          ? `calc(${percent(size)} - ${INSET})`
+          : `calc(${percent(size)} - 0px)`,
+  };
+};
+
+/**
  * Open tools drawn together, each one live. Tiles are keyed by their tool, so
  * choosing another tile, resizing, adding or removing a neighbour never
  * remounts a tool that stays shown: a simulator or a page would lose its
@@ -411,11 +435,13 @@ function Tile(props: {
     };
   }, []);
   const { content, box } = props;
+  const across = along(box.left, box.width);
+  const down = along(box.top, box.height);
   const style: CSSProperties = {
-    left: percent(box.left),
-    top: percent(box.top),
-    width: percent(box.width),
-    height: percent(box.height),
+    left: across.start,
+    top: down.start,
+    width: across.size,
+    height: down.size,
   };
   return (
     <section
@@ -646,12 +672,17 @@ function TileDivider(props: {
   }
 
   const style: CSSProperties = vertical
-    ? { left: `calc(${percent(props.at)} - 3px)`, top: 0, height: "100%", width: 7 }
+    ? {
+        left: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
+        top: 0,
+        height: "100%",
+        width: DIVIDER_HIT,
+      }
     : {
         left: percent(props.extent?.left ?? 0),
-        top: `calc(${percent(props.at)} - 3px)`,
+        top: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
         width: percent(props.extent?.width ?? 1),
-        height: 7,
+        height: DIVIDER_HIT,
       };
   return (
     <div
