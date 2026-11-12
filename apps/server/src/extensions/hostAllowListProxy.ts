@@ -78,12 +78,23 @@ export async function startHostAllowListProxy(
   const resolve =
     options.resolve ?? (async (host: string) => (await lookup(host, { verbatim: true })).address);
   const sockets = new Set<Socket | Duplex>();
+  let stopped = false;
   const server: Server = createServer((_request, response) => {
     response.writeHead(405, { Allow: "CONNECT" }).end();
   });
   server.on("connect", (request, client, head) => {
+    if (stopped) {
+      client.destroy();
+      return;
+    }
     sockets.add(client);
-    client.on("close", () => sockets.delete(client));
+    let clientClosed = false;
+    let upstreamSocket: Socket | undefined;
+    client.on("close", () => {
+      clientClosed = true;
+      sockets.delete(client);
+      upstreamSocket?.destroy();
+    });
     client.on("error", () => client.destroy());
     const refuse = (status: string) => {
       client.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
@@ -99,11 +110,14 @@ export async function startHostAllowListProxy(
     }
     void resolve(target.host).then(
       (address) => {
+        // The proxy may have stopped, or the client left, while the name resolved.
+        if (stopped || clientClosed) return;
         if (options.refuseLocalNetwork !== false && isLocalNetworkAddress(address)) {
           refuse("403 Forbidden");
           return;
         }
         const upstream = connect({ host: address, port: options.upstreamPort ?? 443 });
+        upstreamSocket = upstream;
         sockets.add(upstream);
         upstream.on("close", () => sockets.delete(upstream));
         upstream.on("error", () => {
@@ -133,6 +147,7 @@ export async function startHostAllowListProxy(
     port: address.port,
     stop: () =>
       new Promise<void>((resolveStop) => {
+        stopped = true;
         for (const socket of sockets) socket.destroy();
         server.close(() => resolveStop());
       }),

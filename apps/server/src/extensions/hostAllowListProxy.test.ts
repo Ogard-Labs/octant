@@ -79,6 +79,37 @@ describe("the host allow-list proxy", () => {
     expect((await connectVia(proxy.port, "id.jottacloud.com:443")).status).toBe(403);
   });
 
+  it("opens no upstream connection for a client that left or a proxy that stopped while resolving", async () => {
+    let connections = 0;
+    const upstream = createTcpServer(() => {
+      connections += 1;
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", () => resolve()));
+    const address = upstream.address();
+    const upstreamPort = typeof address === "object" && address !== null ? address.port : 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const running = await startHostAllowListProxy({
+      allowedHosts: ["*.jottacloud.com"],
+      resolve: async () => {
+        await gate;
+        return "127.0.0.1";
+      },
+      refuseLocalNetwork: false,
+      upstreamPort,
+    });
+    const pending = connectVia(running.port, "id.jottacloud.com:443").catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await running.stop();
+    release();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(connections).toBe(0);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
   it("tunnels a listed host and nothing else", async () => {
     const echo = createTcpServer((socket) =>
       socket.on("data", (data) => socket.write(`echo:${data.toString()}`)),
