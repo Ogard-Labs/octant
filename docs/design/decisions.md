@@ -2958,7 +2958,7 @@ Status: Built. Since: 2026-10-26. Detail: [Enterprise provider identity: authent
 Each organization sign-in uses the narrowest flow that works. The organization registers its own client, and Octant needs no account of its own.
 
 - The organization registers a public client in its own tenant and enters its client id; reusing another product's client id is refused.
-- The desktop signs in with authorization code and PKCE on a loopback redirect; a device code is a per-instance opt-in for a host without the desktop app, and may be shown in a local desktop window, not only a terminal (maintainer request, 2026-11-12); not built yet: today it is shown only in a terminal.
+- The desktop signs in with authorization code and PKCE on a loopback redirect; a device code is a per-instance opt-in for a host without the desktop app, and may be shown in a local desktop window, not only a terminal (maintainer request, 2026-11-12). Built: the desktop's main process reaches the host-local sign-in for its own window; a paired device and a remote browser still cannot begin one or see a code.
 - Continuous access evaluation is not requested.
 - Cloud request signing uses the cloud's single sign-on device authorization held in the broker; stored long-lived access keys are refused, and the person's existing cloud profile is read only under the opt-in "Use my AWS profile"; not built yet: today reading the person's cloud profile files is refused.
 

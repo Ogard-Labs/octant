@@ -432,8 +432,13 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   terminal where the person typed the command or in a local desktop window
   that reaches the host-local routes above through the desktop app, because a
   code shown on a page someone else can reach is how device-code phishing
-  works (local desktop window: maintainer request, 2026-11-12; not built yet,
-  today the code is shown only in the terminal). Both routes refuse an
+  works (local desktop window: maintainer request, 2026-11-12). Built: the
+  desktop's main process forwards a window's begin and poll over its own
+  channel ([`providerDeviceSignInControls.ts`](../../apps/desktop/src/providerDeviceSignInControls.ts)),
+  adding the bridge secret and that window's capability, which the renderer
+  never holds; the routes and their caller rule are unchanged, so a paired
+  device and a remote browser, which have no such channel, still cannot begin
+  one or read a code. Both routes refuse an
   instance that has not opted in before any broker call, and the shared
   sign-in path checks the opt-in again for every caller.
 - **The broker's device authorization.** The broker builds

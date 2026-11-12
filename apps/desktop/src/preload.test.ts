@@ -793,6 +793,7 @@ describe("desktop preload bridge", () => {
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",
+      "providerDeviceSignIn",
       "readBundledWhatsNew",
       "readNightlyInstall",
       "reconcileExpiredRemoteDevices",

@@ -5955,8 +5955,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and switching an instance between a key and a sign-in, or changing its
   tenant, client, or base URL, deletes the stored credential and forgets the
   grant before the change is journaled. A device-code sign-in begins only for
-  an instance opted in to it, and only from the host-local
-  `octant provider sign-in` command (see "Organization sign-in on a host
+  an instance opted in to it, and only on the host: from the host-local
+  `octant provider sign-in` command or a local desktop window (see "Organization sign-in on a host
   without the desktop app" under [security and authority](#security-and-authority)).
   An OpenAI-compatible or Anthropic-compatible gateway speaks
   `directory-oauth` against the organization's own OpenID Connect issuer (the
@@ -14700,8 +14700,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   no `Origin`, loopback), and the private listener never forwards them; the
   browser sign-in route never begins a device code. A code may be shown in a
   local desktop window as well as in the terminal that asked for it
-  (maintainer request, 2026-11-12; not built yet: today a code appears only
-  in the terminal). The broker builds the tenant's device
+  (maintainer request, 2026-11-12; built: the desktop's main process calls
+  the same two routes for its own window, adding the bridge secret). The broker builds the tenant's device
   authorization URL from its closed issuer host and refuses a verification
   page off a closed list; the server follows an issued code until the broker
   settles it, so an interrupted command never leaves a grant without a
