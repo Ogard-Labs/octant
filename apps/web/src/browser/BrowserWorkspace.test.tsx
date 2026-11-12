@@ -37,6 +37,28 @@ async function moreActionNames(): Promise<ReadonlyArray<string>> {
   return names;
 }
 
+/** The toolbar row's width, as the resize observer reports it. */
+function widthOfToolbar(width: number): () => void {
+  class FixedObserver {
+    constructor(private readonly notify: (entries: ReadonlyArray<never>) => void) {}
+    observe(): void {
+      this.notify([]);
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  vi.stubGlobal("ResizeObserver", FixedObserver);
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(0, 0, this.classList.contains("browser-workspace__chrome") ? width : 0, 0);
+    });
+  return () => {
+    rect.mockRestore();
+    vi.unstubAllGlobals();
+  };
+}
+
 const localServers = vi.hoisted(() => ({
   snapshot: undefined as unknown,
   open: async (_listenerId: string): Promise<unknown> => undefined,
@@ -1730,33 +1752,6 @@ describe("BrowserWorkspace", () => {
       await screen.findByRole("button", { name: "More Browser actions" });
     }
 
-    /** The toolbar row's width, as the resize observer reports it. */
-    function widthOfToolbar(width: number): () => void {
-      class FixedObserver {
-        constructor(private readonly notify: (entries: ReadonlyArray<never>) => void) {}
-        observe(): void {
-          this.notify([]);
-        }
-        unobserve(): void {}
-        disconnect(): void {}
-      }
-      vi.stubGlobal("ResizeObserver", FixedObserver);
-      const rect = vi
-        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-        .mockImplementation(function (this: HTMLElement) {
-          return new DOMRect(
-            0,
-            0,
-            this.classList.contains("browser-workspace__chrome") ? width : 0,
-            0,
-          );
-        });
-      return () => {
-        rect.mockRestore();
-        vi.unstubAllGlobals();
-      };
-    }
-
     it("draws one row: history icons, the address field, then the trailing buttons", async () => {
       await renderHeadless(holdingClient());
       const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
@@ -2127,6 +2122,54 @@ describe("BrowserWorkspace", () => {
     const nativeBridge = {
       getHostCapabilities: vi.fn(async () => ({ liveBrowserSupported: true }) as any),
     } as any;
+
+    it("keeps the folded profile choices disabled until the task default is read, then lets them work", async () => {
+      const restore = widthOfToolbar(288);
+      try {
+        const browser = client();
+        vi.mocked(browser.inspectThread).mockResolvedValue({
+          status: "running",
+          threadId: threadId as any,
+          context: { ...context, presentation: "headless" } as any,
+          evidence: [],
+        } as any);
+        let release: (state: any) => void = () => undefined;
+        browser.readTaskProfile = vi.fn(() => new Promise((resolve) => (release = resolve)) as any);
+        browser.selectTaskProfile = vi.fn();
+        render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+        await openMore();
+        const personal = await screen.findByRole("menuitem", { name: /Profile: Personal/ });
+        expect(personal).toHaveAttribute("aria-disabled", "true");
+        await userEvent.click(personal);
+        expect(browser.stop).not.toHaveBeenCalled();
+        expect(browser.create).not.toHaveBeenCalled();
+        await userEvent.keyboard("{Escape}");
+
+        await act(async () => {
+          release({
+            threadId,
+            mode: "work",
+            version: 1,
+            profile: "private",
+            contextId: context.contextId,
+          });
+        });
+        await openMore();
+        await waitFor(() =>
+          expect(screen.getByRole("menuitem", { name: /Profile: Personal/ })).not.toHaveAttribute(
+            "aria-disabled",
+            "true",
+          ),
+        );
+        await userEvent.click(screen.getByRole("menuitem", { name: /Profile: Personal/ }));
+        expect(
+          await screen.findByText("Change this task’s default Browser profile?"),
+        ).toBeVisible();
+        expect(browser.stop).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
 
     it("offers an explicit one-off Private open when task-default controls refuse the read", async () => {
       const browser = client();

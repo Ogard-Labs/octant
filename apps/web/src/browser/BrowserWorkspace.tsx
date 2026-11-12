@@ -1347,6 +1347,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     : activeContext
       ? profileChoiceOf(storedProfile)
       : profileChoice;
+  // The standalone profile button and the folded profile items share this: no
+  // choice or sign-out while a page starts, the task's default is read or a
+  // selection is in flight.
+  const profileDisabled =
+    starting ||
+    selectingTaskProfile ||
+    (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready");
   const profileInputs = {
     profile: shownProfile,
     accounts,
@@ -1375,12 +1382,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ? [
           ...browserProfileMenuItems(profileInputs).map((item) => ({
             ...item,
+            disabled: item.disabled === true || profileDisabled,
             label: `Profile: ${item.label}${item.value === shownProfile ? " (current)" : ""}`,
             value: `profile:${item.value}`,
           })),
           ...(canSignOut
             ? [
                 {
+                  disabled: profileDisabled,
                   icon: <LogOut aria-hidden="true" size={16} />,
                   label: "Sign out of this profile…",
                   value: "profile-sign-out",
@@ -1402,11 +1411,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       return;
     }
     if (value.startsWith("profile:")) {
+      if (profileDisabled) return;
       void chooseProfile(decodeBrowserProfileChoice(value.slice("profile:".length)));
       return;
     }
     switch (value) {
       case "profile-sign-out":
+        if (profileDisabled) return;
         setSignOutRequest((count) => count + 1);
         return;
       case "take-over":
@@ -1597,11 +1608,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         <BrowserProfileControl
           accounts={accounts}
           {...(showStatus ? {} : { description: agentNote.message })}
-          disabled={
-            starting ||
-            selectingTaskProfile ||
-            (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
-          }
+          disabled={profileDisabled}
           folded={folded.has("profile")}
           iconOnly
           {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
