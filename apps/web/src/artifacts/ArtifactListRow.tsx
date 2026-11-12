@@ -40,12 +40,12 @@ export function ArtifactListRow(props: ArtifactListRowProps) {
           <span className="artifact-row__share">
             {entry.shared ? (
               <>
-                <Link2 aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Link2 aria-hidden="true" size={12} />
                 Shared
               </>
             ) : (
               <>
-                <Lock aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Lock aria-hidden="true" size={12} />
                 Private
               </>
             )}

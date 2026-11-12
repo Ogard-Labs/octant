@@ -142,6 +142,33 @@ function fakeClient(input: {
 }
 
 describe("the Computer card", () => {
+  it("names this computer once when its name is already This computer", () => {
+    render(
+      <ThreadMoveComputerCard
+        hostName="This computer"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+
+    expect(screen.getAllByText("This computer")).toHaveLength(1);
+  });
+
+  it("still says This computer on a row named for the machine", () => {
+    render(
+      <ThreadMoveComputerCard
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+
+    expect(screen.getByText("Laptop")).toBeInTheDocument();
+    expect(screen.getByText("This computer")).toBeInTheDocument();
+  });
+
   it("moves a thread to the chosen computer with this Mac's Touch ID", async () => {
     const user = userEvent.setup();
     const { client, started } = fakeClient({});

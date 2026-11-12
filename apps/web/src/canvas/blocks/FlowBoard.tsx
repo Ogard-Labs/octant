@@ -350,7 +350,7 @@ export function FlowBoard(props: FlowBoardProps) {
           type="button"
           variant="secondary"
         >
-          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          <Play aria-hidden="true" size={12} />
           Play
         </OctantButton>
       </div>
@@ -652,7 +652,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronLeft aria-hidden="true" size={16} />
             </OctantButton>
             <OctantButton
               onClick={() => {
@@ -663,7 +663,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <RotateCcw aria-hidden="true" size={12} strokeWidth={2} />
+              <RotateCcw aria-hidden="true" size={12} />
               Restart
             </OctantButton>
             <FullscreenButton fullscreen={fullscreen} />
@@ -674,7 +674,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={16} strokeWidth={1.8} />
+              <X aria-hidden="true" size={16} />
             </OctantButton>
           </div>
         </header>

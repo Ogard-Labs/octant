@@ -67,7 +67,6 @@ export function ShellState(props: ShellStateProps) {
           aria-hidden="true"
           className={props.state === "loading" ? "shell-state__spinner" : undefined}
           size={16}
-          strokeWidth={1.7}
         />
       </OctantEmptyMedia>
       <OctantEmptyHeader>
@@ -83,9 +82,9 @@ export function ShellState(props: ShellStateProps) {
         <OctantEmptyContent>
           <OctantButton onClick={props.action.onClick} type="button" variant="secondary">
             {props.action.glyph === undefined ? (
-              <RefreshCcw aria-hidden="true" size={14} strokeWidth={1.9} />
+              <RefreshCcw aria-hidden="true" size={14} />
             ) : (
-              <props.action.glyph aria-hidden="true" size={14} strokeWidth={1.9} />
+              <props.action.glyph aria-hidden="true" size={14} />
             )}
             <span>{props.action.label}</span>
           </OctantButton>

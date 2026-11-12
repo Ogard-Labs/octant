@@ -2,9 +2,9 @@
  * The Environment tool reads top to bottom as cards: what the thread works in
  * and what its checkout holds (the header card), then captioned cards of rows
  * — Running, then Delivery — in the Settings kit's grouped-card look. Every
- * row shares one grammar: a glyph tile, the name, the row's state as a pill at
+ * row shares one grammar: a glyph tile, the name, the row's state as a chip at
  * the trailing edge, and a chevron where the row opens. It had been a dozen
- * rule sets across the root stylesheet: a header with a state pill, a four-row
+ * rule sets across the root stylesheet: a header with a state chip, a four-row
  * table that repeated the header, rows floating on the panel with nothing to
  * say which belonged together, and a Usage section open by default with its
  * form. Every rule for it now lives here.
@@ -23,7 +23,7 @@
 
 .thread-environment-dock {
   /* One step above the dock's own fill: a card on the panel. The tile and the
-     pill sit a step above the card. Both follow the theme's text colour so the
+     chip sit a step above the card. Both follow the theme's text colour so the
      Default style stays monochrome in light and dark. The card is a wash of
      the ink over whatever the dock shows, not over the opaque page colour:
      mixed into that, on an OLED preset under Glass, every card was a black
@@ -390,7 +390,7 @@
   font-weight: var(--oct-weight-regular);
 }
 
-/* The state is a small neutral pill. It yields before the name does, and ends
+/* The state is a small neutral chip. It yields before the name does, and ends
    where every other row's state ends, just short of the chevron column. */
 .environment-group__summary,
 .environment-row__detail {
@@ -402,7 +402,7 @@
   color: var(--oct-fg-2);
   background: var(--environment-soft-fill);
   border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 20px;
@@ -416,6 +416,16 @@
   flex: none;
   color: var(--oct-muted);
   transition: transform var(--oct-motion-fast) ease;
+}
+
+/* With no state beside it, a long title wraps to a second line instead of
+   pushing the chevron out past the card's edge in a narrow dock tile. */
+.environment-group__title:has(+ .environment-group__chevron),
+.environment-row__title:has(+ .environment-row__trailing) {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The button recipe keeps a label on one line. */
+  white-space: normal;
 }
 
 /* With no state to show, the chevron still ends the row. */
@@ -448,7 +458,7 @@
 }
 
 /* The head wraps so a row's action drops under it instead of squeezing the
-   state pill: in a 300px dock "Not on GitHub" was cut to "Not on Git…" beside
+   state chip: in a 300px dock "Not on GitHub" was cut to "Not on Git…" beside
    "All pull requests". */
 .environment-group__head {
   display: flex;
@@ -1171,7 +1181,7 @@ details.thread-move-sheet__section > summary {
 
 .shutdown-row__title {
   flex: 1 1 auto;
-  /* The title keeps room to be read; a reason pill gives way first. */
+  /* The title keeps room to be read; a reason chip gives way first. */
   min-width: 35%;
   overflow: hidden;
   color: var(--oct-fg);
@@ -1270,7 +1280,7 @@ details.thread-move-sheet__section > summary {
   gap: var(--oct-space-3);
   padding: var(--oct-space-4);
   background: var(--octant-card);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow:
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);

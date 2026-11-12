@@ -62,11 +62,20 @@ describe("the public-block visual language", () => {
     // corner also shrinks with the interface font size while a token does not.
     const corner =
       /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl)|octant-sheet-corner-outer)\))$/;
+    // A part inside a control or a container is that radius less the gap
+    // between them, written as one calc(), never below 2px for a control.
+    const derived = /(?:max\(2px,\s*)?calc\(var\(--oct-radius-(?:sm|md)\) - \d+px\)\)?/g;
     const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
     const strays = cssFiles(webRoot).flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(declaration)]
         .map((match) => (match[1] ?? "").trim())
-        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .filter(
+          (value) =>
+            !value
+              .replace(derived, "0")
+              .split(/[\s/]+/)
+              .every((part) => corner.test(part)),
+        )
         .map((value) => `${relative(webRoot, path)}: ${value}`),
     );
 
@@ -179,17 +188,15 @@ describe("the public-block visual language", () => {
   it("gives title-band controls one shape and no accent on a pressed divider", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
-    // A label, a pill with a chevron, and a square icon sat in the band as
+    // A label, a chip with a chevron, and a square icon sat in the band as
     // three shapes at 24px and 28px: they are the 28px rail button's shape.
     expect(shell).toMatch(
       /\.project-action-buttons \[data-slot="button"\] \{\s*height: var\(--oct-rail-button-h\);\s*border-radius: var\(--oct-radius-sm\);/,
     );
-    expect(dock).toMatch(/\.dock-quick-tools__tool \{\s*height: var\(--oct-rail-button-h\);\s*\}/);
-    expect(readFileSync(join(webRoot, "shell/RightUtilityDockSurface.tsx"), "utf8")).toContain(
-      'className="dock-quick-tools__tool window-no-drag rounded-lg"',
-    );
-    expect(dock).toMatch(
-      /\.dock-quick-tools__tool:not\(\[data-labelled="true"\]\) \{\s*width: var\(--oct-rail-button-h\);/,
+    // The dock's own quick tools are gone; a tool's button in the band is the
+    // window button itself, so it cannot be a fourth shape.
+    expect(readFileSync(join(webRoot, "shell/DockToolButtons.tsx"), "utf8")).toContain(
+      'className="window-chrome__button dock-tool-buttons__button"',
     );
     // A divider the pointer rests on after a click kept a bright accent line.
     // Hover is the strong border, grabbed the meta ink; keyboard focus is the one
@@ -208,21 +215,24 @@ describe("the public-block visual language", () => {
     expect(strays).toEqual([]);
   });
 
-  it("gives a card, a menu, and a popover the same corner", () => {
-    // The recipes round cards, menus, and popovers at their `xl` step and the
-    // stylesheets round panels at the medium token. They were 14px and 16px, so
-    // a menu sat beside a popover with a different corner.
-    // The recipes' scale keeps its one root, so the two numbers are
-    // read and compared rather than one aliased to the other.
+  it("gives every control one outline and every container another", () => {
+    // Two numbers: a control's outline is the small token and a container's the
+    // medium one. The recipes' control steps (`rounded-md`, `rounded-lg`) both
+    // land on the control token and their `rounded-xl` on the container token,
+    // so a menu and a popover share a corner and no recipe class is rewritten.
     const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
     const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
-    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
-    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
-    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
-    expect(control - rootStep + cardStep).toBe(card);
+    expect(px(system, /--oct-radius-sm:\s*(\d+)px;/)).toBe(4);
+    expect(px(system, /--oct-radius-md:\s*(\d+)px;/)).toBe(12);
+    expect(theme).toMatch(/--radius:\s*var\(--oct-radius-sm\);/);
+    expect(tailwind).toMatch(/--radius-md:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-lg:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-xl:\s*var\(--oct-radius-md\);/);
+    // The dialog and the composer are containers; the third and fourth
+    // container radii (14px and 22px) are gone with their tokens.
+    expect(system).not.toMatch(/--oct-radius-(?:lg|composer):/);
     // The radius scale has one definition; the second, unread set is gone.
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
     expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
@@ -322,7 +332,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    // One line and 12px above and under it: the 44px pill.
+    // One line and 12px above and under it: the 44px box.
     expect(input).toMatch(/padding:\s*12px var\(--oct-composer-gutter\);/);
   });
 
@@ -340,7 +350,7 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it("draws a composer's notices as callout cards above the pill, with the callout's corner, not inside it", () => {
+  it("draws a composer's notices as callout cards above the box, with the callout's corner, not inside it", () => {
     const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     const card = /\.callout\.composer-notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
@@ -348,7 +358,7 @@ describe("the public-block visual language", () => {
     const actions =
       /\.callout\.composer-notice > \.callout__actions\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
 
-    // One group of cards, with a gap from the pill on the spacing scale and no
+    // One group of cards, with a gap from the box on the spacing scale and no
     // room when there is nothing to say.
     expect(group).toMatch(/display:\s*grid/);
     expect(group).toMatch(/margin-bottom:\s*var\(--oct-space-1\)/);
@@ -356,24 +366,23 @@ describe("the public-block visual language", () => {
     // The words wrap, and the action wraps under them in a narrow composer.
     expect(card).toMatch(/flex-wrap:\s*wrap/);
     // The compact form: the 12px meta step and tight padding, so the card is
-    // visibly lighter than the pill.
+    // visibly lighter than the box.
     expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(body).toMatch(/flex:\s*1 1 200px/);
     expect(actions).toMatch(/margin-inline-start:\s*auto/);
-    // The corner is the callout's own (12px), not the pill's 22px: no radius is
-    // set on the card here, so a bar with the pill's corner cannot come back.
+    // The corner is the callout's own (12px), the same as the composer's: no
+    // radius is set on the card here, so a second corner cannot come back.
     expect(card).not.toMatch(/border-radius/);
     expect(css).toMatch(/--oct-radius-md:\s*12px/);
-    expect(css).toMatch(/--oct-radius-composer:\s*22px/);
     expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
       /border-radius:\s*var\(--oct-radius-md\)/,
     );
-    // Over a ground or under Window glass the card is the glass the pill is.
+    // Over a ground or under Window glass the card is the glass the box is.
     expect(css).toMatch(
       /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
     );
-    // Nothing the pill held for a notice survives: no feedback strip in it.
+    // Nothing the box held for a notice survives: no feedback strip in it.
     expect(css).not.toMatch(/\.thread-composer__feedback/);
     expect(css).not.toMatch(/\.composer-status\b/);
   });
@@ -553,7 +562,7 @@ describe("the public-block visual language", () => {
     for (const source of composers) {
       expect(source).toContain("thread-composer");
       // What the surface says about its thread or about sending goes to the
-      // composer's notice cards, never into a strip inside the pill.
+      // composer's notice cards, never into a strip inside the box.
       expect(source).toMatch(/\bnotices=\{/);
       expect(source).not.toMatch(/\bfooter=\{/);
     }
@@ -606,7 +615,7 @@ describe("the public-block visual language", () => {
     expect(readFileSync(join(webRoot, "ui/shadcn/checkbox.tsx"), "utf8")).toContain(
       "border-(--octant-divider-strong)",
     );
-    // The inverse tooltip takes no inset bevel: its white line drew on the dark pill.
+    // The inverse tooltip takes no inset bevel: its white line drew on the dark tooltip.
     expect(rule(system, "\\.octant-tooltip").match(/box-shadow:[^;]+;/)?.[0]).not.toContain(
       "inset",
     );
@@ -716,6 +725,9 @@ describe("the public-block visual language", () => {
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
+    // An item inside the padded track takes the control corner less the
+    // padding, never below 2px.
+    expect(toggles).toContain("gap-1 rounded-sm border");
     expect(activePane).toMatch(/background:\s*transparent/);
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });
@@ -827,14 +839,20 @@ describe("the public-block visual language", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
-    // A rail group heading is the Section label role: its type is defined once,
-    // in the base rule, and the rail's rule only sets its room.
+    // A rail group label is the Navigation group label role: its type is
+    // defined once, in `oct-nav-group`, and neither rule here sets any.
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    const groupRole = surface.match(/(?:^|\n)\.oct-nav-group\s*\{[^}]+\}/)?.[0] ?? "";
     const sectionLabel = system.match(/(?:^|\n)\.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(sectionLabel).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
-    expect(sectionLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
-    expect(sectionLabel).toMatch(/letter-spacing:\s*var\(--oct-tracking-snug\)/);
+    expect(groupRole).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(groupRole).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(groupRole).toMatch(/letter-spacing:\s*0/);
+    expect(sectionLabel).not.toMatch(/font-size|font-weight|letter-spacing/);
+    expect(readFileSync(join(webRoot, "shell/SettingsNavigation.tsx"), "utf8")).toContain(
+      "oct-nav-group setnav-section",
+    );
     expect(navigation).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     // The desktop rail shows its group labels; a quiet label is what separates
@@ -1082,19 +1100,6 @@ describe("the public-block visual language", () => {
     // The row sits in a scrolling column: a long thread list shrank it to its
     // min-height and left the wrapped second row of buttons under the list.
     expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
-  });
-
-  it("lets the dock's labelled quick tool ellipsize instead of clipping mid-word", () => {
-    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
-    const rule = (selector: string) =>
-      dock.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-
-    const tool = rule('\\.dock-quick-tools > \\.dock-quick-tools__tool\\[data-labelled="true"\\]');
-    expect(tool).toMatch(/min-width:\s*0/);
-    expect(tool).toMatch(/flex:\s*0 1 auto/);
-    expect(rule('\\.dock-quick-tools__tool\\[data-labelled="true"\\] > span')).toMatch(
-      /text-overflow:\s*ellipsis/,
-    );
   });
 
   it("lets the Review tool's heads wrap instead of overlapping or clipping at the dock's 280px minimum", () => {
@@ -1351,6 +1356,57 @@ describe("the public-block visual language", () => {
       expect(system).toMatch(
         /html\[data-octant-reduced-motion="true"\] \.skeleton::after \{\s*display: none;\s*\}/,
       );
+    });
+  });
+
+  describe("dock tool tiles", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const body = (selector: string) => {
+      const start = dock.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return dock.slice(start, dock.indexOf("}", start));
+    };
+
+    it("clips every tile to its box and gives its tool a definite height to scroll within", () => {
+      expect(body(".dock-tile")).toMatch(/overflow:\s*hidden/);
+      const tool = body(".dock-tile > .right-utility-dock__tool");
+      expect(tool).toMatch(/overflow:\s*hidden/);
+      expect(tool).toMatch(/min-height:\s*0/);
+      expect(tool).toMatch(/flex:\s*1 1 0/);
+      expect(
+        body('.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > *'),
+      ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
+    });
+
+    it("stands the narrow dock sheet at a definite height, so the tool fills it and scrolls inside", () => {
+      const sheet = body(".octant-dialog__popup:has(> .right-utility-dock__surface)");
+      expect(sheet).toMatch(
+        /height:\s*min\(var\(--octant-dialog-height, 640px\), calc\(100vh - 48px\)\)/,
+      );
+    });
+
+    it("draws a divider as a hairline that never keeps an accent line after a click", () => {
+      const rule = (selector: string) => body(selector);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*var\(--oct-border\)/);
+      const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
+      expect(held).toMatch(/--octant-border-strong/);
+      const dividerRules = dock.slice(
+        dock.indexOf(".dock-tiles__divider {"),
+        dock.indexOf(".dock-tiles__drag-shield"),
+      );
+      // Keyboard focus is the app's own outline, not a line of this rule's.
+      expect(dividerRules).not.toMatch(/accent/);
+      expect(dividerRules).not.toMatch(/focus-visible/);
+    });
+
+    it("gives every tile bar one height, so neighbouring tiles line up", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+      expect(dock).not.toContain("dock-tile__caption");
+    });
+
+    it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
+      expect(body(".dock-tile")).not.toMatch(/background/);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
     });
   });
 

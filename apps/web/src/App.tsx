@@ -1,5 +1,6 @@
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
+import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -393,17 +394,36 @@ import {
 import {
   addThreadUtilityTab,
   addUtilityTabState,
-  closeThreadUtilityTab,
+  changeDisplayedUtilityState,
   closeUtilityTabState,
+  hideUtilityCard,
+  hideUtilityTile,
+  minimisedUtilityTabIds,
+  minimiseUtilityTool,
+  MAX_DOCK_TILE_COLUMNS,
+  MAX_DOCK_TILES_PER_COLUMN,
+  offeredBrowserStaysMinimised,
+  restoreUtilityTool,
+  moveUtilityTile,
   openThreadUtilityTab,
+  openUtilityTabBesideState,
   openUtilityTabState,
   removeUtilityTabs,
+  resizeUtilityTileColumn,
+  resizeUtilityTileColumns,
   retainAvailableUtilityTabs,
-  selectThreadUtilityTab,
   selectUtilityTabState,
+  shownTileColumns,
+  shownUtilityTabIds,
+  showUtilityTabAlone,
+  showUtilityTabBelow,
+  showUtilityTabBeside,
   threadUtilityDockState,
   threadUtilityDockKey,
+  withoutTileLayout,
+  type DockTileMove,
   type ThreadUtilityDockKey,
+  type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
@@ -415,6 +435,12 @@ import {
   isDockToolLaunchable,
   isDockToolStillOpenable,
 } from "./shell/dockToolAvailability";
+import {
+  buildDockToolButtons,
+  NO_DOCK_TOOL_BUTTONS,
+  type DockToolButtonsModel,
+} from "./shell/dockToolButtonsModel";
+import { useDockReferences } from "./app/dockReferences";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
@@ -804,7 +830,7 @@ function LaunchedShell(
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
-    openDockBrowser: ({ threadId }) => {
+    openDockBrowser: ({ threadId, offered }) => {
       // The dock is thread-scoped: a Browser session belongs in it only when
       // the announcing thread is the subject the dock already describes.
       if (
@@ -814,6 +840,13 @@ function LaunchedShell(
         !dockAvailable
       ) {
         return false;
+      }
+      // A session announced while the person has the Browser minimised leaves
+      // it minimised: its card, or the dock toggle's dot, is the sign. What the
+      // person asked for, such as the page handed over to sign in, restores it.
+      // The narrow window's modal dock draws neither, so there it just opens.
+      if (offeredBrowserStaysMinimised(displayedDockState, { offered, shelfDrawn: !isNarrow })) {
+        return true;
       }
       openDockTab("browser");
       return true;
@@ -3173,14 +3206,11 @@ function LaunchedShell(
         presentationAvailability: "available",
         savedSurface: surface,
       });
-    const retainedDockState = retainAvailableUtilityTabs(
-      dockState,
-      new Set(
-        RIGHT_UTILITY_DOCK_SURFACES.filter((surface) => {
-          if (resolveDockSurface(surface.id).kind !== "surface") return false;
-          return isDockToolStillOpenable(surface.id, dockToolCapabilities);
-        }).map((surface) => surface.id),
-      ),
+    const openableDockSurfaces = new Set(
+      RIGHT_UTILITY_DOCK_SURFACES.filter((surface) => {
+        if (resolveDockSurface(surface.id).kind !== "surface") return false;
+        return isDockToolStillOpenable(surface.id, dockToolCapabilities);
+      }).map((surface) => surface.id),
     );
     const bottomPanelSurfaceOrder: ReadonlyArray<RightUtilityDockSurfaceId> = [
       "review",
@@ -3197,10 +3227,13 @@ function LaunchedShell(
         ? [surface]
         : [];
     });
-    const bottomPanelState =
+    // The panel shows one tool at a time, so a tile layout is never drawn there
+    // even if a state carrying one were handed to it.
+    const bottomPanelState = withoutTileLayout(
       dockThreadKey === undefined
         ? fallbackBottomPanelState
-        : threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey);
+        : threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey),
+    );
     const bottomPanelAvailableIds = new Set(bottomPanelSurfaces.map((surface) => surface.id));
     const retainedBottomPanelState = retainAvailableUtilityTabs(
       bottomPanelState,
@@ -3235,16 +3268,33 @@ function LaunchedShell(
       dockThreadKey === undefined || bottomPanelStatesByThread.has(dockThreadKey);
     const bottomPanelOpen =
       bottomPanelPresentation.open && bottomPanelOpenedHere && bottomPanelAvailable && !isNarrow;
-    const displayedDockState = bottomPanelOpen
-      ? removeUtilityTabs(
-          retainedDockState,
-          new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
-        )
-      : retainedDockState;
+    // What the dock draws of a stored state: tools the panel holds and tools
+    // that cannot open are left out. Tile changes are made on this view, so a
+    // divider's shares and the caps always address the tiles on screen.
+    const displayDockState = (stored: ThreadUtilityDockState) => {
+      const retained = retainAvailableUtilityTabs(stored, openableDockSurfaces);
+      return bottomPanelOpen
+        ? removeUtilityTabs(
+            retained,
+            new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
+          )
+        : retained;
+    };
+    const displayedDockState = displayDockState(dockState);
     const dockSurface = displayedDockState.tabs.find(
       (tab) => tab.id === displayedDockState.active,
     )?.surface;
     const dockResolution = resolveDockSurface(dockSurface);
+    // The modal dock has room for one tool, so a stored layout is not drawn
+    // there and only the focused tool is on screen.
+    const dockShownTabIds = isNarrow
+      ? shownUtilityTabIds(withoutTileLayout(displayedDockState))
+      : shownUtilityTabIds(displayedDockState);
+    const dockShownTabs = displayedDockState.tabs.filter(
+      (tab) =>
+        dockShownTabIds.includes(tab.id) && resolveDockSurface(tab.surface).kind === "surface",
+    );
+    const dockTileColumns = isNarrow ? 1 : (displayedDockState.layout?.columns.length ?? 1);
     const bottomPanelSurfaceIds = new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface));
     const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
       (surface) =>
@@ -3269,17 +3319,39 @@ function LaunchedShell(
             isDockToolLaunchable(surface.id, dockToolCapabilities),
         )
       : undefined;
+    // The tools with a button in the title band: every tool this thread can use
+    // or already has open, including one the bottom panel holds.
+    const bottomHeldSurfaces = bottomPanelOpen ? [...bottomPanelSurfaceIds] : [];
+    const dockToolSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
+      (surface) =>
+        resolveDockSurface(surface.id).kind === "surface" &&
+        (isDockToolLaunchable(surface.id, dockToolCapabilities) ||
+          displayedDockState.tabs.some((tab) => tab.surface === surface.id) ||
+          bottomHeldSurfaces.includes(surface.id)),
+    ).map((surface) => ({ id: surface.id, label: surface.label }));
+    const lastDockColumn = displayedDockState.layout?.columns.at(-1);
+    const dockCapsFull =
+      displayedDockState.layout !== undefined &&
+      displayedDockState.layout.columns.length >= MAX_DOCK_TILE_COLUMNS &&
+      (lastDockColumn?.tiles.length ?? 0) >= MAX_DOCK_TILES_PER_COLUMN;
     return {
       activeBottomSurface,
       activeBottomTab,
+      bottomHeldSurfaces,
+      dockCapsFull,
+      dockToolSurfaces,
       bottomPanelAvailable,
       bottomPanelOpen,
       bottomPanelSurfaces,
       bottomPanelTabs,
       defaultBottomSurface,
+      displayDockState,
       displayedDockState,
       dockResolution,
+      dockResolveSurface: resolveDockSurface,
+      dockShownTabs,
       dockSurface,
+      dockTileColumns,
       dockToolsAwaitingThread,
       launchableDockSurfaces,
       renderedBottomPanelState,
@@ -3301,14 +3373,21 @@ function LaunchedShell(
   const {
     activeBottomSurface,
     activeBottomTab,
+    bottomHeldSurfaces,
+    dockCapsFull,
+    dockToolSurfaces,
     bottomPanelAvailable,
     bottomPanelOpen,
     bottomPanelSurfaces,
     bottomPanelTabs,
     defaultBottomSurface,
+    displayDockState,
     displayedDockState,
     dockResolution,
+    dockResolveSurface,
+    dockShownTabs,
     dockSurface,
+    dockTileColumns,
     dockToolsAwaitingThread,
     launchableDockSurfaces,
     renderedBottomPanelState,
@@ -3353,16 +3432,20 @@ function LaunchedShell(
   // session: only a tab with no context of its own counts as that view.
   const sharedBrowserInDock =
     dockOpen &&
-    displayedDockState.tabs.some(
-      (tab) =>
-        tab.id === displayedDockState.active &&
-        tab.surface === "browser" &&
-        tab.browserContextId === undefined,
-    );
+    dockShownTabs.some((tab) => tab.surface === "browser" && tab.browserContextId === undefined);
   const sharedBrowserInBottomPanel =
     bottomPanelOpen &&
     activeBottomSurface?.id === "browser" &&
     activeBottomTab?.browserContextId === undefined;
+  // The agent's Browser is live, out of sight, and has a tab the dock's card
+  // would stand for: with the dock closed that card is invisible, so the toggle
+  // says so. Only a thread's own Browser tab counts as the card's tab.
+  const agentBrowserContext = useAgentBrowserCard(
+    activeMode === "chat" || dockThreadId === undefined ? undefined : String(dockThreadId),
+  );
+  const dockBrowserActive =
+    agentBrowserContext !== undefined &&
+    displayedDockState.tabs.some((tab) => tab.surface === "browser");
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -4046,15 +4129,27 @@ function LaunchedShell(
     widenDockFor(surface);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
-    if (bottomPanelPresentation.open) {
-      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
-    }
+    closeBottomPanelHolding(surface);
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setActivePaneDockVisible(true);
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => openUtilityTabState(current, surface));
     } else {
       setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
+    }
+  }
+  /**
+   * Opening a dock tool leaves the bottom panel as it is: a Terminal below and
+   * a Browser beside it are the point of having both. Only a tool the panel is
+   * showing itself still closes it, because one tool shows in one region at a
+   * time and the dock's copy would open filtered out of sight.
+   */
+  function closeBottomPanelHolding(surface: RightUtilityDockSurfaceId) {
+    if (
+      bottomPanelPresentation.open &&
+      renderedBottomPanelState.tabs.some((tab) => tab.surface === surface)
+    ) {
+      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
   }
   function widenDockFor(surface: RightUtilityDockSurfaceId) {
@@ -4065,9 +4160,7 @@ function LaunchedShell(
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
-    if (bottomPanelPresentation.open) {
-      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
-    }
+    closeBottomPanelHolding(surface);
     const instanceId = crypto.randomUUID();
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
@@ -4136,39 +4229,110 @@ function LaunchedShell(
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
   function selectDockTab(tabId: string) {
+    noteTerminalShown(tabId);
+    changeDockTiles((state) => selectUtilityTabState(state, tabId));
+  }
+  /**
+   * Applies a tile change to the dock the pane's thread keeps, or the
+   * thread-less one, as the person sees it: `changeDisplayedUtilityState`.
+   */
+  function changeDockTiles(change: (state: ThreadUtilityDockState) => ThreadUtilityDockState) {
+    const apply = (stored: ThreadUtilityDockState) =>
+      changeDisplayedUtilityState(stored, displayDockState(stored), change);
+    if (dockThreadKey === undefined) {
+      setFallbackDockState((current) => apply(current));
+    } else {
+      setDockStatesByThread((current) => {
+        const state = threadUtilityDockState(current, dockThreadKey);
+        const next = apply(state);
+        if (next === state) return current;
+        const states = new Map(current);
+        // A thread with no open tool keeps no entry, as closing its last tab always did.
+        if (next.tabs.length === 0) states.delete(dockThreadKey);
+        else states.set(dockThreadKey, next);
+        return states;
+      });
+    }
+  }
+  /**
+   * A second column asks for width the way a Browser or Terminal does: it
+   * clears the person's own sizing so the dock widens, and a drag afterwards
+   * holds as before. A tile below or in a column that exists asks for nothing.
+   */
+  function widenDockForColumns(next: ThreadUtilityDockState) {
+    if (shownTileColumns(next) > shownTileColumns(displayedDockState)) setDockWidthChosen(false);
+  }
+  function noteTerminalShown(tabId: string) {
     if (dockState.tabs.some((tab) => tab.id === tabId && tab.surface === "terminal")) {
       dockTabActivation.noteActivated(workspaceDockTabId(tabId, "terminal"));
     }
-    if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => selectUtilityTabState(current, tabId));
-    } else {
-      setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, tabId));
+  }
+  function showDockTabBeside(tabId: string) {
+    noteTerminalShown(tabId);
+    widenDockForColumns(showUtilityTabBeside(displayedDockState, tabId));
+    changeDockTiles((state) => showUtilityTabBeside(state, tabId));
+  }
+  function openDockTabBeside(surface: RightUtilityDockSurfaceId) {
+    const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
+    if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "review") setRequestedAgentReview(undefined);
+    closeBottomPanelHolding(surface);
+    const instanceId = crypto.randomUUID();
+    if (surface === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
     }
+    widenDockForColumns(openUtilityTabBesideState(displayedDockState, surface, instanceId));
+    setActivePaneDockVisible(true);
+    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId));
+  }
+  function showDockTabBelow(tabId: string) {
+    noteTerminalShown(tabId);
+    changeDockTiles((state) => showUtilityTabBelow(state, tabId));
+  }
+  function showDockTabAlone(tabId: string) {
+    noteTerminalShown(tabId);
+    changeDockTiles((state) => showUtilityTabAlone(state, tabId));
+  }
+  function hideDockTile(tabId: string) {
+    changeDockTiles((state) => hideUtilityTile(state, tabId));
+  }
+  function hideDockCard(tabId: string) {
+    changeDockTiles((state) => hideUtilityCard(state, tabId));
+  }
+  function restoreDockTool(tabId: string) {
+    changeDockTiles((state) => restoreUtilityTool(state, tabId));
+  }
+  function minimiseDockTool(tabId: string) {
+    changeDockTiles((state) => minimiseUtilityTool(state, tabId));
+  }
+  function moveDockTile(tabId: string, direction: DockTileMove) {
+    changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
+  }
+  function resizeDockTileColumns(shares: ReadonlyArray<number>) {
+    changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
+  }
+  function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
+    changeDockTiles((state) => resizeUtilityTileColumn(state, columnIndex, shares));
   }
   function closeDockTab(tabId: string) {
-    if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => closeUtilityTabState(current, tabId));
-    } else {
-      const closedTab = threadUtilityDockState(dockStatesByThread, dockThreadKey).tabs.find(
-        (tab) => tab.id === tabId,
-      );
-      setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, tabId));
-      // A dock Browser tab bound to a context owns it: closing the tab is the
-      // only close path a dedicated context has, so the context stops here.
-      // The shared tab binds the thread's context the same way once it exists,
-      // so closing it stops the thread's session too.
-      if (
-        closedTab?.browserContextId !== undefined &&
-        dockThread !== undefined &&
-        browserAutomationClient !== undefined
-      ) {
-        void browserAutomationClient
-          .stop({
-            contextId: decodeBrowserContextId(closedTab.browserContextId),
-            threadId: decodeBrowserThreadId(dockThread.threadId),
-          })
-          .catch(() => undefined);
-      }
+    const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
+    changeDockTiles((state) => closeUtilityTabState(state, tabId));
+    // A dock Browser tab bound to a context owns it: closing the tab is the
+    // only close path a dedicated context has, so the context stops here.
+    // The shared tab binds the thread's context the same way once it exists,
+    // so closing it stops the thread's session too.
+    if (
+      dockThreadKey !== undefined &&
+      closedTab?.browserContextId !== undefined &&
+      dockThread !== undefined &&
+      browserAutomationClient !== undefined
+    ) {
+      void browserAutomationClient
+        .stop({
+          contextId: decodeBrowserContextId(closedTab.browserContextId),
+          threadId: decodeBrowserThreadId(dockThread.threadId),
+        })
+        .catch(() => undefined);
     }
   }
   /**
@@ -4333,7 +4497,7 @@ function LaunchedShell(
     }
   }
 
-  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId) {
+  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId, restoreFocus = true) {
     const nextState = closeUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextState);
@@ -4345,7 +4509,7 @@ function LaunchedShell(
         return next;
       });
     }
-    if (nextState.tabs.length === 0) closeBottomPanel();
+    if (nextState.tabs.length === 0) closeBottomPanel(restoreFocus);
   }
   function toggleBottomPanel(opener: HTMLElement) {
     // With a reader up the panel is stepped aside, not closed, so the toggle
@@ -4394,6 +4558,111 @@ function LaunchedShell(
     }
     closeDockTab(surface);
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
+  }
+  /**
+   * A tool's button in the title band: opens the tool beside the focused tile,
+   * or closes it when it is shown. What a press does is decided by the same
+   * model that draws the button, so the two cannot disagree. Focus stays on the
+   * button: nothing here asks the dock to take it.
+   */
+  function toggleDockTool(surface: RightUtilityDockSurfaceId, opener: HTMLElement) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined || button.press.kind === "refused") return;
+    // A reader hides the dock and the bottom panel without closing them, so
+    // the press leaves the reader first, as the dock's own toggle does. A
+    // reader that shows the dock beside it (a pull request's review) stays.
+    if (readerOpen && !dockPresentedOpen) closeWorkspaceReaders();
+    const press = button.press;
+    switch (press.kind) {
+      case "open-dock":
+        if (!dockOpen) {
+          markInteraction("renderer", "dock-open-requested");
+          markInteractionAfterPaint("dock-open");
+          setActivePaneDockVisible(true);
+        }
+        return;
+      case "open-beside":
+        openDockTabBeside(surface);
+        return;
+      case "open":
+        openDockTab(surface);
+        return;
+      case "select":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        selectDockTab(press.tabId);
+        return;
+      case "show-beside":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        showDockTabBeside(press.tabId);
+        return;
+      case "close":
+        for (const tabId of press.tabIds) closeDockTab(tabId);
+        return;
+      case "minimise":
+        // The tool keeps running, now as a card on the shelf.
+        minimiseDockTool(press.tabId);
+        return;
+      case "restore":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        restoreDockTool(press.tabId);
+        return;
+      case "close-bottom":
+        // The panel's own close sends focus to its toggle; this press came
+        // from the tool's button, which keeps it.
+        closeBottomPanelTab(surface, false);
+        queueMicrotask(() => {
+          if (opener.isConnected) opener.focus();
+        });
+        return;
+      case "select-bottom":
+        if (readerOpen) closeWorkspaceReaders();
+        openBottomTool(surface);
+        return;
+      case "reveal":
+        // The bottom panel holds the tool but is not on screen: a reader
+        // stands over it, or the panel is closed. The guard above only leaves
+        // a reader that hides the dock, and a review shows the dock beside
+        // it, so without this the press did nothing there.
+        if (readerOpen) closeWorkspaceReaders();
+        if (!bottomPanelPresentation.open) {
+          persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
+        }
+        return;
+    }
+  }
+  /**
+   * A tool button's context-menu choice: arranging the tool among the tiles,
+   * a new shell or page, or closing it. The tab it acts on comes from the same
+   * model that drew the menu.
+   */
+  function runDockToolMenu(surface: RightUtilityDockSurfaceId, value: string) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined) return;
+    if (readerOpen && !dockPresentedOpen) closeWorkspaceReaders();
+    const tabId = button.tabId;
+    if (value === "new") {
+      addDockTab(surface);
+      return;
+    }
+    if (tabId === undefined) return;
+    if (value === "close") {
+      for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      return;
+    }
+    if (value === "minimise") minimiseDockTool(tabId);
+    else if (value === "below") {
+      if (!dockOpen) setActivePaneDockVisible(true);
+      showDockTabBelow(tabId);
+    } else if (value === "alone") showDockTabAlone(tabId);
+    else if (value === "hide") hideDockTile(tabId);
+    else if (value === "move-left") moveDockTile(tabId, "left");
+    else if (value === "move-right") moveDockTile(tabId, "right");
+    else if (value === "move-up") moveDockTile(tabId, "up");
+    else if (value === "move-down") moveDockTile(tabId, "down");
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -5050,6 +5319,17 @@ function LaunchedShell(
       selectChatThread,
       selectCodeThread,
       selectDockTab,
+      hideDockCard,
+      hideDockTile,
+      restoreDockTool,
+      minimiseDockTool,
+      moveDockTile,
+      openDockTabBeside,
+      resizeDockTileColumn,
+      resizeDockTileColumns,
+      showDockTabAlone,
+      showDockTabBelow,
+      showDockTabBeside,
       selectMode: handleSelectMode,
       selectProjectPullRequest,
       selectProjectPullRequestIdentity,
@@ -5119,6 +5399,8 @@ function LaunchedShell(
       startNewThreadDraft,
       toggleBottomPanel,
       toggleDock,
+      toggleDockTool,
+      runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
@@ -5127,6 +5409,13 @@ function LaunchedShell(
       wakeCodeThread: codeController.wakeThread,
     }),
   );
+
+  const dockReferences = useDockReferences({
+    actions,
+    pullRequests: dockPullRequests,
+    projectId: dockThreadProjectId,
+    repository: dockThreadRepository,
+  });
 
   // Work and Code start screens share one shape: tiles, then the card area.
   // Code reads the host's activity line off the board; Work has no board card to
@@ -5207,6 +5496,57 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
+  // Readers hide unrelated thread tools. Selecting a pull request explicitly
+  // opens its Review beside that list, so the detail must remain visible.
+  const dockPresentedOpen =
+    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  // The bottom panel steps aside for the same reason, and it had not been:
+  // a terminal opened on a thread kept a quarter of the viewport on Board,
+  // Inbox, and the pull request list, pages that are about many threads and
+  // show none of them. The panel keeps its tabs and its height and comes back
+  // with the thread; only the presentation is withheld. Ownership stays on
+  // `bottomPanelOpen`, so which tools the dock may still launch does not
+  // change while a reader is up.
+  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
+  // The row of tool buttons in the title band. A tile resize rebuilds the dock
+  // presentation but changes nothing a button shows, so the model is kept by
+  // value: the memoised chrome re-renders only when a button's state changes.
+  const dockShelfDrawn = !isNarrow && activeMode !== "chat" && dockThreadId !== undefined;
+  const dockToolButtonsKey = JSON.stringify(
+    dockAvailable
+      ? buildDockToolButtons({
+          surfaces: dockToolSurfaces,
+          ...(dockToolsAwaitingThread === undefined
+            ? {}
+            : {
+                awaitingThread: dockToolsAwaitingThread.map((surface) => ({
+                  id: surface.id,
+                  label: surface.label,
+                })),
+              }),
+          tabs: displayedDockState.tabs.map((tab) => ({ id: tab.id, surface: tab.surface })),
+          shownTabIds: dockShownTabs.map((tab) => tab.id),
+          // The modal dock draws no shelf, so there a minimised tool is an
+          // ordinary open one; so is a thread with no shelf (Chat has none).
+          minimised: dockShelfDrawn ? minimisedUtilityTabIds(displayedDockState) : [],
+          shelfDrawn: dockShelfDrawn,
+          activeTabId: displayedDockState.active,
+          lastBrowserTabId: displayedDockState.lastBrowser,
+          dockOpen,
+          narrow: isNarrow,
+          layout: displayedDockState.layout,
+          dockPresentedOpen,
+          bottomHeld: bottomHeldSurfaces,
+          bottomPresentedOpen: bottomPanelPresentedOpen,
+          bottomActive: activeBottomSurface?.id,
+          capsFull: dockCapsFull,
+        })
+      : NO_DOCK_TOOL_BUTTONS,
+  );
+  const dockToolButtons = useMemo(
+    () => JSON.parse(dockToolButtonsKey) as DockToolButtonsModel,
+    [dockToolButtonsKey],
+  );
   const homeActive =
     !readerOpen &&
     controller.workspace !== undefined &&
@@ -5754,29 +6094,12 @@ function LaunchedShell(
     }));
   }
 
-  /**
-   * Global workspace destinations are mutually exclusive. A reader may hide
-   * the workspace while it is open, so any navigation that targets a draft or
-   * thread dismisses the reader first instead of opening the destination
-   * invisibly behind it.
-   */
-  // Readers hide unrelated thread tools. Selecting a pull request explicitly
-  // opens its Review beside that list, so the detail must remain visible.
-  const dockPresentedOpen =
-    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
   const dockPresentationWidth = resolveDockPresentationWidth({
     storedWidth: contextSidebarWidth,
     widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
+    tileColumns: dockTileColumns,
   });
-  // The bottom panel steps aside for the same reason, and it had not been:
-  // a terminal opened on a thread kept a quarter of the viewport on Board,
-  // Inbox, and the pull request list, pages that are about many threads and
-  // show none of them. The panel keeps its tabs and its height and comes back
-  // with the thread; only the presentation is withheld. Ownership stays on
-  // `bottomPanelOpen`, so which tools the dock may still launch does not
-  // change while a reader is up.
-  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   /** The pages back and forward can return to, by the destination that opens them. */
   function windowPageOpeners(): Partial<Record<WindowPage, () => void>> {
@@ -5796,6 +6119,12 @@ function LaunchedShell(
     };
   }
 
+  /**
+   * Global workspace destinations are mutually exclusive. A reader may hide
+   * the workspace while it is open, so any navigation that targets a draft or
+   * thread dismisses the reader first instead of opening the destination
+   * invisibly behind it.
+   */
   function closeWorkspaceReaders() {
     setProjectsListOpen(false);
     setRailPlaceholder(undefined);
@@ -7226,11 +7555,11 @@ function LaunchedShell(
     },
   });
 
-  // The tools on screen: the dock's tab and the bottom panel's. The thread's own
+  // The tools on screen: every tile the dock shows and the bottom panel's. The thread's own
   // controller and view reach the dock only while a tool that declares reading
   // them is open, so a tool that shows nothing of a streaming turn sits still.
   const presentedToolSurfaces: ReadonlyArray<RightUtilityDockSurfaceId> = [
-    ...(dockPresentedOpen && dockResolution.kind === "surface" ? [dockResolution.surface.id] : []),
+    ...(dockPresentedOpen ? [...new Set(dockShownTabs.map((tab) => tab.surface))] : []),
     ...(bottomPanelPresentedOpen && activeBottomSurface !== undefined
       ? [activeBottomSurface.id]
       : []),
@@ -7354,7 +7683,10 @@ function LaunchedShell(
             bottomPanelAvailable={bottomPanelAvailable}
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
+            dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
+            dockReferences={dockReferences}
+            dockTools={dockToolButtons}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
             isNarrow={isNarrow}
@@ -7454,6 +7786,7 @@ function LaunchedShell(
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
+        dockTileColumns={dockPresentedOpen ? dockTileColumns : 1}
         workspace={
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <StartQuickToolsContext.Provider value={startQuickToolsServices}>
@@ -7553,7 +7886,14 @@ function LaunchedShell(
                     createHostViewScope={createHostViewScope}
                     discoveryController={discoveryController}
                     dockOpen={dockOpen}
-                    {...(dockSurface === undefined ? {} : { dockSurface })}
+                    {...(dockSurface === undefined
+                      ? {}
+                      : {
+                          // Environment is open in the dock while any tile shows it.
+                          dockSurface: dockShownTabs.some((tab) => tab.surface === "environment")
+                            ? "environment"
+                            : dockSurface,
+                        })}
                     draftCreating={draftCreating}
                     {...(draftError === undefined ? {} : { draftError })}
                     {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
@@ -7659,20 +7999,19 @@ function LaunchedShell(
                     displayedDockState={displayedDockState}
                     dockPresentationWidth={dockPresentationWidth}
                     dockPresentedOpen={dockPresentedOpen}
-                    dockPullRequests={dockPullRequests}
+                    dockReferences={dockReferences}
+                    dockToolButtons={dockToolButtons}
                     dockResolution={dockResolution}
+                    dockResolveSurface={dockResolveSurface}
                     dockSidecarsByThread={dockSidecarsByThread}
                     dockTabs={dockTabs}
                     {...(dockThread === undefined ? {} : { dockThread })}
                     {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
                     dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                     {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-                    {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
-                    {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
                     {...(dockToolsAwaitingThread === undefined ? {} : { dockToolsAwaitingThread })}
                     {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                     isNarrow={isNarrow}
-                    launchableDockSurfaces={launchableDockSurfaces}
                     navigation={navigationModel}
                     now={minuteNow.getTime()}
                     {...(dockOverviewThread === undefined

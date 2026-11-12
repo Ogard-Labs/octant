@@ -1,6 +1,7 @@
 import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { IconDefaults } from "../ui/IconDefaults";
 import { Schema } from "effect";
 import {
   CANVAS_SCHEMA_VERSION,
@@ -725,12 +726,14 @@ if (!rootElement) throw new Error("Chart visuals evidence root is missing");
 
 createRoot(rootElement).render(
   <StrictMode>
-    <main data-canvas-chart-evidence="all">
-      <CanvasDocument
-        definition={definition}
-        designAssetRuntime={harnessDesignAssets}
-        {...(only === "table" ? { comments: tableComments } : {})}
-      />
-    </main>
+    <IconDefaults>
+      <main data-canvas-chart-evidence="all">
+        <CanvasDocument
+          definition={definition}
+          designAssetRuntime={harnessDesignAssets}
+          {...(only === "table" ? { comments: tableComments } : {})}
+        />
+      </main>
+    </IconDefaults>
   </StrictMode>,
 );

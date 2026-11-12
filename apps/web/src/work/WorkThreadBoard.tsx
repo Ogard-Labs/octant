@@ -180,7 +180,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
       <div aria-label="Board controls" className="surface-toolbar" role="group">
         <label className="surface-toolbar__search code-board__search">
           <span className="sr-only">Search threads</span>
-          <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+          <Search aria-hidden="true" size={14} />
           <OctantInput
             onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
             placeholder="Search threads"
@@ -197,7 +197,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             title="Filters"
             trigger={
               <>
-                <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
+                <Filter aria-hidden="true" size={14} />
                 <span>Filters</span>
                 {activeAdvancedFilterCount === 0 ? null : (
                   <span aria-hidden="true" className="code-board__filter-count">
@@ -318,7 +318,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
           type="button"
           variant="ghost"
         >
-          <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+          <RefreshCw aria-hidden="true" size={14} />
           <span>{board.status === "refreshing" ? "Refreshing" : "Refresh"}</span>
         </OctantButton>
 
@@ -331,7 +331,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             trigger={
               <>
                 <span>View</span>
-                <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                <ChevronDown aria-hidden="true" size={14} />
               </>
             }
             triggerClassName="code-board__view-toggle"
@@ -528,7 +528,7 @@ function WorkBoardCardView(props: {
         <details className="code-board__card-details">
           <summary aria-label={`Details for ${card.title}`}>
             <span>Details</span>
-            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+            <ChevronDown aria-hidden="true" size={12} />
           </summary>
           <dl className="code-board__card-meta">
             {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
@@ -565,7 +565,7 @@ function cardFacts(
     facts.push({
       key: "binding",
       text: card.binding.workingDirectory,
-      icon: <Folder aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
+      icon: <Folder aria-hidden="true" className="icon" size={12} />,
     });
   }
   facts.push({

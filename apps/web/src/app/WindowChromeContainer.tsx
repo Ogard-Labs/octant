@@ -3,19 +3,32 @@ import { memo } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBridge";
 import { WindowChrome } from "../shell/WindowChrome";
 import type { WindowHistory } from "../shell/windowHistory";
+import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
+import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
   readonly actions: Pick<
     ShellActions,
-    "recoverZen" | "startNewThreadDraft" | "toggleBottomPanel" | "toggleDock"
+    | "recoverZen"
+    | "startNewThreadDraft"
+    | "toggleBottomPanel"
+    | "toggleDock"
+    | "toggleDockTool"
+    | "runDockToolMenu"
   >;
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelPresentedOpen: boolean;
   readonly dockAvailable: boolean;
+  /** The agent's Browser is live and has a card the closed dock is holding. */
+  readonly dockBrowserActive: boolean;
   readonly dockPresentedOpen: boolean;
+  /** Value-stable between renders; see the model in App. */
+  readonly dockTools?: DockToolButtonsModel;
+  /** The pull requests listed in More tools; stable between renders. */
+  readonly dockReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly hostBridge?: OctantHostBridge;
   readonly hostReservesTitlebarInset: boolean;
   readonly isNarrow: boolean;
@@ -43,6 +56,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     bottomPanelAvailable,
     bottomPanelPresentedOpen,
     dockAvailable,
+    dockBrowserActive,
     dockPresentedOpen,
     hostReservesTitlebarInset,
     isNarrow,
@@ -58,8 +72,19 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
       bottomPanelExpanded={bottomPanelPresentedOpen}
       dockAvailable={dockAvailable}
+      // The modal dock draws no shelf, so a dot there would promise a card
+      // that cannot be shown.
+      dockBrowserActive={dockBrowserActive && !dockPresentedOpen && !isNarrow}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
+      {...(props.dockTools === undefined
+        ? {}
+        : {
+            dockTools: props.dockTools,
+            onToggleDockTool: actions.toggleDockTool,
+            onDockToolMenuAction: actions.runDockToolMenu,
+            ...(props.dockReferences === undefined ? {} : { dockReferences: props.dockReferences }),
+          })}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       isNarrow={isNarrow}
       material={material}

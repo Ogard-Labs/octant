@@ -65,7 +65,7 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
       title="Delivers"
       trigger={
         <>
-          <TriggerIcon aria-hidden="true" size={12} strokeWidth={1.8} />
+          <TriggerIcon aria-hidden="true" size={12} />
           <span>{selected?.label}</span>
           <ChevronDown aria-hidden="true" size={12} />
         </>
@@ -90,7 +90,7 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
             variant="ghost"
           >
             <span className="code-composer-choice__option-icon">
-              <option.icon aria-hidden="true" size={14} strokeWidth={1.7} />
+              <option.icon aria-hidden="true" size={14} />
             </span>
             <span className="code-composer-choice__option-copy">
               <span className="code-composer-choice__option-label">{option.label}</span>

@@ -311,7 +311,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             </p>
             {props.onNewThread === undefined || archived || connectionStale ? null : (
               <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
-                <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+                <SquarePen aria-hidden="true" size={14} />
                 {props.project.type === "chat" ? "New chat" : "New thread"}
               </OctantButton>
             )}

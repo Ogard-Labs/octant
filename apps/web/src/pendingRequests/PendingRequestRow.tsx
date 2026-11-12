@@ -231,7 +231,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           <span className="oct-meta pending-request__differs">Second opinion differs</span>
         ) : null}
         <span className="oct-meta pending-request__wait">
-          <CirclePause aria-hidden="true" size={12} strokeWidth={1.8} />
+          <CirclePause aria-hidden="true" size={12} />
           {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
         </span>
       </div>

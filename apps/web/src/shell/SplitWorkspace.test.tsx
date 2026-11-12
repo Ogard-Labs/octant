@@ -184,7 +184,7 @@ describe("a pane's tab bar", () => {
       "title",
       "auroradocs-mcp · Drag to move or split",
     );
-    // The running thread's own tab says so; the bar carries no separate pill.
+    // The running thread's own tab says so; the bar carries no separate chip.
     expect(screen.getByRole("tab", { name: /^Thread 1/ })).toHaveAccessibleName(
       "Thread 1, running",
     );
@@ -399,8 +399,10 @@ describe("SplitWorkspace", () => {
     expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
     // The Project leads the breadcrumb before the title.
     expect(screen.getByText("Octant")).toHaveClass("workspace-pane__context");
-    // The thread's title is the page title role, the Project beside it is meta.
-    expect(screen.getByTitle(/^Octant \//)).toHaveClass("oct-page-title");
+    // The thread's title is a name in navigation, the Project beside it is meta.
+    const title = screen.getByTitle(/^Octant \//);
+    expect(title).toHaveClass("oct-nav-name");
+    expect(title).not.toHaveClass("oct-page-title");
 
     rerender(
       <SplitWorkspace {...splitCallbacks()} layout={layout} renderSurface={(tab) => tab.title} />,
@@ -433,7 +435,7 @@ describe("SplitWorkspace", () => {
 
     const handle = screen.getByTitle("Drag to move or split");
     expect(within(handle).getByText("Running")).toBeVisible();
-    // The host says a turn is executing but not when it began, so the pill
+    // The host says a turn is executing but not when it began, so the chip
     // claims no elapsed time.
     expect(within(handle).getByText("Running")).not.toHaveTextContent(/\d/);
 
@@ -474,7 +476,7 @@ describe("SplitWorkspace", () => {
     const handle = screen.getByTitle("Drag to move or split");
     expect(within(handle).getByText("Needs you")).toBeVisible();
     expect(screen.queryByText("Running")).not.toBeInTheDocument();
-    // The pill states the wait; it has no spinner to suggest work is going on.
+    // The chip states the wait; it has no spinner to suggest work is going on.
     expect(handle.querySelector(".spinner")).toBeNull();
 
     rerender(

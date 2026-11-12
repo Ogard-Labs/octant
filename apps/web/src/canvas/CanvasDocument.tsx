@@ -362,7 +362,7 @@ function CommentMarker(props: {
       type="button"
       variant="bare"
     >
-      <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+      <MessageSquare aria-hidden="true" size={12} />
       {props.count === 0 ? null : <span>{props.count}</span>}
     </OctantButton>
   );

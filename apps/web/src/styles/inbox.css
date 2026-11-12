@@ -82,7 +82,9 @@
 .inbox-card__filters > [data-slot="toggle-group-item"] {
   height: 24px;
   padding-inline: var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  /* An item inside the group's padded track: the control corner less the
+     3px of padding, never below 2px. */
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 3px));
   font-size: var(--oct-text-xs);
 }
 

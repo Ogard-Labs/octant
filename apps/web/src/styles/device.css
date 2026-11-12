@@ -22,7 +22,7 @@
   --device-bezel: 12px;
   /* Room kept under the device for its caption. */
   --device-caption-room: 24px;
-  container-type: inline-size;
+  container: device-pane / inline-size;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
@@ -93,6 +93,31 @@
   font-size: var(--oct-text-xs);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* In a narrow tile the tile's own bar already names the tool, so the name
+   gives way and the state keeps its words ("Not set up" read as "N…"). */
+@container device-pane (max-width: 339px) {
+  /* Under 340px the name has no room for even one whole letter (a cut "A" was
+     drawn), so it stays for assistive technology and leaves the eye; the tile's
+     bar already names the tool. */
+  .device-toolbar__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@container device-pane (max-width: 479px) {
+  .device-toolbar__device {
+    max-width: none;
+  }
+
+  .device-toolbar__meta {
+    flex: 0 0 auto;
+  }
 }
 
 .device-toolbar__os {
@@ -169,7 +194,7 @@
   height: 22px;
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: var(--oct-bg);
   font-size: calc(11 * var(--oct-text-step));
@@ -453,7 +478,7 @@
   left: 50%;
   padding: 2px var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: var(--oct-bg);
   font-size: calc(11 * var(--oct-text-step));
@@ -478,7 +503,7 @@
   max-height: 100%;
   padding: var(--oct-space-5);
   overflow: auto;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
   box-shadow: var(--oct-elev-subtle);
 }

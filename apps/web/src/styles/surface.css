@@ -49,7 +49,8 @@
 }
 
 /* The section labels' size and tracking in primary ink: one step above them.
-   Destinations and Settings share it, so the two page heads cannot drift. */
+   Destinations and Settings share it, so the two page heads cannot drift. A
+   thread's title in the title band is a name in navigation, not a page title. */
 .oct-page-title {
   margin: 0;
   overflow: hidden;
@@ -74,6 +75,48 @@
   letter-spacing: var(--oct-tracking-snug);
   line-height: var(--oct-leading-snug);
   text-transform: none;
+}
+
+/* A name in navigation: a thread's title in the sidebar and the title band,
+   the account's name, a Settings page. The interface size at regular weight
+   reads as a calm list; the selected row is told by its fill, not its weight. */
+.oct-nav-name {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
+  line-height: var(--oct-leading-label);
+}
+
+/* A group's caption in navigation: quiet text over its rows, in sentence
+   case, not a heading. Headings inside content stay Section labels. */
+.oct-nav-group {
+  margin: 0;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
+  line-height: var(--oct-leading-snug);
+  text-transform: none;
+}
+
+/* What a thread says about its turns ("Worked for", the time): the size of
+   the text it sits between, told apart by the muted ink. */
+.oct-activity-line {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-meta);
+}
+
+/* Every pick-list's option: menu, context menu, select, combobox. */
+.oct-menu-option {
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .oct-row-label {
@@ -563,7 +606,7 @@
 
 /* Each control is a quiet chip: the meta tone at rest, a fill only under the
    pointer or while its menu is open, the same as the access and model
-   controls in the row under the prompt. Filled pills at rest made the row
+   controls in the row under the prompt. Filled chips at rest made the row
    louder than the message, and a filled "Create from…" beside ghost ones
    looked like a second kind of control. */
 .composer-tray--start .composer-tray__leading > *,

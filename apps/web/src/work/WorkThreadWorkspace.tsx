@@ -1,3 +1,4 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -779,6 +780,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
+  // A Work turn keeps the turn id its sender chose, which is how a turn an
+  // outside agent sent is named for that agent.
+  const agentTurnSender = useAgentTurnSenders();
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -2382,8 +2386,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </article>
                     );
                   }
+                  const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
                   return (
-                    <article aria-label="Your message" className="turn-user">
+                    <article
+                      aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}
+                      className="turn-user"
+                    >
                       <TurnActionMenu
                         actions={turnActionsFor("user", row.turn).actions}
                         onAction={(value) => onTurnAction(value, "user", row.turn)}
@@ -2394,6 +2402,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={row.entry.text} />
                         )}
+                        <AgentTurnSender agentName={sentBy} />
                       </TurnActionMenu>
                     </article>
                   );
@@ -2502,7 +2511,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <ul className="work-thread-workspace__file-list">
                       {row.wrote.paths.map((path) => (
                         <li className="work-thread-workspace__file" key={path}>
-                          <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                          <FileText aria-hidden="true" size={14} />
                           <span>{path}</span>
                         </li>
                       ))}
@@ -2597,7 +2606,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 }
                 return (
                   <div className="approval-row approval-row--request" role="status">
-                    <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <CirclePause aria-hidden="true" size={14} />
                     <span className="approval-row__text">
                       {row.request.detail.kind === "approval"
                         ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
@@ -2809,7 +2818,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               })}
           context={
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
-              <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              <FolderOpen aria-hidden="true" size={12} />
               {projectLabel === undefined ? null : (
                 <span
                   className="work-folder-bar__project"

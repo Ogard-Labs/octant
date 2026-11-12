@@ -77,7 +77,7 @@ export function ThreadReplyDetailMenu(props: {
             <ChevronDown aria-hidden="true" size={12} />
           </>
         ) : (
-          <ListCollapse aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+          <ListCollapse aria-hidden="true" className="icon" size={16} />
         )
       }
       triggerClassName={

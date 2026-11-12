@@ -270,7 +270,7 @@ function QuickToolRow(props: {
   return (
     <OctantButton disabled={props.disabled} onClick={props.onSelect} type="button" variant="ghost">
       <span className="start-quick-tools__row">
-        <Icon aria-hidden="true" size={16} strokeWidth={1.6} />
+        <Icon aria-hidden="true" size={16} />
         <span>{props.label}</span>
       </span>
     </OctantButton>

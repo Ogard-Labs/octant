@@ -17,7 +17,7 @@ export function EnvironmentMark(props: EnvironmentMarkProps) {
   const Glyph = props.kind === "local" ? Laptop : Cloud;
   return (
     <span aria-label={name} className="environment-mark" role="img" title={name}>
-      <Glyph aria-hidden="true" size={14} strokeWidth={1.8} />
+      <Glyph aria-hidden="true" size={14} />
     </span>
   );
 }
