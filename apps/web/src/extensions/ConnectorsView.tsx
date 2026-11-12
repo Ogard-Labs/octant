@@ -202,6 +202,11 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             Vendor setup guide
                           </a>
                         </span>
+                        {entry.auth.kind === "sign-in" &&
+                        entry.auth.clientSetup !== "registered" &&
+                        entry.auth.permissionNotice !== undefined ? (
+                          <span className="connectors__detail">{entry.auth.permissionNotice}</span>
+                        ) : null}
                         {connection !== undefined && connectionNeedsAttention(connection.state) ? (
                           <ConnectionStatus connection={connection} />
                         ) : null}

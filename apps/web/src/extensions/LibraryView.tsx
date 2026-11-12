@@ -968,6 +968,12 @@ function LibraryDetail(props: LibraryDetailProps) {
           </span>
         </form>
       ) : null}
+      {connector &&
+      item.connectorAuth?.kind === "sign-in" &&
+      item.connectorAuth.clientSetup !== "registered" &&
+      item.connectorAuth.permissionNotice !== undefined ? (
+        <p className="oct-meta">{item.connectorAuth.permissionNotice}</p>
+      ) : null}
       <footer className="library-detail__actions">
         {localSetup && available ? (
           <OctantButton

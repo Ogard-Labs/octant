@@ -205,6 +205,19 @@ describe("the library view", () => {
     expect(onConnected).toHaveBeenCalled();
   });
 
+  it("shows Composio's custody notice in the detail before the confirming Connect", async () => {
+    const user = userEvent.setup();
+    renderLibrary({ connectClient, localHost: true });
+    for (const more of screen.queryAllByRole("button", { name: /^Show all/ })) {
+      await user.click(more);
+    }
+    await user.click(screen.getByRole("button", { name: "Connect… Composio" }));
+    expect(addUserMcpServer).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/third-party hosted service/)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Connect" })).toBeTruthy();
+  });
+
   it("takes a key in the detail before it connects a key connector", async () => {
     const user = userEvent.setup();
     const key = {
