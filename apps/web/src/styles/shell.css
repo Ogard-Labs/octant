@@ -2024,24 +2024,14 @@ html[data-octant-native-host="true"]
   border-radius: var(--oct-radius-md);
 }
 
-.thread-row-context-menu :is([role="menuitem"], [role="menuitemcheckbox"]) {
-  min-height: 26px;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-detail);
-  line-height: 1.25;
-}
-
-.thread-row-context-menu [role="separator"] {
-  margin: var(--oct-space-1) 0;
-}
-
+/* Its rows and separators are the shared menu recipe: 28px rows and the Menu
+   option type. The icon stands in the same 16px column every menu uses; only
+   its ink is this menu's own. */
 .thread-row-context-menu__icon {
   display: inline-flex;
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
+  width: var(--oct-icon-md);
+  min-width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
   align-items: center;
   justify-content: center;
   color: var(--oct-meta);

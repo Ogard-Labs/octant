@@ -151,7 +151,7 @@ nothing essential sits under 12px at the default. The roles live in
 | Body                   | 13              | 400    | 1.5     | primary     | Interface text (the interface size, `body`)                                                                                                                                                                   |
 | Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
 | Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
-| Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
+| Detail                 | 13              | 400    | 1.45    | secondary   | Row description (`oct-row-detail`); a menu's second line is Meta (`oct-menu-detail`)                                                                                                                          |
 | Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's box (`oct-meta`)                                                                                          |
 | Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
@@ -1849,10 +1849,46 @@ bare pixel literal. A rem corner also shrinks with the interface font size,
 which a token does not. Adapters own button paint.
 
 Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
-toggles, comboboxes, badges) size in rem so they grow with the interface size;
-at the default 13px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
-3.25px at that root, so a recipe never uses an odd step bare: it rounds it to a
-whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
+toggles, comboboxes, badges) take their height in rem so they grow with the
+interface size; at the default 13px a button is 20, 24, 28, or 32px tall. A
+quarter-rem step is 3.25px at that root, so a height never uses an odd step
+bare: it rounds to a whole 2px (`h-[round(1.75rem,2px)]`), or a control lands
+between pixels. A field, a select and a combobox take the default button's 28,
+and a tab takes the small button's 24, so a row of them shares one height.
+
+_What scales with the interface size._ Type and control heights scale; spacing,
+icons and radii do not. The recipes' spacing utilities (`p-*`, `gap-*`, `m-*`)
+are pixels, because the theme sets Tailwind's spacing step to `--spacing: 4px`
+in `styles/tailwind.css`, the same 4px scale as the stylesheets'
+`--oct-space-*`; at the default size `px-2` is 8px, never the 6.5px a
+quarter-rem step drew. A recipe names a step that is on the scale (`gap-1`,
+`px-2`, `p-3`, `gap-4`) and never a half step (`px-2.5` is 10px, not 8); a
+contract test scans every class string for one. A width or height that follows
+the type (a menu's minimum width, a terminal's height) is written in rem on
+purpose. _Rationale._ The other way to the same whole pixels was to leave the
+step in rem and rewrite every recipe in `--oct-space-*` tokens, which keeps
+the half steps' meaning but spends 95 edits and leaves two spacing systems in
+one file; a larger interface size would also have padded a control that already
+grew with its text, so a control at 16px would have read as loose rather than
+larger. Pixel spacing is the same decision the icon sizes made.
+_One menu row._ Every in-page pick-list (dropdown, context menu, select and
+combobox options, the model list, the mode menu, the Add tool menu) draws the
+same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
+it carries a second line (`--oct-menu-row-two-h`, an `oct-menu-detail` span), an
+8px inset on a popup padded 4px, a 16px icon column and an 8px gap
+(`--oct-menu-row-gap`), the words in the Menu option role (13 / 500), and a
+group label in the Navigation group label role (12 / 400, muted). A row's words
+therefore stand 36px from the popup's edge when it has an icon and 12px when it
+has none, in every menu. A menu where any row has an icon reserves the column
+for every row, so it never has two text edges; a menu with no icons keeps the
+words on the popup's own inset. The separator is one hairline as wide as the
+rows (4px in from the popup's edge, the same inset the rows have), never a
+negative margin. A feature stylesheet may colour a menu's icons but gives its
+rows no height, gap, padding or font size. In the desktop app dropdown and
+context menus can be drawn by the system; that path is unchanged and the OS owns
+its spacing.
+
+The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window

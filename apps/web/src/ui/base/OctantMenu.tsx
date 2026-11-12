@@ -28,6 +28,7 @@ import {
   DropdownMenuSubTrigger as OctantMenuSubTrigger,
   DropdownMenuTrigger as OctantMenuTrigger,
 } from "./NativeDropdownMenu";
+import { menuIconColumn } from "../shadcn/menu-row";
 import { cn } from "../shadcn/utils";
 
 export {
@@ -94,17 +95,25 @@ export function OctantMenu(props: OctantMenuProps) {
   const menuId = useId();
   const labelId = (index: number) => `${menuId}-item-${index}-label`;
   const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
+  // A menu where any row has an icon reserves the column for all of them, so
+  // the words stand on one edge; a menu with none keeps them on the popup's own
+  // inset.
+  const hasIcons =
+    props.items.some((item) => item.icon !== undefined) ||
+    (props.actions ?? []).some((action) => action.icon !== undefined);
   const itemBody = (item: OctantMenuItem, index: number) => (
     <>
-      <span aria-hidden="true" className="flex size-(--oct-icon-md) items-center justify-center">
-        {item.icon}
-      </span>
+      {hasIcons ? (
+        <span aria-hidden="true" className={menuIconColumn}>
+          {item.icon}
+        </span>
+      ) : null}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium" id={labelId(index)}>
+        <span className="truncate" id={labelId(index)}>
           {item.label}
         </span>
         {item.description === undefined ? null : (
-          <span className="truncate text-xs text-muted-foreground" id={descriptionId(index)}>
+          <span className="truncate oct-menu-detail" id={descriptionId(index)}>
             {item.description}
           </span>
         )}
@@ -180,13 +189,12 @@ export function OctantMenu(props: OctantMenuProps) {
                     {...(action.disabled === true ? { disabled: true } : {})}
                     onClick={action.onSelect}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="flex size-(--oct-icon-md) items-center justify-center"
-                    >
-                      {action.icon}
-                    </span>
-                    <span className="truncate font-medium">{action.label}</span>
+                    {hasIcons ? (
+                      <span aria-hidden="true" className={menuIconColumn}>
+                        {action.icon}
+                      </span>
+                    ) : null}
+                    <span className="truncate">{action.label}</span>
                   </DropdownMenuItem>
                 ))}
               </>

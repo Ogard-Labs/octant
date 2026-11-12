@@ -104,7 +104,7 @@ export function CompactionDivider(props: { readonly receipt: ContextCompactionRe
   const line = compactionResultLine({ status: "completed", receipt: props.receipt }, names);
   const notice = limitNearNotice(props.receipt, names);
   const divider = (
-    <OctantSeparatorWithLabel aria-label={line} className="py-3" data-compaction-divider="">
+    <OctantSeparatorWithLabel aria-label={line} className="py-2" data-compaction-divider="">
       {line}
     </OctantSeparatorWithLabel>
   );
@@ -112,7 +112,7 @@ export function CompactionDivider(props: { readonly receipt: ContextCompactionRe
   return (
     <>
       {divider}
-      <div className="flex flex-wrap items-center justify-center gap-2 pb-3 text-center text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-center gap-2 pb-2 text-center text-sm text-muted-foreground">
         <p>{notice}</p>
         {/* Offered only where it reaches this thread's own composer: the
             active pane's, writing to the thread the receipt is for. */}
