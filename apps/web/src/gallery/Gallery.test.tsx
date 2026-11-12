@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ADAPTER_ROOTS } from "./adapterRoots";
+import { ADAPTER_ROOTS } from "./adapterRoots.test-support";
 import { Gallery } from "./Gallery";
 
 /**

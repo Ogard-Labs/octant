@@ -1,5 +1,5 @@
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -37,17 +37,24 @@ const CONTENTS = [
   ["patterns", "Patterns"],
 ] as const;
 
-/** Moves keyboard focus to the next specimen marked as a focus sample, so focus-visible can be seen on each. */
-function stepFocus(): void {
+/**
+ * Moves keyboard focus to the specimen after `previous` among those marked as
+ * focus samples, so focus-visible can be seen on each, and returns its index.
+ * The caller keeps the index: a click focuses the stepping button itself in
+ * most browsers, so the focused element cannot say where the walk had reached,
+ * and every press went back to the first sample.
+ */
+function stepFocus(previous: number): number {
   const samples = Array.from(
     document.querySelectorAll<HTMLElement>(
       "[data-focus-sample] :is(button, input, textarea, [role=switch], [role=combobox])",
     ),
   );
-  const index = samples.findIndex((element) => element === document.activeElement);
-  const next = samples[(index + 1) % samples.length];
+  if (samples.length === 0) return -1;
+  const index = (previous + 1) % samples.length;
   document.documentElement.dataset.octantInput = "keyboard";
-  next?.focus();
+  samples[index]?.focus();
+  return index;
 }
 
 /**
@@ -69,7 +76,10 @@ export function Gallery() {
     },
   };
   const measureKey = `${mode}-${String(size)}-${String(glass)}`;
-  const onStepFocus = useCallback(() => stepFocus(), []);
+  const focusStep = useRef(-1);
+  const onStepFocus = useCallback(() => {
+    focusStep.current = stepFocus(focusStep.current);
+  }, []);
   return (
     <ThemeSettingsProvider rememberMode={false} settings={settings}>
       <ThemeTypographyProvider typography={settings.typography}>
