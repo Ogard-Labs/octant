@@ -1,3 +1,4 @@
+import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
@@ -14,6 +15,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -40,7 +42,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import type { ThemeController } from "../theme/useThemeController";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { SettingsSurfaceErrorBoundary } from "./SettingsSurfaceErrorBoundary";
-import { ShellState } from "./ShellState";
+import { SettingsLoading } from "./SettingsLoading";
 import { ShellThemeRoot } from "./ShellFrame";
 import type { OctantHostBridge } from "./hostBridge";
 import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
@@ -89,6 +91,7 @@ export interface ShellSettingsSurfaceProps {
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
+  readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
@@ -98,6 +101,7 @@ export interface ShellSettingsSurfaceProps {
   readonly shieldServersClient?: ShieldServersClient;
   readonly providerToolingClient?: ProviderToolingClient;
   readonly serverProjectsClient?: ServerProjectsClient;
+  readonly agentGrantClient?: AgentGrantClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
@@ -136,14 +140,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
       <SettingsSurfaceErrorBoundary onReload={() => globalThis.location.reload()}>
         <Suspense
           fallback={
-            <main className="shell-boundary">
-              <ShellState
-                eyebrow="Settings"
-                message="Loading the Octant settings surface."
-                state="loading"
-                title="Opening Settings"
-              />
-            </main>
+            <SettingsLoading narrow={props.isNarrow} sheet={props.presentation === "sheet"} />
           }
         >
           <LazySettingsView
@@ -196,6 +193,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.archivedWorktreesClient === undefined
               ? {}
               : { archivedWorktreesClient: props.archivedWorktreesClient })}
+            {...(props.diskCleanupClient === undefined
+              ? {}
+              : { diskCleanupClient: props.diskCleanupClient })}
             {...(props.personMemoryClient === undefined
               ? {}
               : { personMemoryClient: props.personMemoryClient })}
@@ -218,6 +218,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.providerToolingClient === undefined
               ? {}
               : { providerToolingClient: props.providerToolingClient })}
+            {...(props.agentGrantClient === undefined
+              ? {}
+              : { agentGrantClient: props.agentGrantClient })}
             {...(props.serverProjectsClient === undefined
               ? {}
               : { serverProjectsClient: props.serverProjectsClient })}

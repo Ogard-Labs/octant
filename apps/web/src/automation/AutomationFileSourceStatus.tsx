@@ -2,6 +2,7 @@ import type { AutomationDefinition, AutomationFileSourceSummary } from "@octant/
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { AutomationCenterController } from "./useAutomationCenterController";
 import { AUTOMATION_RUN_LEVEL_OPTIONS, automationAuthoritySummary } from "./automationCenterModel";
 import { routineFileSourceLabel } from "./routineFileSourcePresentation";
@@ -165,130 +166,137 @@ export function AutomationFileSourceStatus(props: {
           </OctantButton>
         ) : null}
       </div>
-      <OctantDialog
-        open={review !== undefined}
-        onClose={close}
-        label="Review file input"
-        labelledBy={titleId}
-        initialFocus={closeRef}
-        restoreFocus={reviewRef}
-        className="automation-editor automation-file-source"
-      >
-        <h3 id={titleId}>Review file input</h3>
-        <p>
-          {review?.automation.displayName}:{" "}
-          <code>
-            {review?.automation.trigger.kind === "file-arrival"
-              ? review.automation.trigger.directory
-              : ""}
-          </code>
-        </p>
-        <p>
-          These changes may be outside arrivals or routine output; Octant cannot identify their
-          writer.
-        </p>
-        {review === undefined ? null : (
-          <dl className="automation-detail__facts">
-            <div>
-              <dt>Task</dt>
-              <dd>{review.automation.taskPrompt}</dd>
-            </div>
-            <div>
-              <dt>Profile and authority</dt>
-              <dd>
-                {review.automation.executionProfile.modelId} ·{" "}
-                {automationAuthoritySummary(review.automation.authorityProfile)}
-              </dd>
-            </div>
-            <div>
-              <dt>Level ceiling</dt>
-              <dd>
-                {
-                  AUTOMATION_RUN_LEVEL_OPTIONS.find(
-                    (option) =>
-                      option.id ===
-                      (review.automation.projectLevel === "opted-in"
-                        ? "project"
-                        : (review.automation.runLevel ??
-                          (review.automation.authorityProfile.effective.executionPolicy ===
-                          "auto-accept-edits"
-                            ? "auto-accept-edits"
-                            : "ask-first"))),
-                  )?.label
-                }
-                ; the Project's current grant can narrow it.
-              </dd>
-            </div>
-            <div>
-              <dt>Confirmed delivery</dt>
-              <dd>{review.automation.deliveryTarget.summary}</dd>
-            </div>
-          </dl>
-        )}
-        <p>
-          Run once starts one new Work task with the current profile, level and confirmed delivery.
-          Skip records these files as the new baseline without a run. Either starts a new allowance
-          of {automation.trigger.automaticStartLimit} automatic runs.
-        </p>
-        <p>{review?.source.heldFiles.length ?? 0} changed surviving files in this review:</p>
-        <ul>
-          {review?.source.heldFiles.slice(0, 12).map((path) => (
-            <li key={path}>
-              <code>{path}</code>
-            </li>
-          ))}
-        </ul>
-        {(review?.source.heldFiles.length ?? 0) > 12 ? (
-          <p>{(review?.source.heldFiles.length ?? 0) - 12} more files are retained in the batch.</p>
-        ) : null}
-        {review?.source.heldFiles.length === 0 ? (
-          <p>No changed surviving files remain; choose Skip to re-arm without a run.</p>
-        ) : null}
-        {stale ? (
-          <p role="alert">
-            This input review changed. Check input status and review the current batch before
-            choosing.
-          </p>
-        ) : null}
-        {message === undefined ? null : <p role="alert">{message}</p>}
-        {busy ? (
-          <p role="status">
-            Checking and committing your choice. Closing this review does not undo an admitted task.
-          </p>
-        ) : null}
-        <div className="automation-detail__actions">
-          <OctantButton ref={closeRef} type="button" variant="outline" onClick={close}>
-            Close review
-          </OctantButton>
-          {requiresRefresh || stale ? (
-            <OctantButton type="button" onClick={props.refresh}>
-              Refresh details and history
-            </OctantButton>
-          ) : (
-            <>
-              <OctantButton
-                type="button"
-                variant="secondary"
-                disabled={busy || review === undefined}
-                onClick={() => {
-                  void rearm("skip");
-                }}
-              >
-                Skip these changes and re-arm
+      <OctantDialogPresence>
+        {review !== undefined ? (
+          <OctantDialog
+            open
+            onClose={close}
+            label="Review file input"
+            labelledBy={titleId}
+            initialFocus={closeRef}
+            restoreFocus={reviewRef}
+            className="automation-editor automation-file-source"
+          >
+            <h3 id={titleId}>Review file input</h3>
+            <p>
+              {review?.automation.displayName}:{" "}
+              <code>
+                {review?.automation.trigger.kind === "file-arrival"
+                  ? review.automation.trigger.directory
+                  : ""}
+              </code>
+            </p>
+            <p>
+              These changes may be outside arrivals or routine output; Octant cannot identify their
+              writer.
+            </p>
+            {review === undefined ? null : (
+              <dl className="automation-detail__facts">
+                <div>
+                  <dt>Task</dt>
+                  <dd>{review.automation.taskPrompt}</dd>
+                </div>
+                <div>
+                  <dt>Profile and authority</dt>
+                  <dd>
+                    {review.automation.executionProfile.modelId} ·{" "}
+                    {automationAuthoritySummary(review.automation.authorityProfile)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Level ceiling</dt>
+                  <dd>
+                    {
+                      AUTOMATION_RUN_LEVEL_OPTIONS.find(
+                        (option) =>
+                          option.id ===
+                          (review.automation.projectLevel === "opted-in"
+                            ? "project"
+                            : (review.automation.runLevel ??
+                              (review.automation.authorityProfile.effective.executionPolicy ===
+                              "auto-accept-edits"
+                                ? "auto-accept-edits"
+                                : "ask-first"))),
+                      )?.label
+                    }
+                    ; the Project's current grant can narrow it.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Confirmed delivery</dt>
+                  <dd>{review.automation.deliveryTarget.summary}</dd>
+                </div>
+              </dl>
+            )}
+            <p>
+              Run once starts one new Work task with the current profile, level and confirmed
+              delivery. Skip records these files as the new baseline without a run. Either starts a
+              new allowance of {automation.trigger.automaticStartLimit} automatic runs.
+            </p>
+            <p>{review?.source.heldFiles.length ?? 0} changed surviving files in this review:</p>
+            <ul>
+              {review?.source.heldFiles.slice(0, 12).map((path) => (
+                <li key={path}>
+                  <code>{path}</code>
+                </li>
+              ))}
+            </ul>
+            {(review?.source.heldFiles.length ?? 0) > 12 ? (
+              <p>
+                {(review?.source.heldFiles.length ?? 0) - 12} more files are retained in the batch.
+              </p>
+            ) : null}
+            {review?.source.heldFiles.length === 0 ? (
+              <p>No changed surviving files remain; choose Skip to re-arm without a run.</p>
+            ) : null}
+            {stale ? (
+              <p role="alert">
+                This input review changed. Check input status and review the current batch before
+                choosing.
+              </p>
+            ) : null}
+            {message === undefined ? null : <p role="alert">{message}</p>}
+            {busy ? (
+              <p role="status">
+                Checking and committing your choice. Closing this review does not undo an admitted
+                task.
+              </p>
+            ) : null}
+            <div className="automation-detail__actions">
+              <OctantButton ref={closeRef} type="button" variant="outline" onClick={close}>
+                Close review
               </OctantButton>
-              <OctantButton
-                type="button"
-                disabled={busy || review === undefined || review.source.heldFiles.length === 0}
-                onClick={() => {
-                  void rearm("run-once");
-                }}
-              >
-                Run once and re-arm
-              </OctantButton>
-            </>
-          )}
-        </div>
-      </OctantDialog>
+              {requiresRefresh || stale ? (
+                <OctantButton type="button" onClick={props.refresh}>
+                  Refresh details and history
+                </OctantButton>
+              ) : (
+                <>
+                  <OctantButton
+                    type="button"
+                    variant="secondary"
+                    disabled={busy || review === undefined}
+                    onClick={() => {
+                      void rearm("skip");
+                    }}
+                  >
+                    Skip these changes and re-arm
+                  </OctantButton>
+                  <OctantButton
+                    type="button"
+                    disabled={busy || review === undefined || review.source.heldFiles.length === 0}
+                    onClick={() => {
+                      void rearm("run-once");
+                    }}
+                  >
+                    Run once and re-arm
+                  </OctantButton>
+                </>
+              )}
+            </div>
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }

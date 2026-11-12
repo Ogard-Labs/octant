@@ -58,7 +58,7 @@
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.35;
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -72,7 +72,7 @@
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
+  line-height: var(--oct-leading-snug);
   text-transform: none;
 }
 
@@ -80,19 +80,19 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
-  line-height: 1.35;
+  line-height: var(--oct-leading-label);
 }
 
 .oct-row-detail {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
-  line-height: 1.45;
+  line-height: var(--oct-leading-detail);
 }
 
 .oct-meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  line-height: var(--oct-leading-meta);
 }
 
 .oct-meta--mono {
@@ -747,12 +747,86 @@
 .app-backdrop__builtin,
 .app-backdrop__photo,
 .app-backdrop__characters,
-.app-backdrop__pixels {
+.app-backdrop__pixels,
+.app-backdrop__flowing,
+.app-backdrop__flowing-canvas,
+.app-backdrop__flowing-fallback,
+.app-backdrop__flowing-grain {
   position: absolute;
   inset: 0;
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.app-backdrop__flowing {
+  --octant-flowing-deep: var(--octant-app-background);
+  --octant-flowing-mid: var(--octant-accent);
+  --octant-flowing-light: var(--octant-accent);
+  --octant-flowing-glow: var(--octant-accent);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.app-backdrop__flowing-canvas {
+  /* Half-resolution framebuffer; bilinear upscale is the look, not a fault. */
+  image-rendering: auto;
+}
+
+.app-backdrop__flowing-fallback {
+  background:
+    radial-gradient(ellipse 55% 50% at 92% 94%, var(--octant-flowing-glow), transparent 52%),
+    radial-gradient(ellipse 58% 52% at 74% 78%, var(--octant-flowing-light), transparent 56%),
+    radial-gradient(ellipse 70% 62% at 46% 48%, var(--octant-flowing-mid), transparent 58%),
+    var(--octant-flowing-deep);
+  background-size: 140% 140%;
+  background-position: 20% 15%;
+  filter: blur(48px);
+  transform: scale(1.18);
+  transform-origin: center;
+}
+
+.app-backdrop__flowing[data-engine="webgl"] .app-backdrop__flowing-fallback {
+  display: none;
+}
+
+.app-backdrop__flowing[data-engine="css"] .app-backdrop__flowing-canvas {
+  display: none;
+}
+
+.app-backdrop__flowing[data-engine="css"][data-animated="true"] .app-backdrop__flowing-fallback {
+  animation: octant-flowing-drift var(--oct-motion-flowing) ease-in-out infinite alternate;
+}
+
+.app-backdrop__flowing-grain {
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 80px 80px;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop__flowing .app-backdrop__flowing-fallback {
+    animation: none;
+  }
+}
+
+@keyframes octant-flowing-drift {
+  from {
+    background-position:
+      12% 8%,
+      40% 42%,
+      28% 22%,
+      0% 0%;
+  }
+  to {
+    background-position:
+      78% 72%,
+      62% 58%,
+      48% 44%,
+      0% 0%;
+  }
 }
 
 .app-backdrop__builtin {
@@ -802,13 +876,24 @@
     top: var(--oct-title-rail-h);
     right: var(--octant-sheet-inset);
     bottom: var(--octant-sheet-inset);
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+    border-radius: 0 var(--oct-radius-md) var(--octant-sheet-corner-outer) 0;
   }
 
   .shell--app-backdrop.shell-frame.shell--app-backdrop-sidebar
     > .app-backdrop[data-placement="shell"] {
     left: var(--octant-rail-offset, 0px);
-    border-radius: var(--oct-radius-md);
+    border-radius: var(--oct-radius-md) var(--oct-radius-md) var(--octant-sheet-corner-outer)
+      var(--oct-radius-md);
+  }
+
+  /* With no rail the ground reaches the window's left edge, as the sheet does,
+     and square there: a rounded left corner showed a nick of frame colour. */
+  .shell--app-backdrop.shell-frame.shell--app-backdrop-sidebar:not(
+      .shell--rail-beside,
+      .shell--sidebar-rail
+    )
+    > .app-backdrop[data-placement="shell"] {
+    border-radius: 0 var(--oct-radius-md) var(--octant-sheet-corner-outer) 0;
   }
 
   /* Under Glass the sidebar's nearly clear sheet cannot quiet a ground that
@@ -1077,6 +1162,38 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.12;
+}
+
+/* ── Loading shape ─────────────────────────────────────────────────── */
+
+/* A page that is on its way shows its own outline: the title bar where the
+   title will be and a few rows under it, in the page's frame, so nothing
+   moves when the page arrives. The bars are the shared skeleton. */
+.surface-loading__title {
+  width: 128px;
+  height: 12px;
+}
+
+.surface-loading__rows {
+  display: grid;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-2);
+}
+
+.surface-loading__row {
+  height: 12px;
+}
+
+.surface-loading__row:nth-child(odd) {
+  width: 72%;
+}
+
+.surface-loading__row:nth-child(even) {
+  width: 56%;
+}
+
+.surface-loading__row:last-child {
+  width: 34%;
 }
 
 /* Where the veil meets the sheet's rounded corner, it rounds with it. */

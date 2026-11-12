@@ -31,6 +31,7 @@ import {
   type ProjectProviderPolicy,
   type ProjectRank,
 } from "@octant/contracts/projects";
+import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 
 export type ProjectPolicyRejectionCode =
   | "extra-folder-refused"
@@ -38,6 +39,7 @@ export type ProjectPolicyRejectionCode =
   | "binding-revision-conflict"
   | "binding-unchanged"
   | "invalid-brand-kit"
+  | "invalid-design-system"
   | "invalid-desktop-recipe"
   | "invalid-lifecycle"
   | "invalid-name"
@@ -581,6 +583,41 @@ export function changeProjectBrandKit(
   return {
     ...rest,
     ...(entries.length === 0 ? {} : { brandKit }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Choose which `DESIGN.md` a Work or Code Project follows, turn design systems
+ * off for it (`none`), or (with `null`) return it to the automatic rule. The
+ * chosen file must live in a folder the Project lends; whether it exists is
+ * read from the folder each time, so a choice that names a file someone later
+ * deletes leaves the Project with no design system rather than another one.
+ * A Chat Project has no folder, so it keeps its brand kit instead.
+ */
+export function changeProjectDesignSystem(
+  project: Project,
+  designSystem: DesignSystemChoice | null,
+  updatedAt: UtcTimestamp,
+): Project {
+  if (project.type === "chat") {
+    reject("invalid-design-system", "A Chat Project has no folder for a design system");
+  }
+  if (
+    designSystem?.kind === "file" &&
+    designSystem.folder !== project.binding.canonicalRoot &&
+    !projectExtraFolderRoots(project).includes(designSystem.folder)
+  ) {
+    reject("invalid-design-system", "The design system must be in a folder this Project lends");
+  }
+  if (JSON.stringify(project.designSystem ?? null) === JSON.stringify(designSystem)) {
+    reject("invalid-lifecycle", "Project design system is already selected");
+  }
+  const { designSystem: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(designSystem === null ? {} : { designSystem }),
     version: nextVersion(project),
     updatedAt,
   };

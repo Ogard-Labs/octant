@@ -68,6 +68,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -101,6 +102,11 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments } from "./useCodeAttachments";
+import {
+  threadImageOfferKey,
+  useThreadImageOffers,
+  type ThreadImageVerdict,
+} from "../composer/threadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
@@ -690,6 +696,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       else void attachments.attach(files);
     },
   });
+  // A picture marked up in this thread's Browser arrives here as a file and
+  // meets the same checks as one dropped on the composer.
+  useThreadImageOffers(
+    threadImageOfferKey("code", String(props.threadId)),
+    async (file, arrival): Promise<ThreadImageVerdict> => {
+      let reason: string | undefined;
+      if (props.attachmentClient === undefined) {
+        reason = "Image attachments are unavailable on this host.";
+        attachments.refuse(reason);
+      } else if (boundModelReadsImages(providerGroups, thread) === false) {
+        reason = "Choose a vision model to attach images.";
+        attachments.refuse(reason);
+      } else {
+        reason = await attachments.attach([file]);
+      }
+      if (reason !== undefined) return { status: "refused", reason };
+      if (arrival === "live") textareaRef.current?.focus();
+      return { status: "accepted" };
+    },
+  );
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -2178,18 +2204,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </SelectionThreadScope>
         )}
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={rewind?.files ?? { kind: "loading" }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={(scope) => void runRewind(scope)}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-          {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={rewind?.files ?? { kind: "loading" }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={(scope) => void runRewind(scope)}
+              open
+              removedTurns={rewind?.removedTurns}
+              {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined || view === undefined ? null : (
           <div className="thread-column">
@@ -2671,13 +2701,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {plan == null || plan.status === "withdrawn" ? (
                   <ThreadPlanProposal key={String(thread.id)} />
                 ) : null}
-                {confirmArtifacts ? (
-                  <ThreadArtifactsConfirm
-                    onCancel={() => setConfirmArtifacts(false)}
-                    onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-                    pending={deliveryChanging}
-                  />
-                ) : null}
+                <OctantDialogPresence>
+                  {confirmArtifacts ? (
+                    <ThreadArtifactsConfirm
+                      onCancel={() => setConfirmArtifacts(false)}
+                      onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+                      pending={deliveryChanging}
+                    />
+                  ) : null}
+                </OctantDialogPresence>
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}

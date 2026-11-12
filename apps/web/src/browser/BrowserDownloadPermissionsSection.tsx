@@ -10,6 +10,7 @@ import { browserProfileKey } from "@octant/domain";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -247,231 +248,241 @@ export function BrowserDownloadPermissionsSection(props: {
       ))}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {!editing && error !== undefined ? <OctantAlert tone="danger">{error}</OctantAlert> : null}
-      {!editing ? null : (
-        <OctantConfirmDialog
-          children="Review one routine’s source sites, destination, file types and limits before granting download permission."
-          title={
-            review === undefined ? "Review recurring downloads" : "Grant this download manifest?"
-          }
-          confirmLabel={
-            review === undefined ? "Review sources and destination" : "Grant download manifest"
-          }
-          pending={pending}
-          confirmDisabled={
-            review === undefined &&
-            (chosen === undefined ||
-              profile === undefined ||
-              folderId === "" ||
-              origin.trim() === "" ||
-              sources.trim() === "" ||
-              directory.trim() === "" ||
-              mediaTypes.length === 0)
-          }
-          onCancel={() => {
-            if (!pending) {
-              setEditing(false);
-              setReview(undefined);
+      <OctantDialogPresence>
+        {!editing ? null : (
+          <OctantConfirmDialog
+            children="Review one routine’s source sites, destination, file types and limits before granting download permission."
+            title={
+              review === undefined ? "Review recurring downloads" : "Grant this download manifest?"
             }
-          }}
-          onConfirm={() =>
-            review === undefined
-              ? startReview()
-              : void act({ kind: "grant", reviewId: review.reviewId })
-          }
-          details={
-            <div className="flex min-w-0 flex-col gap-3">
-              {review === undefined ? (
-                <>
-                  <label>
-                    Routine
-                    <OctantSelectField
-                      aria-label="Download routine"
-                      value={targetId}
-                      placeholder="Choose a routine"
-                      onValueChange={(value) => {
-                        setTargetId(value);
-                        setFolderId("");
-                        setProfileId("");
-                      }}
-                      options={targets.flatMap((row) =>
-                        row.target.grantee.kind === "routine"
-                          ? [{ id: String(row.target.grantee.routineId), label: row.target.label }]
-                          : [],
-                      )}
-                    />
-                  </label>
-                  <label>
-                    Account profile
-                    <OctantSelectField
-                      aria-label="Download account profile"
-                      value={profileId}
-                      placeholder="Choose an account profile"
-                      onValueChange={setProfileId}
-                      options={profileChoices.map((row) => ({
-                        id: browserProfileKey(row.profile),
-                        label: row.label,
-                      }))}
-                    />
-                  </label>
-                  <label>
-                    Destination folder
-                    <OctantSelectField
-                      aria-label="Download destination folder"
-                      value={folderId}
-                      placeholder="Choose an approved folder"
-                      onValueChange={setFolderId}
-                      options={(chosen?.folders ?? []).map((row) => ({
-                        id: String(row.id),
-                        label: row.label,
-                      }))}
-                    />
-                  </label>
-                  <label>
-                    HTTPS site
-                    <OctantInput
-                      aria-label="Download HTTPS site"
-                      value={origin}
-                      maxLength={2048}
-                      placeholder="https://example.com"
-                      onChange={(event) => setOrigin(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Download source sites, one exact HTTPS origin per line
-                    <OctantTextarea
-                      aria-label="Download source sites"
-                      value={sources}
-                      maxLength={65536}
-                      rows={4}
-                      onChange={(event) => setSources(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Destination directory, relative to the approved folder
-                    <OctantInput
-                      aria-label="Download destination directory"
-                      value={directory}
-                      maxLength={4096}
-                      onChange={(event) => setDirectory(event.target.value)}
-                    />
-                  </label>
-                  <fieldset className="flex flex-col gap-2">
-                    <legend>Allowed file types</legend>
-                    {DOWNLOAD_TYPES.map(([type, label]) => (
-                      <label className="flex items-center gap-2" key={type}>
-                        <OctantCheckbox
-                          aria-label={label}
-                          checked={mediaTypes.includes(type)}
-                          onChange={(event) => {
-                            const checked = event.target.checked;
-                            setMediaTypes((values) =>
-                              checked
-                                ? [...values.filter((value) => value !== type), type]
-                                : values.filter((value) => value !== type),
-                            );
-                          }}
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </fieldset>
-                  <p>
-                    The directory must already exist. Every native redirect origin must match a
-                    reviewed source site. Unverified sources, other types and files above 25 MiB are
-                    refused. Files never overwrite existing files.
-                  </p>
-                  <label>
-                    Total file uses
-                    <OctantInput
-                      aria-label="Total download file uses"
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={maxFiles}
-                      onChange={(event) => setMaxFiles(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Total file contents, MiB
-                    <OctantInput
-                      aria-label="Total download MiB"
-                      type="number"
-                      min={1}
-                      max={250}
-                      value={maxMiB}
-                      onChange={(event) => setMaxMiB(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Expiry
-                    <OctantSelectField
-                      aria-label="Download permission expiry"
-                      value={duration}
-                      onValueChange={setDuration}
-                      options={[
-                        { id: "60", label: "1 hour" },
-                        { id: "10080", label: "7 days" },
-                        { id: "43200", label: "30 days" },
-                      ]}
-                    />
-                  </label>
-                </>
-              ) : (
-                <dl className="grid min-w-0 gap-2">
-                  <dt>Routine</dt>
-                  <dd>{review.permission.target.label}</dd>
-                  <dt>Model</dt>
-                  <dd>{review.permission.target.modelId}</dd>
-                  <dt>Account profile</dt>
-                  <dd>
-                    {props.profiles.find(
-                      (row) =>
-                        browserProfileKey(row.profile) ===
-                        browserProfileKey(review.permission.profile),
-                    )?.label ?? review.permission.profile.kind}
-                  </dd>
-                  <dt>Destination folder</dt>
-                  <dd>{review.permission.folder.label}</dd>
-                  <dt>HTTPS site</dt>
-                  <dd className="break-all">{review.permission.origin}</dd>
-                  <dt>Destination directory</dt>
-                  <dd className="break-all">{review.permission.directory}</dd>
-                  <dt>Download source sites</dt>
-                  <dd>
-                    <ul>
-                      {review.permission.sourceOrigins.map((origin) => (
-                        <li className="break-all" key={origin}>
-                          {origin}
-                        </li>
+            confirmLabel={
+              review === undefined ? "Review sources and destination" : "Grant download manifest"
+            }
+            pending={pending}
+            confirmDisabled={
+              review === undefined &&
+              (chosen === undefined ||
+                profile === undefined ||
+                folderId === "" ||
+                origin.trim() === "" ||
+                sources.trim() === "" ||
+                directory.trim() === "" ||
+                mediaTypes.length === 0)
+            }
+            onCancel={() => {
+              if (!pending) {
+                setEditing(false);
+                setReview(undefined);
+              }
+            }}
+            onConfirm={() =>
+              review === undefined
+                ? startReview()
+                : void act({ kind: "grant", reviewId: review.reviewId })
+            }
+            details={
+              <div className="flex min-w-0 flex-col gap-3">
+                {review === undefined ? (
+                  <>
+                    <label>
+                      Routine
+                      <OctantSelectField
+                        aria-label="Download routine"
+                        value={targetId}
+                        placeholder="Choose a routine"
+                        onValueChange={(value) => {
+                          setTargetId(value);
+                          setFolderId("");
+                          setProfileId("");
+                        }}
+                        options={targets.flatMap((row) =>
+                          row.target.grantee.kind === "routine"
+                            ? [
+                                {
+                                  id: String(row.target.grantee.routineId),
+                                  label: row.target.label,
+                                },
+                              ]
+                            : [],
+                        )}
+                      />
+                    </label>
+                    <label>
+                      Account profile
+                      <OctantSelectField
+                        aria-label="Download account profile"
+                        value={profileId}
+                        placeholder="Choose an account profile"
+                        onValueChange={setProfileId}
+                        options={profileChoices.map((row) => ({
+                          id: browserProfileKey(row.profile),
+                          label: row.label,
+                        }))}
+                      />
+                    </label>
+                    <label>
+                      Destination folder
+                      <OctantSelectField
+                        aria-label="Download destination folder"
+                        value={folderId}
+                        placeholder="Choose an approved folder"
+                        onValueChange={setFolderId}
+                        options={(chosen?.folders ?? []).map((row) => ({
+                          id: String(row.id),
+                          label: row.label,
+                        }))}
+                      />
+                    </label>
+                    <label>
+                      HTTPS site
+                      <OctantInput
+                        aria-label="Download HTTPS site"
+                        value={origin}
+                        maxLength={2048}
+                        placeholder="https://example.com"
+                        onChange={(event) => setOrigin(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Download source sites, one exact HTTPS origin per line
+                      <OctantTextarea
+                        aria-label="Download source sites"
+                        value={sources}
+                        maxLength={65536}
+                        rows={4}
+                        onChange={(event) => setSources(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Destination directory, relative to the approved folder
+                      <OctantInput
+                        aria-label="Download destination directory"
+                        value={directory}
+                        maxLength={4096}
+                        onChange={(event) => setDirectory(event.target.value)}
+                      />
+                    </label>
+                    <fieldset className="flex flex-col gap-2">
+                      <legend>Allowed file types</legend>
+                      {DOWNLOAD_TYPES.map(([type, label]) => (
+                        <label className="flex items-center gap-2" key={type}>
+                          <OctantCheckbox
+                            aria-label={label}
+                            checked={mediaTypes.includes(type)}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setMediaTypes((values) =>
+                                checked
+                                  ? [...values.filter((value) => value !== type), type]
+                                  : values.filter((value) => value !== type),
+                              );
+                            }}
+                          />
+                          {label}
+                        </label>
                       ))}
-                    </ul>
-                  </dd>
-                  <dt>Allowed file types</dt>
-                  <dd>
-                    {review.permission.mediaTypes
-                      .map((type) => DOWNLOAD_TYPES.find(([value]) => value === type)?.[1] ?? type)
-                      .join(", ")}
-                  </dd>
-                  <dt>Total quota</dt>
-                  <dd>
-                    {review.permission.maxFiles} file uses · {mebibytes(review.permission.maxBytes)}
-                  </dd>
-                  <dt>Expires</dt>
-                  <dd>{new Date(review.permission.expiresAt).toLocaleString()}</dd>
-                </dl>
-              )}
-              <p>
-                Each admitted file consumes quota, including a later cancellation. Permission ends
-                on revocation, changed routine authority or host restart. Revoking closes an
-                affected page, but a file already dispatched may have been saved. Check the
-                destination before retrying. This manifest grants no account access, uploads or
-                access to other folders.
-              </p>
-              {error === undefined ? null : <OctantAlert tone="danger">{error}</OctantAlert>}
-            </div>
-          }
-        />
-      )}
+                    </fieldset>
+                    <p>
+                      The directory must already exist. Every native redirect origin must match a
+                      reviewed source site. Unverified sources, other types and files above 25 MiB
+                      are refused. Files never overwrite existing files.
+                    </p>
+                    <label>
+                      Total file uses
+                      <OctantInput
+                        aria-label="Total download file uses"
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={maxFiles}
+                        onChange={(event) => setMaxFiles(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Total file contents, MiB
+                      <OctantInput
+                        aria-label="Total download MiB"
+                        type="number"
+                        min={1}
+                        max={250}
+                        value={maxMiB}
+                        onChange={(event) => setMaxMiB(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Expiry
+                      <OctantSelectField
+                        aria-label="Download permission expiry"
+                        value={duration}
+                        onValueChange={setDuration}
+                        options={[
+                          { id: "60", label: "1 hour" },
+                          { id: "10080", label: "7 days" },
+                          { id: "43200", label: "30 days" },
+                        ]}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <dl className="grid min-w-0 gap-2">
+                    <dt>Routine</dt>
+                    <dd>{review.permission.target.label}</dd>
+                    <dt>Model</dt>
+                    <dd>{review.permission.target.modelId}</dd>
+                    <dt>Account profile</dt>
+                    <dd>
+                      {props.profiles.find(
+                        (row) =>
+                          browserProfileKey(row.profile) ===
+                          browserProfileKey(review.permission.profile),
+                      )?.label ?? review.permission.profile.kind}
+                    </dd>
+                    <dt>Destination folder</dt>
+                    <dd>{review.permission.folder.label}</dd>
+                    <dt>HTTPS site</dt>
+                    <dd className="break-all">{review.permission.origin}</dd>
+                    <dt>Destination directory</dt>
+                    <dd className="break-all">{review.permission.directory}</dd>
+                    <dt>Download source sites</dt>
+                    <dd>
+                      <ul>
+                        {review.permission.sourceOrigins.map((origin) => (
+                          <li className="break-all" key={origin}>
+                            {origin}
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                    <dt>Allowed file types</dt>
+                    <dd>
+                      {review.permission.mediaTypes
+                        .map(
+                          (type) => DOWNLOAD_TYPES.find(([value]) => value === type)?.[1] ?? type,
+                        )
+                        .join(", ")}
+                    </dd>
+                    <dt>Total quota</dt>
+                    <dd>
+                      {review.permission.maxFiles} file uses ·{" "}
+                      {mebibytes(review.permission.maxBytes)}
+                    </dd>
+                    <dt>Expires</dt>
+                    <dd>{new Date(review.permission.expiresAt).toLocaleString()}</dd>
+                  </dl>
+                )}
+                <p>
+                  Each admitted file consumes quota, including a later cancellation. Permission ends
+                  on revocation, changed routine authority or host restart. Revoking closes an
+                  affected page, but a file already dispatched may have been saved. Check the
+                  destination before retrying. This manifest grants no account access, uploads or
+                  access to other folders.
+                </p>
+                {error === undefined ? null : <OctantAlert tone="danger">{error}</OctantAlert>}
+              </div>
+            }
+          />
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

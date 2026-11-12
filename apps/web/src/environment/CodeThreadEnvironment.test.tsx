@@ -76,6 +76,9 @@ function projectClient(observation: CodeEnvironmentObservation): ProjectClient {
     executeMemory: vi.fn(),
     listMemoryProposals: vi.fn(async () => []),
     decideMemoryProposal: vi.fn(),
+    listDesignSystems: vi.fn(),
+    readDesignSystem: vi.fn(),
+    saveDesignSystem: vi.fn(),
   };
 }
 

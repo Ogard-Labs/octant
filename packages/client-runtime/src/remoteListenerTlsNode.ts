@@ -8,7 +8,6 @@ import { createHash, type X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
-import { Readable } from "node:stream";
 import { connect as connectTls, type TLSSocket } from "node:tls";
 import { LISTENER_KEY_TRANSITION_HEADER } from "@octant/domain";
 import { listenerTrustAfterResponse } from "./listenerKeyTransition";
@@ -113,7 +112,15 @@ export const testOnlyListenerTls = {
  * listener throws a `TypeError`, as the platform `fetch` does. It never
  * follows a redirect and refuses a URL on any other origin.
  */
-export function createListenerFetch(options: ListenerConnectionOptions): typeof globalThis.fetch {
+/**
+ * The `fetch` shape a listener connection answers. It is spelled out rather
+ * than `typeof globalThis.fetch` because Bun's `fetch` type adds members
+ * (`preconnect`) that no listener connection has, and the CLI compiles this
+ * module under Bun's types.
+ */
+export type ListenerFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export function createListenerFetch(options: ListenerConnectionOptions): ListenerFetch {
   return createListenerFetchOver(options, SYSTEM_NETWORK);
 }
 
@@ -123,7 +130,7 @@ const BODYLESS_STATUSES: ReadonlySet<number> = new Set([101, 204, 205, 304]);
 function createListenerFetchOver(
   options: ListenerConnectionOptions,
   network: ListenerNetwork,
-): typeof globalThis.fetch {
+): ListenerFetch {
   let trust = options.trust;
   const remember = async (
     previous: ListenerOriginTrust,
@@ -218,7 +225,21 @@ function responseOf(incoming: IncomingMessage): Response {
     incoming.resume();
     return new Response(null, { status, headers });
   }
-  return new Response(Readable.toWeb(incoming) as ReadableStream<Uint8Array>, { status, headers });
+  // Read on demand, so a slow reader holds the socket back. A stream made by
+  // hand rather than `Readable.toWeb` has one type under both Node's and
+  // Bun's typings.
+  const chunks = incoming[Symbol.asyncIterator]();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await chunks.next();
+      if (next.done === true) controller.close();
+      else controller.enqueue(next.value as Buffer);
+    },
+    cancel() {
+      incoming.destroy();
+    },
+  });
+  return new Response(body, { status, headers });
 }
 
 async function connectListenerOver(

@@ -75,6 +75,8 @@
     "./work-delivery-policy": "./src/workDeliveryPolicy.ts",
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
     "./work-project-status-policy": "./src/workProjectStatusPolicy.ts",
+    "./design-system-policy": "./src/designSystemPolicy.ts",
+    "./canvas-design-system-policy": "./src/canvasDesignSystemPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
@@ -137,6 +139,8 @@
     "./command-credential-policy": "./src/commandCredentialPolicy.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

@@ -30,12 +30,17 @@
   content: "";
 }
 
-/* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
-   which is what tells it apart from the pointer. */
-.right-utility-dock__resize:hover::before,
-.right-utility-dock__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
+.right-utility-dock__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.right-utility-dock__resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
 }
 
 .right-utility-dock__surface {
@@ -78,6 +83,34 @@
   overflow: hidden;
   align-items: center;
   gap: 2px;
+}
+
+/* A lone labelled tool wider than the band cannot wrap away, so the row's
+   clip cut "Environment" mid-glyph. It gives way and its name ellipsizes. */
+.dock-quick-tools > .dock-quick-tools__tool[data-labelled="true"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dock-quick-tools__tool[data-labelled="true"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A band control is the 28px rail button's shape, whatever it holds: the
+   recipe's compact step drew these tools 24px tall at the compact radius,
+   beside square 28px window buttons at the control radius, and a label, an
+   icon, and a square sat together as three shapes. The control radius comes
+   from the button's own `rounded-lg`; an icon alone is square. */
+.dock-quick-tools__tool {
+  height: var(--oct-rail-button-h);
+}
+
+.dock-quick-tools__tool:not([data-labelled="true"]) {
+  width: var(--oct-rail-button-h);
+  padding: 0;
 }
 
 .dock-quick-tools__tool > svg {
@@ -244,6 +277,7 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .dock-card__chevron {
@@ -291,12 +325,23 @@
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A diff figure in a card row is the mono figure it is everywhere else, not a
+   name: it keeps the regular weight and the row's own line height. */
+.dock-card__label.diffstat {
+  font-weight: var(--oct-weight-regular);
+  line-height: inherit;
+}
+
+/* The fold row's own words are a hint, not a name: they keep the regular weight. */
 .dock-card__label--meta {
   color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 
 .dock-card__meta {
@@ -535,6 +580,23 @@
   white-space: nowrap;
 }
 
+/* A delivery head's status line is the one part that can outgrow a narrow dock
+   (280px is the dock's minimum). It drops to a row of its own and wraps there,
+   instead of holding its one-line width and pushing the title's label over
+   itself: measured at 280px, "Local only · GitHub review mutation unavailable"
+   ran 14px past the edge and the "Review" label overlapped it. Wide docks fit
+   both on one line, so nothing moves there. */
+.right-utility-dock__tool .code-delivery-pane__toolbar {
+  flex-wrap: wrap;
+  row-gap: var(--oct-space-1);
+}
+
+.right-utility-dock__tool .code-delivery-pane__toolbar > p {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
   flex: none;
   padding: 0;
@@ -639,9 +701,13 @@
   content: "";
 }
 
-.bottom-utility-panel__resize:hover::before,
-.bottom-utility-panel__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+.bottom-utility-panel__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.bottom-utility-panel__resize:active::before {
+  height: 2px;
+  background: var(--oct-meta);
 }
 
 .bottom-utility-panel__toolbar {
@@ -707,20 +773,20 @@
   border-radius: var(--oct-radius-md);
 }
 
-/* A dialog shares the layer menus, popovers and pickers float on (`z-50`),
-   so whichever opened last paints on top. At 51 the dialog outranked every
-   popup opened from inside it: in the narrow dock sheet the Canvas version
-   history and More menu opened behind the sheet, out of reach. */
+/* A dialog stands on the floating layer and every popup stands above it, so
+   a popup opened from inside a dialog is never behind it: in the narrow dock
+   sheet the Canvas version history and More menu once opened behind the sheet,
+   out of reach. A notice sits between the two. */
 .octant-dialog__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -761,14 +827,14 @@
    its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
 .octant-sheet__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -793,6 +859,68 @@
   pointer-events: auto;
 }
 
+/* Settings while it loads: its rail and a page in outline, so the rail and
+   the page title are roughly where they will be and nothing swaps places
+   when Settings arrives. These rules are here, not in settings.css, because
+   that stylesheet arrives with Settings itself: styled from it, the outline
+   was a blank panel for exactly the moment it exists to cover. The frame
+   repeats Settings' own columns for that reason. */
+.settings-loading {
+  display: grid;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  grid-template-columns: var(--octant-sidebar-width, 248px) minmax(0, 1fr);
+}
+
+.settings-loading[data-presentation="sheet"] {
+  height: 100%;
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.settings-loading[data-presentation="narrow"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-loading__rail,
+.settings-loading__page {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oct-space-4);
+}
+
+.settings-loading__rail {
+  padding: var(--oct-space-6) var(--oct-space-5);
+  border-right: 1px solid var(--oct-border);
+}
+
+.settings-loading__page {
+  padding: var(--oct-space-12) var(--oct-space-8);
+}
+
+.settings-loading__title {
+  width: 96px;
+  height: 12px;
+  margin-bottom: var(--oct-space-2);
+}
+
+.settings-loading__rail-row {
+  width: 64%;
+  height: 12px;
+}
+
+.settings-loading__rail-row:nth-child(even) {
+  width: 48%;
+}
+
+.settings-loading__page-row {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--oct-radius-md);
+}
+
 /* A sheet opened in a wide window stays a sheet when the window is made
    narrow, where there is no room around it: it then fills the window. */
 @media (max-width: 960px) {
@@ -806,19 +934,6 @@
     border: 0;
     border-radius: 0;
   }
-}
-
-/* The persisted app preference must stop entrance motion just like the OS
-   preference, including feature-owned animations on the shared popup. */
-html[data-octant-reduced-motion="true"]
-  :is(
-    .octant-dialog__popup,
-    .octant-dialog__backdrop,
-    .octant-sheet__popup,
-    .octant-sheet__backdrop
-  ) {
-  animation: none;
-  transition: none;
 }
 
 /* One inset for every dialog. The recipe's own padding is a rem step, which

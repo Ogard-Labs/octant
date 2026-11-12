@@ -155,6 +155,28 @@ html:not([data-octant-reduced-transparency="true"])
   background: color-mix(in srgb, var(--octant-workspace), var(--octant-text-primary) 12%);
 }
 
+/* The code editor and the terminal draw their scrollbars as elements of their
+   own, so the one scrollbar rule in styles.css cannot reach them. Their
+   runtimes ask each library for the thumb's colours, and the editor for its
+   lane and thumb width (code/scrollbarTreatment.ts). These two rules give the
+   thumb the shape neither library has an option for, and they hold on the
+   libraries' own class names: `.monaco-scrollable-element > .scrollbar >
+   .slider` from monaco-editor and `.xterm-scrollable-element > .scrollbar >
+   .slider` from @xterm/xterm. */
+.monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: var(--oct-radius-pill);
+}
+
+/* The editor's thumb is narrower than its lane by option. The terminal's
+   fills its lane and has no such option, so it is cut here to the same
+   picture: 2px clear at the edge, and everything further than 8px from the
+   edge cut away, which leaves a 6px thumb however wide the engine's lane is. */
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  clip-path: inset(
+    0 calc(var(--oct-space-1) / 2) 0 calc(100% - var(--oct-space-2)) round var(--oct-radius-pill)
+  );
+}
+
 .code-terminal-pane__actions-menu {
   position: absolute;
   z-index: 3;
@@ -364,7 +386,7 @@ html:not([data-octant-reduced-transparency="true"])
 .code-file-explorer__search input {
   height: 30px;
   padding: 0 32px 0 var(--oct-space-8);
-  border-color: var(--oct-border);
+  border-color: var(--input);
   background: var(--oct-surface);
 }
 
@@ -2101,17 +2123,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   width: 100%;
 }
 
-/* The scroll frame and its padding are the system's `.transcript-scroll`.
-   Text scrolling under the frame's top edge fades out over the frame's own
-   top padding: cut off sharp right under the waiting row, half a line of the
-   answer read as printed over that row. At rest the first line sits below
-   the fade. */
+/* The scroll frame, its padding, and the fade at its edges are the system's
+   `.transcript-scroll`. (Code alone faded the top: cut off sharp right under
+   the waiting row, half a line of the answer read as printed over that row.) */
 .code-thread-workspace__conversation {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  mask-image: linear-gradient(to bottom, transparent, var(--oct-fg) var(--oct-space-3));
 }
 
 /* The frame is a flex column, and a windowed list holds only absolutely
@@ -2482,7 +2501,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests__search input {
   height: 30px;
   padding-right: 32px;
-  border-color: var(--oct-border);
+  border-color: var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
 }

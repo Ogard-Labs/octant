@@ -33,7 +33,7 @@ export interface AppBackgroundSettingsProps {
   readonly onChange: (next: AppBackground) => void;
 }
 
-type Choice = "builtin" | "photo" | "characters" | "pixels" | "none";
+type Choice = "builtin" | "photo" | "characters" | "pixels" | "flowing" | "none";
 
 /** A ground saved as the retired dot pattern draws nothing, and says so. */
 function choiceFor(kind: AppBackground["kind"]): Choice {
@@ -102,7 +102,11 @@ type Motion = "still" | "wave";
 function currentMotion(background: AppBackground): Motion {
   if (background.motion === "still") return "still";
   if (background.motion === "wave" || background.motion === "pulse") return "wave";
-  return background.kind === "characters" || background.kind === "pixels" ? "wave" : "still";
+  return background.kind === "characters" ||
+    background.kind === "pixels" ||
+    background.kind === "flowing"
+    ? "wave"
+    : "still";
 }
 
 const EFFECTS = [
@@ -144,7 +148,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const effect: AppBackgroundEffect = field && savedEffect === "none" ? "dither" : savedEffect;
   const printed = (picture && effect !== "none") || field;
   const motion = currentMotion(background);
-  const moves = printed || background.kind === "characters";
+  const moves = printed || background.kind === "characters" || background.kind === "flowing";
   // A photo dithered before the effect choice existed prints at 2 px and 4
   // colours. Moving one slider saves an explicit effect, which retires that
   // legacy reading, so the untouched slider's value is saved with it rather
@@ -181,7 +185,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "none" || kind === "characters" || kind === "pixels") {
+    if (kind === "none" || kind === "characters" || kind === "pixels" || kind === "flowing") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -234,7 +238,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, dithered pixels, or none."
+          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, dithered pixels, flowing colour, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -250,6 +254,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               { id: "photo", label: "Your photo" },
               { id: "characters", label: "Pulsing characters" },
               { id: "pixels", label: "Dithered pixels" },
+              { id: "flowing", label: "Flowing" },
               { id: "none", label: "None" },
             ]}
             value={choice}
@@ -537,7 +542,9 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               description={
                 picture
                   ? "Still keeps the print as it is. Wave sends a wave through its pixels when you click a start screen."
-                  : "Still holds one frame. Wave lets it drift and sends a wave out when you click a start screen."
+                  : background.kind === "flowing"
+                    ? "Still holds one frame. Wave lets the colour field keep drifting."
+                    : "Still holds one frame. Wave lets it drift and sends a wave out when you click a start screen."
               }
               label="Motion"
               scope="app"

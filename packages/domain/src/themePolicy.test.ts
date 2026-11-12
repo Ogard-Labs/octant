@@ -404,6 +404,29 @@ describe("application background policy", () => {
     expect(resolveAppBackground(settings).backgroundAnimated).toBe(false);
   });
 
+  it("lets the flowing field drift unless a person chose Still, reduced motion holds it, or increased contrast turns it off", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "flowing", effect: "dither" },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "flowing",
+      backgroundId: null,
+      backgroundAnimated: true,
+    });
+    const still = {
+      ...settings,
+      appBackground: { ...settings.appBackground, motion: "still" as const },
+    };
+    expect(resolveAppBackground(still).backgroundAnimated).toBe(false);
+    expect(resolveAppBackground(settings, true).backgroundAnimated).toBe(false);
+    expect(resolveAppBackground({ ...settings, reducedMotion: true }).backgroundAnimated).toBe(
+      false,
+    );
+    expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
   it("hands a gradient its light-theme picture beside the dark one", () => {
     const settings: ThemeSettings = {
       ...baseSettings,

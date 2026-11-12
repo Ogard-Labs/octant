@@ -62,6 +62,34 @@ describe("editor color projection", () => {
     });
   });
 
+  it("gives the editor's scrollbar thumb the roles the app's scrollbar takes, in both modes and under an override", () => {
+    const light = resolveEffectiveTokens({ ...DEFAULT_THEME_SETTINGS, mode: "light" }, false);
+    const dark = resolveEffectiveTokens({ ...DEFAULT_THEME_SETTINGS, mode: "dark" }, false);
+
+    expect(resolveEditorColorProjection(light)).toMatchObject({
+      scrollbarThumb: light.tokens["border-strong"],
+      scrollbarThumbHover: light.tokens["divider-strong"],
+    });
+    expect(resolveEditorColorProjection(dark)).toMatchObject({
+      scrollbarThumb: "#4d4d4d",
+      scrollbarThumbHover: "#8a8a8a",
+    });
+    expect(
+      resolveEditorColorProjection(
+        resolveEffectiveTokens(
+          {
+            ...DEFAULT_THEME_SETTINGS,
+            mode: "dark",
+            semanticOverrides: [
+              decodeThemeSemanticOverrideEntry({ role: "border-strong", color: "#6a6a6a" }),
+            ],
+          },
+          false,
+        ),
+      ).scrollbarThumb,
+    ).toBe("#6a6a6a");
+  });
+
   it("falls back to the mode's default for a role a theme does not carry", () => {
     const projection = resolveEditorColorProjection({ mode: "dark", tokens: {} });
 

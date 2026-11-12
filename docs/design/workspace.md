@@ -238,7 +238,7 @@ in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
-rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
+rows split into **Context** (Memory, Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
 rows is not drawn. **Guardrail level** shows the level the Project's threads
@@ -1149,13 +1149,20 @@ sit side by side without giving any thread a view of another's. The tabs use
 the shared tab rail, which wraps rather than scrolls so no tab hides off the
 edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
-page's picture with the thread, and a thread that kept screenshots shows a
+page's picture with the thread, and, in a Work or Code thread's Browser, a
+**Draw on page** button (a pen-line icon beside it) that keeps the same capture,
+shows it still in place of the page, and floats a drawing bar ("Drawing tools":
+Select, Pen, Box, Arrow, Text, one ink control, one stroke toggle, Undo, Redo,
+Delete, then **Add to chat** and **Discard drawing**) over its bottom centre; **Add to chat** puts the
+marked-up picture in that thread's composer as an ordinary image and sends
+nothing, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
 An agent's recording sits in the strip and the panel like a screenshot, still,
 with a play mark and its length, and plays when the person opens it.
-The rules are in [Browser captures](browser-captures.md) and
+The rules are in [Browser captures](browser-captures.md),
+[Marking up a capture](browser-captures.md#marking-up-a-capture) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device

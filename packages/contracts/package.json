@@ -40,9 +40,11 @@
     "./work-board": "./src/workBoard.ts",
     "./work-overview": "./src/workOverview.ts",
     "./work-project-status": "./src/workProjectStatus.ts",
+    "./design-systems": "./src/designSystems.ts",
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
     "./pending-requests": "./src/pendingRequests.ts",
+    "./agent-access": "./src/agentAccess.ts",
     "./fleet-activity": "./src/fleetActivity.ts",
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
@@ -82,6 +84,7 @@
     "./provider-tooling": "./src/providerTooling.ts",
     "./protected-files": "./src/protectedFiles.ts",
     "./archived-worktrees": "./src/archivedWorktrees.ts",
+    "./disk-cleanup": "./src/diskCleanup.ts",
     "./person-memory": "./src/personMemory.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
@@ -177,6 +180,8 @@
     "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

@@ -8,6 +8,7 @@ import {
   type ComponentProps,
   type MutableRefObject,
 } from "react";
+import { menuGroupLabel, menuRow } from "./menu-row";
 import { cn } from "./utils";
 
 /** Whether the open in progress came from the keyboard, set by the root, read by the popup. */
@@ -103,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-50 min-w-48 origin-(--transform-origin) rounded-xl bg-popover p-1.5 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none transition-[opacity,scale] duration-150 ease-out data-ending-style:scale-98 data-ending-style:opacity-0 data-starting-style:scale-98 data-starting-style:opacity-0 motion-reduce:transition-none",
+        "z-[var(--oct-z-popup)] min-w-48 rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"
@@ -112,8 +113,7 @@ export function DropdownMenuPopup({
   );
 }
 
-const dropdownMenuItemClassName =
-  "relative flex min-h-7.5 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
+const dropdownMenuItemClassName = cn(menuRow, "window-no-drag");
 
 export function DropdownMenuPortal(props: ComponentProps<typeof MenuPrimitive.Portal>) {
   return <MenuPrimitive.Portal {...props} />;
@@ -126,7 +126,7 @@ export function DropdownMenuPositioner({
   return (
     <MenuPrimitive.Positioner
       align="start"
-      className={cn("z-50 outline-none window-no-drag", className)}
+      className={cn("z-[var(--oct-z-popup)] outline-none window-no-drag", className)}
       side="bottom"
       sideOffset={4}
       {...props}
@@ -142,12 +142,7 @@ export function DropdownMenuGroupLabel({
   className,
   ...props
 }: ComponentProps<typeof MenuPrimitive.GroupLabel>) {
-  return (
-    <MenuPrimitive.GroupLabel
-      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", className)}
-      {...props}
-    />
-  );
+  return <MenuPrimitive.GroupLabel className={cn(menuGroupLabel, className)} {...props} />;
 }
 
 export function DropdownMenuItem({
@@ -247,7 +242,7 @@ export function DropdownMenuSubPopup({
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
         align="start"
-        className="z-50 outline-none window-no-drag"
+        className="z-[var(--oct-z-popup)] outline-none window-no-drag"
         side="right"
         sideOffset={0}
       >

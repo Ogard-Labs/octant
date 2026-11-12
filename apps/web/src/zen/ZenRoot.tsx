@@ -16,6 +16,9 @@ export interface ZenRootProps {
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
+  // A surface that handles its own keys (Browser drawing's undo and redo, on an
+  // SVG) is treated like a text field: Mod+Shift+Z there is its redo, not Zen.
+  if (target instanceof Element && target.closest("[data-owns-chords]") !== null) return true;
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return (

@@ -1,6 +1,7 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { runCharacterField } from "./appBackdropCharacters";
+import { runFlowingField } from "./appBackdropFlowing";
 import { runMovingPrint } from "./appBackdropPrint";
 import {
   decodePhoto,
@@ -33,6 +34,8 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   const photoCanvas = useRef<HTMLCanvasElement>(null);
   const charactersCanvas = useRef<HTMLCanvasElement>(null);
   const pixelsCanvas = useRef<HTMLCanvasElement>(null);
+  const flowingRoot = useRef<HTMLDivElement>(null);
+  const flowingCanvas = useRef<HTMLCanvasElement>(null);
   const wavesWithin = placement === "shell" ? START_SCREEN_SELECTOR : undefined;
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
@@ -137,6 +140,14 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     resolved.effect.levels,
   ]);
 
+  const flowing = resolved.kind === "flowing";
+  useEffect(() => {
+    const canvas = flowingCanvas.current;
+    const root = flowingRoot.current;
+    if (!flowing || canvas === null || root === null) return;
+    return runFlowingField(canvas, root, resolved.backgroundAnimated);
+  }, [flowing, resolved.backgroundAnimated]);
+
   if (!active) return null;
 
   const builtinUrl =
@@ -185,6 +196,17 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           data-animated={resolved.backgroundAnimated ? "true" : "false"}
           ref={pixelsCanvas}
         />
+      ) : null}
+      {flowing ? (
+        <div
+          className="app-backdrop__flowing"
+          data-animated={resolved.backgroundAnimated ? "true" : "false"}
+          ref={flowingRoot}
+        >
+          <canvas className="app-backdrop__flowing-canvas" ref={flowingCanvas} />
+          <div aria-hidden="true" className="app-backdrop__flowing-fallback" />
+          <div aria-hidden="true" className="app-backdrop__flowing-grain" />
+        </div>
       ) : null}
       {pictureSource === null ? null : (
         <canvas

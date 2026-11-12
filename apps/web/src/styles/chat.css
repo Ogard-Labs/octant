@@ -708,7 +708,7 @@
   padding: var(--oct-space-1) var(--oct-space-1);
   color: var(--oct-fg);
   background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
+  border: 1px solid var(--input);
   border-radius: 4px;
   font: inherit;
 }
@@ -918,15 +918,18 @@
 .thread-mention__list {
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  padding: var(--oct-menu-inset);
   margin: 0;
   list-style: none;
 }
 
+/* The shared menu row, as in the `/` command typeahead. */
 .thread-mention__option > button {
   width: 100%;
+  height: var(--oct-menu-row-h);
   justify-content: flex-start;
   gap: var(--oct-space-1);
+  padding-inline: var(--oct-menu-row-inset);
 }
 
 .thread-mention__meta {
@@ -1278,7 +1281,9 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 
 .transcript-find {
   position: absolute;
-  top: var(--oct-space-2);
+  /* Below the transcript's edge fade (one space-3), which dimmed the bar's top
+     edge while the transcript was scrolled. */
+  top: var(--oct-space-3);
   right: var(--oct-space-3);
   display: flex;
   align-items: center;

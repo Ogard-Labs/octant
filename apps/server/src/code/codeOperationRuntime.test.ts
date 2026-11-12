@@ -8936,6 +8936,7 @@ function runtimeFixture(options: {
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
+  designSystemContext?: Parameters<typeof createCodeOperationRuntime>[0]["designSystemContext"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["confirmAgentMessagesDelivered"];
@@ -9326,6 +9327,9 @@ function runtimeFixture(options: {
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.designSystemContext === undefined
+      ? {}
+      : { designSystemContext: options.designSystemContext }),
     ...(options.projectMemoryEntries === undefined
       ? {}
       : { projectMemoryEntries: options.projectMemoryEntries }),
@@ -9611,6 +9615,8 @@ function runtimeFixture(options: {
       });
     },
     runtimeWorkFailures,
+    /** The journal under the runtime, so a test can make an append fail. */
+    journal,
     /**
      * The store the service writes a turn's opening frame through, so a test
      * can put a prior turn on the journal the runtime reads.
@@ -10969,6 +10975,47 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
       }),
     );
     expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("tells a Code turn to follow the design system read from the folder it works in", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const designSystemContext = vi.fn(async () => ({
+    instructions: "Follow DESIGN.md.",
+    system: { key: "project-design-system", text: "Contents of DESIGN.md:\n\n# Acme" },
+  }));
+  const fixture = runtimeFixture({ provider: providerDriver(connection), designSystemContext });
+  try {
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(88),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([
+          expect.objectContaining({ kind: "instructions", text: "Follow DESIGN.md." }),
+          {
+            kind: "project-memory",
+            key: "project-design-system",
+            text: "Contents of DESIGN.md:\n\n# Acme",
+          },
+        ]),
+      }),
+    );
+    expect(designSystemContext).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ id: threadId }) }),
+    );
   } finally {
     await fixture.runtime.close();
     fixture.close();
@@ -13766,3 +13813,511 @@ const noSiblings: SiblingThreadSource = {
   projectThreads: () => [],
   readTranscript: async () => undefined,
 };
+
+describe("streamed reply text in a Code turn", () => {
+  async function streamingTurn(
+    id: number,
+    options: Omit<Parameters<typeof runtimeFixture>[0], "provider"> = {},
+    connectionOverrides: Partial<ProviderConnection> = {},
+  ) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = { ...providerConnection(queue), ...connectionOverrides };
+    const fixture = runtimeFixture({ ...options, provider: providerDriver(connection) });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const evidenceBefore = fixture.evidenceValues.size;
+    const offer = async (...events: Array<Parameters<typeof providerEvent>[0]>) => {
+      for (const event of events) await Effect.runPromise(Queue.offer(queue, providerEvent(event)));
+      // Let the runtime consume the queue without moving the batch window.
+      for (let turn = 0; turn < 20; turn += 1) await vi.advanceTimersByTimeAsync(0);
+    };
+    const frames = () => {
+      const replay = fixture.operationEvents.replay({
+        threadId,
+        operationId: operationId(id),
+        afterCursor: 0,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      if (replay.status !== "ok") throw new Error("journal replay failed");
+      return replay.frames;
+    };
+    const kinds = () => frames().map((frame) => frame.event.kind);
+    const texts = () =>
+      frames().flatMap((frame) =>
+        frame.event.kind === "provider-content"
+          ? [`${frame.event.channel}:${fixture.evidenceValues.get(frame.event.content.contentId)}`]
+          : [],
+      );
+    const terminalStates = () =>
+      frames().flatMap((frame) =>
+        frame.event.kind === "operation-state" &&
+        ["completed", "failed", "interrupted"].includes(frame.event.state)
+          ? [frame.event.state]
+          : [],
+      );
+    return {
+      fixture,
+      connection,
+      offer,
+      frames,
+      kinds,
+      texts,
+      terminalStates,
+      evidenceRows: () => fixture.evidenceValues.size - evidenceBefore,
+      finish: async () => {
+        vi.useRealTimers();
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    };
+  }
+
+  it("commits 50 chunks inside one window as one journal event and one evidence row", async () => {
+    const turn = await streamingTurn(301);
+    try {
+      const chunks = Array.from({ length: 50 }, (_, index) => `c${index} `);
+      await turn.offer(...chunks.map((text) => ({ kind: "text-delta" as const, text })));
+      expect(turn.kinds().filter((kind) => kind === "provider-content")).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(turn.texts()).toEqual([`message:${chunks.join("")}`]);
+      expect(turn.evidenceRows()).toBe(1);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals a tool event after the text that preceded it and before the text that follows", async () => {
+    const turn = await streamingTurn(302);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "before " },
+        { kind: "text-delta", text: "tool" },
+        { kind: "tool-start", toolCallId: "tool-1", toolName: "read" },
+        { kind: "text-delta", text: "after" },
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      const kinds = turn.kinds();
+      const first = kinds.indexOf("provider-content");
+      const tool = kinds.indexOf("tool-activity");
+      const last = kinds.lastIndexOf("provider-content");
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(tool).toBeGreaterThan(first);
+      expect(last).toBeGreaterThan(tool);
+      expect(turn.texts()).toEqual([
+        "message:before tool",
+        expect.stringMatching(/^message:\s*after$/),
+      ]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("keeps message, reasoning and message as three events in that order", async () => {
+    const turn = await streamingTurn(303);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "a" },
+        { kind: "reasoning-delta", text: "b" },
+        { kind: "text-delta", text: "c" },
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(turn.texts()).toEqual(["message:a", "reasoning:b", "message:c"]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it.each([
+    ["settles", { kind: "completed" as const }],
+    ["fails", { kind: "failed" as const, message: "Provider failed." }],
+    ["is interrupted", { kind: "interrupted" as const, message: "Stopped." }],
+  ])("journals the open text before the turn %s", async (_name, ending) => {
+    const turn = await streamingTurn(304);
+    try {
+      await turn.offer({ kind: "text-delta", text: "partial" }, ending);
+      const kinds = turn.kinds();
+      expect(turn.texts()).toEqual(["message:partial"]);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(kinds.lastIndexOf("operation-state"));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals the open text before an abort ends the turn", async () => {
+    const turn = await streamingTurn(305);
+    try {
+      await turn.offer({ kind: "text-delta", text: "partial" });
+      await turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(399),
+        threadId,
+        checkoutId,
+      });
+      await turn.offer();
+      const kinds = turn.kinds();
+      expect(turn.texts()).toEqual(["message:partial"]);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(kinds.lastIndexOf("operation-state"));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("stores the same conversation text a chunk-per-event journal would", async () => {
+    const turn = await streamingTurn(306);
+    try {
+      const chunks = ["Hel", "lo", ", ", "wor", "ld"];
+      for (const text of chunks) {
+        await turn.offer({ kind: "text-delta", text });
+        await vi.advanceTimersByTimeAsync(40);
+      }
+      await turn.offer({ kind: "completed" });
+      expect(
+        turn
+          .texts()
+          .map((text) => text.replace(/^message:/, ""))
+          .join(""),
+      ).toBe(chunks.join(""));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("fails the turn when a timer-driven flush hits evidence capacity", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(307, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      full = true;
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      await vi.advanceTimersByTimeAsync(100);
+      for (let step = 0; step < 20; step += 1) await vi.advanceTimersByTimeAsync(0);
+      const states = turn
+        .frames()
+        .flatMap((frame) => (frame.event.kind === "operation-state" ? [frame.event] : []));
+      expect(states).toContainEqual(
+        expect.objectContaining({
+          state: "failed",
+          failure: expect.objectContaining({ category: "unavailable" }),
+        }),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("leaves no timer pending once the turn has ended", async () => {
+    const turn = await streamingTurn(308);
+    try {
+      await turn.offer({ kind: "text-delta", text: "done" }, { kind: "completed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals text before an approval request and before a question", async () => {
+    const turn = await streamingTurn(309);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "before approval" },
+        {
+          kind: "approval-request",
+          requestId: "provider-approval-1",
+          action: "Bash",
+          description: "Bash · git status",
+        },
+      );
+      await turn.offer(
+        { kind: "text-delta", text: "before question" },
+        { kind: "user-input-request", requestId: "ask-1", prompt: "Which one?", options: [] },
+      );
+      const kinds = turn.kinds();
+      const approval = kinds.indexOf("approval-requested");
+      expect(approval).toBeGreaterThan(-1);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(approval);
+      expect(turn.texts()[0]).toBe("message:before approval");
+      const second = kinds.lastIndexOf("provider-content");
+      expect(turn.texts().at(-1)).toMatch(/^message:\s*before question$/);
+      expect(second).toBeGreaterThan(approval);
+      // Something follows the second text: the question it preceded.
+      expect(kinds.slice(second + 1).length).toBeGreaterThan(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("flushes an open burst when the runtime closes", async () => {
+    const turn = await streamingTurn(310);
+    try {
+      await turn.offer({ kind: "text-delta", text: "open burst" });
+      expect(turn.texts()).toEqual([]);
+      await turn.fixture.runtime.close();
+      expect(turn.texts()).toEqual(["message:open burst"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("writes nothing for a chunk that arrives after the turn settled", async () => {
+    const turn = await streamingTurn(311);
+    try {
+      await turn.offer({ kind: "text-delta", text: "done" }, { kind: "completed" });
+      const settled = turn.frames().length;
+      await turn.offer({ kind: "text-delta", text: "late" });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(turn.frames()).toHaveLength(settled);
+      expect(turn.texts()).toEqual(["message:done"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals exactly one terminal state when a cancel races a failed timer flush", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(312, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      full = true;
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      // Fire the timer, then cancel before the failed flush has finished.
+      vi.advanceTimersByTime(100);
+      const stopping = turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(398),
+        threadId,
+        checkoutId,
+      });
+      for (let step = 0; step < 40; step += 1) await vi.advanceTimersByTimeAsync(0);
+      await stopping;
+      expect(turn.terminalStates()).toHaveLength(1);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("keeps the lost-text note when a cancel follows a flush that already failed", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(317, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // A caller that swallows the refusal leaves the turn running with an
+      // empty burst, so the cancel below has nothing left to flush.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      await turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(395),
+        threadId,
+        checkoutId,
+      });
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("keeps the lost-text note when the provider interrupts the turn after a flush already failed", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(318, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // A caller that swallows the refusal leaves the turn running with the
+      // loss recorded and nothing to flush when the provider's stop arrives.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      full = false;
+      await turn.offer({ kind: "interrupted", message: "Stopped by the provider." });
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      const last = JSON.stringify(turn.frames().at(-1));
+      expect(last).toContain("Stopped by the provider.");
+      expect(last).toContain("storage is full");
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("fails the turn when the journal append, not the evidence put, fails during a flush", async () => {
+    const turn = await streamingTurn(313);
+    try {
+      const append = turn.fixture.journal.append.bind(turn.fixture.journal);
+      let failing = true;
+      vi.spyOn(turn.fixture.journal, "append").mockImplementation((input) => {
+        if (failing && JSON.stringify(input).includes("provider-content"))
+          throw new Error("journal unavailable");
+        return append(input);
+      });
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      await vi.advanceTimersByTimeAsync(100);
+      for (let step = 0; step < 20; step += 1) await vi.advanceTimersByTimeAsync(0);
+      failing = false;
+      expect(turn.terminalStates()).toEqual(["failed"]);
+      expect(turn.texts()).toEqual([]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("ends the turn as failed when a caller that swallows errors hit the failed flush", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(314, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // The reviewed-approval path swallows a journal refusal.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      full = false;
+      await turn.offer({ kind: "completed" });
+      expect(turn.terminalStates()).toEqual(["failed"]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("still stops the turn on a forced stop and records the loss when the flush fails", async () => {
+    let full = false;
+    let rows = 9000;
+    const gate = Effect.runSync(Deferred.make<void>());
+    const turn = await streamingTurn(
+      315,
+      {
+        evidencePut: (content) => {
+          if (full) throw new CodeEvidenceCapacityExceeded();
+          return storedEvidence(++rows, content);
+        },
+      },
+      {
+        interrupt: vi.fn(() => Deferred.await(gate)),
+        forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+      },
+    );
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // The cancel's flush fails; the forced stop that follows keeps that loss.
+      const stopping = turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(396),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(turn.connection.interrupt).toHaveBeenCalled());
+      const result = await turn.fixture.runtime.execute(windowId, {
+        kind: "force-stop-provider-turn",
+        operationId: operationId(397),
+        turnOperationId: operationId(315),
+        threadId,
+        checkoutId,
+      });
+      expect(result).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await turn.finish();
+    }
+  });
+
+  it("still stops the turn on the third denial and records the loss when the flush fails", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(316, {
+      approvalValidator: false,
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      for (const requestId of ["d-1", "d-2", "d-3"])
+        await turn.offer({
+          kind: "approval-request",
+          requestId,
+          action: "write",
+          description: `Modify src/${requestId}.ts`,
+        });
+      const approvals = turn
+        .frames()
+        .flatMap((frame) =>
+          frame.event.kind === "approval-requested" ? [frame.event.approvalId] : [],
+        );
+      expect(approvals).toHaveLength(3);
+      const answer = (index: number) =>
+        turn.fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(380 + index),
+          threadId,
+          checkoutId,
+          approvalId: approvals[index] ?? "",
+          decision: "denied",
+        });
+      await answer(0);
+      await answer(1);
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      expect(await answer(2)).toMatchObject({ state: "interrupted" });
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
+    } finally {
+      await turn.finish();
+    }
+  });
+});

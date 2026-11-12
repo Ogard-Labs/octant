@@ -13,6 +13,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { UsageWorkspace } from "../shell/deferredSurfaces";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { ShellSettingsSurface } from "../shell/ShellSettingsSurface";
+import { SurfaceLoading } from "../surface/SurfaceLoading";
 import type { useShellController } from "../shell/useShellController";
 import type { useBackgroundImageLibrary } from "../shell/useShellPresentation";
 import type { useThemeController } from "../theme/useThemeController";
@@ -102,6 +103,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     workSettings,
   } = props;
   const {
+    agentGrantClient,
     agentRunSettingsClient,
     automationNotificationClient,
     canvasClient,
@@ -112,6 +114,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     hostControlClient,
     protectedFilesClient,
     archivedWorktreesClient,
+    diskCleanupClient,
     personMemoryClient,
     localUsageHistoryClient,
     nativeHarnessClient,
@@ -203,13 +206,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
   };
 
   const usageSurface = (
-    <Suspense
-      fallback={
-        <div aria-label="Opening usage" className="workspace-rail-loading" role="status">
-          Opening usage…
-        </div>
-      }
-    >
+    <Suspense fallback={<SurfaceLoading label="Opening usage" measure="reading" />}>
       <UsageWorkspace
         client={usageDashboardClient}
         {...(localUsageHistoryClient === undefined
@@ -284,6 +281,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
       archivedWorktreesClient={archivedWorktreesClient}
+      diskCleanupClient={diskCleanupClient}
       personMemoryClient={personMemoryClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
@@ -293,6 +291,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(shieldServersClient === undefined ? {} : { shieldServersClient })}
       {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
+      agentGrantClient={agentGrantClient}
       codeProjectId={controller.workspace?.contextByMode.code.projectId ?? undefined}
       workProjectId={controller.workspace?.contextByMode.work.projectId ?? undefined}
       {...(props.onOpenServerProject === undefined

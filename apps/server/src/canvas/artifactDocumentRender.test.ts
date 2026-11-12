@@ -1512,3 +1512,22 @@ describe("a destination export near the approval card's limit", () => {
     expect(exported.body).toContain("[redacted]");
   });
 });
+
+describe("a Canvas that follows a design system", () => {
+  it("draws its charts in the design system's colours in an HTML export", () => {
+    const blocks = chartExampleBlocks.filter((block) => block.series.length > 1).slice(0, 1);
+    const plain = renderArtifactHtml(definition(blocks));
+    const branded = renderArtifactHtml({
+      ...definition(blocks),
+      designSystem: {
+        name: "Acme",
+        source: "DESIGN.md",
+        brand: { "color-primary": "#1a73e8", "color-secondary": "#0b8043" },
+      },
+    });
+    if (plain.kind !== "rendered" || branded.kind !== "rendered") throw new Error("not rendered");
+    expect(plain.body).not.toContain("#1a73e8");
+    expect(branded.body).toContain('fill="#1a73e8"');
+    expect(branded.body).toContain("#0b8043");
+  });
+});

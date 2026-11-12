@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { validateQuestionnaireAnswer } from "@octant/domain";
@@ -665,6 +666,16 @@ export interface CodeOperationRuntimeOptions {
    * or Work turn in the Project does. Absent gives none.
    */
   readonly projectMemoryEntries?: (thread: CodeThread) => ReadonlyArray<string>;
+  /**
+   * The Project's design system as this turn should see it, read from the
+   * folder the runtime works in (a worktree carries its own `DESIGN.md`).
+   * Absent, or undefined, gives none.
+   */
+  readonly designSystemContext?: (input: {
+    readonly thread: CodeThread;
+    readonly root: string;
+    readonly extraFolders: ReadonlyArray<string>;
+  }) => Promise<DesignSystemTurnContext | undefined>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -2542,6 +2553,8 @@ interface ActiveTurn {
   readonly providerRoot: string;
   readonly folderCurrent?: () => boolean;
   readonly checkoutRoot: string;
+  /** Read once as the turn starts, so `#launch` stays synchronous. */
+  readonly designSystem?: DesignSystemTurnContext;
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
@@ -2578,6 +2591,17 @@ interface ActiveTurn {
   readonly harnessQuestions: Set<string>;
   connection?: ProviderConnection;
   cursor: number;
+  /** Streamed text of one channel not yet journaled; see `#bufferDelta`. */
+  deltaBurst?: {
+    readonly channel: "message" | "reasoning";
+    readonly parts: string[];
+    bytes: number;
+    readonly timer: ReturnType<typeof setTimeout>;
+  };
+  /** Set once the turn has settled; a late chunk is dropped instead of re-arming a timer. */
+  closed?: boolean;
+  /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
+  deltaFlushFailure?: { readonly error: unknown };
   /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
   deniedApprovals: number;
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
@@ -3361,6 +3385,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // Extensions' tools act on this host; the server tool set is the turn's whole set.
       await input.extensionTools?.close?.().catch(() => undefined);
     }
+    const providerRoot = input.providerRoot ?? input.checkoutRoot;
+    const extraFolders = [
+      ...new Set([
+        ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
+        ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
+          ? [input.checkoutRoot]
+          : []),
+      ]),
+    ].filter((folder) => folder !== providerRoot);
+    // Read before the final admission check, which must not yield before the
+    // turn is owned. A server Project's folder is on another machine, so its
+    // design system is the runtime's to read there.
+    const designSystem = remoteThread
+      ? undefined
+      : await this.#options
+          .designSystemContext?.({ thread: input.thread, root: providerRoot, extraFolders })
+          .catch(() => undefined);
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (
       input.folderCurrent?.() === false ||
@@ -3401,6 +3442,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(feedback?.attachments ?? []),
     ];
     const active: ActiveTurn = {
+      ...(designSystem === undefined ? {} : { designSystem }),
       ...(inputGuards.length === 0
         ? {}
         : { inputsCurrent: () => inputGuards.every((current) => current()) }),
@@ -3427,19 +3469,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ? previous.sessionId
           : input.sessionId,
       requestedSessionId: input.sessionId,
-      providerRoot: input.providerRoot ?? input.checkoutRoot,
+      providerRoot,
       ...(input.folderCurrent === undefined ? {} : { folderCurrent: input.folderCurrent }),
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
-      extraFolders: [
-        ...new Set([
-          ...(this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? []),
-          ...(input.providerRoot !== undefined && input.providerRoot !== input.checkoutRoot
-            ? [input.checkoutRoot]
-            : []),
-        ]),
-      ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
+      extraFolders,
       driver,
       firstTurn:
         !priorTurn &&
@@ -3884,10 +3919,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active === undefined || active.state !== "running") return false;
     active.questions.add(input.questionId);
     active.harnessQuestions.add(input.questionId);
-    const frame = this.#events.append({
-      threadId: active.thread.id,
-      operationId: active.operationId,
-      expectedCursor: active.cursor,
+    const frame = this.#appendTurnEvent(active, {
       event: {
         kind: "input-requested",
         ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
@@ -3927,10 +3959,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active === undefined || (active.state !== "running" && active.state !== "waiting")) return;
     const summary = boundProviderSummary(input.summary) ?? "Tool call";
     try {
-      const frame = this.#events.append({
-        threadId: active.thread.id,
-        operationId: active.operationId,
-        expectedCursor: active.cursor,
+      const frame = this.#appendTurnEvent(active, {
         event: { kind: "approval-reviewed", summary, decision: input.decision },
       });
       active.cursor = frame.cursor;
@@ -3984,10 +4013,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       pendingCall.command !== undefined &&
       forgeShellChanges(pendingCall.command).length > 0
     ) {
-      const frame = this.#events.append({
-        threadId: active.thread.id,
-        operationId: active.operationId,
-        expectedCursor: active.cursor,
+      const frame = this.#appendTurnEvent(active, {
         event: {
           kind: "tool-activity",
           toolCallId: `forge-refusal:${requestId}`,
@@ -4404,10 +4430,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
-        const frame = this.#events.append({
-          threadId: active.thread.id,
-          operationId: active.operationId,
-          expectedCursor: active.cursor,
+        const frame = this.#appendTurnEvent(active, {
           event: {
             kind: "approval-requested",
             approvalId,
@@ -4486,10 +4509,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               return true;
             } finally {
               if (!active.approvals.has(requestId)) {
-                const frame = this.#events.append({
-                  threadId: active.thread.id,
-                  operationId: active.operationId,
-                  expectedCursor: active.cursor,
+                const frame = this.#appendTurnEvent(active, {
                   event: {
                     kind: "owner-approval-settled",
                     approvalId: CodeApprovalId.make(requestId),
@@ -4573,8 +4593,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active.deniedApprovals += 1;
     if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
       return answeredTurnState(active.state);
-    active.interruptMessage =
+    const lostText = this.#flushBeforeStop(active);
+    const deniedMessage =
       "Stopped after 3 denied tool requests in one turn. Send a new message to continue.";
+    active.interruptMessage =
+      lostText === undefined ? deniedMessage : `${deniedMessage} ${lostText}`;
     active.state = "interrupted";
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
@@ -4743,7 +4766,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       });
     }
     if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
-    active.interruptMessage = "The provider attempt was stopped by force.";
+    const lostText = this.#flushBeforeStop(active);
+    const forcedMessage = "The provider attempt was stopped by force.";
+    active.interruptMessage =
+      lostText === undefined ? forcedMessage : `${forcedMessage} ${lostText}`;
     active.state = "interrupted";
     this.#persistRuntimeWork(active, "interrupted");
     return turnState("interrupted");
@@ -4752,6 +4778,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
+    const lostText = this.#flushBeforeStop(active);
+    if (lostText !== undefined) {
+      active.interruptMessage =
+        active.interruptMessage === undefined ? lostText : `${active.interruptMessage} ${lostText}`;
+    }
     active.state = "interrupted";
     active.reviewCapture?.cancelPending();
     this.#revokeBrowserGrants(active);
@@ -4774,6 +4805,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.reviewCapture?.close();
+        // Shutdown loses only the open burst, as a crash would.
+        this.#flushBeforeStop(active);
+        active.closed = true;
         active.state = "interrupted";
         this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
@@ -5142,6 +5176,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(extraFolderInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
+      ...(active.designSystem === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: active.designSystem.instructions }]),
       ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
         kind: "instructions" as const,
         text: line.text,
@@ -5159,9 +5196,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? []
         : [{ kind: "person-memory" as const, text: personMemoryText }];
     // After person memory, as in Chat and Work, and counted with it.
-    const projectMemory = (this.#options.projectMemoryEntries?.(active.thread) ?? []).map(
-      (text) => ({ kind: "project-memory" as const, text }),
-    );
+    const projectMemory = [
+      ...(this.#options.projectMemoryEntries?.(active.thread) ?? []).map((text) => ({
+        kind: "project-memory" as const,
+        text,
+      })),
+      // Keyed, so a session that holds this file is sent it again only once it changed.
+      ...(active.designSystem?.system === undefined
+        ? []
+        : [
+            {
+              kind: "project-memory" as const,
+              key: active.designSystem.system.key,
+              text: active.designSystem.system.text,
+            },
+          ]),
+    ];
     const fullContext = [
       ...harnessContext,
       ...hostGuidance,
@@ -5253,30 +5303,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     }
                     event = { ...record, content };
                   }
-                  const handoff = this.#events.append({
-                    threadId: active.thread.id,
-                    operationId: active.operationId,
-                    expectedCursor: active.cursor,
+                  const handoff = this.#appendTurnEvent(active, {
                     event,
                   });
                   active.cursor = handoff.cursor;
                   delete active.pendingHandoff;
                 }
                 for (const record of active.pendingForkMerges ?? []) {
-                  const delivered = this.#events.append({
-                    threadId: active.thread.id,
-                    operationId: active.operationId,
-                    expectedCursor: active.cursor,
+                  const delivered = this.#appendTurnEvent(active, {
                     event: record,
                   });
                   active.cursor = delivered.cursor;
                 }
                 delete active.pendingForkMerges;
                 const resumeCursor = handle.resumeCursor ?? active.resumeCursor;
-                const frame = this.#events.append({
-                  threadId: active.thread.id,
-                  operationId: active.operationId,
-                  expectedCursor: active.cursor,
+                const frame = this.#appendTurnEvent(active, {
                   event: {
                     kind: "provider-session-ready",
                     sessionId: handle.sessionId,
@@ -5456,10 +5497,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   // A forced stop can carry its own reason over the runner's
                   // generic cancellation copy; the text is still redacted
                   // before it is journaled like any provider-authored event's.
-                  const reason =
+                  const stopReason =
                     outcome === "interrupted" && active.interruptMessage !== undefined
                       ? active.interruptMessage
                       : failure?.message;
+                  const reason =
+                    outcome === "completed" || outcome === "waiting"
+                      ? stopReason
+                      : withLostTextNote(active, stopReason);
                   const message =
                     reason === undefined
                       ? undefined
@@ -5511,7 +5556,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             outcome === "interrupted"
               ? {
                   category: "failed",
-                  message: active.interruptMessage ?? "Code turn was cancelled.",
+                  message:
+                    withLostTextNote(
+                      active,
+                      active.interruptMessage ?? "Code turn was cancelled.",
+                    ) ?? "Code turn was cancelled.",
                 }
               : evidenceCapacityFailure(error),
           );
@@ -5522,6 +5571,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       .finally(() => {
         clearInterval(folderWatch);
         active.reviewCapture?.close();
+        // A flush failure here has already marked the turn; the terminal state
+        // is journaled, so only the open burst is lost.
+        this.#flushBeforeStop(active);
+        active.closed = true;
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
@@ -5590,6 +5643,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {
+    if (event.category === "message" || event.category === "reasoning") {
+      this.#bufferDelta(active, event.category, event.text ?? " ");
+      return;
+    }
     const operationEvent = normalizedOperationEvent(
       event,
       active,
@@ -5598,6 +5655,108 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     );
     if (operationEvent === undefined) return;
     this.#noteHarnessRetry(active, operationEvent);
+    // Text that could not be journaled must not sit under a completed turn.
+    const lostText = active.deltaFlushFailure;
+    const journaled: CodeOperationEvent =
+      operationEvent.kind === "operation-state" &&
+      operationEvent.state === "completed" &&
+      lostText !== undefined
+        ? {
+            kind: "operation-state",
+            state: "failed",
+            ...optionalFailure(evidenceCapacityFailure(lostText.error)),
+          }
+        : operationEvent;
+    const frame = this.#appendTurnEvent(active, { event: journaled });
+    active.cursor = frame.cursor;
+    if (journaled.kind === "operation-state") {
+      active.lastPersistedState = journaled.state;
+      active.lastPersistedFailure = journaled.failure?.message;
+    }
+  }
+
+  /**
+   * Holds streamed reply text so one burst commits once, not once per chunk.
+   * Every journal commit is fully synced, and a long reply streams hundreds of
+   * chunks a second. A buffer holds one channel; the other channel, any other
+   * event, and the end of the turn flush it first, so nothing is journaled
+   * ahead of text that arrived before it.
+   */
+  #bufferDelta(active: ActiveTurn, channel: "message" | "reasoning", text: string): void {
+    // A chunk after the turn settled has no operation left to append to, and a
+    // timer armed for it would outlive the turn.
+    if (active.closed === true) return;
+    if (active.state !== "running" && active.state !== "waiting") return;
+    if (
+      active.lastPersistedState !== undefined &&
+      active.lastPersistedState !== "running" &&
+      active.lastPersistedState !== "waiting"
+    )
+      return;
+    if (active.deltaBurst !== undefined && active.deltaBurst.channel !== channel)
+      this.#flushDelta(active);
+    if (active.deltaBurst === undefined) {
+      const timer = setTimeout(() => {
+        try {
+          this.#flushDelta(active);
+        } catch (error) {
+          // No runner call is on the stack to receive the throw, so the turn
+          // fails here, as it would have on the chunk that overflowed.
+          void this.#failOnTimedFlush(active, error);
+        }
+      }, STREAMED_DELTA_BATCH_WINDOW_MS);
+      timer.unref?.();
+      active.deltaBurst = { channel, parts: [], bytes: 0, timer };
+    }
+    active.deltaBurst.parts.push(text);
+    active.deltaBurst.bytes += text.length;
+    if (active.deltaBurst.bytes >= STREAMED_DELTA_BATCH_MAX_CHARS) this.#flushDelta(active);
+  }
+
+  async #failOnTimedFlush(active: ActiveTurn, error: unknown): Promise<void> {
+    const stillOpen = (): boolean =>
+      (active.state === "running" || active.state === "waiting") &&
+      (active.lastPersistedState === undefined ||
+        active.lastPersistedState === "running" ||
+        active.lastPersistedState === "waiting");
+    if (!stillOpen()) return;
+    // The change list goes in ahead of the terminal state, as for any outcome.
+    await this.#recordChangedFiles(active);
+    // A cancel or forced stop may have settled the turn while that await ran.
+    if (!stillOpen()) return;
+    try {
+      this.#persistOutcome(active, "failed", evidenceCapacityFailure(error));
+    } catch {
+      active.state = "failed";
+    }
+    active.abort.abort();
+  }
+
+  /**
+   * Journals the open burst, if any, as one evidence row and one event. The
+   * burst stays until both writes land; on failure it is abandoned and the
+   * turn is marked so no caller, however it handles the throw, can let the
+   * turn report `completed` with text missing.
+   */
+  #flushDelta(active: ActiveTurn): void {
+    try {
+      this.#writeBurst(active);
+    } catch (error) {
+      this.#abandonBurst(active);
+      active.deltaFlushFailure ??= { error };
+      throw error;
+    }
+  }
+
+  #writeBurst(active: ActiveTurn): void {
+    const burst = active.deltaBurst;
+    if (burst === undefined) return;
+    const operationEvent: CodeOperationEvent = {
+      kind: "provider-content",
+      channel: burst.channel,
+      content: this.#options.evidence.put(burst.parts.join("")),
+    };
+    this.#noteHarnessRetry(active, operationEvent);
     const frame = this.#events.append({
       threadId: active.thread.id,
       operationId: active.operationId,
@@ -5605,10 +5764,41 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       event: operationEvent,
     });
     active.cursor = frame.cursor;
-    if (operationEvent.kind === "operation-state") {
-      active.lastPersistedState = operationEvent.state;
-      active.lastPersistedFailure = operationEvent.failure?.message;
+    this.#abandonBurst(active);
+  }
+
+  #abandonBurst(active: ActiveTurn): void {
+    const burst = active.deltaBurst;
+    if (burst === undefined) return;
+    clearTimeout(burst.timer);
+    delete active.deltaBurst;
+  }
+
+  /**
+   * Flushes ahead of a stop. The stop still lands when the write fails, so the
+   * loss is returned for the stop's own reason instead of thrown.
+   */
+  #flushBeforeStop(active: ActiveTurn): string | undefined {
+    try {
+      this.#writeBurst(active);
+    } catch (error) {
+      this.#abandonBurst(active);
+      active.deltaFlushFailure ??= { error };
     }
+    // An earlier timer flush may have failed already, leaving nothing to write
+    // here; the stop still owes the person the note.
+    return lostTextNote(active);
+  }
+
+  /** The one way a turn's events reach the journal, behind any open burst. */
+  #appendTurnEvent(active: ActiveTurn, input: { readonly event: CodeOperationEvent }) {
+    this.#flushDelta(active);
+    return this.#events.append({
+      threadId: active.thread.id,
+      operationId: active.operationId,
+      expectedCursor: active.cursor,
+      event: input.event,
+    });
   }
 
   /**
@@ -5704,10 +5894,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #publishReview(active: ActiveTurn, preview: CodeTurnReviewPreview): void {
-    const frame = this.#events.append({
-      threadId: active.thread.id,
-      operationId: active.operationId,
-      expectedCursor: active.cursor,
+    const frame = this.#appendTurnEvent(active, {
       event: { kind: "conversation-turn-review-preview", preview },
     });
     active.cursor = frame.cursor;
@@ -5849,6 +6036,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const diff = this.#options.evidence.put(bounded.text, {
       truncated: bounded.truncated || result.capture.diff.truncated,
     });
+    // The capture's cursor must equal its own event's cursor, so journal any
+    // buffered reply text first; flushing later would advance the cursor past it.
+    this.#flushDelta(active);
     const capture = decodeCodeTurnReviewCapture({
       checkoutId: active.thread.checkoutId,
       version: (active.reviewLatest?.version ?? 0) + 1,
@@ -5879,10 +6069,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           const changedFiles =
             active.reviewFinalCaptured === true ? active.reviewLatest?.changedFiles : undefined;
           if (changedFiles === undefined || changedFiles.total === 0) return;
-          const frame = this.#events.append({
-            threadId: active.thread.id,
-            operationId: active.operationId,
-            expectedCursor: active.cursor,
+          const frame = this.#appendTurnEvent(active, {
             event: { kind: "conversation-turn-changed-files", changedFiles },
           });
           active.cursor = frame.cursor;
@@ -5916,10 +6103,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         if (result.status !== "ready") return;
         const changedFiles = turnChangedFiles(result.changes);
         if (changedFiles === undefined) return;
-        const frame = this.#events.append({
-          threadId: active.thread.id,
-          operationId: active.operationId,
-          expectedCursor: active.cursor,
+        const frame = this.#appendTurnEvent(active, {
           event: { kind: "conversation-turn-changed-files", changedFiles },
         });
         active.cursor = frame.cursor;
@@ -5935,18 +6119,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     outcome: CodeTurnOutcome,
     failure?: CodeOperationFailure,
   ): void {
+    if (outcome === "completed" && active.deltaFlushFailure !== undefined) {
+      outcome = "failed";
+      failure = evidenceCapacityFailure(active.deltaFlushFailure.error);
+    }
+    // Only a lost-text failure keeps its terminal state: the runner settles the
+    // aborted turn after that failure was journaled, and its `interrupted` must
+    // not stack on it. Every other turn journals a later, different outcome as
+    // it always did.
+    const journaledTerminal =
+      active.deltaFlushFailure !== undefined &&
+      (active.lastPersistedState === "completed" ||
+        active.lastPersistedState === "failed" ||
+        active.lastPersistedState === "interrupted")
+        ? active.lastPersistedState
+        : undefined;
+    const supersededTerminal = journaledTerminal !== undefined && journaledTerminal !== outcome;
+    if (journaledTerminal !== undefined) outcome = journaledTerminal;
     active.state = outcome;
     if (outcome === "failed" || outcome === "interrupted") this.#revokeBrowserGrants(active);
     // The provider's own terminal event already journaled this state, reason
     // and all; a second frame would only repeat it. The settle below is not
     // part of that dedupe: the board reads runtime work, not this journal.
     const alreadyJournaled =
-      active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message;
+      supersededTerminal ||
+      (active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message);
     if (!alreadyJournaled) {
-      const frame = this.#events.append({
-        threadId: active.thread.id,
-        operationId: active.operationId,
-        expectedCursor: active.cursor,
+      const frame = this.#appendTurnEvent(active, {
         event: {
           kind: "operation-state",
           state: outcome,
@@ -5995,6 +6194,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     );
   }
+}
+
+/** Streamed text of one channel is journaled at most this often. */
+const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
+/** A burst this long flushes early, well under the evidence bound. */
+const STREAMED_DELTA_BATCH_MAX_CHARS = 256 * 1024;
+
+function optionalFailure(failure: CodeOperationFailure | undefined) {
+  return failure === undefined ? {} : { failure };
 }
 
 function evidenceCapacityFailure(error: unknown): CodeOperationFailure | undefined {
@@ -6223,7 +6431,7 @@ function normalizedOperationEvent(
     // The provider's sentence is the only reason the person will ever see, so
     // the journaled frame carries it; a forced stop's own reason wins over the
     // provider's generic cancellation copy, exactly like the outcome path.
-    const reason = active.interruptMessage ?? event.text;
+    const reason = withLostTextNote(active, active.interruptMessage ?? event.text);
     const message =
       reason === undefined
         ? undefined
@@ -6240,7 +6448,9 @@ function normalizedOperationEvent(
   // without it the transcript said "The provider turn failed" and nothing
   // else, whatever the driver had refused with.
   if (event.category === "failure") {
-    const message = event.text === undefined ? undefined : boundProviderFailureMessage(event.text);
+    const failureText = withLostTextNote(active, event.text);
+    const message =
+      failureText === undefined ? undefined : boundProviderFailureMessage(failureText);
     return {
       kind: "operation-state",
       state: "failed",
@@ -6248,6 +6458,28 @@ function normalizedOperationEvent(
     };
   }
   return undefined;
+}
+
+/** The stop's note that streamed reply text was lost, once any flush has failed. */
+function lostTextNote(active: ActiveTurn): string | undefined {
+  if (active.deltaFlushFailure === undefined) return undefined;
+  return (
+    evidenceCapacityFailure(active.deltaFlushFailure.error)?.message ??
+    "Some streamed reply text could not be saved."
+  );
+}
+
+/**
+ * A stop's reason with the lost-text note appended once. Stops that settle
+ * through the runner (the folder going away, a provider-reported failure)
+ * never pass #flushBeforeStop, so the note is added where the terminal state
+ * is built; a reason that already carries it is left alone.
+ */
+function withLostTextNote(active: ActiveTurn, reason: string | undefined): string | undefined {
+  const note = lostTextNote(active);
+  if (note === undefined) return reason;
+  if (reason === undefined) return note;
+  return reason.includes(note) ? reason : `${reason} ${note}`;
 }
 
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";

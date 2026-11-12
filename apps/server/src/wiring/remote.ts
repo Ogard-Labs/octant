@@ -103,6 +103,18 @@ import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
 import { createWorkDelegationHost } from "../hub/workDelegationHost";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
+import { AgentAccessService } from "../agentAccess/agentAccessService";
+import { createAgentAccessAdministrationRouteHandler } from "../agentAccess/agentAccessAdministrationRoutes";
+import {
+  createAgentGrantRouteHandler,
+  type AgentGrantRoutes,
+} from "../agentAccess/agentGrantRoutes";
+import { createAgentAccessListenerRouteHandler } from "../agentAccess/agentAccessRoutes";
+import {
+  createAgentSession,
+  type AgentSessionDependencies,
+} from "../agentAccess/agentAccessSession";
+import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
@@ -217,10 +229,11 @@ const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
-export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void } & Pick<
-  ServerStart,
-  "options" | "persistence" | "serve" | "startedAt" | "version"
-> &
+export type RemoteDependencies = {
+  readonly onSecretStoreLinkChange?: () => void;
+  /** Bound here once the agent access service exists; the product chain asks it. */
+  readonly agentGrantRouteSlot: { readonly bind: (routes: AgentGrantRoutes) => void };
+} & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
   Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<
     AuthorityWiring,
@@ -536,6 +549,7 @@ export function wireRemote(deps: RemoteDependencies) {
               return webOrigin === undefined ? [] : [webOrigin];
             })),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
+        agentAccess: (request, facts) => agentAccessListenerRoutes(request, facts),
         serve: options.remoteServe ?? serve,
         config,
       });
@@ -1963,6 +1977,130 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeSignIn: spokeSignInService,
     record: recordHubMembership,
   });
+  // Agent access: an agent on another machine on the person's own network,
+  // held to a grant the person makes here (docs/design/agent-access.md).
+  const agentAccessService = new AgentAccessService({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    uuid: randomUUID,
+    listener: () => {
+      const status = privateListenerController.status();
+      if (!status.enabled || status.state !== "ready" || status.origin === null) return undefined;
+      return {
+        origin: status.origin,
+        ...(status.tlsPin === null ? {} : { pin: status.tlsPin }),
+        hostId: String(resolveRemoteGatewayServices().hostId),
+      };
+    },
+    projectType: (projectId) => {
+      try {
+        const project = persistence.readProject(decodeProjectId(projectId));
+        return project?.lifecycle === "active" ? project.type : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  });
+  agentAccessService.reconcileExpired();
+  setInterval(() => agentAccessService.reconcileExpired(), 60 * 60 * 1_000).unref();
+  const agentSessionDependencies: AgentSessionDependencies = {
+    service: agentAccessService,
+    dispatch: authenticatedProductDispatch,
+    hostId: () => String(resolveRemoteGatewayServices().hostId),
+    threadProject: (threadId) => {
+      try {
+        const chat = persistence.readChatThread(decodeChatThreadId(threadId));
+        if (chat !== undefined) {
+          return chat.projectId === undefined ? {} : { projectId: String(chat.projectId) };
+        }
+      } catch {
+        // Not a Chat thread id; try the other modes.
+      }
+      try {
+        const code = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (code !== undefined) return { projectId: String(code.projectId) };
+      } catch {
+        // Not a Code thread id either.
+      }
+      const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
+      return work === undefined ? undefined : { projectId: String(work.projectId) };
+    },
+    threadAccess: (threadId) => {
+      try {
+        const chat = persistence.readChatThread(decodeChatThreadId(threadId));
+        if (chat !== undefined) return { kind: "chat", modelId: String(chat.modelId) };
+      } catch {
+        // Not a Chat thread id; try the other modes.
+      }
+      try {
+        const code = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (code !== undefined) {
+          return {
+            kind: "code",
+            modelId: String(code.modelId),
+            executionPolicy: code.executionPolicy,
+            autoApprove: code.autoApprove === true,
+            fullAccessSandbox: code.fullAccessSandbox === true,
+          };
+        }
+      } catch {
+        // Not a Code thread id either.
+      }
+      const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
+      return work === undefined
+        ? undefined
+        : {
+            kind: "work",
+            modelId: String(work.modelId),
+            access: work.access,
+            fullAccessSandbox: work.fullAccessSandbox === true,
+          };
+    },
+    markOutsideContent: (threadId, grant) => {
+      externalContentIngestionStore.record({
+        threadId,
+        provenance: { origin: "external-content", sourceLabel: "outside-agent" },
+        contentReference: `agent-access:${String(grant.grantId)}`,
+        correlationId: randomUUID(),
+        authorized: true,
+      });
+    },
+  };
+  const agentAccessListenerRoutes = createAgentAccessListenerRouteHandler({
+    service: agentAccessService,
+    session: agentSessionDependencies,
+    version,
+  });
+  const stopAgentGrantTurns = async (grantId: string): Promise<void> => {
+    const grant = agentAccessService.read(grantId);
+    if (grant === undefined) return;
+    const session = createAgentSession({
+      grant,
+      signal: new AbortController().signal,
+      deps: agentSessionDependencies,
+      stopOnly: true,
+    });
+    const threadIds = new Set([
+      ...agentAccessService.threadsOf(grantId).map((thread) => thread.threadId),
+      ...agentAccessService.turnThreadsOf(grantId).map((thread) => thread.threadId),
+    ]);
+    for (const threadId of threadIds) {
+      await stopAgentTurn(session, threadId).catch(() => undefined);
+    }
+  };
+  const agentAccessAdministrationRoutes = createAgentAccessAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    service: agentAccessService,
+    stopRunningTurns: stopAgentGrantTurns,
+  });
+  deps.agentGrantRouteSlot.bind(
+    createAgentGrantRouteHandler({
+      service: agentAccessService,
+      windowAuthorityStore,
+      stopRunningTurns: stopAgentGrantTurns,
+    }),
+  );
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
@@ -2360,6 +2498,7 @@ export function wireRemote(deps: RemoteDependencies) {
     supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
+    agentAccessAdministrationRoutes,
     privateListenerAdministrationRoutes,
     privateListenerController,
     privateListenerSetting,

@@ -205,7 +205,9 @@ export interface CanvasAgentToolPort {
    * model names, and read without a window so describe stays free of window
    * state. Absent on a host without Projects' kits.
    */
-  readonly brandKit?: (projectId: string) => CanvasDesignBrand | undefined;
+  readonly brandKit?: (
+    projectId: string,
+  ) => CanvasProjectBrand | Promise<CanvasProjectBrand | undefined> | undefined;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
   /**
    * The open comments a person sent to the agent about a Canvas. Absent on a
@@ -600,18 +602,59 @@ function blockGuide(): Readonly<Record<string, string>> {
 }
 
 /**
+ * The brand a Project lends its designs: the tokens of its design system
+ * (`DESIGN.md`) when that file carries any, else the brand kit on the Project
+ * record. Code and documents then share one palette.
+ */
+export type CanvasProjectBrand =
+  | {
+      readonly source: "design-system";
+      readonly brand: CanvasDesignBrand;
+      readonly path: string;
+      readonly name: string;
+    }
+  | { readonly source: "brand-kit"; readonly brand: CanvasDesignBrand };
+
+/**
  * Written only when the Project has a brand kit, so a thread without one is
  * never told to look for it.
  */
 const BRAND_KIT_GUIDANCE =
   'This Project has a brand kit, returned as brandKit. A design that should look like the person\'s product or company sets "theme": "brand" and "brand" to those tokens unchanged (copy the whole object; do not invent colours or fonts). Frames then read --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)) and the kit classes pick up the colour, font, and radius roles. Without "theme": "brand" the design keeps the workspace theme or its own palette. A brand design cannot run script.';
 
+/**
+ * Written only when the Project's design system carries tokens. It names
+ * every kind of Canvas item, because a design system that reached screens but
+ * not the deck or the document would leave them looking like two products.
+ */
+const DESIGN_SYSTEM_GUIDANCE =
+  'This Project has a design system, returned as designSystem: its file path, its name, and its tokens as brand. Every design you make here follows it: a document (size "document"), a slide deck (size "slide", and the deck block that presents those frames), a website, app screens, a UI kit, a flow\'s screens. Set "theme": "brand" and "brand" to designSystem.brand unchanged (copy the whole object; do not invent colours or fonts), and style from the --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)); the kit classes pick up the colour, font, and radius roles. A design that runs script cannot take a brand theme, so write the same token values into its own stylesheet as custom properties instead. Follow the written rules of the design system as well as its tokens: the file is in your context or can be read at designSystem.path. A Canvas you create here follows the design system on its own, so its charts, tables, metrics, and diagrams draw their series and accent colours from it (a "chart-1" to "chart-6" palette under colors, else its primary and secondary); title and label them in the design system\'s voice.';
+
+function projectBrandFields(projectBrand: CanvasProjectBrand | undefined) {
+  if (projectBrand === undefined) return {};
+  return projectBrand.source === "brand-kit"
+    ? { brandKit: projectBrand.brand }
+    : {
+        designSystem: {
+          path: projectBrand.path,
+          name: projectBrand.name,
+          brand: projectBrand.brand,
+        },
+      };
+}
+
+function projectBrandGuidance(projectBrand: CanvasProjectBrand | undefined) {
+  if (projectBrand === undefined) return undefined;
+  return projectBrand.source === "brand-kit" ? BRAND_KIT_GUIDANCE : DESIGN_SYSTEM_GUIDANCE;
+}
+
 function describedGuidance(
   kinds: ReadonlyArray<string>,
   mode: "chat" | "work" | "code",
   chatOwner: ChatCanvasOwner = "project",
-  brandKit?: CanvasDesignBrand,
+  projectBrand?: CanvasProjectBrand,
 ): Readonly<Record<string, string>> {
+  const brandGuidance = projectBrandGuidance(projectBrand);
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
     const detail = BLOCK_GUIDANCE[kind]?.detail;
@@ -625,7 +668,7 @@ function describedGuidance(
             designAssetGuidance(mode, chatOwner),
             DESIGN_PROTOTYPE_GUIDANCE,
             DESIGN_APP_WINDOW_GUIDANCE,
-            ...(brandKit === undefined ? [] : [BRAND_KIT_GUIDANCE]),
+            ...(brandGuidance === undefined ? [] : [brandGuidance]),
           ].join(" ")
         : detail;
   }
@@ -1195,7 +1238,10 @@ function canvasToolSet(options: {
   readonly modelId: CanvasAuthoringThread["modelId"];
   readonly author?: CanvasActor;
   /** The thread's Project's brand kit, when it has one; read by describe alone. */
-  readonly brandKit?: () => CanvasDesignBrand | undefined;
+  readonly brandKit?: () =>
+    | CanvasProjectBrand
+    | Promise<CanvasProjectBrand | undefined>
+    | undefined;
   readonly resolveTarget: () => Promise<ResolvedCanvasTarget>;
 }): AppManagedToolSet {
   return {
@@ -1212,13 +1258,23 @@ function canvasToolSet(options: {
       let input = parseInput(inputJson);
       if ("error" in input) return { result: { error: input.error }, isError: true };
       if (input.operation === "describe") {
-        const brandKit = options.brandKit?.();
-        const brand = brandKit === undefined ? {} : { brandKit };
+        let projectBrand: CanvasProjectBrand | undefined;
+        try {
+          projectBrand = await options.brandKit?.();
+        } catch {
+          projectBrand = undefined;
+        }
+        const brand = projectBrandFields(projectBrand);
+        const brandGuidance = projectBrandGuidance(projectBrand);
         if (input.blockKinds === undefined) {
           return {
             result: {
               ...brand,
-              ...(brandKit === undefined ? {} : { brandKitGuidance: BRAND_KIT_GUIDANCE }),
+              ...(projectBrand === undefined
+                ? {}
+                : projectBrand.source === "brand-kit"
+                  ? { brandKitGuidance: brandGuidance }
+                  : { designSystemGuidance: brandGuidance }),
               blockKinds,
               blockGuide: blockGuide(),
               tierGuide: TIER_GUIDE,
@@ -1250,7 +1306,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(requested, options.mode, options.chatOwner, brandKit),
+            guidance: describedGuidance(requested, options.mode, options.chatOwner, projectBrand),
             ...(input.blockKinds?.includes("design") === true ? brand : {}),
             ...(examples.length === 0 ? {} : { examples }),
           },
@@ -1421,8 +1477,25 @@ function canvasToolSet(options: {
           requestedAuthority: documentAuthority(),
         };
         const placed = placement(input);
+        // A Canvas made in a Project that follows a design system follows it
+        // too, so its charts and tables draw in the Project's colours. The
+        // host stamps it from the thread's own Project; the model names none.
+        let projectBrand: CanvasProjectBrand | undefined;
+        try {
+          projectBrand = await options.brandKit?.();
+        } catch {
+          projectBrand = undefined;
+        }
+        const designSystem =
+          projectBrand?.source === "design-system"
+            ? {
+                name: projectBrand.name.slice(0, 128) || "Design system",
+                source: projectBrand.path.slice(0, 1024),
+                brand: projectBrand.brand,
+              }
+            : undefined;
         const result =
-          placed.presentation !== undefined
+          designSystem !== undefined
             ? options.port.canvas.create(
                 request,
                 target.context,
@@ -1430,16 +1503,26 @@ function canvasToolSet(options: {
                 input.blocks,
                 options.author,
                 placed.presentation,
+                designSystem,
               )
-            : options.author === undefined
-              ? options.port.canvas.create(request, target.context, target.project, input.blocks)
-              : options.port.canvas.create(
+            : placed.presentation !== undefined
+              ? options.port.canvas.create(
                   request,
                   target.context,
                   target.project,
                   input.blocks,
                   options.author,
-                );
+                  placed.presentation,
+                )
+              : options.author === undefined
+                ? options.port.canvas.create(request, target.context, target.project, input.blocks)
+                : options.port.canvas.create(
+                    request,
+                    target.context,
+                    target.project,
+                    input.blocks,
+                    options.author,
+                  );
         if (result.kind !== "accepted") {
           return { result: { error: result.message }, isError: true };
         }

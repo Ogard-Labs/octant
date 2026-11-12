@@ -526,7 +526,12 @@ async function personRequests(
   threadId: string,
 ): Promise<{ readonly requests: ReadonlyArray<AgentPersonRequest>; readonly complete: boolean }> {
   const listed = await readWaitingRows(session);
-  if (listed.kind === "refused") return { requests: [], complete: false };
+  if (listed.kind === "refused") {
+    // The Needs you list answers local windows only. A caller that is not one
+    // (an outside agent) still learns of the agent's own pending approvals
+    // from the thread's harness session, and the list stays marked incomplete.
+    return { requests: await harnessApprovals(session, threadId), complete: false };
+  }
   return {
     complete: !listed.truncated,
     requests: listed.requests.flatMap((request) =>
@@ -535,6 +540,22 @@ async function personRequests(
         : [{ kind: request.kind, ...(request.text === undefined ? {} : { text: request.text }) }],
     ),
   };
+}
+
+async function harnessApprovals(
+  session: OpenedLocalControlSession,
+  threadId: string,
+): Promise<ReadonlyArray<AgentPersonRequest>> {
+  const response = await session.send({
+    path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}`,
+    method: "GET",
+  });
+  if (response.status !== 200) return [];
+  const view = (response.body as { readonly view?: unknown } | undefined)?.view;
+  if (view === null || view === undefined) return [];
+  return (decodeHostAnswer(NativeHarnessSessionView)(view).approvals ?? [])
+    .filter((approval) => approval.status === "pending")
+    .map((approval) => ({ kind: "lead-approval", text: approval.summary }));
 }
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {

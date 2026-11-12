@@ -43,6 +43,7 @@ import {
   PublishedSnapshotRunOutcome,
   type PublishedSnapshotRunRequest,
 } from "@octant/contracts";
+import { DesignSystemList } from "@octant/contracts/design-systems";
 import {
   type CanvasExportFolderCommand,
   CanvasExportFolderResult,
@@ -155,6 +156,10 @@ export interface CanvasClient {
   htmlFile?(request: CanvasHtmlFileRequest): Promise<CanvasHtmlFileResult>;
   /** A person's one click: the host derives and journals a deck from the Canvas. */
   proposeDeck?(body: unknown): Promise<CanvasDiagramLayoutReviseResult>;
+  /** The design systems of the Canvas's own Project, for the switch below. */
+  listDesignSystems?(canvasId: string): Promise<DesignSystemList>;
+  /** Switch the design system the Canvas follows; the host reads the file itself. */
+  applyDesignSystem?(body: unknown): Promise<CanvasDiagramLayoutReviseResult>;
   /**
    * The folder a Canvas exports to, and the host identity and browse mode a
    * person chooses one with. A host without the route offers no folder
@@ -363,6 +368,28 @@ export function createCanvasClient(
       return request(
         options.fetch,
         new URL("/api/canvas/deck-propose", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasDiagramLayoutReviseResult),
+      );
+    },
+    listDesignSystems(canvasId) {
+      const url = new URL("/api/canvas/design-systems", options.baseUrl);
+      url.searchParams.set("canvasId", canvasId);
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(DesignSystemList),
+      );
+    },
+    applyDesignSystem(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/design-system-apply", options.baseUrl).toString(),
         {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },

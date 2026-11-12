@@ -23,6 +23,7 @@ import {
 } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { CoordinatorProposalsPanel } from "../review/CoordinatorProposalsPanel";
+import { ThreadRoutinesPanel } from "../review/ThreadRoutinesPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
@@ -123,6 +124,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const chat = useChatThread({ ...shared(targetFor("chat")), modelOptions: models.options });
   const work = useWorkThread(shared(targetFor("work")));
   const code = useCodeThread(shared(targetFor("code")));
+  // The Project the selected Work or Code thread belongs to, once it has loaded.
+  const routinesProjectId =
+    mode === "work"
+      ? work.thread === undefined
+        ? undefined
+        : String(work.thread.projectId)
+      : mode === "code"
+        ? code.thread === undefined
+          ? undefined
+          : String(code.thread.projectId)
+        : undefined;
   const refreshers = { chat: chat.refresh, work: work.refresh, code: code.refresh };
   const refreshSelected = refreshers[mode ?? "chat"];
   const refresh = useCallback(
@@ -366,6 +378,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
             transport !== undefined &&
             code.thread !== undefined ? (
               <CoordinatorProposalsPanel thread={code.thread} transport={transport} />
+            ) : null}
+            {!offlineDemo &&
+            transport !== undefined &&
+            (selected.mode === "work" || selected.mode === "code") &&
+            routinesProjectId !== undefined ? (
+              <ThreadRoutinesPanel
+                mode={selected.mode}
+                projectId={routinesProjectId}
+                threadId={selected.threadId}
+                transport={transport}
+              />
             ) : null}
             <ThreadTranscript
               allowProductMutations={staleGate.allowProductMutations}

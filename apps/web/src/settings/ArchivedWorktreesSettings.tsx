@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatBytes } from "../environment/threadMove/threadMoveSize";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
@@ -116,24 +117,26 @@ export function ArchivedWorktreesSettings(props: ArchivedWorktreesSettingsProps)
   return (
     <SettingsSection description={ARCHIVED_WORKTREES_FACT} title="Worktrees">
       {body}
-      {confirming === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Remove worktree"
-          destructive
-          onCancel={() => setConfirming(undefined)}
-          onConfirm={() => {
-            const worktree = confirming;
-            setConfirming(undefined);
-            void remove(worktree);
-          }}
-          pending={busy}
-          title="Remove this worktree?"
-        >
-          Deletes {confirming.path}, including ignored files such as build output and installed
-          dependencies. The branch {confirming.branch} and its commits stay. A worktree with
-          uncommitted changes is kept.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {confirming === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Remove worktree"
+            destructive
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => {
+              const worktree = confirming;
+              setConfirming(undefined);
+              void remove(worktree);
+            }}
+            pending={busy}
+            title="Remove this worktree?"
+          >
+            Deletes {confirming.path}, including ignored files such as build output and installed
+            dependencies. The branch {confirming.branch} and its commits stay. A worktree with
+            uncommitted changes is kept.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

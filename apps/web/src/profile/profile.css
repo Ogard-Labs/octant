@@ -103,6 +103,7 @@ fieldset.profile-editor__field > legend {
 .profile-editor__label {
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
+  line-height: var(--oct-leading-label);
 }
 
 .profile-editor__hint,

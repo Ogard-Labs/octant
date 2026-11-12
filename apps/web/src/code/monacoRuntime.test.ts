@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createModel: vi.fn(),
   editorDispose: vi.fn(),
   editorCreate: vi.fn(),
+  diffCreate: vi.fn(),
   editorFocus: vi.fn(),
   editorUpdateOptions: vi.fn(),
   getModel: vi.fn(),
@@ -61,7 +62,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./monacoIntelligence", () => ({ installMonacoIntelligence: vi.fn() }));
 
-const modelUri = { scheme: "octant-code", toString: () => "octant-code://checkout/file" };
+const modelUri = {
+  scheme: "octant-code",
+  path: "/file",
+  toString: () => "octant-code://checkout/file",
+  with: () => modelUri,
+};
 
 mocks.model = {
   uri: modelUri,
@@ -124,6 +130,17 @@ vi.mock("monaco-editor", () => ({
       };
       return mocks.editor;
     }),
+    createDiffEditor: mocks.diffCreate.mockImplementation(() => {
+      const side = { updateOptions: vi.fn() };
+      return {
+        dispose: vi.fn(),
+        createViewModel: () => ({ dispose: vi.fn() }),
+        setModel: vi.fn(),
+        getOriginalEditor: () => side,
+        getModifiedEditor: () => side,
+        updateOptions: vi.fn(),
+      };
+    }),
     createModel: mocks.createModel,
     defineTheme: mocks.defineTheme,
     setTheme: mocks.setTheme,
@@ -177,7 +194,7 @@ vi.mock("./monacoEnvironment", () => ({
 
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS } from "@octant/theme/tokens";
 import { resolveEditorColorProjection } from "@octant/theme/editor-colors";
-import { mount } from "./monacoRuntime";
+import { mount, mountDiff } from "./monacoRuntime";
 
 describe("Monaco runtime", () => {
   beforeEach(() => {
@@ -313,6 +330,102 @@ describe("Monaco runtime", () => {
       }),
     );
     expect(mocks.setTheme).toHaveBeenLastCalledWith("octant");
+    session.dispose();
+  });
+
+  it("draws the editor's scrollbar as a pane draws its own: the same thumb in the same lane, in the scrollbar's theme roles, with no shadow and no outline", () => {
+    const light = resolveEditorColorProjection({ mode: "light", tokens: DEFAULT_LIGHT_TOKENS });
+    const dark = resolveEditorColorProjection({ mode: "dark", tokens: DEFAULT_DARK_TOKENS });
+    const session = mount(document.createElement("div"), options({ colors: dark }));
+
+    expect(mocks.editorCreate).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        scrollbar: {
+          vertical: "auto",
+          horizontal: "auto",
+          verticalScrollbarSize: 10,
+          horizontalScrollbarSize: 10,
+          verticalSliderSize: 6,
+          horizontalSliderSize: 6,
+          useShadows: false,
+        },
+        overviewRulerBorder: false,
+        hideCursorInOverviewRuler: true,
+        minimap: { enabled: false },
+      }),
+    );
+
+    session.setColors?.(light);
+    expect(mocks.defineTheme).toHaveBeenLastCalledWith(
+      "octant",
+      expect.objectContaining({
+        colors: expect.objectContaining({
+          "scrollbarSlider.background": "#bdbdbb",
+          "scrollbarSlider.hoverBackground": "#6f6f6d",
+          "scrollbarSlider.activeBackground": "#6f6f6d",
+        }),
+      }),
+    );
+    session.setColors?.(dark);
+    expect(mocks.defineTheme).toHaveBeenLastCalledWith(
+      "octant",
+      expect.objectContaining({
+        colors: expect.objectContaining({
+          "scrollbarSlider.background": "#4d4d4d",
+          "scrollbarSlider.hoverBackground": "#8a8a8a",
+          "scrollbarSlider.activeBackground": "#8a8a8a",
+        }),
+      }),
+    );
+    session.dispose();
+  });
+
+  it("keeps the editor's thumb on screen where the system keeps a strip for scrollbars", () => {
+    // A scroller that gives up width to its scrollbar is how a page can tell:
+    // where the system floats scrollbars the two widths are equal.
+    const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(50);
+    const before = document.body.childElementCount;
+    try {
+      mount(document.createElement("div"), options()).dispose();
+    } finally {
+      width.mockRestore();
+    }
+
+    expect(mocks.editorCreate).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        scrollbar: expect.objectContaining({ vertical: "visible", horizontal: "visible" }),
+      }),
+    );
+    expect(document.body.childElementCount).toBe(before);
+  });
+
+  it("draws a comparison's scrollbars the same way and keeps no strip beside it for a map of the changes", () => {
+    const session = mountDiff(document.createElement("div"), {
+      language: "markdown",
+      modelUriBase: "octant-code://checkout-opaque/diff-opaque",
+      original: "before",
+      modified: "after",
+      renderSideBySide: true,
+    });
+
+    expect(mocks.diffCreate).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        scrollbar: expect.objectContaining({
+          verticalScrollbarSize: 10,
+          horizontalScrollbarSize: 10,
+          verticalSliderSize: 6,
+          horizontalSliderSize: 6,
+          useShadows: false,
+        }),
+        overviewRulerBorder: false,
+        hideCursorInOverviewRuler: true,
+        renderOverviewRuler: false,
+        minimap: { enabled: false },
+      }),
+    );
     session.dispose();
   });
 

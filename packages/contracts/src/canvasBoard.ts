@@ -12,6 +12,7 @@ import {
 } from "./canvasIdentity";
 import { CanvasPlanTaskId, CanvasPlanTaskStatus } from "./canvas";
 import { UtcTimestamp } from "./events";
+import { DesignSystemLocation } from "./designSystems";
 
 export { CANVAS_SCHEMA_VERSION };
 
@@ -473,6 +474,23 @@ export const CanvasDeckProposeCommand = Schema.Struct({
 }).annotations(strict);
 export type CanvasDeckProposeCommand = typeof CanvasDeckProposeCommand.Type;
 
+/**
+ * A person's switch of the design system a Canvas follows: one of its
+ * Project's `DESIGN.md` files, or `null` to stop following one. The host reads
+ * the file itself, so the request carries a location, never tokens.
+ */
+export const CanvasDesignSystemApplyCommand = Schema.Struct({
+  kind: Schema.Literal("canvas-design-system-apply"),
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  actor: CanvasActor,
+  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  schemaVersion: CanvasSchemaVersion,
+  issuedAt: UtcTimestamp,
+  designSystem: Schema.NullOr(DesignSystemLocation),
+}).annotations(strict);
+export type CanvasDesignSystemApplyCommand = typeof CanvasDesignSystemApplyCommand.Type;
+
 export const CanvasDeckProposeResult = CanvasDiagramLayoutReviseResult;
 export type CanvasDeckProposeResult = CanvasDiagramLayoutReviseResult;
 
@@ -538,6 +556,9 @@ export const decodeCanvasPlanTaskReviseCommand = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseCommand,
 );
 export const decodeCanvasDeckProposeCommand = Schema.decodeUnknownSync(CanvasDeckProposeCommand);
+export const decodeCanvasDesignSystemApplyCommand = Schema.decodeUnknownSync(
+  CanvasDesignSystemApplyCommand,
+);
 export const decodeCanvasPlanTaskReviseResult = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseResult,
 );

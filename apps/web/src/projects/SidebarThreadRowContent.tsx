@@ -1,7 +1,8 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
-import { Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
+import { Bot, Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProjectIcon } from "./ProjectIcon";
+import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
 
@@ -23,6 +24,8 @@ type ThreadRowPullRequest = ThreadBoardPullRequestSummaries["items"][number];
  */
 export function SidebarThreadRowContent(props: {
   readonly title: string;
+  /** Names the outside agent that started the thread, when one did. */
+  readonly threadId?: string;
   readonly provider?: ThreadProviderIdentity;
   /**
    * A coordinator wears the coordinator mark in the icon column instead of
@@ -40,7 +43,9 @@ export function SidebarThreadRowContent(props: {
   readonly age?: { readonly label: string; readonly title?: string };
   readonly status?: ReactNode;
 }) {
+  const startedBy = useAgentThreadName(props.threadId);
   const hasFacts =
+    startedBy !== undefined ||
     props.coordinatorName !== undefined ||
     props.projectName !== undefined ||
     props.pullRequest !== undefined ||
@@ -76,6 +81,17 @@ export function SidebarThreadRowContent(props: {
         <span className="sidebar-navigation__thread-title">{props.title}</span>
         {hasFacts ? (
           <span className="sidebar-navigation__thread-facts">
+            {startedBy === undefined ? null : (
+              <span
+                className="sidebar-navigation__thread-project"
+                title={`Started by ${startedBy}`}
+              >
+                <Bot aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span className="sidebar-navigation__thread-project-label">
+                  {`Started by ${startedBy}`}
+                </span>
+              </span>
+            )}
             {props.coordinatorName === undefined ? null : (
               <span
                 className="sidebar-navigation__thread-project"
