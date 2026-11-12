@@ -10,12 +10,18 @@ import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
 
 /**
  * Decides whether an MCP tool call may run: a thread at Full access runs it
- * unasked, a remembered approval for exactly this tool or for its whole
- * server covers it, and otherwise a person is asked in the turn's window. A
- * thread in a Project reads and records that Project's grants; a thread
- * outside one reads and records the account's. A grant is recorded only from
- * inside that prompt's answer, so nothing a model, a tool, or a route sends
- * can create one.
+ * unasked, a remembered approval for its whole server or for exactly this
+ * tool covers it, and otherwise a person is asked in the turn's window. Below
+ * Full access a server asks once: the approval of its first prompt is
+ * recorded for every tool of the server. A thread in a Project reads and
+ * records that Project's grants; a thread outside one reads and records the
+ * account's. A grant is recorded only from a person's approval of that
+ * prompt, so nothing a model, a tool, or a route sends can create one.
+ *
+ * On a thread that has taken in outside content a network server asks once
+ * more, and that approval holds for the server on that thread until the host
+ * stops. It is kept in memory and not journaled, so a restarted host asks
+ * that thread again rather than run on an answer it cannot show.
  */
 export function createExtensionToolCallAuthorizer(options: {
   readonly grants: Pick<ExtensionToolGrantStore, "read" | "record">;
@@ -36,6 +42,7 @@ export function createExtensionToolCallAuthorizer(options: {
   /** The sources that marked the thread, which its prompt names. */
   readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
 }): (call: ExtensionToolCall) => Promise<boolean> {
+  const allowedOnMarkedThread = new Set<string>();
   const judge = (
     call: ExtensionToolCall,
   ): {
@@ -80,17 +87,18 @@ export function createExtensionToolCallAuthorizer(options: {
                 digest: storedForServer.digest,
                 revoked: storedForServer.revocationReason !== undefined,
               },
+        serverAllowedOnMarkedThread: allowedOnMarkedThread.has(markedThreadKey(call)),
       }),
     };
   };
 
   // Judged again when the person answers: the prompt may have been open while
-  // another call brought outside content onto the thread, and what was
-  // rememberable when it was raised is then approved for that call alone.
+  // another call brought outside content onto the thread, and what would have
+  // been kept for the Project when it was raised is then kept for the thread.
   const remember = (call: ExtensionToolCall, scope: "tool" | "server"): boolean => {
     const { server, decision } = judge(call);
     if (decision.kind === "covered") return true;
-    if (!decision.rememberable) return false;
+    if (decision.answerCovers !== "server") return false;
     const recorded =
       scope === "server"
         ? options.grants.record({ ...server, version: call.version, digest: call.digest })
@@ -102,13 +110,28 @@ export function createExtensionToolCallAuthorizer(options: {
     return recorded === "recorded";
   };
 
+  // Only the local window whose own turn raised a prompt can answer one whose
+  // approval is kept: a host-owned or a paired device's turn is judged to
+  // cover its call alone. An answer that already narrowed itself to this tool
+  // is judged covered here and records nothing wider.
+  const keepApproval = (call: ExtensionToolCall): void => {
+    const { server, decision } = judge(call);
+    if (decision.kind === "covered") return;
+    if (decision.answerCovers === "server") {
+      // A grant the journal refuses leaves this call approved and the next asked.
+      options.grants.record({ ...server, version: call.version, digest: call.digest });
+    } else if (decision.answerCovers === "server-on-thread") {
+      allowedOnMarkedThread.add(markedThreadKey(call));
+    }
+  };
+
   return async (call) => {
     const { decision } = judge(call);
     if (decision.kind === "covered") return true;
     // A turn nobody is sitting at may use a grant but cannot raise a prompt.
     if (call.windowId === undefined) return false;
     const outsideContent = options.outsideContent?.(call.thread.id);
-    return options.approvals.request({
+    const approved = await options.approvals.request({
       windowId: call.windowId,
       threadId: call.thread.id,
       ...(call.thread.projectId === undefined ? {} : { projectId: call.thread.projectId }),
@@ -120,12 +143,30 @@ export function createExtensionToolCallAuthorizer(options: {
       mcpToolName: call.mcpToolName,
       inputJson: call.inputJson,
       ...(outsideContent === undefined ? {} : { outsideContent }),
-      ...(decision.rememberable
+      answerCovers: decision.answerCovers,
+      ...(decision.answerCovers === "server"
         ? { remember: (scope: "tool" | "server") => remember(call, scope) }
         : {}),
       ...(call.signal === undefined ? {} : { signal: call.signal }),
     });
+    if (approved) keepApproval(call);
+    return approved;
   };
+}
+
+/**
+ * One server of one package version on one thread: an update is different
+ * code under the same name, so it asks the marked thread again.
+ */
+function markedThreadKey(call: ExtensionToolCall): string {
+  return [
+    call.thread.id,
+    call.extensionId,
+    call.packageId,
+    call.componentId,
+    call.version,
+    call.digest,
+  ].join("\u0000");
 }
 
 function offeredBinding(call: ExtensionToolCall) {

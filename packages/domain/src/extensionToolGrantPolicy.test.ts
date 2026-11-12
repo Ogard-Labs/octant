@@ -23,6 +23,7 @@ function facts(overrides: Partial<ExtensionToolGrantFacts> = {}): ExtensionToolG
     offered: seen,
     grant: { ...seen, revoked: false },
     serverGrant: undefined,
+    serverAllowedOnMarkedThread: false,
     ...overrides,
   };
 }
@@ -32,11 +33,11 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts())).toEqual({ kind: "covered" });
   });
 
-  it("asks, and offers to remember, when the Project holds no grant for the tool", () => {
+  it("asks once for a server: the answer to a first use covers every tool of the server", () => {
     expect(decideExtensionToolGrant(facts({ grant: undefined }))).toEqual({
       kind: "ask",
       reason: "not-granted",
-      rememberable: true,
+      answerCovers: "server",
     });
   });
 
@@ -44,7 +45,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ inProject: false, grant: undefined }))).toEqual({
       kind: "ask",
       reason: "not-granted",
-      rememberable: true,
+      answerCovers: "server",
     });
     expect(decideExtensionToolGrant(facts({ inProject: false }))).toEqual({ kind: "covered" });
   });
@@ -70,12 +71,12 @@ describe("remembered MCP tool approval", () => {
       decideExtensionToolGrant(
         facts({ grant: undefined, serverGrant: { ...serverGrant, version: "1.3.0" } }),
       ),
-    ).toEqual({ kind: "ask", reason: "package-changed", rememberable: true });
+    ).toEqual({ kind: "ask", reason: "package-changed", answerCovers: "server" });
     expect(
       decideExtensionToolGrant(
         facts({ grant: undefined, serverGrant: { ...serverGrant, revoked: true } }),
       ),
-    ).toEqual({ kind: "ask", reason: "revoked", rememberable: true });
+    ).toEqual({ kind: "ask", reason: "revoked", answerCovers: "server" });
   });
 
   it("asks on a Plan turn and for a network tool on a tainted thread though the server is allowed whole", () => {
@@ -94,7 +95,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ planTurn: true }))).toEqual({
       kind: "ask",
       reason: "plan-turn",
-      rememberable: false,
+      answerCovers: "call",
     });
   });
 
@@ -129,14 +130,14 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ fullAccessTurn: true, planTurn: true }))).toEqual({
       kind: "ask",
       reason: "plan-turn",
-      rememberable: false,
+      answerCovers: "call",
     });
   });
 
   it("still asks on a thread with no Project, which has no Full access level", () => {
     expect(
       decideExtensionToolGrant(facts({ fullAccessTurn: true, inProject: false, grant: undefined })),
-    ).toEqual({ kind: "ask", reason: "not-granted", rememberable: true });
+    ).toEqual({ kind: "ask", reason: "not-granted", answerCovers: "server" });
   });
 
   it("lets a host-owned turn use a grant", () => {
@@ -156,7 +157,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ hostOwnedTurn: true, ...changed }))).toEqual({
       kind: "ask",
       reason,
-      rememberable: false,
+      answerCovers: "call",
     });
   });
 
@@ -167,7 +168,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ pairedDeviceTurn: true, grant: undefined }))).toEqual({
       kind: "ask",
       reason: "not-granted",
-      rememberable: false,
+      answerCovers: "call",
     });
   });
 
@@ -175,7 +176,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ grant: { ...seen, revoked: true } }))).toEqual({
       kind: "ask",
       reason: "revoked",
-      rememberable: true,
+      answerCovers: "server",
     });
   });
 
@@ -186,7 +187,7 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ offered: { ...seen, ...changed } }))).toEqual({
       kind: "ask",
       reason: "package-changed",
-      rememberable: true,
+      answerCovers: "server",
     });
   });
 
@@ -195,7 +196,7 @@ describe("remembered MCP tool approval", () => {
       decideExtensionToolGrant(
         facts({ offered: { ...seen, definitionDigest: `sha256:${"d".repeat(64)}` } }),
       ),
-    ).toEqual({ kind: "ask", reason: "tool-definition-changed", rememberable: true });
+    ).toEqual({ kind: "ask", reason: "tool-definition-changed", answerCovers: "server" });
   });
 
   it("keeps a grant for a confined stdio tool on a thread that took in outside content", () => {
@@ -204,15 +205,41 @@ describe("remembered MCP tool approval", () => {
     ).toEqual({ kind: "covered" });
   });
 
-  it("asks for every call of a network tool on a thread that took in outside content", () => {
+  it("asks once for a network server on a thread that took in outside content, and that answer holds for the thread", () => {
     expect(decideExtensionToolGrant(facts({ threadTainted: true, reach: "network" }))).toEqual({
       kind: "ask",
       reason: "network-tool-on-tainted-thread",
-      rememberable: false,
+      answerCovers: "server-on-thread",
     });
     expect(
-      decideExtensionToolGrant(facts({ threadTainted: true, reach: "network", grant: undefined })),
-    ).toEqual({ kind: "ask", reason: "network-tool-on-tainted-thread", rememberable: false });
+      decideExtensionToolGrant(
+        facts({ threadTainted: true, serverAllowedOnMarkedThread: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it("does not carry an answer given on a marked thread to a thread that is not marked", () => {
+    expect(
+      decideExtensionToolGrant(facts({ serverAllowedOnMarkedThread: true, grant: undefined })),
+    ).toEqual({ kind: "ask", reason: "not-granted", answerCovers: "server" });
+  });
+
+  it("approves a host-owned or paired-device turn's prompt on a marked thread for that call alone", () => {
+    for (const turn of [{ hostOwnedTurn: true }, { pairedDeviceTurn: true }]) {
+      expect(decideExtensionToolGrant(facts({ threadTainted: true, ...turn }))).toEqual({
+        kind: "ask",
+        reason: "network-tool-on-tainted-thread",
+        answerCovers: "call",
+      });
+    }
+  });
+
+  it("still asks a Plan turn on a marked thread whose server the person allowed there", () => {
+    expect(
+      decideExtensionToolGrant(
+        facts({ threadTainted: true, serverAllowedOnMarkedThread: true, planTurn: true }),
+      ),
+    ).toEqual({ kind: "ask", reason: "plan-turn", answerCovers: "call" });
   });
 });
 

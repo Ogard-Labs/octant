@@ -77,13 +77,20 @@ export const ExtensionToolApproval = Schema.Struct({
   inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
   requestedAt: UtcTimestamp,
   /**
-   * Whether this prompt may be answered with `remember`, for the tool or for
-   * its whole server. False on a Plan turn, on a turn the host started as
-   * itself or a paired device sent, and for a network tool on a thread that
-   * took in outside content: those are approved one call at a time. A thread
-   * with no `projectId` remembers for the account.
+   * Whether an approval is kept for the Project, or for the account on a
+   * thread with no `projectId`, so `remember` may also narrow it to this tool.
+   * False on a Plan turn, on a turn the host started as itself or a paired
+   * device sent, and for a network tool on a thread that took in outside
+   * content.
    */
   rememberable: Schema.Boolean,
+  /**
+   * What approving lets run afterwards: every tool of the tool's server
+   * (`server`, the same as `rememberable`), every tool of that server for the
+   * rest of this thread (`server-on-thread`), or this call alone (`call`).
+   * Absent from a host that predates it, where an approval covers this call.
+   */
+  answerCovers: Schema.optional(Schema.Literal("call", "server", "server-on-thread")),
   /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
   outsideContent: Schema.optional(ApprovalOutsideContent),
 }).annotations({ ...strict, ...personDecides });
@@ -95,11 +102,15 @@ export type ExtensionToolApprovalList = typeof ExtensionToolApprovalList.Type;
 export const ExtensionToolApprovalDecision = Schema.Struct({
   approvalId: Schema.UUID,
   decision: Schema.Literal("approved", "denied"),
-  /** Always allow, where the thread remembers. Only an approval can be remembered. */
+  /**
+   * Names what the approval is kept for, where the prompt is `rememberable`.
+   * Left out, an approval there is kept for every tool of the server. Only
+   * an approval can be remembered.
+   */
   remember: Schema.optional(Schema.Boolean),
   /**
-   * What `remember` covers: this tool, or every tool of its server. Absent
-   * means this tool, which is all an older client can ask for.
+   * What `remember` covers: this tool alone, or every tool of its server.
+   * Absent means this tool, which is all an older client can ask for.
    */
   rememberScope: Schema.optional(Schema.Literal("tool", "server")),
 })

@@ -303,6 +303,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
         offered: binding,
         grant: { ...binding, revoked: false },
         serverGrant: undefined,
+        serverAllowedOnMarkedThread: false,
       });
     const ingested = {
       kind: "content-ingested",
@@ -310,7 +311,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
     } as const;
 
     const tainted = projectThreadContentTaint(emptyThreadContentTaint(), ingested);
-    expect(decide(tainted)).toMatchObject({ kind: "ask", rememberable: false });
+    expect(decide(tainted)).toMatchObject({ kind: "ask", answerCovers: "server-on-thread" });
 
     const cleared = projectThreadContentTaint(tainted, { kind: "content-cleared" });
     expect(decide(cleared)).toEqual({ kind: "covered" });
@@ -319,7 +320,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
     expect(decide(projectThreadContentTaint(cleared, ingested))).toEqual({
       kind: "ask",
       reason: "network-tool-on-tainted-thread",
-      rememberable: false,
+      answerCovers: "server-on-thread",
     });
   });
 });
