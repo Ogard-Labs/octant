@@ -581,6 +581,36 @@ describe("useProjectController", () => {
     expect(server.api.executeProject).not.toHaveBeenCalled();
   });
 
+  it("turns on a Code Project's own toolchain as a versioned command, and sends nothing for a no-op", async () => {
+    const server = client();
+    vi.mocked(server.api.executeProject).mockResolvedValue({} as never);
+    const { result } = renderHook(() =>
+      useProjectController({ activeMode: "code", activeProjectId: codeId, client: server.api }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.setCodeOwnToolchain(codeId, "enabled");
+    });
+    expect(server.api.executeProject).toHaveBeenCalledWith({
+      kind: "change-code-project-own-toolchain",
+      projectId: codeId,
+      expectedVersion: 1,
+      ownToolchain: "enabled",
+    });
+
+    vi.mocked(server.api.executeProject).mockClear();
+    let refused: boolean | undefined;
+    let alreadyDisabled: boolean | undefined;
+    await act(async () => {
+      refused = await result.current.setCodeOwnToolchain(chatId, "enabled");
+      alreadyDisabled = await result.current.setCodeOwnToolchain(codeId, "disabled");
+    });
+    expect(refused).toBe(false);
+    expect(alreadyDisabled).toBe(true);
+    expect(server.api.executeProject).not.toHaveBeenCalled();
+  });
+
   it("lets a Code Project's agents merge as a versioned command, and sends nothing for a no-op", async () => {
     const server = client();
     vi.mocked(server.api.executeProject).mockResolvedValue({} as never);

@@ -11,6 +11,7 @@ import {
   decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectAutoReviewerChanged,
   decodeCodeProjectAgentMergeChanged,
+  decodeCodeProjectOwnToolchainChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectNativeProvidersChanged,
@@ -189,6 +190,8 @@ const projectDecoders = {
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
   "project.code-agent-merge-changed@1": (payload: unknown) =>
     decodeCodeProjectAgentMergeChanged(payload).project,
+  "project.code-own-toolchain-changed@1": (payload: unknown) =>
+    decodeCodeProjectOwnToolchainChanged(payload).project,
   "project.provider-policy-changed@1": (payload: unknown) =>
     decodeProjectProviderPolicyChanged(payload).project,
   "project.native-providers-changed@1": (payload: unknown) =>

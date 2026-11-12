@@ -5385,6 +5385,7 @@ function LaunchedShell(
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
+      setProjectOwnToolchain: projectController.setCodeOwnToolchain,
       setProjectWorkDeveloperTools: projectController.setWorkDeveloperTools,
       setProjectsListOpen,
       setRailPlaceholder,

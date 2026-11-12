@@ -10327,6 +10327,7 @@ describe("language reads on Code turns", () => {
           folders,
           authority: () => authority,
           externalContentIngested: () => false,
+          recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
           language: { readForAgent, servesAgentsIn: () => true },
           uuid: randomUUID,
         }),

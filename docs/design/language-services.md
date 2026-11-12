@@ -28,8 +28,8 @@ Apple Silicon package awaits the maintainer. Slice 5 (user-added `static`
 servers), slice 6 (repository-tooling servers, started only after a local
 window's approval and networked under the Project's egress rules), and slice 7
 (one read-only agent tool, `octant_code`, for diagnostics, definitions, and
-references, which never starts or reads through a repository-tooling server)
-are also built; slice 7's
+references, which never starts a repository-tooling server and reads through
+one only while it is already approved and running) are also built; slice 7's
 real-provider smoke awaits the maintainer. Slice 8's [Debugger addendum](#debugger-addendum) was accepted by the
 maintainer on 2026-10-27; its sub-slices 8a (seam and policy) and 8b (session
 host) are built: the host installs a reviewed adapter, records a local
@@ -608,6 +608,31 @@ design left a choice open.
   file's language, the bundled server serves it, then installed servers by
   package name, so install order never decides.
 
+- **The Project's own toolchain.** A Code Project's switch **Use the
+  Project's own toolchain** (`ownToolchain` on the Project, off by default,
+  `change-code-project-own-toolchain`, journaled as
+  `project.code-own-toolchain-changed@1`) is set only from a window on the
+  host; the route answers 403 to a paired device. With it on, a component
+  that can run from the Project's own copy serves that Project as a
+  `repo-tooling` server under a key, cache, and approval of its own, in place
+  of the bundled copy, so every rule under
+  [Repository tooling](#repository-tooling) applies unchanged: an approval
+  per checkout or Project at every posture, refused in Plan, started only by
+  the person at a local window, the checkout writable, and the network
+  `proxied` under the Project's rules. The bundled TypeScript server is the
+  one such component: its own copy is the native binary for this host in
+  the checkout's `node_modules` (`@typescript/typescript-<platform>-<arch>/lib/tsc`,
+  hoisted or beside a linked `typescript` package), named only when the file
+  really lies inside the folder the server reads
+  (`apps/server/src/code/projectTypeScriptToolchain.ts`). A checkout that
+  holds no such copy (an older TypeScript, or another platform's install)
+  starts nothing and the editor reads `crashed`; it never falls back to the
+  bundled copy. Reason: falling back would let a file in the checkout choose
+  between two launch classes, and the class must come from the person's
+  setting alone. Changing the switch stops the other copy's server at once.
+  The Settings › Code switch still wins: with the bundled server turned off
+  there is nothing to run from either copy.
+
 ### Repository tooling
 
 Slice 6 settled these details, taking the more restrictive option where the
@@ -843,9 +868,11 @@ design left a choice open.
 - **Offered only where it can answer.** A Code turn is offered `octant_code`
   only when a server an agent may start covers a file of the turn's checkout
   or extra folders: an effective `static` server (so a bundled server the
-  Settings switch turned off counts for nothing, and a `repo-tooling` server
-  never counts, since an agent never starts or reads through one) on macOS or
-  Linux, and a file whose name maps to one of that server's languages. The
+  Settings switch turned off, or one a Project runs from its own toolchain
+  instead, counts for nothing) on macOS or Linux, and a file whose name maps
+  to one of that server's languages. A `repo-tooling` server counts only
+  while it is running on one of those folders when a turn outside Plan
+  starts, since an agent reads through one but never starts it. The
   host knows this when it composes the turn's tools from a bounded scan
   (`codeLanguageCoverage.ts`): names only, breadth first, at most 2,000
   entries and six folders deep, skipping hidden folders and `node_modules`,
@@ -889,11 +916,23 @@ design left a choice open.
   start a `static` server and never starts a `repo-tooling` one
   (`local-host-required`, in every posture). Its code tool may read through a
   `repo-tooling` server that is already approved and running, which starts
-  nothing (maintainer request, 2026-11-12). Not built yet: today that read is
-  refused as well. Reason: starting repository tooling stays the person's act
-  at the machine (D4), and an agent's call is not that act. An agent's read
-  never resets the crash budget either; reopening the file in the editor stays
-  the person's retry.
+  nothing (maintainer request, 2026-11-12). Built: the read is answered only
+  while the server for that checkout and component is up, on the same folder,
+  in the package state the approval covers; a server that is stopped,
+  crashed, or still starting answers `local-host-required` and is left as it
+  is, an approval that no longer covers it answers `approval-required`, and
+  Plan answers `plan-read-only`
+  (`decideAgentReadThroughRepositoryTooling`). Reason: starting repository
+  tooling stays the person's act at the machine (D4), and an agent's call is
+  not that act. An agent's read never resets the crash budget either;
+  reopening the file in the editor stays the person's retry.
+- **Outside content.** An answer a `repo-tooling` server computed is the
+  repository's own programs speaking, so the tool marks it as every other
+  app-managed tool's outside content is marked: the result is journaled as
+  thread external-content ingestion under `octant_code`, passes Octant
+  Shield's Watcher, and carries the mark on its tool row; one that cannot be
+  journaled is withheld (`tool-unavailable`). A `static` server's answer is
+  Octant's own reading of the checkout and marks nothing.
 - **Answers.** Results keep the editor's bounds, and a definition or
   reference outside the checkout is only its label. `references` returns at
   most 200 places, fewer than the editor's 1,000, and `references` and
@@ -1948,7 +1987,9 @@ alternatives considered and the reason for the choice follow it.
    installed TypeScript runs a repository-supplied binary and so is
    `repo-tooling`; it is used only as the person's explicit choice, a
    per-Project setting "Use the Project's own toolchain" (maintainer request,
-   2026-11-12). Not built yet: today only the bundled binary is used. Rejected: a third-party language-server dependency, which
+   2026-11-12). Built: [the Project's own toolchain](#user-added-servers).
+   Not run yet: a real Project copy of the binary under Seatbelt or
+   Bubblewrap. Rejected: a third-party language-server dependency, which
    adds a dependency for nothing the bundled binary lacks.
 
 2. **D2. Bundled server on by default.** The bundled server is on for Code,
@@ -2203,8 +2244,9 @@ accounts or hardware.
      agent's diagnostics and cross-file definition for a saved file in a Plan
      thread, and its next read saw a saved fix
      (`codeLanguageServiceProcess.test.ts`); the same suite covers refusals
-     before any launch, a `repo-tooling` server never started or read through
-     even while a local approval covers it and the editor runs it, an editor's
+     before any launch, a `repo-tooling` server never started by an agent and
+     read through only while a local approval covers it and the editor runs
+     it, an editor's
      draft left in place, a file too large, and the crash budget. Still to
      run: one Code turn in Plan on a signed-in Claude Code and a signed-in
      Codex provider, asking the agent to read a type error, a definition, and

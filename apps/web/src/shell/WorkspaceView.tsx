@@ -487,6 +487,7 @@ export interface WorkspaceViewProps {
     designSystem: import("@octant/contracts/design-systems").DesignSystemChoice | null,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
     enabled: boolean,
@@ -2531,6 +2532,9 @@ function renderNonCodeTab(
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
+        {...(props.onOwnToolchainChange === undefined
+          ? {}
+          : { onOwnToolchainChange: props.onOwnToolchainChange })}
         {...(props.onWorkDeveloperToolsChange === undefined
           ? {}
           : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}

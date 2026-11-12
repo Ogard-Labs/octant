@@ -120,6 +120,63 @@ describe("ProjectOverview", () => {
     expect(screen.queryByRole("switch", { name: "Keep a status file" })).not.toBeInTheDocument();
   });
 
+  it("offers a Code Project an off-by-default switch to use its own toolchain, and no other Project", async () => {
+    const user = userEvent.setup();
+    const onOwnToolchainChange = vi.fn(async () => true);
+    const codeProject = {
+      id: "20000000-0000-4000-8000-000000000004",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    const { rerender } = render(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onOwnToolchainChange={onOwnToolchainChange}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={codeProject}
+      />,
+    );
+
+    const toggle = screen.getByRole("switch", { name: "Use the Project's own toolchain" });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/runs code from the repository/);
+    await user.click(toggle);
+    expect(onOwnToolchainChange).toHaveBeenCalledWith(codeProject.id, true);
+
+    rerender(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onOwnToolchainChange={onOwnToolchainChange}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={{ ...codeProject, ownToolchain: "enabled" } as ProjectSummary}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Use the Project's own toolchain" })).toBeChecked();
+
+    rerender(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onOwnToolchainChange={onOwnToolchainChange}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={{ ...codeProject, type: "work" } as unknown as ProjectSummary}
+      />,
+    );
+    expect(
+      screen.queryByRole("switch", { name: "Use the Project's own toolchain" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps a Work Project's actions hidden until its Developer tools switch is turned on", async () => {
     const user = userEvent.setup();
     const onWorkDeveloperToolsChange = vi.fn(async () => true);

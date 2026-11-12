@@ -31,6 +31,7 @@ import {
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectAgentMerge,
+  changeCodeProjectOwnToolchain,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
   changeProjectColor,
@@ -269,6 +270,26 @@ describe("Project creation and lifecycle", () => {
     expect(() =>
       changeCodeProjectPullRequestBackgroundRefresh(
         makeProject(ids.chat, "0/1"),
+        "enabled",
+        updatedAt,
+      ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("lets a Code Project use its own toolchain for language services, which starts off for every Project", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const own = changeCodeProjectOwnToolchain(project, "enabled", updatedAt);
+    expect(own).toMatchObject({ type: "code", ownToolchain: "enabled", version: 2 });
+    expect(changeCodeProjectOwnToolchain(own, "disabled", updatedAt)).toMatchObject({
+      ownToolchain: "disabled",
+      version: 3,
+    });
+    expect(() => changeCodeProjectOwnToolchain(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectOwnToolchain(
+        makeProject(ids.work, "0/1", { type: "work" }),
         "enabled",
         updatedAt,
       ),
