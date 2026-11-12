@@ -4779,7 +4779,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
     const lostText = this.#flushBeforeStop(active);
-    if (lostText !== undefined) active.interruptMessage = lostText;
+    if (lostText !== undefined) {
+      active.interruptMessage =
+        active.interruptMessage === undefined ? lostText : `${active.interruptMessage} ${lostText}`;
+    }
     active.state = "interrupted";
     active.reviewCapture?.cancelPending();
     this.#revokeBrowserGrants(active);
@@ -5494,10 +5497,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   // A forced stop can carry its own reason over the runner's
                   // generic cancellation copy; the text is still redacted
                   // before it is journaled like any provider-authored event's.
-                  const reason =
+                  const stopReason =
                     outcome === "interrupted" && active.interruptMessage !== undefined
                       ? active.interruptMessage
                       : failure?.message;
+                  const reason =
+                    outcome === "completed" || outcome === "waiting"
+                      ? stopReason
+                      : withLostTextNote(active, stopReason);
                   const message =
                     reason === undefined
                       ? undefined
@@ -5549,7 +5556,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             outcome === "interrupted"
               ? {
                   category: "failed",
-                  message: active.interruptMessage ?? "Code turn was cancelled.",
+                  message:
+                    withLostTextNote(
+                      active,
+                      active.interruptMessage ?? "Code turn was cancelled.",
+                    ) ?? "Code turn was cancelled.",
                 }
               : evidenceCapacityFailure(error),
           );
@@ -5776,16 +5787,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
     // An earlier timer flush may have failed already, leaving nothing to write
     // here; the stop still owes the person the note.
-    return this.#lostTextNote(active);
-  }
-
-  /** The stop's note that streamed reply text was lost, once any flush has failed. */
-  #lostTextNote(active: ActiveTurn): string | undefined {
-    if (active.deltaFlushFailure === undefined) return undefined;
-    return (
-      evidenceCapacityFailure(active.deltaFlushFailure.error)?.message ??
-      "Some streamed reply text could not be saved."
-    );
+    return lostTextNote(active);
   }
 
   /** The one way a turn's events reach the journal, behind any open burst. */
@@ -6426,7 +6428,7 @@ function normalizedOperationEvent(
     // The provider's sentence is the only reason the person will ever see, so
     // the journaled frame carries it; a forced stop's own reason wins over the
     // provider's generic cancellation copy, exactly like the outcome path.
-    const reason = active.interruptMessage ?? event.text;
+    const reason = withLostTextNote(active, active.interruptMessage ?? event.text);
     const message =
       reason === undefined
         ? undefined
@@ -6443,7 +6445,9 @@ function normalizedOperationEvent(
   // without it the transcript said "The provider turn failed" and nothing
   // else, whatever the driver had refused with.
   if (event.category === "failure") {
-    const message = event.text === undefined ? undefined : boundProviderFailureMessage(event.text);
+    const failureText = withLostTextNote(active, event.text);
+    const message =
+      failureText === undefined ? undefined : boundProviderFailureMessage(failureText);
     return {
       kind: "operation-state",
       state: "failed",
@@ -6451,6 +6455,28 @@ function normalizedOperationEvent(
     };
   }
   return undefined;
+}
+
+/** The stop's note that streamed reply text was lost, once any flush has failed. */
+function lostTextNote(active: ActiveTurn): string | undefined {
+  if (active.deltaFlushFailure === undefined) return undefined;
+  return (
+    evidenceCapacityFailure(active.deltaFlushFailure.error)?.message ??
+    "Some streamed reply text could not be saved."
+  );
+}
+
+/**
+ * A stop's reason with the lost-text note appended once. Stops that settle
+ * through the runner (the folder going away, a provider-reported failure)
+ * never pass #flushBeforeStop, so the note is added where the terminal state
+ * is built; a reason that already carries it is left alone.
+ */
+function withLostTextNote(active: ActiveTurn, reason: string | undefined): string | undefined {
+  const note = lostTextNote(active);
+  if (note === undefined) return reason;
+  if (reason === undefined) return note;
+  return reason.includes(note) ? reason : `${reason} ${note}`;
 }
 
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";

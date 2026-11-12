@@ -14150,6 +14150,36 @@ describe("streamed reply text in a Code turn", () => {
     }
   });
 
+  it("keeps the lost-text note when the provider interrupts the turn after a flush already failed", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(318, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // A caller that swallows the refusal leaves the turn running with the
+      // loss recorded and nothing to flush when the provider's stop arrives.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      full = false;
+      await turn.offer({ kind: "interrupted", message: "Stopped by the provider." });
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      const last = JSON.stringify(turn.frames().at(-1));
+      expect(last).toContain("Stopped by the provider.");
+      expect(last).toContain("storage is full");
+    } finally {
+      await turn.finish();
+    }
+  });
+
   it("fails the turn when the journal append, not the evidence put, fails during a flush", async () => {
     const turn = await streamingTurn(313);
     try {
