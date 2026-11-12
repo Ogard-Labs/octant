@@ -124,7 +124,9 @@ export function AgentHierarchyPanel(props: {
       aria-label="Subagents"
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
-      {hosted !== undefined ? null : (
+      {hosted !== undefined ? (
+        <h2 className="visually-hidden">Subagents</h2>
+      ) : (
         <header className="agent-hierarchy__header">
           <h2>Subagents</h2>
           {onViewChange === undefined || !anythingToArrange ? null : (

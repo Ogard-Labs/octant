@@ -11,8 +11,8 @@ import {
   type Ref,
 } from "react";
 import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
-import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
-import { DockBarContext, useDockBarHost, type DockBarItem } from "./dockBarControls";
+import { DockBarNodes, DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
+import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 import { IconButton } from "./IconButton";
 import {
   OctantMenuItem,
@@ -436,8 +436,7 @@ function Tile(props: {
       node.removeEventListener("focusin", focus, true);
     };
   }, []);
-  const [barItems, setBarItems] = useState<ReadonlyArray<DockBarItem>>();
-  const barHost = useDockBarHost(props.single ? "alone" : "tiled", setBarItems);
+  const { host: barHost, items: barItems } = useDockBarSlot(props.single ? "alone" : "tiled");
   const bar = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLDivElement>(null);
   // A tool alone has no tile bar: the title band already names it. Its
@@ -547,9 +546,18 @@ function Tile(props: {
           </>
         </div>
       )}
+      {!props.single && folded === "row" && barItems !== undefined ? (
+        <div className="dock-tile__row dock-tile__row--nodes">
+          <DockBarNodes items={barItems} />
+        </div>
+      ) : null}
       {props.single && barItems !== undefined && barItems.length > 0 ? (
         <div className="dock-tile__row" ref={row}>
-          <DockBarRow fold={folded} items={barItems} toolLabel={content.label} />
+          <DockBarRow
+            fold={folded === "row" ? "menu" : folded}
+            items={barItems}
+            toolLabel={content.label}
+          />
         </div>
       ) : null}
       <DockBarContext.Provider value={barHost}>

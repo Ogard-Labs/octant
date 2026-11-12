@@ -1011,8 +1011,9 @@
   position: relative;
 }
 
+/* The name gives way last: the status text beside it shrinks ten times as fast. */
 .dock-tile__bar[data-has-controls="true"] > .dock-tile__lead {
-  flex: 0 1 auto;
+  flex: 0 0.1 auto;
 }
 
 .dock-tile__tool-controls {
@@ -1037,7 +1038,10 @@
 }
 
 .dock-tile__tool-text {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
   max-width: 16em;
   overflow: hidden;
   color: var(--oct-meta);
@@ -1097,7 +1101,9 @@
 .dock-bar-named {
   display: inline-flex;
   height: 24px;
-  flex: none;
+  max-width: 16em;
+  min-width: 0;
+  flex: 0 1 auto;
   align-items: center;
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
@@ -1110,9 +1116,47 @@
   white-space: nowrap;
 }
 
+/* A long name (a device the person named) stops at the cap with an ellipsis;
+   its full name is the tooltip. */
+.dock-bar-named__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dock-bar-named:hover,
 .dock-bar-named[aria-expanded="true"] {
   background: var(--octant-control);
+}
+
+/* A state that must read at a glance stays in words (View only). */
+.dock-bar-chip {
+  display: inline-flex;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+.dock-tile__tool-node {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The controls a tool draws itself, moved under the bar when the bar cannot
+   hold them: the one secondary row, on the bar's insets and hairline. */
+.dock-tile__row--nodes {
+  gap: var(--oct-space-1);
 }
 
 /* The words laid out unseen, so the bar knows how much room they need. */

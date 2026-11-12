@@ -192,7 +192,9 @@ export function CodeTestPane(props: CodeTestPaneProps) {
   ]);
   return (
     <section aria-label="Repository tests" className="code-delivery-pane code-test-pane">
-      {hosted !== undefined ? null : (
+      {hosted !== undefined ? (
+        <h2 className="visually-hidden">Repository tests</h2>
+      ) : (
         <header className="code-delivery-pane__toolbar">
           <div>
             <h1>Repository tests</h1>

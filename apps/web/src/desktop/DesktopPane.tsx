@@ -289,6 +289,10 @@ export function DesktopPane(props: {
   return (
     <section aria-label="Desktop" className="device-pane desktop-pane">
       <DesktopToolbar
+        describe={(lease) => {
+          const place = desktopWhere(providers, lease);
+          return `${providerName(providers, String(lease.providerId))}${place === undefined ? "" : ` · ${place}`}`;
+        }}
         leases={leases}
         now={now}
         onExtend={(lease) => {
@@ -462,6 +466,8 @@ function StartConfirmation(props: {
 
 function DesktopToolbar(props: {
   readonly title: string;
+  /** Provider and place of a lease, said under its name in the desktops menu. */
+  readonly describe: (lease: DesktopLease) => string;
   readonly state: DesktopPaneState;
   readonly leases: ReadonlyArray<DesktopLease>;
   readonly selected: DesktopLease | undefined;
@@ -475,7 +481,15 @@ function DesktopToolbar(props: {
   const lease = "lease" in state ? state.lease : undefined;
   const running = lease?.state === "ready";
   const extendable = running && lease !== undefined && extensionMinutes(lease) > 0;
+  // The provider and place of a desktop off this computer, which can bill, stay
+  // in words beside its state; they do not fold away.
   const items: DockBarItem[] = [
+    {
+      kind: "text",
+      id: "where",
+      text: props.title,
+      dot: dotFor(state),
+    },
     { kind: "text", id: "state", text: stateWords(state, props.now()), live: true },
   ];
   if (props.leases.length > 1)
@@ -486,6 +500,7 @@ function DesktopToolbar(props: {
       options: props.leases.map((each, index) => ({
         id: String(each.leaseId),
         label: `Desktop ${index + 1}`,
+        description: props.describe(each),
       })),
       value: String(props.selected?.leaseId ?? ""),
       onChange: (id) => {

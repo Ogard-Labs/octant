@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 import { IconButton } from "./IconButton";
 import { ShellResizeHandle } from "./ShellResizeHandle";
@@ -10,7 +10,7 @@ import type {
 } from "./rightUtilityDockModel";
 import { DockToolStrip } from "./DockToolStrip";
 import { DockBarRow, useFoldedControls } from "./DockBarRow";
-import { DockBarContext, useDockBarHost, type DockBarItem } from "./dockBarControls";
+import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 
 export interface BottomUtilityPanelProps {
   readonly height: number;
@@ -34,8 +34,7 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
   // under the rules a tile's bar follows: 24px controls with 14px glyphs, 4px
   // apart, folded into one menu before anything is cut. The bar itself stays
   // the 44px band the tabs stand in.
-  const [items, setItems] = useState<ReadonlyArray<DockBarItem>>();
-  const host = useDockBarHost("bottom", setItems);
+  const { host, items } = useDockBarSlot("bottom");
   const controls = useRef<HTMLDivElement>(null);
   const fold = useFoldedControls(controls, items ?? [], 0);
   return (
@@ -80,7 +79,11 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
           />
         </div>
         <div className="bottom-utility-panel__controls" ref={controls}>
-          <DockBarRow fold={fold} items={items ?? []} toolLabel={props.activeSurface.label} />
+          <DockBarRow
+            fold={fold === "row" ? "menu" : fold}
+            items={items ?? []}
+            toolLabel={props.activeSurface.label}
+          />
         </div>
         <IconButton icon={X} label="Hide bottom panel" onClick={() => props.onClose()} />
       </header>

@@ -79,20 +79,25 @@ export function DeviceToolbar(props: {
       ? {
           kind: "choice",
           id: "device",
-          label: "Device",
+          label: "Switch device",
           compact: true,
           options: props.devices
             .filter((device) => device.state !== "unavailable")
-            .map((device) => ({ id: device.id, label: device.name })),
+            .map((device) => ({
+              id: device.id,
+              label: device.name,
+              description: [device.os, deviceStateWord(device.state)].filter(Boolean).join(" · "),
+            })),
           value: props.currentId ?? "",
           onChange: (id) => props.onSelectDevice?.(id),
         }
-      : { kind: "text", id: "device", text: props.title },
+      : { kind: "text", id: "device", text: props.title, dot: props.dot },
     {
       kind: "text",
       id: "state",
       text: props.os === undefined ? props.state : `${props.os} · ${props.state}`,
       live: true,
+      ...(switchable ? { dot: props.dot } : {}),
     },
   ];
   if (props.viewOnly !== undefined) {
@@ -103,6 +108,7 @@ export function DeviceToolbar(props: {
       label: "View only",
       title: "Show the input approval again",
       icon: EyeOff,
+      words: true,
       onSelect: showApproval,
     });
   }

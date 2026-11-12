@@ -286,9 +286,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const placement = useDockBarPlacement();
   const countInBar =
     dock && (placement === "tiled" || placement === "bottom") && countCopy !== undefined;
-  useDockBarControls(
-    countInBar ? [{ kind: "text", id: "count", text: countCopy, live: true }] : [],
-  );
+  useDockBarControls(countInBar ? [{ kind: "text", id: "count", text: countCopy }] : []);
 
   const searchField = (
     <label className="surface-toolbar__search code-project-pull-requests__search">

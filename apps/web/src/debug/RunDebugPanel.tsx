@@ -309,7 +309,9 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   );
   return (
     <section aria-label="Run and debug" className="run-debug">
-      {hosted !== undefined ? null : (
+      {hosted !== undefined ? (
+        <h2 className="visually-hidden">Run and debug</h2>
+      ) : (
         <header className="run-debug__toolbar">
           <Bug aria-hidden="true" size={16} />
           <h2 className="run-debug__title">Run and debug</h2>

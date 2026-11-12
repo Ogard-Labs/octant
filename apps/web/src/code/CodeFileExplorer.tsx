@@ -51,6 +51,8 @@ export interface CodeFileExplorerProps {
   /** Absent on a surface that does not offer an explicit relist. */
   readonly onRefresh?: () => void;
   readonly refreshing?: boolean;
+  /** False for a tree that is not the tool's primary one: its Refresh stays in its own row. */
+  readonly barControls?: boolean;
 }
 
 export function CodeFileExplorer(props: CodeFileExplorerProps) {
@@ -197,7 +199,11 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
   // the bar beside the name and the filter, which is content, keeps the one row
   // under it. Shown alone there is no bar: filter and Refresh share the one row.
   const placement = useDockBarPlacement();
-  const refreshInBar = placement === "tiled" || placement === "bottom";
+  // A tool lists the checkout and each extra folder as separate trees, each with
+  // its own filter, so only the primary tree (`barControls`) hands its Refresh
+  // to the bar; an extra folder keeps its own beside its own filter.
+  const refreshInBar =
+    props.barControls !== false && (placement === "tiled" || placement === "bottom");
   useDockBarControls(
     props.onRefresh === undefined || !refreshInBar
       ? []

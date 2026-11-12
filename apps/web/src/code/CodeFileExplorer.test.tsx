@@ -20,7 +20,9 @@ describe("CodeFileExplorer", () => {
     const onRefresh = vi.fn();
     const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
     render(
-      <DockBarContext.Provider value={{ placement: "tiled", set: (items) => handed.push(items) }}>
+      <DockBarContext.Provider
+        value={{ placement: "tiled", set: (_owner, items) => handed.push(items) }}
+      >
         <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={onRefresh} />
       </DockBarContext.Provider>,
     );
@@ -54,7 +56,9 @@ describe("CodeFileExplorer", () => {
   it("keeps Refresh beside the filter in the one row when the tool stands alone", () => {
     const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
     render(
-      <DockBarContext.Provider value={{ placement: "alone", set: (items) => handed.push(items) }}>
+      <DockBarContext.Provider
+        value={{ placement: "alone", set: (_owner, items) => handed.push(items) }}
+      >
         <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={vi.fn()} />
       </DockBarContext.Provider>,
     );

@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { useState, type ReactNode } from "react";
+import { DockBarTestHost } from "./dockBarHost.test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { BottomUtilityPanel } from "./BottomUtilityPanel";
@@ -108,6 +109,8 @@ const aloneWithoutControls: DockTileLayout = {
   columns: [{ share: 1, tiles: [{ tabId: "two", share: 1 }] }],
 };
 
+let textWidth = 0;
+
 /** A bar `width` wide whose switch needs 150px in words and 90px named, beside a 40px name. */
 function barOfWidth(width: number) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
@@ -120,7 +123,13 @@ function barOfWidth(width: number) {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(
     function (this: HTMLElement) {
       const ruler = this.dataset.ruler ?? "";
-      return ruler.startsWith("full:") ? 150 : ruler.startsWith("named:") ? 90 : 0;
+      return ruler.startsWith("full:")
+        ? 150
+        : ruler.startsWith("named:")
+          ? 90
+          : ruler.startsWith("text:")
+            ? textWidth
+            : 0;
     },
   );
   vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(
@@ -130,7 +139,11 @@ function barOfWidth(width: number) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  textWidth = 0;
+});
 
 describe("a tool's controls in its tile's bar", () => {
   it("stands the tool's words and status, then its actions, between its name and Arrange and Close, in that order", () => {
@@ -147,7 +160,7 @@ describe("a tool's controls in its tile's bar", () => {
       "Arrange one",
       "Close one",
     ]);
-    expect(within(region).getByText("3 things")).toBeInTheDocument();
+    expect(within(region).getAllByText("3 things").length).toBeGreaterThan(0);
     expect(region.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByText("tiled, view a")).toBeInTheDocument();
   });
@@ -304,5 +317,262 @@ describe("the bar's sizes", () => {
     expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-sm\)/);
     expect(rule(".dock-bar-switch")).toMatch(/height:\s*28px/);
     expect(rule(".dock-bar-switch__option")).toMatch(/height:\s*24px/);
+  });
+});
+
+function Registrant(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly onSelect?: () => void;
+}) {
+  useDockBarControls([
+    {
+      kind: "button",
+      id: props.id,
+      label: props.label,
+      icon: RefreshCw,
+      onSelect: props.onSelect ?? (() => {}),
+    },
+  ]);
+  return null;
+}
+
+describe("the slot a host keeps", () => {
+  it("draws each registrant's controls in the order they registered and clears only an unmounted one's own", () => {
+    function Two(props: { readonly second: boolean }) {
+      return (
+        <DockBarTestHost placement="tiled">
+          <Registrant id="a" label="Refresh a" />
+          {props.second ? <Registrant id="b" label="Refresh b" /> : null}
+        </DockBarTestHost>
+      );
+    }
+    const { rerender } = render(<Two second />);
+    const labels = () =>
+      within(screen.getByTestId("bar"))
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"));
+    expect(labels()).toEqual(["Refresh a", "Refresh b"]);
+    rerender(<Two second={false} />);
+    expect(labels()).toEqual(["Refresh a"]);
+  });
+
+  it("redraws a control when its tool registers it again with a new name, and clears it on unmount", () => {
+    const { rerender } = render(
+      <DockBarTestHost placement="alone">
+        <Registrant id="a" label="Refresh a" />
+      </DockBarTestHost>,
+    );
+    rerender(
+      <DockBarTestHost placement="alone">
+        <Registrant id="a" label="Refresh again" />
+      </DockBarTestHost>,
+    );
+    expect(screen.getByRole("button", { name: "Refresh again" })).toBeInTheDocument();
+    rerender(<DockBarTestHost placement="alone">{null}</DockBarTestHost>);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("refuses a second registrant's control with an id already taken and says so", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = vi.fn();
+    const second = vi.fn();
+    render(
+      <DockBarTestHost placement="tiled">
+        <Registrant id="clash" label="Refresh first" onSelect={first} />
+        <Registrant id="clash" label="Refresh second" onSelect={second} />
+      </DockBarTestHost>,
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Refresh first" }));
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('"clash"'));
+  });
+});
+
+describe("a bar that holds status text and a tool's name", () => {
+  const textTool = (
+    <DockTiles
+      focusedTabId="one"
+      layout={two}
+      onCloseTile={() => {}}
+      onFocusTile={() => {}}
+      onHideTile={() => {}}
+      onMoveTile={() => {}}
+      onResizeColumn={() => {}}
+      onResizeColumns={() => {}}
+      onShowTileAlone={() => {}}
+      renderTile={(tabId) => content(tabId, tabId === "one" ? <StatusTool /> : <Plain />)}
+    />
+  );
+
+  function StatusTool() {
+    useDockBarControls([
+      { kind: "text", id: "state", text: "iOS 27 · Running", live: true, dot: "running" },
+      { kind: "button", id: "back", label: "Back", icon: RefreshCw, onSelect: () => {} },
+      { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: () => {} },
+      { kind: "button", id: "shot", label: "Screenshot", icon: RefreshCw, onSelect: () => {} },
+    ]);
+    return null;
+  }
+
+  it("folds the actions into More before the status text is cut, and keeps the name whole", () => {
+    textWidth = 120;
+    barOfWidth(300);
+    render(textTool);
+    expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
+    const text = screen
+      .getAllByText("iOS 27 · Running")
+      .find((element) => element.closest("[inert]") === null);
+    if (text === undefined) throw new Error("The status text is not drawn.");
+    expect(text).toBeVisible();
+    // Counted at its measured width: the bar's room (300 less insets, the name
+    // and Arrange and Close) holds it and the one More button.
+    expect(120 + 4 + 28).toBeLessThanOrEqual(300 - 20 - (14 + 4 + 40) - 60);
+    expect(screen.getByText("one", { selector: ".dock-tile__name" })).toBeInTheDocument();
+  });
+
+  it("keeps the actions as icons while the bar holds them all beside the status text", () => {
+    textWidth = 120;
+    barOfWidth(420);
+    render(textTool);
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More one actions" })).toBeNull();
+  });
+});
+
+describe("a bar's measurement", () => {
+  it("measures again when the words' widths change and the bar's does not", () => {
+    const callbacks: ResizeObserverCallback[] = [];
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callbacks.push(callback);
+        }
+        observe(element: Element) {
+          observed.push(element);
+        }
+        disconnect() {}
+        unobserve() {}
+      },
+    );
+    barOfWidth(400);
+    render(<Dock layout={two} />);
+    expect(screen.getByRole("group", { name: "Things view" })).toBeInTheDocument();
+    expect(observed.some((element) => (element as HTMLElement).dataset.ruler !== undefined)).toBe(
+      true,
+    );
+    // The interface size grew: the same words now need 300px, the bar the same.
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(
+      function (this: HTMLElement) {
+        const ruler = this.dataset.ruler ?? "";
+        return ruler.startsWith("full:") ? 300 : ruler.startsWith("named:") ? 90 : 0;
+      },
+    );
+    act(() => {
+      for (const callback of callbacks) callback([], {} as ResizeObserver);
+    });
+    expect(screen.queryByRole("group", { name: "Things view" })).toBeNull();
+    expect(screen.getByRole("button", { name: "View A, Things view" })).toBeInTheDocument();
+  });
+});
+
+describe("a bar's toolbar", () => {
+  it("names the tool's controls as one toolbar and moves along them with the arrow keys", async () => {
+    render(<Dock layout={two} />);
+    const toolbar = screen.getByRole("toolbar", { name: "one controls" });
+    const buttons = within(toolbar).getAllByRole("button");
+    buttons[0]?.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(buttons[1]).toHaveFocus();
+    await userEvent.keyboard("{End}");
+    expect(buttons.at(-1)).toHaveFocus();
+  });
+
+  it("labels the alone row's controls the same way", () => {
+    render(<Dock layout={alone} />);
+    expect(screen.getByRole("toolbar", { name: "one controls" })).toBeInTheDocument();
+  });
+});
+
+describe("a tile that changes between tiled and alone", () => {
+  it("keeps the tool mounted, with what was typed in it and its focus", async () => {
+    function Draft() {
+      useDockBarControls([
+        { kind: "button", id: "r", label: "Refresh draft", icon: RefreshCw, onSelect: () => {} },
+      ]);
+      return <input aria-label="Draft" />;
+    }
+    const layoutOf = (layout: DockTileLayout) => (
+      <DockTiles
+        focusedTabId="one"
+        layout={layout}
+        onCloseTile={() => {}}
+        onFocusTile={() => {}}
+        onHideTile={() => {}}
+        onMoveTile={() => {}}
+        onResizeColumn={() => {}}
+        onResizeColumns={() => {}}
+        onShowTileAlone={() => {}}
+        renderTile={(tabId) => content(tabId, tabId === "one" ? <Draft /> : <Plain />)}
+      />
+    );
+    const { rerender } = render(layoutOf(two));
+    const input = screen.getByLabelText("Draft");
+    await userEvent.type(input, "keep me");
+    rerender(layoutOf(alone));
+    expect(screen.getByLabelText("Draft")).toBe(input);
+    expect(input).toHaveValue("keep me");
+    expect(input).toHaveFocus();
+    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh draft" })).toBeInTheDocument();
+    rerender(layoutOf(two));
+    expect(screen.getByLabelText("Draft")).toBe(input);
+    expect(input).toHaveValue("keep me");
+  });
+});
+
+describe("controls a tool draws itself", () => {
+  it("moves under the bar as the one secondary row when the bar cannot hold them, and stays in the bar when it can", () => {
+    function Drawn() {
+      useDockBarControls([
+        { kind: "node", id: "own", width: 232, node: <button type="button">Versions</button> },
+      ]);
+      return null;
+    }
+    const dock = (
+      <DockTiles
+        focusedTabId="one"
+        layout={two}
+        onCloseTile={() => {}}
+        onFocusTile={() => {}}
+        onHideTile={() => {}}
+        onMoveTile={() => {}}
+        onResizeColumn={() => {}}
+        onResizeColumns={() => {}}
+        onShowTileAlone={() => {}}
+        renderTile={(tabId) => content(tabId, tabId === "one" ? <Drawn /> : <Plain />)}
+      />
+    );
+    barOfWidth(500);
+    const { unmount } = render(dock);
+    expect(document.querySelector(".dock-tile__bar .dock-tile__tool-node")).not.toBeNull();
+    expect(document.querySelector(".dock-tile__row--nodes")).toBeNull();
+    unmount();
+    vi.restoreAllMocks();
+    barOfWidth(280);
+    render(dock);
+    expect(document.querySelector(".dock-tile__bar .dock-tile__tool-node")).toBeNull();
+    const row = document.querySelector(".dock-tile__row--nodes");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByRole("button", { name: "Versions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 });
