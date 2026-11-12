@@ -430,6 +430,18 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               ? (persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.toolConstraints ??
                 [])
               : [],
+          // Read from the thread as it stands now, so lowering a thread from
+          // Full access brings back the ask on its next action. A Code
+          // owner also carries its turn's posture, which may sit below the
+          // thread's; Chat has no Full access.
+          fullAccess: (owner) =>
+            owner.mode === "code"
+              ? owner.executionPolicy === "full-access" &&
+                persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.executionPolicy ===
+                  "full-access"
+              : owner.mode === "work" &&
+                workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.access ===
+                  "full-access",
           externalContentIngested: (owner) =>
             readThreadExternalContentTaint(persistence.connection, owner.threadId)
               .externalContentIngested,

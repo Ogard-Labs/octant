@@ -902,15 +902,20 @@ intent at the moment of action instead:
 - The first Computer action on each application in a thread asks, even under
   Full access: no app grant exists until the person approves one, and the
   tool never reads the execution policy to skip the ask. A grant lasts the
-  thread and covers that application, owner, and authority only; a setting
-  can remember it for the Project (maintainer request, 2026-11-12; not built
-  yet: today a grant lapses after five minutes).
+  thread and covers that application, owner, and authority only. It has no
+  clock: it ends when the task is stopped, when the thread is archived or
+  otherwise stops being active, when its provider, model, or authority
+  changes, when Computer is disabled, and at a host restart, because grants
+  are held in memory and never journaled. A setting can remember it for the
+  Project (maintainer request, 2026-11-12; not built yet: no setting
+  remembers a grant for the Project).
 - Below Full access, once outside content has entered the thread (a Browser page, a tool result,
   imported content), no standing grant carries a Computer action: every
   action asks again, for that one action, and the ask names what marked the
   thread. At Full access outside content does not make later actions ask
-  again (maintainer request, 2026-11-12; not built yet: today it does at
-  every level).
+  again (maintainer request, 2026-11-12). The level is the thread's as it
+  stands when the action is asked, so lowering a thread brings the ask back
+  on its next action, and a Code turn sent below its thread's level asks.
 - The approval card shows the agent's stated reason, quoted as its words, and
   the outside sources with their last read.
 - Only the person at this Mac approves control of this Mac. A paired device or
@@ -11271,8 +11276,8 @@ for an action to the host, which shows it on the approval and grants nothing
 for it. The first action in each application asks once and the grant lasts the
 thread; a setting can remember it for the Project. At Full access outside
 content does not make later actions ask again; below Full access that re-ask
-stays (maintainer request, 2026-11-12). Not built yet: today each
-application's approval lapses after five minutes. Stop, cancellation, changed authority, or disable revokes
+stays (maintainer request, 2026-11-12). Not built yet: no setting
+remembers a grant for the Project. Stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 Lifecycle evidence retains the exact tool authority: Chat may have no Project;
@@ -11836,8 +11841,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     Private page asks nothing there. Both are entries in the Full access
     rule above (maintainer request, 2026-11-12, replacing the earlier
     decision that both asked at every level). Not built yet: the Browser
-    still asks for each site on a Private page, and a Computer grant still
-    lapses after five minutes.
+    still asks for each site on a Private page.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,

@@ -74,6 +74,8 @@ function fixture(overrides?: {
   readonly toolOwner?: ComputerUseOwner;
   /** A host with no screen of its own, whose only destination is a lease. */
   readonly leasableOnly?: boolean;
+  /** Whether the owner's thread stands at Full access. */
+  readonly fullAccess?: boolean;
   /** Reads the thread's real outside-content mark in place of the fixture's flag. */
   readonly marks?: {
     readonly ingested: () => boolean;
@@ -121,6 +123,7 @@ function fixture(overrides?: {
     authority: () => authority,
     ownerIsCurrent: () => current,
     toolConstraints: () => toolConstraints,
+    fullAccess: () => overrides?.fullAccess === true,
     externalContentIngested: overrides?.marks?.ingested ?? (() => tainted),
     outsideContent:
       overrides?.marks?.outsideContent ??
@@ -140,6 +143,9 @@ function fixture(overrides?: {
     revoke: () => {
       current = false;
     },
+    restore: () => {
+      current = true;
+    },
     taint: () => {
       tainted = true;
     },
@@ -147,7 +153,7 @@ function fixture(overrides?: {
 }
 
 describe("Computer use through a provider tool", () => {
-  it("expires an app grant from approval time even when the first action is slow", async () => {
+  it("keeps an app grant for the thread, with no lapse after five minutes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const approvedAt = Date.now();
     const f = fixture();
@@ -157,47 +163,42 @@ describe("Computer use through a provider tool", () => {
     };
     try {
       const first = f.tools.execute(command);
-      await vi.waitFor(() =>
-        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
-      );
-      const view = f.service.runtime.list(owner.windowId)[0];
-      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
-      f.execute.mockImplementationOnce(async () => {
-        vi.setSystemTime(approvedAt + 120_000);
-        return decodeComputerControlResult({
-          kind: "windows",
-          appId: "com.example.Fixture",
-          windows: [],
-        });
-      });
-      await f.service.runtime.decide({
-        ownerWindowId: owner.windowId,
-        threadId: owner.threadId,
-        authority,
-        sessionId: view.sessionId,
-        actionId: view.pendingApproval.actionId,
-        approvalId: view.pendingApproval.approvalId,
-        decision: "approved",
-      });
+      await approvePending(f);
       await first;
-      vi.setSystemTime(approvedAt + 301_000);
-      const second = f.tools.execute(command);
-      try {
-        await vi.waitFor(() =>
-          expect(
-            f.service.runtime
-              .list(owner.windowId)
-              .some((session) => session.pendingApproval !== undefined),
-          ).toBe(true),
-        );
-        expect(f.execute).toHaveBeenCalledOnce();
-      } finally {
-        await f.tools.close?.();
-        await second;
-      }
+      vi.setSystemTime(approvedAt + 6 * 60 * 60_000);
+      await f.service.sweep();
+      expect(f.release).not.toHaveBeenCalled();
+      expect(await f.tools.execute(command)).toMatchObject({ result: { kind: "windows" } });
+      expect(f.execute).toHaveBeenCalledTimes(2);
+      expect(
+        f.service.runtime.list(owner.windowId).some((view) => view.pendingApproval !== undefined),
+      ).toBe(false);
     } finally {
       await f.service.close();
       vi.useRealTimers();
+    }
+  });
+  it("ends an app grant when its thread stops being active, and asks again if the thread returns", async () => {
+    const f = fixture();
+    const command = {
+      name: "octant_computer",
+      inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+    };
+    try {
+      const first = f.tools.execute(command);
+      await approvePending(f);
+      await first;
+      // An archived thread is no longer current; the sweep that follows every
+      // journal commit ends what it held.
+      f.revoke();
+      await f.service.sweep();
+      f.restore();
+      const again = f.tools.execute(command);
+      expect((await approvePending(f)).scope).toBe("application-session");
+      await again;
+      expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
     }
   });
   it("revokes a pending app approval when the tool session closes", async () => {
@@ -230,7 +231,7 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
-  it("offers a one-time approval, not a five-minute grant, once the thread has read external content", async () => {
+  it("offers a one-time approval, not an app grant, once the thread has read external content", async () => {
     const f = fixture();
     try {
       f.taint();
@@ -244,7 +245,7 @@ describe("Computer use through a provider tool", () => {
       const pending = f.service.runtime.list(owner.windowId)[0]?.pendingApproval;
       expect(pending?.scope).toBeUndefined();
       expect(pending?.summary).toContain("this one action");
-      expect(pending?.summary).not.toContain("5 minutes");
+      expect(pending?.summary).not.toContain("this thread");
       expect(pending?.outsideContent).toEqual(marking);
       await f.tools.close?.();
     } finally {
@@ -433,7 +434,7 @@ describe("Computer use through a provider tool", () => {
     }
   });
 
-  it("asks again under taint instead of honouring the five-minute app grant", async () => {
+  it("asks again below Full access once the thread read outside content, instead of honouring the app grant", async () => {
     const f = fixture();
     try {
       const first = f.tools.execute({
@@ -456,9 +457,10 @@ describe("Computer use through a provider tool", () => {
       });
       expect(await first).toMatchObject({ result: { kind: "windows" } });
 
-      // The grant now covers the app for five minutes. Once the thread has
-      // ingested external content, a standing grant must not carry an
-      // irreversible action: the runtime asks again for a fresh confirmation.
+      // The grant now covers the app for the thread. Below Full access, once
+      // the thread has ingested external content, a standing grant must not
+      // carry an irreversible action: the runtime asks again for a fresh
+      // confirmation.
       f.taint();
       const second = f.tools.execute({
         name: "octant_computer",
@@ -680,6 +682,42 @@ describe("Computer offered on every eligible turn", () => {
       expect(askedAgain.summary).toContain("com.example.Other");
       await other;
       expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("lets an app grant carry later actions at Full access after the thread read outside content", async () => {
+    // A Work owner never carries its thread's level, so the host reads it
+    // from the thread.
+    const fullAccess = decodeComputerUseOwner({ ...owner, mode: "work" });
+    const f = fixture({ toolOwner: fullAccess, fullAccess: true });
+    const windows = (appId: string) => ({
+      name: "octant_computer",
+      inputJson: JSON.stringify({ operation: "windows", appId }),
+    });
+    try {
+      const first = f.tools.execute(windows("com.example.Fixture"));
+      await approvePending(f, fullAccess);
+      await first;
+      f.taint();
+      expect(await f.tools.execute(windows("com.example.Fixture"))).toMatchObject({
+        result: { kind: "windows" },
+      });
+      expect(f.execute).toHaveBeenCalledTimes(2);
+      // The first action on another app still asks, for a grant that lasts
+      // the thread rather than for one action.
+      const other = f.tools.execute(windows("com.example.Other"));
+      const asked = await approvePending(f, fullAccess);
+      expect(asked.scope).toBe("application-session");
+      expect(asked.summary).toBe(
+        'Allow control of com.example.Other for "Fixture task" for this thread.',
+      );
+      await other;
+      expect(await f.tools.execute(windows("com.example.Other"))).toMatchObject({
+        result: { kind: "windows" },
+      });
+      expect(f.execute).toHaveBeenCalledTimes(4);
     } finally {
       await f.service.close();
     }
@@ -911,6 +949,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       authority: () => codeAuthority,
       ownerIsCurrent: () => true,
       toolConstraints: () => [],
+      fullAccess: () => false,
       externalContentIngested: () => tainted,
       threadTitle: () => "Notes app",
       record: (event) => {
@@ -976,7 +1015,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         isError: false,
       });
       expect(f.asked).toEqual([
-        `Allow control of notes-app on this thread's disposable desktop for "Notes app" for 5 minutes.`,
+        `Allow control of notes-app on this thread's disposable desktop for "Notes app" for this thread.`,
       ]);
       expect(f.control).toHaveBeenCalledOnce();
       expect(f.control.mock.calls[0]?.[0]).toMatchObject({ leaseId });
@@ -1144,7 +1183,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       await tools.execute(call({ operation: "launch", appId: "notes-app" }));
       await tools.execute(call({ operation: "windows", appId: "other-app" }));
       expect(f.asked.slice(3)).toEqual([
-        `Allow control of notes-app on this thread's disposable desktop for "Notes app" for 5 minutes.`,
+        `Allow control of notes-app on this thread's disposable desktop for "Notes app" for this thread.`,
       ]);
       expect(f.control).toHaveBeenCalledTimes(4);
     } finally {

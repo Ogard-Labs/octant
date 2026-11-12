@@ -913,8 +913,8 @@ Rules this slice resolved:
   images is refused `needs-image-model` for every command but `stop`, and for
   `send-file`, before anything is asked or sent.
 - **Approvals are asked in the thread.** Per-app approval keeps the existing
-  rules: a five-minute app grant, one action at a time once the thread is
-  tainted, and Plan refuses. A desktop's approval is also asked in the
+  rules: an app grant that lasts the thread, one action at a time once a
+  thread below Full access is tainted, and Plan refuses. A desktop's approval is also asked in the
   thread, where any client that may open the thread can answer it
   ([decision 3](#maintainer-decisions)); the first answer, there or on a
   local approval card, decides and withdraws the other. This Mac's approvals

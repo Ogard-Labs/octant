@@ -666,6 +666,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
         authority: () => authority,
         ownerIsCurrent: () => true,
         toolConstraints: () => [],
+        fullAccess: () => false,
         externalContentIngested: () => ingested.length > 0,
         threadTitle: () => "Notes app",
         record: () => undefined,
