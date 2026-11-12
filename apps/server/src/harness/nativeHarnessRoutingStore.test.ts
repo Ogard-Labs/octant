@@ -582,6 +582,150 @@ describe("native harness session store", () => {
     expect(sessions.read(threadId)?.approvals).toHaveLength(2);
   });
 
+  it("refuses an allow answered after the thread's posture changed, keeps asking, and still takes a denial", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000027";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    let posture = "ask-first";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      posture: (thread, mode) => (thread === threadId && mode === "code" ? posture : undefined),
+    });
+    const ask = (source?: {
+      readonly runId: never;
+      readonly providerInstanceId: never;
+      readonly modelId: never;
+    }) =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+        ...(source === undefined ? {} : { source }),
+      });
+
+    const lead = ask();
+    const leadApproval = sessions.read(threadId)?.approvals?.[0];
+    posture = "plan";
+    expect(approvals.decide(threadId, String(leadApproval?.id), "approve")).toBe("posture-changed");
+    expect(approvals.decide(threadId, String(leadApproval?.id), "approve")).toBe("decided");
+    // Asked again under the posture the thread holds now, the allow goes through.
+    await expect(lead).resolves.toBe("approved");
+
+    // A child's request is asked on its parent thread and follows the parent's posture.
+    const child = ask({
+      runId: "00000000-0000-4000-8000-000000000091" as never,
+      providerInstanceId: candidate("big").providerInstanceId as never,
+      modelId: "big" as never,
+    });
+    const childApproval = sessions.read(threadId)?.approvals?.[1];
+    expect(childApproval).toMatchObject({ status: "pending" });
+    posture = "ask-first";
+    expect(approvals.decide(threadId, String(childApproval?.id), "approve")).toBe(
+      "posture-changed",
+    );
+    expect(sessions.read(threadId)?.approvals?.[1]).toMatchObject({ status: "pending" });
+    expect(approvals.decide(threadId, String(childApproval?.id), "deny")).toBe("decided");
+    await expect(child).resolves.toBe("denied");
+  });
+
+  it("stops answering with an always grant once the thread's permissions change, and asks again", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000028";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    let posture = "auto";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      posture: (thread) => (thread === threadId ? posture : undefined),
+    });
+    const ask = () =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    const idAt = (index: number) => String(sessions.read(threadId)?.approvals?.[index]?.id);
+
+    const first = ask();
+    expect(approvals.decide(threadId, idAt(0), "approve-always")).toBe("decided");
+    await expect(first).resolves.toBe("approved");
+    await expect(ask()).resolves.toBe("approved");
+    expect(approvals.remembers(threadId, "shell-commands", false)).toBe(true);
+
+    // Narrowed: the grant given under the wider posture no longer answers.
+    posture = "ask-first";
+    expect(approvals.remembers(threadId, "shell-commands", false)).toBe(false);
+    const narrowed = ask();
+    expect(sessions.read(threadId)?.approvals?.[1]).toMatchObject({ status: "pending" });
+    expect(approvals.decide(threadId, idAt(1), "deny")).toBe("decided");
+    await expect(narrowed).resolves.toBe("denied");
+
+    // Back on the posture it was granted under, the grant still holds.
+    posture = "auto";
+    await expect(ask()).resolves.toBe("approved");
+    expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+  });
+
+  it("refuses an allow for an approval that waited a day once the thread's posture changed, and keeps it waiting", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000036";
+    const uuid = uuidFactory();
+    let at = Date.parse(now);
+    const clock = () => new Date(at).toISOString();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock,
+    });
+    let posture = "auto";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock,
+      posture: (thread) => (thread === threadId ? posture : undefined),
+    });
+    const asked = approvals.ask({
+      threadId,
+      mode: "code",
+      lead: candidate("big") as never,
+      toolName: "bash",
+      summary: "bash: bun test",
+      approvalClass: "shell-commands",
+    });
+    const approvalId = String(sessions.read(threadId)?.approvals?.[0]?.id);
+
+    // The wait itself never lapses, but the answer is still held to the
+    // posture: narrowed while the approval waited, the first allow is refused.
+    at += 24 * 60 * 60_000;
+    posture = "ask-first";
+    expect(approvals.decide(threadId, approvalId, "approve")).toBe("posture-changed");
+    expect(approvals.waiting()).toEqual([{ threadId, approvalId }]);
+    expect(sessions.read(threadId)?.approvals?.[0]?.status).toBe("pending");
+
+    at += 24 * 60 * 60_000;
+    expect(approvals.decide(threadId, approvalId, "approve")).toBe("decided");
+    await expect(asked).resolves.toBe("approved");
+  });
+
   it("keeps an approval waiting a day later and still takes the person's decision", async () => {
     vi.useFakeTimers();
     try {

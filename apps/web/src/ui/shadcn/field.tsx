@@ -13,7 +13,7 @@ import { cn } from "./utils";
 
 export function FieldGroup({ className, ...props }: ComponentProps<"div">) {
   return (
-    <div className={cn("flex flex-col gap-4", className)} data-slot="field-group" {...props} />
+    <div className={cn("flex flex-col gap-3", className)} data-slot="field-group" {...props} />
   );
 }
 
@@ -21,7 +21,7 @@ export function Field({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "group/field flex flex-col gap-1.5 data-disabled:opacity-(--oct-disabled-opacity)",
+        "group/field flex flex-col gap-1 data-disabled:opacity-(--oct-disabled-opacity)",
         className,
       )}
       data-slot="field"

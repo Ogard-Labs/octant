@@ -22,6 +22,39 @@ export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "k
 }
 
 /**
+ * The most streamed text and reasoning one turn may journal. The deltas are
+ * exempt from the event budget above, and Chat and Code journal every one, so
+ * without this a provider that never stops streaming grows the journal until
+ * the disk fills. 32 MiB is far past any real answer (a 200,000-token context
+ * is under 1 MiB of text, and Chat already keeps only the first 256 KiB of a
+ * reply for the turn's own record), yet small enough that a runaway turn
+ * costs a bounded, recoverable slice of the disk.
+ */
+export const MAX_TURN_STREAMED_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+/** The words a turn's output ends with when Octant stopped keeping it. */
+export const STREAMED_OUTPUT_TRUNCATION_MARKER = "\n\n[Output truncated by Octant.]";
+
+/** The bounded failure code a turn stopped by its streamed-output budget carries. */
+export const STREAMED_OUTPUT_BUDGET_CODE = "output-budget-exceeded";
+
+/**
+ * Counts a turn's streamed text and reasoning bytes. It answers `exceeded`
+ * for the first delta that would carry the turn past `limitBytes`; that delta
+ * is not kept, and the runner ends the turn with the truncation marker.
+ */
+export function makeStreamedOutputBudget(
+  limitBytes: number = MAX_TURN_STREAMED_OUTPUT_BYTES,
+): (event: ProviderRuntimeEvent) => "within" | "exceeded" {
+  let streamedBytes = 0;
+  return (event) => {
+    if (event.kind !== "text-delta" && event.kind !== "reasoning-delta") return "within";
+    streamedBytes += Buffer.byteLength(event.text, "utf8");
+    return streamedBytes > limitBytes ? "exceeded" : "within";
+  };
+}
+
+/**
  * The provider answered the request a harness retry was waiting on: reply
  * text, reasoning, or a tool call. A retried response that only calls a tool
  * streams no text, so a tool event has to end the wait as well, or the retry
@@ -121,6 +154,41 @@ export function providerToolCallPauseLimitMs(
 /** The pause bound a runner uses when nothing tells it the host's setting. */
 export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS =
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES * 60_000;
+
+/**
+ * How long a turn may process provider events before it hands the event loop
+ * back. A provider that streams faster than the host journals keeps the
+ * event stream non-empty, and each event resumes the turn from a promise, so
+ * the work ran as one unbroken chain of microtasks: timers and incoming
+ * requests, Stop among them, never ran until the provider paused (a Code
+ * turn fed deltas as fast as they could be pulled starved a 50 ms timer for
+ * a whole minute).
+ */
+export const PROVIDER_EVENT_SLICE_MS = 10;
+
+/**
+ * An effect a turn runs once per provider event. It is free until the turn
+ * has held the event loop for `sliceMs`, then waits one `setImmediate` so
+ * timers and pending I/O (a Stop, an approval answer) run before the next
+ * event. Wall time, not the Effect clock: a test clock that never advances
+ * would otherwise turn it off.
+ */
+export function makeEventLoopShare(
+  sliceMs: number = PROVIDER_EVENT_SLICE_MS,
+  now: () => number = () => performance.now(),
+): Effect.Effect<void> {
+  let sliceStartedAt = now();
+  return Effect.suspend(() => {
+    if (now() - sliceStartedAt < sliceMs) return Effect.void;
+    return Effect.async<void>((resume) => {
+      const pending = setImmediate(() => {
+        sliceStartedAt = now();
+        resume(Effect.void);
+      });
+      return Effect.sync(() => clearImmediate(pending));
+    });
+  });
+}
 
 export interface IdleTimeout {
   /** Record activity; the idle clock restarts from now. */

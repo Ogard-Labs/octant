@@ -1058,6 +1058,13 @@ const ForceStopProviderTurn = Schema.Struct({
 const CancelProviderTurn = Schema.Struct({
   kind: Schema.Literal("cancel-provider-turn"),
   ...OperationScope,
+  /**
+   * The turn this Stop was pressed for. A Stop that names a turn no longer
+   * current is refused, so one that arrives late cannot stop the turn that
+   * replaced it (a queued message the host sent on, or a continuation).
+   * Optional so a client built before it existed still stops the live turn.
+   */
+  turnOperationId: Schema.optional(CodeOperationId),
 }).annotations(strict);
 export const CODE_OPERATION_COMMAND_KINDS = [
   "start-terminal",

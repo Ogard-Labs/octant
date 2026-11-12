@@ -4,6 +4,7 @@ import {
   type CodeRuntimeWork,
   type CodeRuntimeWorkId,
   type CodeRuntimeWorkKind,
+  type CodeRuntimeRemoteStep,
   type CodeRuntimeWorkState,
   type CodeOperationCommand,
   type CodeOperationResult,
@@ -61,6 +62,8 @@ export interface CodeRuntimeWorkPlan {
   readonly kind: CodeRuntimeWorkKind;
   readonly starts: boolean;
   readonly reachesNetwork: boolean;
+  /** What the work does on a remote, recorded so a lost outcome can be settled later. */
+  readonly remoteStep?: CodeRuntimeRemoteStep;
 }
 
 /**
@@ -86,7 +89,11 @@ export class CodeRuntimeWorkRecorder {
   readonly #actor: typeof EventActor.Type;
   readonly #open = new Map<
     CodeRuntimeWorkUnitId,
-    { readonly version: number; readonly state: CodeRuntimeWorkState }
+    {
+      readonly version: number;
+      readonly state: CodeRuntimeWorkState;
+      readonly remoteStep: CodeRuntimeRemoteStep | undefined;
+    }
   >();
 
   constructor(options: CodeRuntimeWorkRecorderOptions) {
@@ -102,8 +109,9 @@ export class CodeRuntimeWorkRecorder {
     readonly id: CodeRuntimeWorkUnitId;
     readonly threadId: CodeThreadId;
     readonly kind: CodeRuntimeWorkKind;
+    readonly remoteStep: CodeRuntimeRemoteStep | undefined;
   }): CodeRuntimeWorkRecordOutcome {
-    return this.#record(input.id, input.threadId, input.kind, "running");
+    return this.#record(input.id, input.threadId, input.kind, "running", input.remoteStep);
   }
 
   /**
@@ -156,7 +164,13 @@ export class CodeRuntimeWorkRecorder {
     readonly kind: CodeRuntimeWorkKind;
     readonly state: CodeRuntimeWorkState;
   }): CodeRuntimeWorkRecordOutcome {
-    const outcome = this.#record(input.id, input.threadId, input.kind, input.state);
+    const outcome = this.#record(
+      input.id,
+      input.threadId,
+      input.kind,
+      input.state,
+      this.#open.get(input.id)?.remoteStep,
+    );
     if (outcome.status === "recorded" && input.state !== "running" && input.state !== "waiting")
       this.#open.delete(input.id);
     return outcome;
@@ -172,6 +186,7 @@ export class CodeRuntimeWorkRecorder {
     threadId: CodeThreadId,
     kind: CodeRuntimeWorkKind,
     state: CodeRuntimeWorkState,
+    remoteStep: CodeRuntimeRemoteStep | undefined,
   ): CodeRuntimeWorkRecordOutcome {
     const current = this.#open.get(id);
     // One record per state change. A turn that reports `running` again after it
@@ -187,6 +202,7 @@ export class CodeRuntimeWorkRecorder {
         kind,
         state,
         updatedAt: this.#clock(),
+        ...(remoteStep === undefined ? {} : { remoteStep }),
       });
     } catch {
       // A unit id that is not a work identity is a wiring mistake, not a
@@ -218,7 +234,7 @@ export class CodeRuntimeWorkRecorder {
       // there.
       return { status: "failed", kind: "journal-unavailable" };
     }
-    this.#open.set(id, { version: expectedVersion + 1, state });
+    this.#open.set(id, { version: expectedVersion + 1, state, remoteStep });
     return { status: "recorded" };
   }
 }
@@ -242,11 +258,17 @@ export class CodeRuntimeWorkRecorder {
  * same unfinished work twice and let one of the two waits clear while the
  * other did not.
  */
-export function codeRuntimeWorkStarted(
-  command: CodeOperationCommand,
-): { readonly id: CodeRuntimeWorkUnitId; readonly kind: CodeRuntimeWorkKind } | undefined {
+export function codeRuntimeWorkStarted(command: CodeOperationCommand):
+  | {
+      readonly id: CodeRuntimeWorkUnitId;
+      readonly kind: CodeRuntimeWorkKind;
+      readonly remoteStep: CodeRuntimeRemoteStep | undefined;
+    }
+  | undefined {
   const plan = codeRuntimeWorkPlan(command);
-  return plan?.starts === true ? { id: plan.id, kind: plan.kind } : undefined;
+  return plan?.starts === true
+    ? { id: plan.id, kind: plan.kind, remoteStep: plan.remoteStep }
+    : undefined;
 }
 
 /**
@@ -293,12 +315,38 @@ export function codeRuntimeWorkPlan(
         kind: "git",
         starts: true,
         reachesNetwork: command.kind === "push-git",
+        ...(command.kind === "push-git"
+          ? {
+              remoteStep: {
+                kind: "push",
+                remote: command.remote,
+                remoteRef: command.remoteRef,
+                commitOid: command.expectedHeadOid,
+              },
+            }
+          : {}),
       };
     case "create-pull-request":
     case "update-pull-request":
     case "comment-pull-request":
     case "merge-pull-request":
-      return { id: command.operationId, kind: "delivery", starts: true, reachesNetwork: true };
+      return {
+        id: command.operationId,
+        kind: "delivery",
+        starts: true,
+        reachesNetwork: true,
+        remoteStep: {
+          kind: "pull-request",
+          action:
+            command.kind === "create-pull-request"
+              ? "create"
+              : command.kind === "update-pull-request"
+                ? "update"
+                : command.kind === "comment-pull-request"
+                  ? "comment"
+                  : "merge",
+        },
+      };
     default:
       return undefined;
   }

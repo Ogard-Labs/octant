@@ -902,6 +902,44 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
   });
 
+  it("stops a flooding turn at its streamed-output budget with a truncation marker after what was journaled", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "text-delta", text: "abcd" }),
+          event({ kind: "reasoning-delta", text: "efgh" }),
+          event({ kind: "text-delta", text: "ijkl" }),
+          event({ kind: "text-delta", text: "never kept" }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    const outcomes: CodeTurnOutcome[] = [];
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner({ maxStreamedOutputBytes: 12 }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(observed.map((next) => next.text)).toEqual([
+      "abcd",
+      "efgh",
+      "ijkl",
+      "\n\n[Output truncated by Octant.]",
+    ]);
+    expect(outcomes.at(-1)).toBe("failed");
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+  });
+
   it("bounds upstream claim text and the complete serialized observation event", async () => {
     const upstreamLimit = MAX_CODE_TURN_EVENT_BYTES * 4;
     const rawDiff = "x".repeat(upstreamLimit * 2);

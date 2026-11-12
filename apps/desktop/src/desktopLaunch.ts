@@ -86,11 +86,19 @@ export async function launchDesktopApplication(
 
 export const DESKTOP_HOST_ONLY_SWITCH = "--octant-host-only";
 
+/**
+ * Added by the per-user background service to its host-only launch. A Nightly
+ * client's host-only launch stops once no Nightly window is left; the service's
+ * host has no client to wait for and runs until an explicit quit, so it must
+ * not inherit that grace.
+ */
+export const DESKTOP_BACKGROUND_SERVICE_SWITCH = "--octant-background-service";
+
 export const DESKTOP_TERMINAL_SWITCH = "--octant-terminal-cli";
 
 export type PackagedDesktopLaunch =
   | { readonly kind: "desktop" }
-  | { readonly kind: "host-only" }
+  | { readonly kind: "host-only"; readonly backgroundService?: true }
   | { readonly kind: "canvas" }
   | { readonly kind: "terminal"; readonly args: ReadonlyArray<string> }
   | { readonly kind: "refused"; readonly message: string };
@@ -195,10 +203,18 @@ export function resolvePackagedDesktopLaunch(
     identity.flavor === "stable" &&
     args.includes(DESKTOP_HOST_ONLY_SWITCH) &&
     args.filter((arg) => arg === DESKTOP_HOST_ONLY_SWITCH).length === 1 &&
+    args.filter((arg) => arg === DESKTOP_BACKGROUND_SERVICE_SWITCH).length <= 1 &&
     args.filter((arg) => /^-psn_[0-9]+_[0-9]+$/.test(arg)).length <= 1 &&
-    args.every((arg) => arg === DESKTOP_HOST_ONLY_SWITCH || /^-psn_[0-9]+_[0-9]+$/.test(arg))
+    args.every(
+      (arg) =>
+        arg === DESKTOP_HOST_ONLY_SWITCH ||
+        arg === DESKTOP_BACKGROUND_SERVICE_SWITCH ||
+        /^-psn_[0-9]+_[0-9]+$/.test(arg),
+    )
   )
-    return { kind: "host-only" };
+    return args.includes(DESKTOP_BACKGROUND_SERVICE_SWITCH)
+      ? { kind: "host-only", backgroundService: true }
+      : { kind: "host-only" };
   // The Canvas prototype host is a child the host-owning desktop starts. Nightly
   // runs that desktop only as its own test host, never as a client of Octant.
   if (

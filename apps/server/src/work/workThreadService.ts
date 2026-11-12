@@ -122,6 +122,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -1960,7 +1961,10 @@ export class WorkThreadService {
       return this.#failure("stale", "Work thread changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Octant Work thread service is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Octant Work thread service is unavailable."),
+      );
     }
     return this.#failure("unavailable", "Octant Work thread service is unavailable.");
   }

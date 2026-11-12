@@ -122,6 +122,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
+    | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -197,6 +198,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessTranscripts,
     options,
     persistence,
+    processAuthorityTime,
     providerDataDirectory,
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
@@ -256,6 +258,7 @@ export function wireHarness(deps: HarnessDependencies) {
   serverRegistry.servers = () => shieldServerStore.servers();
   serverRegistry.serversFor = (projectId) => shieldServerStore.serversFor(projectId);
   const serverPreviewTunnels = new ServerPreviewTunnels({
+    now: processAuthorityTime,
     address: (projectId) => {
       const project = serverProjectStore.project(projectId);
       const address = serverProjectStore.addressOf(projectId);

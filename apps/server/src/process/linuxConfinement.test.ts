@@ -1521,6 +1521,76 @@ describe("Linux Bubblewrap confinement", () => {
   });
 });
 
+// A provider runtime is launched with its Project as the bound root, its own
+// state folder as a read root, and read-everywhere asked for, which Linux does
+// not grant. The CI job that installs Bubblewrap sets
+// OCTANT_REQUIRE_LINUX_ISOLATION so a missing bwrap fails instead of skipping.
+describe("a provider runtime under Bubblewrap", () => {
+  const previousHome = process.env.HOME;
+  afterEach(() => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  });
+
+  it("cannot read the person's credentials, whether outside its Project or inside a home opened as one", (context) => {
+    if (process.platform !== "linux" || !canRunHostBwrap()) {
+      if (process.env.OCTANT_REQUIRE_LINUX_ISOLATION === "1") {
+        throw new Error(`Bubblewrap is required at ${DEFAULT_BWRAP_PATH} but cannot run.`);
+      }
+      context.skip("needs a runnable Bubblewrap on Linux");
+    }
+    const { root, temporaryDirectory } = fixture();
+    const home = join(root, "home");
+    const project = join(home, "project");
+    const runtimeState = join(home, ".runtime-state");
+    for (const folder of [project, runtimeState, join(home, ".aws"), join(home, ".ssh")]) {
+      mkdirSync(folder, { recursive: true });
+    }
+    const awsCredentials = join(home, ".aws", "credentials");
+    const sshKey = join(home, ".ssh", "id_ed25519");
+    writeFileSync(awsCredentials, "aws-secret");
+    writeFileSync(sshKey, "ssh-secret");
+    writeFileSync(`${sshKey}.pub`, "ssh-ed25519 public");
+    writeFileSync(join(home, "notes.txt"), "notes");
+    writeFileSync(join(runtimeState, "settings.json"), "state");
+    // The secret guard resolves the protected list against the account home.
+    process.env.HOME = home;
+
+    const runtimeReads = (boundRoot: string) => {
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for file in "$@"; do if text=$(cat "$file" 2>/dev/null); then echo "read:$text"; else echo refused; fi; done',
+          "sh",
+          awsCredentials,
+          sshKey,
+          join(runtimeState, "settings.json"),
+          join(home, "notes.txt"),
+        ],
+        boundRoot,
+        temporaryDirectory,
+        readRoots: [boundRoot, temporaryDirectory, runtimeState],
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowProcessExec: true,
+        allowProcessFork: true,
+        allowFileReadStar: true,
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      return result.stdout.trim().split("\n");
+    };
+
+    // Credentials beside the Project are absent from the capsule.
+    expect(runtimeReads(project)).toEqual(["refused", "refused", "read:state", "refused"]);
+    // Opening the home itself as the Project binds the credentials' folders,
+    // and the secret guard covers each file; ordinary files stay readable.
+    expect(runtimeReads(home)).toEqual(["read:", "read:", "read:state", "read:notes"]);
+  });
+});
+
 function hasFlagValue(args: ReadonlyArray<string>, flag: string, value: string): boolean {
   for (const [index, arg] of args.entries()) {
     if (arg === flag && args[index + 1] === value) return true;

@@ -71,8 +71,13 @@ import {
   endsHarnessRetryWait,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
+  makeEventLoopShare,
   makeIdleTimeout,
+  makeStreamedOutputBudget,
   makeTurnTextParagraphs,
+  MAX_TURN_STREAMED_OUTPUT_BYTES,
+  STREAMED_OUTPUT_BUDGET_CODE,
+  STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 
@@ -206,6 +211,7 @@ export interface ChatTurnRunnerOptions {
   readonly contextHarness: ContextHarnessService;
   readonly researchRouter: ResearchRouter;
   readonly maxEvents?: number;
+  readonly maxStreamedOutputBytes?: number;
   /**
    * The host's stalled-turn limit in milliseconds, `null` when it is Off.
    * Read as each turn starts, so a changed setting applies to the next turn
@@ -326,6 +332,7 @@ export class ChatTurnRunner {
   readonly #stalledTurnLimitMs: () => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #appManagedToolDeadlineMs: number;
+  readonly #maxStreamedOutputBytes: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
   readonly #openQuestions = new Map<string, OpenChatQuestion>();
   /** Kills one live attempt's own runtime process; present only for a connection that offers it. */
@@ -341,6 +348,7 @@ export class ChatTurnRunner {
     this.#providerToolCallPauseLimitMs =
       options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
     this.#appManagedToolDeadlineMs = options.timeoutMs ?? APP_MANAGED_TOOL_DEADLINE_MS;
+    this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
   }
 
   /**
@@ -390,6 +398,7 @@ export class ChatTurnRunner {
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
     const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
+    const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
     const spendCeiling = this.#spendCeiling;
     const openQuestions = this.#openQuestions;
     const forceStops = this.#forceStops;
@@ -976,6 +985,7 @@ export class ChatTurnRunner {
             );
 
       const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
           Effect.flatMap(() =>
@@ -1016,6 +1026,7 @@ export class ChatTurnRunner {
             ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                yield* shareEventLoop;
                 yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
@@ -1113,6 +1124,32 @@ export class ChatTurnRunner {
                     decodeChatFailure({
                       category: "interrupted",
                       message: "Chat turn was cancelled.",
+                    }),
+                  );
+                }
+                if (streamedOutput(event) === "exceeded") {
+                  // The reply kept so far stays, and ends in words that say
+                  // Octant stopped keeping it rather than looking finished.
+                  const responseRef = yield* input.persistResponse(
+                    STREAMED_OUTPUT_TRUNCATION_MARKER,
+                  );
+                  currentAttempt = {
+                    ...currentAttempt,
+                    responseRefs: [...currentAttempt.responseRefs, responseRef],
+                    updatedAt: updatedAt(),
+                  };
+                  yield* input.persistAttempt(currentAttempt);
+                  yield* connection
+                    .interrupt(input.attempt.providerSessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  yield* persistOutcome("interrupted", {
+                    code: decodeDiagnosticFailureCode(STREAMED_OUTPUT_BUDGET_CODE),
+                  });
+                  terminalOutcome = "interrupted";
+                  return yield* Effect.fail(
+                    decodeChatFailure({
+                      category: "interrupted",
+                      message: "Chat turn exceeded its streamed output budget.",
                     }),
                   );
                 }

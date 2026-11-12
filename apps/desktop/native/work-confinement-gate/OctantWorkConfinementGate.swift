@@ -156,16 +156,14 @@ private func establishTrustedPeer(
     ? .stale : .denied(establishmentCategory, establishmentEvidence)
 }
 
-private func trustedPeerProbe() -> TrustedPeerSession? {
-  if
-    case .allowed(let session) = establishTrustedPeer(
-      mode: .authenticationOnly,
-      generation: UUID()
-    )
-  {
-    return session
+/// The session, or the step that refused it: a run where the peer was
+/// refused otherwise shows only "Unavailable", which names no cause.
+private func trustedPeerProbe() -> (session: TrustedPeerSession?, refusal: String) {
+  switch establishTrustedPeer(mode: .authenticationOnly, generation: UUID()) {
+  case .allowed(let session): return (session, "None")
+  case .stale: return (nil, "StaleAuthority")
+  case .denied(let category, let evidence): return (nil, evidence ?? categoryName(category))
   }
-  return nil
 }
 
 private func foreignClientProbe(_ session: TrustedPeerSession) -> String? {
@@ -696,11 +694,11 @@ struct OctantWorkConfinementGate {
     }
     guard mode == "authentication" else { return }
     var results: [String] = []
-    let trustedSession = trustedPeerProbe()
+    let (trustedSession, refusal) = trustedPeerProbe()
     if trustedSession != nil {
       results.append("probe=trusted-peer result=allowed category=None")
     } else {
-      results.append("probe=trusted-peer result=unavailable category=Unavailable")
+      results.append("probe=trusted-peer result=unavailable category=\(refusal)")
     }
     if let trustedSession, let foreignResult = foreignClientProbe(trustedSession) {
       results.append(foreignResult)

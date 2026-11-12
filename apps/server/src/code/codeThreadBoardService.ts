@@ -140,7 +140,7 @@ export function boardRuntimeActivityFromWorks(
           blockingReason: asking
             ? "Waiting for a decision or answer."
             : unconfirmed
-              ? "Octant could not confirm how the last step ended."
+              ? "Octant could not confirm how the last step ended. Opening the thread's Git or pull request tab checks the remote again."
               : "The last agent turn was interrupted.",
         }
       : {}),

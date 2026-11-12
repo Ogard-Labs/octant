@@ -155,7 +155,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
             }
           }}
           aria-label="Task access details"
-          className="task-access-details__report flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-3 overflow-y-auto overscroll-contain"
+          className="task-access-details__report flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain"
         >
           <p>
             These are the host&apos;s reported limits. Every action is checked again when it runs.

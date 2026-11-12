@@ -1657,6 +1657,98 @@ describe("ChatTurnRunner", () => {
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
   });
 
+  it("stops a flooding reply at its streamed-output budget, keeping what was recorded and saying it was truncated", async () => {
+    const updates: ChatAttempt[] = [];
+    const recorded: string[] = [];
+    const interrupted: unknown[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          // A provider that never stops streaming: 64 deltas of 4 bytes.
+          for (let index = 0; index < 64; index += 1) {
+            yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "abcd" } as never);
+          }
+        }),
+      interrupt: (id: unknown) =>
+        Effect.sync(() => {
+          interrupted.push(id);
+        }),
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+      maxStreamedOutputBytes: 12,
+      timeoutMs: 1_000,
+    });
+
+    const exit = await Effect.runPromise(
+      Fiber.await(
+        Effect.runFork(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistAppendedResponse: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: (text) => {
+                recorded.push(text);
+                return Effect.succeed({
+                  contentId: decodeChatContentId(
+                    `82000000-0000-4000-8000-${String(recorded.length).padStart(12, "0")}`,
+                  ),
+                  digest: "e".repeat(64),
+                  byteLength: text.length,
+                });
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(recorded).toEqual(["abcd", "abcd", "abcd", "\n\n[Output truncated by Octant.]"]);
+    expect(updates.at(-1)?.outcome).toBe("interrupted");
+    expect(updates.at(-1)?.failure?.code).toBe("output-budget-exceeded");
+    expect(updates.at(-1)?.responseRefs).toHaveLength(4);
+    expect(interrupted).toEqual([sessionId]);
+  });
+
   const runWithRuntimeWebTool = async (
     record: RecordExternalContentIngestion | undefined,
     extra: ReadonlyArray<unknown> = [],

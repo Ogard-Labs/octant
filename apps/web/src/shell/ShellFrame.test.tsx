@@ -385,7 +385,17 @@ describe("ShellFrame", () => {
       /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*height:\s*auto;[^}]*overflow-y:\s*auto;/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px;/,
+      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px 0;/,
     );
+  });
+
+  it("stands the narrow Chat start screen's composer the panel's own inset from each edge", () => {
+    // 44px of gutter (a 12px margin and 12px of padding inside the panel's 20px)
+    // was the fault: the welcome fills the panel and adds none.
+    const welcome = shellStyles.match(
+      /@media \(max-width: 640px\)[\s\S]*?\.draft-thread\.chat-welcome\s+\.welcome\s*\{([^}]*)\}/,
+    );
+    expect(welcome?.[1]).toMatch(/width:\s*100%;/);
+    expect(welcome?.[1]).not.toMatch(/calc\(100% - 24px\)/);
   });
 });

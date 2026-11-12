@@ -96,6 +96,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "machineChangeFeed"
     | "onThreadArchived"
     | "onWindowRevoked"
+    | "processAuthorityTime"
     | "windowAuthorityStore"
     | "codeSessionAuthority"
   > &
@@ -124,6 +125,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     onWindowRevoked,
     options,
     persistence,
+    processAuthorityTime,
     providerDataDirectory,
     shellService,
     windowAuthorityStore,
@@ -341,8 +343,10 @@ export function wireBrowser(deps: BrowserDependencies) {
           approvedWorkingFolderRoot(project, folderId),
       };
     };
+    // Upload and download permissions live only in this process, so their
+    // review windows and their minutes run on the authority clock.
     const browserUploadPermissions = new BrowserUploadPermissions({
-      now: Date.now,
+      now: processAuthorityTime,
       uuid: randomUUID,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       canReview: (windowId, target) =>
@@ -365,7 +369,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
     const browserDownloadPermissions = new BrowserDownloadPermissions({
-      now: Date.now,
+      now: processAuthorityTime,
       uuid: randomUUID,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       canReview: (windowId, target) =>

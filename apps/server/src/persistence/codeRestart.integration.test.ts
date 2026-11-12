@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeCodeCheckoutId, decodeCodeFileId, decodeCodeRuntimeWorkId } from "@octant/contracts";
+import {
+  decodeCodeCheckoutId,
+  decodeCodeFileId,
+  decodeCodeRuntimeWorkId,
+  type CodeRuntimeRemoteStep,
+} from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { readCodeCheckout, readCodeFileReference, readCodeRuntimeWork } from "./codeProjection";
@@ -26,6 +31,9 @@ const ids = {
   running: "84000000-0000-4000-8000-000000000006",
   ambiguous: "84000000-0000-4000-8000-000000000007",
   runningTerminal: "84000000-0000-4000-8000-00000000000a",
+  runningPush: "84000000-0000-4000-8000-00000000000b",
+  runningPullRequest: "84000000-0000-4000-8000-00000000000c",
+  runningCommit: "84000000-0000-4000-8000-00000000000d",
 } as const;
 
 afterEach(() => {
@@ -50,6 +58,18 @@ describe("Code persistence restart", () => {
     appendRuntime(journal, ids.running, "running", 101);
     appendRuntime(journal, ids.ambiguous, "ambiguous", 102);
     appendRuntime(journal, ids.runningTerminal, "running", 107, "terminal");
+    appendRuntime(journal, ids.runningPush, "running", 108, "git", {
+      remoteStep: {
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      },
+    });
+    appendRuntime(journal, ids.runningPullRequest, "running", 109, "delivery", {
+      remoteStep: { kind: "pull-request", action: "create" },
+    });
+    appendRuntime(journal, ids.runningCommit, "running", 110, "git");
     appendCheckout(journal, {
       id: ids.checkout,
       kind: "existing-worktree",
@@ -99,6 +119,13 @@ describe("Code persistence restart", () => {
             runningTerminal: persistence.readCodeRuntimeWork(
               decodeCodeRuntimeWorkId(ids.runningTerminal),
             ),
+            runningPush: persistence.readCodeRuntimeWork(decodeCodeRuntimeWorkId(ids.runningPush)),
+            runningPullRequest: persistence.readCodeRuntimeWork(
+              decodeCodeRuntimeWorkId(ids.runningPullRequest),
+            ),
+            runningCommit: persistence.readCodeRuntimeWork(
+              decodeCodeRuntimeWorkId(ids.runningCommit),
+            ),
             file: persistence.readCodeFileReference(decodeCodeFileId(ids.file)),
             existingCheckout: persistence.readCodeCheckout(decodeCodeCheckoutId(ids.checkout)),
             managedCheckout: persistence.readCodeCheckout(
@@ -127,6 +154,12 @@ describe("Code persistence restart", () => {
       state: "interrupted",
       updatedAt: now,
     });
+    // A push or pull request cut off mid-flight may already have landed on the
+    // remote, so the restart cannot say it ended; it holds the thread instead
+    // of letting it read Ready. A local commit's result is in the checkout.
+    expect(states.runningPush).toMatchObject({ state: "ambiguous", updatedAt: now });
+    expect(states.runningPullRequest).toMatchObject({ state: "ambiguous", updatedAt: now });
+    expect(states.runningCommit).toMatchObject({ state: "interrupted", updatedAt: now });
     expect(states.file).toMatchObject({
       state: "interrupted",
       version: 2,
@@ -335,7 +368,8 @@ function appendRuntime(
   runtimeWorkId: string,
   state: "running" | "ambiguous",
   eventSuffix: number,
-  kind: "provider-turn" | "terminal" = "provider-turn",
+  kind: "provider-turn" | "terminal" | "git" | "delivery" = "provider-turn",
+  reach: { readonly remoteStep?: CodeRuntimeRemoteStep } = {},
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-runtime", aggregateId: runtimeWorkId },
@@ -356,6 +390,7 @@ function appendRuntime(
             kind,
             state,
             updatedAt: now,
+            ...reach,
           },
         },
       },
