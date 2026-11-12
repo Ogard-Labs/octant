@@ -362,4 +362,43 @@ describe("an ancestor swapped for a link to a host folder during Work confinemen
     ).resolves.toBe(true);
     expect(readFileSync(join(root, "dist", "app", "app.bin"), "utf8")).toBe("rebuilt app");
   });
+
+  // A rename or delete runs after the mutation was resolved and authorized, on
+  // the canonical path that resolution returned. A path `unlink` or `rename`
+  // resolves the ancestors again and followed a swap made in between.
+  it.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
+    "never deletes or renames the host file when an ancestor is swapped after resolution",
+    async () => {
+      const { root, outside } = swappingBefore("open");
+      const canonical = join(root, "dist", "app", "app.bin");
+      renameSync(join(root, "dist"), join(root, "dist-real"));
+      symlinkSync(outside, join(root, "dist"));
+      await expect(liveWorkFilesystem.unlink(canonical)).rejects.toThrow();
+      await expect(
+        liveWorkFilesystem.rename(canonical, join(root, "dist", "app", "renamed.bin")),
+      ).rejects.toThrow();
+      expect(readFileSync(join(outside, "app", "app.bin"), "utf8")).toBe("host secret");
+      await expect(stat(join(outside, "app", "renamed.bin"))).rejects.toThrow();
+    },
+  );
+
+  it.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
+    "still renames and deletes inside the folder when nothing is swapped",
+    async () => {
+      const { root } = swappingBefore("open");
+      const directory = join(root, "dist", "app");
+      await liveWorkFilesystem.rename(join(directory, "app.bin"), join(directory, "renamed.bin"));
+      expect(readFileSync(join(directory, "renamed.bin"), "utf8")).toBe("built app");
+      await liveWorkFilesystem.unlink(join(directory, "renamed.bin"));
+      await expect(stat(join(directory, "renamed.bin"))).rejects.toThrow();
+    },
+  );
+
+  it("refuses a rename that would move an entry to another directory", async () => {
+    const { root } = swappingBefore("open");
+    await expect(
+      liveWorkFilesystem.rename(join(root, "dist", "app", "app.bin"), join(root, "app.bin")),
+    ).rejects.toThrow();
+    expect(readFileSync(join(root, "dist", "app", "app.bin"), "utf8")).toBe("built app");
+  });
 });

@@ -1615,7 +1615,8 @@ A tool call from a model is a petition, not a grant. The server resolves every c
 - A Code turn acts on the checkout it started on until it ends; Octant's tools and the provider's built-ins use the captured root, confinement and identity, not the window's later binding.
 - App-managed tools that reach Project-scoped services (a window-held terminal, the planner board, a sibling thread's transcript) follow the window's live binding and liveness when the call runs.
 - Octant's own tools always re-check the live execution policy, so a thread put in Plan mid-turn refuses writes and process launches on the next call.
-- A provider's built-in tools keep the posture they launched with; lowering the grant reaches them on the next turn or when the person stops the turn.
+- An allowed approval of a native harness tool is authorized again when it resolves; the call runs only if the thread's authority, posture and taint then still allow it without a different approval.
+- A provider's built-in tools keep the posture they launched with; lowering the grant reaches them on the next turn or when the person stops the turn. Answering their approval requests does not reread the grant.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Server-side tool-call policy](../architecture.md#security-and-authority).
 
@@ -1817,6 +1818,7 @@ Every read, listing and search the host makes in a Code checkout or Work folder,
 - The sequence is lstat, link check, realpath, containment check, then an open that itself lands on the canonical path with the handle's device and inode verified.
 - Linux requires the handle's kernel path to equal the canonical path; macOS opens with `O_NOFOLLOW_ANY`; other platforms refuse the open.
 - Mirror writes, removals and re-imports, Canvas refresh and purge removals are held inside the destination root the same way, relative to folders held open from the root down.
+- Work renames and deletes, and native harness writes and edits, act relative to a directory proved at its canonical path or through Work's confined write; a Work rename stays within its directory.
 - A mirror or export folder is stored by its real path, and a root that no longer resolves to exactly that path is refused before anything is written or removed.
 - An entry the host cannot open is not listed; hard links are not refused.
 

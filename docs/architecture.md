@@ -11475,7 +11475,17 @@ mechanisms are:
   current grant, so a thread put in Plan mode mid-turn refuses writes and
   process launches on the next call, and a Plan turn is read-only throughout),
   the turn's confinement, path containment inside the captured root, and the
-  approvals the posture requires. A provider's own built-in tools run under
+  approvals the posture requires. An approval can wait minutes for a person,
+  so when the person allows one of Octant's own native harness tools the call
+  is authorized again against the thread's authority, posture, and taint as
+  they are then, and runs only if that still allows it and asks no more than
+  the person answered: a thread switched to Plan, narrowed from Full access,
+  moved off its Project, or archived while the approval waited refuses the
+  call with its reason, and one that now needs a different approval class or
+  a fresh confirmation refuses it as `approval-stale`. Answering a provider's
+  own approval request (`answer-provider-approval`) stays a read that does not
+  reread the grant: it answers a built-in tool, which the next sentence
+  covers. A provider's own built-in tools run under
   the posture and sandbox the turn was launched with and do not reread the
   thread's grant mid-turn, so lowering it takes effect on them with the next
   turn or when the person stops the turn. The next turn on the thread checks the window's binding again, so
@@ -13006,6 +13016,21 @@ approval-gated` command that undoes it. The terminal shows no one-time
   swapped-in folder is the remaining residual there. Hard links are not
   refused. On Linux a top-level exclusive create that loses the race can leave
   one empty file at the swapped-in location; it never receives bytes.
+  Work renames and deletes, and the native harness's `write` and `edit`, act
+  the same way. Each runs after its containment check and authority decision,
+  on the canonical path the check returned, and a path `rename`, `unlink`, or
+  `writeFile` resolved the ancestors again: an ancestor swapped for a link to a
+  host folder in that window moved, removed, or wrote the host file of that
+  name from the unsandboxed server. A Work rename stays within its directory
+  and renames relative to that directory proved at its canonical path (on
+  Linux under `/proc/self/fd/N`; on macOS by `mv -h` from a child whose working
+  directory `/bin/pwd -P` reports at that path), and a delete removes the name
+  as a mirror removal does. A harness write or edit takes Work's confined
+  write: an existing file is opened where the open must land on its canonical
+  path, and a new file and any missing folders are created under the existing
+  contained folder held open, one no-follow name at a time, with the mode a
+  plain write gave a new file. A write that cannot be proved is refused and
+  writes nothing; another platform refuses all of them.
 
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,

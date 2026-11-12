@@ -4,10 +4,12 @@ import {
   mkdir,
   readFile,
   realpath,
+  stat,
   symlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
+import { renameSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -126,6 +128,85 @@ describe("native harness file system", () => {
     expect(await fs.write({ path: "out/new.txt", content: "x" })).toEqual({
       kind: "refused",
       reason: "path-escapes-root",
+    });
+  });
+
+  describe("an ancestor swapped for a link to a host folder after containment was checked", () => {
+    // The secret guard runs between the containment check and the write, so it
+    // stands in for the agent's own process flipping `src` to a link while the
+    // server decides. A path `writeFile` resolved `src` again and followed it.
+    async function swapping() {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-swap-")));
+      const outside = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-host-")));
+      await mkdir(join(root, "src"));
+      await writeFile(join(root, "src", "a.ts"), "same\n");
+      await writeFile(join(outside, "a.ts"), "same\n");
+      const when = new Date("2026-01-01T00:00:00.000Z");
+      await utimes(join(root, "src", "a.ts"), when, when);
+      await utimes(join(outside, "a.ts"), when, when);
+      let armed = false;
+      let swapped = false;
+      const fs = new NativeHarnessFileSystem({
+        root,
+        protectedFileRefusal: () => {
+          if (armed && !swapped) {
+            swapped = true;
+            renameSync(join(root, "src"), join(root, "src-real"));
+            symlinkSync(outside, join(root, "src"));
+          }
+          return undefined;
+        },
+      });
+      return { root, outside, fs, arm: () => (armed = true) };
+    }
+
+    it("never overwrites the host file of the same name", async () => {
+      const { outside, fs, arm } = await swapping();
+      arm();
+      expect(await fs.write({ path: "src/a.ts", content: "agent\n" })).toMatchObject({
+        kind: "refused",
+      });
+      expect(await readFile(join(outside, "a.ts"), "utf8")).toBe("same\n");
+    });
+
+    it("never creates a file in the host folder", async () => {
+      const { outside, fs, arm } = await swapping();
+      arm();
+      expect(await fs.write({ path: "src/new.ts", content: "agent\n" })).toMatchObject({
+        kind: "refused",
+      });
+      await expect(readFile(join(outside, "new.ts"), "utf8")).rejects.toThrow();
+    });
+
+    it("never writes an edit into the host file", async () => {
+      const { outside, fs, arm } = await swapping();
+      expect((await fs.read({ path: "src/a.ts" })).kind).toBe("file");
+      arm();
+      expect(await fs.edit({ path: "src/a.ts", oldText: "same", newText: "agent" })).toMatchObject({
+        kind: "refused",
+      });
+      expect(await readFile(join(outside, "a.ts"), "utf8")).toBe("same\n");
+    });
+
+    it("still writes, creates under new folders, and edits when nothing is swapped", async () => {
+      const { root, fs } = await swapping();
+      expect(await fs.write({ path: "src/a.ts", content: "next\n" })).toMatchObject({
+        kind: "written",
+        created: false,
+      });
+      expect(await fs.write({ path: "src/deep/er/b.ts", content: "b\n" })).toMatchObject({
+        kind: "written",
+        created: true,
+      });
+      expect(await readFile(join(root, "src", "deep", "er", "b.ts"), "utf8")).toBe("b\n");
+      // A created file keeps the mode a plain write gave it, not a private one.
+      expect((await stat(join(root, "src", "deep", "er", "b.ts"))).mode & 0o777).toBe(
+        0o666 & ~process.umask(),
+      );
+      expect(await fs.edit({ path: "src/a.ts", oldText: "next", newText: "last" })).toMatchObject({
+        kind: "edited",
+      });
+      expect(await readFile(join(root, "src", "a.ts"), "utf8")).toBe("last\n");
     });
   });
 

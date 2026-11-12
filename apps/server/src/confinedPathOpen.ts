@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { closeSync, openSync, readlinkSync, type BigIntStats } from "node:fs";
-import { constants, open, readlink, unlink, type FileHandle } from "node:fs/promises";
+import { constants, open, readlink, rename, unlink, type FileHandle } from "node:fs/promises";
 
 const darwinNoFollowAny = 0x20000000;
 
@@ -140,7 +140,7 @@ export function confinedEnumerationPath(handle: FileHandle, canonicalPath: strin
  * rather than its target. A refusal or failure is thrown.
  */
 export async function removeConfinedEntry(canonicalDirectory: string, name: string): Promise<void> {
-  if (name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\0")) {
+  if (!isEntryName(name)) {
     throw new Error("a confined removal names one entry of its directory");
   }
   if (process.platform === "darwin") {
@@ -172,4 +172,70 @@ export async function removeConfinedEntry(canonicalDirectory: string, name: stri
   } finally {
     await directory.close().catch(() => undefined);
   }
+}
+
+/**
+ * Renames one entry of a directory a confinement sequence canonicalized to
+ * another name in that same directory, with the same proof as
+ * `removeConfinedEntry`: a path `rename` resolves the ancestors afresh, so an
+ * ancestor swapped for a link to a host folder moved the host file of that
+ * name instead.
+ *
+ * - Linux renames both names under `/proc/self/fd/N` of the proved directory.
+ * - macOS runs `mv` from a child whose working directory `/bin/pwd -P` proves
+ *   is the canonical directory. `-h` keeps a link planted at the new name from
+ *   being followed into the folder it points to.
+ * - Elsewhere the rename refuses.
+ *
+ * Neither name's final link is followed: the entry itself is renamed, and an
+ * entry already at the new name is replaced. A refusal or failure is thrown.
+ */
+export async function renameConfinedEntry(
+  canonicalDirectory: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (!isEntryName(from) || !isEntryName(to)) {
+    throw new Error("a confined rename names entries of its directory");
+  }
+  if (process.platform === "darwin") {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        "/bin/sh",
+        [
+          "-c",
+          '[ "$(/bin/pwd -P)" = "$1" ] && exec /bin/mv -f -h -- "$2" "$3"',
+          "octant-confined-rename",
+          canonicalDirectory,
+          from,
+          to,
+        ],
+        { cwd: canonicalDirectory, env: {} },
+        (error) => (error === null ? resolve() : reject(error)),
+      );
+    });
+    return;
+  }
+  if (process.platform !== "linux") {
+    throw new Error("this platform cannot prove where a rename lands");
+  }
+  const directory = await openConfinedPath(
+    canonicalDirectory,
+    constants.O_RDONLY | constants.O_DIRECTORY,
+  );
+  try {
+    await rename(`/proc/self/fd/${directory.fd}/${from}`, `/proc/self/fd/${directory.fd}/${to}`);
+  } finally {
+    await directory.close().catch(() => undefined);
+  }
+}
+
+function isEntryName(name: string): boolean {
+  return !(
+    name === "" ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\0")
+  );
 }
