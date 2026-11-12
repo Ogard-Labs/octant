@@ -25,6 +25,16 @@ interface Draft {
   readonly custom: boolean;
   readonly text: string;
   readonly note: string;
+  /** The question as it read when this draft was made; a draft never outlives a revision. */
+  readonly fingerprint?: string;
+}
+
+/**
+ * A value by an own key. Question ids are any short string, so a plain
+ * lookup of `constructor` or `toString` must not find what an object inherits.
+ */
+function own<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
 type QuestionStatus =
@@ -116,8 +126,17 @@ export function DecisionForm(props: DecisionFormProps) {
 
   const savedFor = (question: Question) =>
     form.questions.find((entry) => entry.question.id === question.id)?.answer;
+  // A draft counts only while the question reads as it did when the draft was
+  // made. After an agent revises the question the old draft is not an answer to
+  // the new one, and is neither shown nor saved against it.
+  const liveDraft = (question: Question): Draft | undefined => {
+    const stored = own(drafts, question.id);
+    return stored !== undefined && stored.fingerprint === canvasChoiceQuestionFingerprint(question)
+      ? stored
+      : undefined;
+  };
   const draftFor = (question: Question): Draft =>
-    drafts[question.id] ?? draftFromAnswer(savedFor(question));
+    liveDraft(question) ?? draftFromAnswer(savedFor(question));
 
   /** Save one question's draft when it is a whole answer; otherwise keep it local. */
   const commit = async (question: Question, draft: Draft, accepted = false) => {
@@ -193,7 +212,8 @@ export function DecisionForm(props: DecisionFormProps) {
     }
   };
 
-  const edit = (question: Question, draft: Draft, delay: boolean) => {
+  const edit = (question: Question, edited: Draft, delay: boolean) => {
+    const draft: Draft = { ...edited, fingerprint: canvasChoiceQuestionFingerprint(question) };
     setDrafts((current) => ({ ...current, [question.id]: draft }));
     const waiting = pendingSaves.current.get(question.id);
     if (waiting !== undefined) clearTimeout(waiting.timer);
@@ -215,7 +235,7 @@ export function DecisionForm(props: DecisionFormProps) {
   const eligible = form.questions.filter(
     (entry) =>
       entry.answer === undefined &&
-      drafts[entry.question.id] === undefined &&
+      liveDraft(entry.question) === undefined &&
       canvasChoiceRecommendedSelection(entry.question) !== undefined,
   );
   const acceptRecommendations = async () => {
@@ -254,7 +274,7 @@ export function DecisionForm(props: DecisionFormProps) {
   // while it held a draft, and no control remains to settle that draft.
   const presentIds = new Set(block.questions.map((question) => question.id));
   const unsaved =
-    Object.keys(drafts).some((questionId) => presentIds.has(questionId)) ||
+    block.questions.some((question) => liveDraft(question) !== undefined) ||
     Object.entries(statuses).some(
       ([questionId, status]) => presentIds.has(questionId) && status.kind === "saving",
     );
@@ -372,7 +392,7 @@ export function DecisionForm(props: DecisionFormProps) {
                     draft={draftFor(question)}
                     answer={savedFor(question)}
                     stale={form.questions.find((entry) => entry.question.id === question.id)?.stale}
-                    status={statuses[question.id]}
+                    status={own(statuses, question.id)}
                     editable={props.editable}
                     onEdit={(draft, delay) => edit(question, draft, delay)}
                     onFlush={() => flush(question.id)}

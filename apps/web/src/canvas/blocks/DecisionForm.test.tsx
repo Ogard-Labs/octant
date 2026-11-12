@@ -470,6 +470,51 @@ describe("decision form", () => {
     expect(screen.queryByRole("button", { name: /Send to/ })).not.toBeInTheDocument();
   });
 
+  it("draws a question whose id is a name objects inherit", async () => {
+    const user = userEvent.setup();
+    const odd = decodeCanvasBlock({
+      blockId: "decisions",
+      schemaVersion: 29,
+      kind: "choice",
+      prompt: "Odd ids",
+      questions: [yesNo("constructor", "Constructor?"), yesNo("toString", "To string?")],
+    }) as CanvasChoiceBlock;
+    const { port } = host({ block: odd });
+    render(<ChoiceBlock block={odd} runtime={sendable(port)} />);
+    const group = await screen.findByRole("radiogroup", { name: "Constructor?" });
+    await user.click(within(group).getByRole("radio", { name: /Yes/ }));
+    await waitFor(() => expect(screen.getByText("1 of 2 answered")).toBeInTheDocument());
+  });
+
+  it("does not carry a draft over to a question the agent has since revised", async () => {
+    const user = userEvent.setup();
+    const { port } = host({ refuse: "The thread is archived.", refuseQuestion: "who" });
+    const runtime = sendable(port);
+    const view = render(<ChoiceBlock block={form} runtime={runtime} />);
+    // The pick is refused, so the form keeps it as a draft.
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /No/,
+        },
+      ),
+    );
+    await screen.findByText("Not saved: The thread is archived.");
+    const reworded = decodeCanvasBlock({
+      ...form,
+      questions: form.questions.map((question) =>
+        question.id === "who" ? { ...question, prompt: "Who, now, may set it?" } : question,
+      ),
+    }) as CanvasChoiceBlock;
+    view.rerender(<ChoiceBlock block={reworded} runtime={runtime} />);
+    // The revised question starts unanswered: the old pick is not its answer.
+    const group = await screen.findByRole("radiogroup", { name: "Who, now, may set it?" });
+    for (const radio of within(group).getAllByRole("radio")) {
+      expect(radio).toHaveAttribute("aria-checked", "false");
+    }
+  });
+
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {
     const user = userEvent.setup();
     const { port } = host({ refuse: "The thread is archived." });
