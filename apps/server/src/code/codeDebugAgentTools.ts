@@ -334,8 +334,10 @@ export function createCodeDebugAgentTools(
         breakpoints: (call.breakpoints ?? []).map(fileBreakpoints),
       });
       if (started.status !== "started") return notStarted(started);
-      // The person's answer, where one was needed, was for this session.
-      options.approvals.remember(options.thread.id, started.sessionId);
+      // Only an answer the person gave covers the session. One started
+      // unasked at Full access holds none, so a later turn narrowed below
+      // Full access asks before it touches it.
+      if (asks) options.approvals.remember(options.thread.id, started.sessionId);
       const state = await settled(started.sessionId, {
         sinceRevision: -1,
         deadlineMs: SETTLE_AFTER_CONTROL_MS,

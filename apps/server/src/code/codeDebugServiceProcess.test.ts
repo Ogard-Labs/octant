@@ -1784,6 +1784,30 @@ describe("the agent's debug tool", () => {
     });
   });
 
+  it("asks a turn narrowed below Full access before it touches a session a Full access turn started unasked", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    expect(await test.approve(test.configuration())).toMatchObject({ status: "approved" });
+    test.threads[0] = { ...test.thread(), executionPolicy: "full-access" };
+    const approvals = createCodeDebugAgentSessionApprovals();
+    const full = agentTools(test, { approvals });
+    const started = await full.call({
+      operation: "start",
+      configuration: await listedDigest(full),
+      breakpoints: [{ path: "src/main.js", lines: [42] }],
+    });
+    expect(started.result).toMatchObject({ session: "stopped" });
+    expect(full.asked).toEqual([]);
+
+    // Nobody answered for this session, so the narrower turn's first act asks.
+    const narrowed = agentTools(test, { approvals, turn: "approval-gated" });
+    expect((await narrowed.call({ operation: "stack" })).isError).toBe(false);
+    expect(narrowed.asked).toHaveLength(1);
+    expect((await narrowed.call({ operation: "threads" })).isError).toBe(false);
+    expect(narrowed.asked).toHaveLength(1);
+  });
+
   it("refuses input outside its closed operations before anything is read or asked", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

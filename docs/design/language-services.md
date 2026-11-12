@@ -1619,8 +1619,9 @@ the addendum left a choice open.
   - The answer covers that session: every later operation on it runs
     without asking, in later turns too, until it ends. The host holds the
     answer in memory only.
-  - A session the person started is asked for once, before the agent's
-    first operation on it.
+  - A session nobody answered for (one the person started, or one a Full
+    access turn started unasked) is asked for once, before the first
+    operation on it from a turn below Full access.
   - `evaluate` is covered by the session's answer until the thread has read
     outside content; from then each expression is asked for by itself,
     showing the expression, as each shell command is. Any read of a session
