@@ -1756,12 +1756,61 @@ public link are ticketed or written without it: their page policy stays
 `connect-src 'none'` and no token is minted, so a reader of a share or a
 public link never fetches through the person's host.
 
+**In the desktop app.** A prototype there runs in the prototype host, whose
+process has no route and no resolver, and that stays so with the switch on: the
+host's proxy and resolver switches and the readback that proves them are not
+touched, and the page is given no address on the network, the loopback host
+included. Its requests are relayed instead, over the two channels that already
+exist (page to prototype host by the host's private scheme, prototype host to
+the app's main process by their IPC channel):
+
+- **Minting.** The main process asks for the ticketed design page with the
+  desktop bridge secret (`x-octant-desktop-secret`, the proof every brokered
+  desktop route already takes) and the surface id it will draw the page on
+  (`x-octant-prototype-surface`). The host mints a token for that request only
+  when `admitDesktopBroker` admits it as the desktop bridge on `127.0.0.1`
+  (so never a request with an `Origin`, one a session carried, or a native
+  window's main), the request names no fetch destination, the ticket is
+  network-capable, and the switch is still on. The token is answered to the
+  main process in a response header (`x-octant-canvas-network-token`) and is
+  not in the page: the page's `connect-src` names
+  `octant-prototype://network/<surface id>/`, and its script sends a `fetch`
+  there. The main process keeps the token beside the surface and passes the
+  prototype host the page with a mark that it has a network, never the token.
+- **The page's side.** The prototype host's scheme handler, the only thing
+  that answers `octant-prototype:`, serves the page once as before and
+  otherwise answers exactly `GET octant-prototype://network/<surface
+id>/fetch?url=<one address>` for a surface it was told has a network
+  (`canvasPrototypeRelayRequest`, a pure function). Any other host, path,
+  query, method, or surface is refused there and goes no further. An `http:`,
+  `https:`, `ws:`, or `file:` address never reaches the handler: it is
+  refused by the page's policy, and without the policy by the dead proxy.
+- **The relay.** The prototype host sends the surface id and the address the
+  page asked for to the main process. The main process makes one request,
+  `GET <host>/api/canvas/network/<that surface's token>/fetch?url=<address>`
+  (`canvasNetworkRelayAddress`: the address is one encoded query value and can
+  change neither the path nor the host), with no header of its own, no cookie,
+  and no redirect followed, and hands back the status, the body, and the
+  answer's fixed headers. The address is not judged in Electron: the host's
+  route applies the destination rule, the bounds, and the switch, exactly as
+  for a browser's page.
+- **Ending.** The token is forgotten by the main process when the prototype
+  closes, its window goes, or the prototype host stops, and its requests still
+  in flight are cancelled. Turning the switch off revokes it on the host, so
+  the next relayed request is refused there.
+
+What the page gained is one question it can ask ("fetch this public address")
+and nothing else: it still has no socket, no name lookup, no address of the
+host, no token it could send out, and no way to read another surface's
+answers. The containment probe draws a hostile page with its network on and
+checks that it reaches the proxy route alone
+(`bun run smoke:canvas-prototype-containment`).
+
 **Where it works today.** In a browser on the host's own machine. Not built
-yet: the desktop app draws a prototype from the prototype host, which has no
-route to the host at all, so there the switch is not shown and a prototype
-stays without a connection until the main process relays the page's requests
-to this route; a paired device's browser is not offered the switch and its
-pages are served without a token.
+yet: the desktop relay above, so in the desktop app the switch is not shown
+and a prototype stays without a connection. A paired device's browser is not
+offered the switch and its pages are served without a token; a Nightly client
+window does not run prototypes.
 
 Rationale: a looser page policy (`connect-src https:`) was rejected because a
 browser would then connect from the person's machine, with its address, to
