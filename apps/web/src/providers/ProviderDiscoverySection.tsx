@@ -183,7 +183,7 @@ function DiscoveryRow(props: DiscoveryRowProps) {
 
 /**
  * Readiness is a fact about the runtime on disk, said in words rather than a
- * pill: colour marks only the states that need attention.
+ * chip: colour marks only the states that need attention.
  */
 function ReadinessText(props: { readonly readiness: DiscoveryCandidate["readiness"] }) {
   const label =

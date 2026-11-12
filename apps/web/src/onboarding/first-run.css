@@ -396,7 +396,7 @@ button.first-run__fact-action {
 .first-run__mode-badge {
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   color: var(--oct-fg-2);
 }

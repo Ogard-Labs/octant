@@ -184,7 +184,7 @@ describe("a pane's tab bar", () => {
       "title",
       "auroradocs-mcp · Drag to move or split",
     );
-    // The running thread's own tab says so; the bar carries no separate pill.
+    // The running thread's own tab says so; the bar carries no separate chip.
     expect(screen.getByRole("tab", { name: /^Thread 1/ })).toHaveAccessibleName(
       "Thread 1, running",
     );
@@ -435,7 +435,7 @@ describe("SplitWorkspace", () => {
 
     const handle = screen.getByTitle("Drag to move or split");
     expect(within(handle).getByText("Running")).toBeVisible();
-    // The host says a turn is executing but not when it began, so the pill
+    // The host says a turn is executing but not when it began, so the chip
     // claims no elapsed time.
     expect(within(handle).getByText("Running")).not.toHaveTextContent(/\d/);
 
@@ -476,7 +476,7 @@ describe("SplitWorkspace", () => {
     const handle = screen.getByTitle("Drag to move or split");
     expect(within(handle).getByText("Needs you")).toBeVisible();
     expect(screen.queryByText("Running")).not.toBeInTheDocument();
-    // The pill states the wait; it has no spinner to suggest work is going on.
+    // The chip states the wait; it has no spinner to suggest work is going on.
     expect(handle.querySelector(".spinner")).toBeNull();
 
     rerender(

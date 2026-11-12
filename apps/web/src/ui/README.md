@@ -54,7 +54,7 @@ layers".
 ## Surface utilities (`styles/components.css`)
 
 - `octant-card` / `octant-card--flat` — raised or flat in-flow container.
-- `octant-chip` — compact pill chip; `aria-pressed`/`data-active` for selection.
+- `octant-chip` — compact chip; `aria-pressed`/`data-active` for selection.
 - `octant-glass` / `octant-glass--overlay` — frosted glass material for layers that
   float above content.
 

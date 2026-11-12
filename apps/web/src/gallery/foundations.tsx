@@ -162,7 +162,7 @@ export function SpacingScale(props: { readonly sizeKey: unknown }) {
   );
 }
 
-const RADII = ["sm", "md", "inset", "lg", "composer", "pill"] as const;
+const RADII = ["sm", "md", "inset", "pill"] as const;
 
 function Radius(props: { readonly name: string; readonly sizeKey: unknown }) {
   const [ref, radius] = useComputed((style) => style.borderTopLeftRadius, props.sizeKey);

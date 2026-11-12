@@ -300,7 +300,7 @@ function projectOptions(
 /**
  * One word for a member's state. A member that refuses answers every reason
  * (Move in off, Owners off, this computer no longer in its roster) in the same
- * words, so the pill cannot say which; whether this Mac is an owner there is
+ * words, so the badge cannot say which; whether this Mac is an owner there is
  * learned at the unlock, and said then.
  */
 function memberPill(entry: ThreadMoveDestination, mode: MovedThreadReference["mode"]): string {
