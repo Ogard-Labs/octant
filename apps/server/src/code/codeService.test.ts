@@ -2325,6 +2325,38 @@ describe("CodeService commands", () => {
     expect(after.messageWake).toBe(true);
   });
 
+  it("turns a thread's Continue after restart off and back on, keeping its other switches", async () => {
+    const fixture = serviceFixture({ project: rememberedFullAccessProject });
+    fixture.persistence.readCodeThread.mockReturnValue({ ...thread(), messageWake: true });
+    const off = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-restart-continuation",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      continueAfterRestart: false,
+    });
+    expect(off).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({
+        restartContinuationOff: true,
+        messageWake: true,
+        version: 2,
+      }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    fixture.persistence.readCodeThread.mockReturnValue(stored);
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-restart-continuation",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      continueAfterRestart: true,
+    });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("restartContinuationOff" in after).toBe(false);
+    expect(after.messageWake).toBe(true);
+  });
+
   it("counts the designated planner toward the Project's four coordinators", async () => {
     const others = [1, 2, 3, 4].map((index) =>
       thread({ id: decodeCodeThreadId(`20000000-0000-4000-8000-00000000010${String(index)}`) }),

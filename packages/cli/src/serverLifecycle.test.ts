@@ -21,6 +21,7 @@ function manager(): UserServiceManager {
   return {
     kind: "systemd",
     install: vi.fn(async () => undefined),
+    uninstall: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
     enable: vi.fn(async () => undefined),

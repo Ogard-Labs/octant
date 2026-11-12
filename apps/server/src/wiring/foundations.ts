@@ -36,6 +36,7 @@ import {
 } from "../work/workThreadProjection";
 import {
   hydrateWorkTurnProjectionFromJournal,
+  journalWorkTurnRestartSettlements,
   WorkTurnProjection,
 } from "../work/workTurnProjection";
 import type { ServerStart } from "./serverShape";
@@ -81,7 +82,15 @@ export function wireFoundations(deps: FoundationsDependencies) {
     }),
     "Work turn",
   );
-  workTurnProjection.markInterruptedOnRestart(new Date().toISOString());
+  const settledAt = new Date().toISOString();
+  const workTurnsCutOffByRestart = workTurnProjection.markInterruptedOnRestart(settledAt);
+  // Journaled, so the next start reads these turns as settled and only the
+  // turns a restart really cut off are ever continued after one.
+  journalWorkTurnRestartSettlements(persistence.journal, workTurnsCutOffByRestart, {
+    settledAt,
+    uuid: randomUUID,
+    actorId: OCTANT_LOCAL_ACTOR_ID,
+  });
   const workArtifactProjection = new WorkArtifactProjection();
   requireJournalHydration(
     hydrateWorkArtifactProjectionFromJournal({
@@ -229,6 +238,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     workArtifactProjection,
     workThreadProjection,
     workTurnProjection,
+    workTurnsCutOffByRestart,
   };
 }
 

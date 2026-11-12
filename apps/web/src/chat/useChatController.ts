@@ -849,6 +849,7 @@ export function useChatController(options: ChatControllerOptions) {
           updatedAt: updatedAtByThread.get(String(thread.id)) ?? thread.updatedAt,
           ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
           ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+          ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
         });
       }
     }
@@ -1345,6 +1346,17 @@ export function useChatController(options: ChatControllerOptions) {
       })),
     [restCommand],
   );
+  /** The thread's Continue after restart switch, from its row menu. */
+  const setThreadRestartContinuation = useCallback(
+    (threadId: ChatThreadId, continueAfterRestart: boolean) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "set-chat-thread-restart-continuation",
+        threadId,
+        expectedVersion,
+        continueAfterRestart,
+      })),
+    [restCommand],
+  );
   /**
    * One more turn on a finished thread that is not open, from the Review page.
    * It is the ordinary send command with the thread's current version, and a
@@ -1508,6 +1520,7 @@ export function useChatController(options: ChatControllerOptions) {
     completeThread,
     reopenThread,
     snoozeThread,
+    setThreadRestartContinuation,
     wakeThread,
     errorMessage,
     toolCatalogHandoffRequired,

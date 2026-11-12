@@ -40,6 +40,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeTurnReviewCapture,
   decodeCodeOperationId,
+  CodeGitOperationId,
   decodeCodeThreadId,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
@@ -70,6 +71,7 @@ import {
   type HarnessRetryNotice,
   type CodeOperationEventFrame,
   type CodeOperationId,
+  type CodeRuntimeWork,
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
@@ -99,7 +101,7 @@ import {
 } from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
@@ -137,6 +139,9 @@ import {
   type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
 import {
+  APPROVAL_POSTURE_CHANGED_MESSAGE,
+  approvalAnswerUnderPosture,
+  approvalPostureOf,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   isAppleSimulatorInputKind,
@@ -257,6 +262,14 @@ type Awaitable<T> = T | Promise<T>;
 
 interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
+  /**
+   * A thread's runtime work records, from which a lost push or pull request
+   * is settled. Required: while it was optional the host wiring left it out,
+   * and no Git or pull request tab ever settled one outside tests.
+   */
+  readonly readCodeRuntimeWorks: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<{ readonly work: CodeRuntimeWork }>;
   readonly journal: Journal;
   readonly readCodeCheckout: (
     checkoutId: CodeCheckoutIdentity["id"],
@@ -307,6 +320,8 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  /** How long a Stop waits for the runtime to confirm it; defaults to {@link CODE_STOP_CONFIRMATION_MS}. */
+  readonly stopConfirmationMs?: number;
   /**
    * Whether a move holds the thread: frozen while it leaves this computer, or
    * arriving and not yet committed. A held thread starts no turn.
@@ -454,7 +469,7 @@ export interface CodeOperationRuntimeOptions {
     | "restoreWorkingTree"
     | "releaseCheckpoint"
   > &
-    Partial<Pick<GitMutationPort, "applyHunks">>;
+    Partial<Pick<GitMutationPort, "applyHunks" | "remoteHead">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -1238,8 +1253,42 @@ export function createCodeOperationRuntime(
       return turns.threadWithActiveTurnPosture(session);
     },
   };
+  const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(readRuntimeWorks === undefined
+      ? {}
+      : {
+          unconfirmedSteps: {
+            list: (threadId: CodeThreadId) =>
+              readRuntimeWorks(threadId)
+                .map((entry) => entry.work)
+                .filter((work) => work.state === "ambiguous"),
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.settleOrphaned({
+                  // A push is recorded under its Git operation, a pull request
+                  // step under its own operation.
+                  id:
+                    work.kind === "git"
+                      ? decodeCodeGitOperationId(String(work.id))
+                      : decodeCodeOperationId(String(work.id)),
+                  threadId: work.threadId,
+                  kind: work.kind,
+                  state,
+                }),
+              ),
+            describe: (threadId, operationId, remoteStep) =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.describeRemoteStep({
+                  id: operationId,
+                  threadId,
+                  kind: "delivery",
+                  remoteStep,
+                }),
+              ),
+          },
+        }),
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
@@ -1277,7 +1326,12 @@ export function createCodeOperationRuntime(
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
-          runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
+          runtimeWork.open({
+            id: started.id,
+            threadId: command.threadId,
+            kind: started.kind,
+            remoteStep: started.remoteStep,
+          }),
         );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
@@ -2574,6 +2628,13 @@ interface ActiveTurn {
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
   /**
+   * The thread's posture, as `#approvalPosture` reads it, when each pending
+   * approval (provider or app-managed tool) was asked, by approval id. An
+   * allow answered under a different posture is refused, and the approval
+   * stays pending under the current one.
+   */
+  readonly approvalPostures: Map<string, string | undefined>;
+  /**
    * Each app-managed tool ask's settle function: a Browser session, with the
    * site it waits to open, or a device effect, which has none.
    */
@@ -2601,6 +2662,8 @@ interface ActiveTurn {
   };
   /** Set once the turn has settled; a late chunk is dropped instead of re-arming a timer. */
   closed?: boolean;
+  /** Set when the host's shutdown stopped the turn; it journals no outcome of its own. */
+  shutDown?: boolean;
   /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
   deltaFlushFailure?: { readonly error: unknown };
   /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
@@ -3502,6 +3565,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
+      approvalPostures: new Map(),
       toolApprovals: new Map(),
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
@@ -3529,6 +3593,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         id: active.operationId,
         threadId: active.thread.id,
         kind: "provider-turn",
+        remoteStep: undefined,
       }),
     );
     return turnState("running");
@@ -3987,6 +4052,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#persistNormalized(active, event);
       return;
     }
+    // A runtime that has not yet answered a Stop can keep working and ask for
+    // more. The person asked for the turn to end, so nothing new is put to
+    // them; the request is declined and the turn waits for the runtime.
+    if (active.abort.signal.aborted) {
+      await Effect.runPromise(
+        active.connection
+          .answerApproval({
+            sessionId: active.sessionId as never,
+            requestId,
+            approved: false,
+            scope: "once",
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+      return;
+    }
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
@@ -4412,6 +4493,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return new Promise((resolve) => {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
         if (!active.toolApprovals.delete(String(approvalId))) return;
+        active.approvalPostures.delete(String(approvalId));
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
@@ -4428,6 +4510,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ...(origin === undefined ? {} : { origin }),
         finish,
       });
+      active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
@@ -4544,10 +4627,34 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             thread: input.thread.executionPolicy,
           });
     const toolApproval = active?.toolApprovals.get(input.approvalId);
+    if (
+      active !== undefined &&
+      (toolApproval !== undefined || providerRequestId !== undefined) &&
+      input.decision === "approved"
+    ) {
+      // An allow given under a wider posture must not take effect after the
+      // person narrowed it, so the ask stands again under the posture the
+      // thread holds now. A denial never widens and is delivered as asked.
+      const current = this.#approvalPosture(active);
+      if (
+        approvalAnswerUnderPosture({
+          approved: true,
+          askedUnder: active.approvalPostures.get(input.approvalId),
+          current,
+        }) === "ask-again"
+      ) {
+        active.approvalPostures.set(input.approvalId, current);
+        return turnState("failed", {
+          category: "failed",
+          message: APPROVAL_POSTURE_CHANGED_MESSAGE,
+        });
+      }
+    }
     if (active !== undefined && toolApproval !== undefined) {
       if (
-        turnPosture === "plan" ||
-        active.thread.permissionPersistence !== input.thread.permissionPersistence
+        input.decision === "approved" &&
+        (turnPosture === "plan" ||
+          active.thread.permissionPersistence !== input.thread.permissionPersistence)
       )
         return turnState("failed");
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
@@ -4558,17 +4665,24 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
     if (
       active.connection === undefined ||
-      turnPosture === "plan" ||
-      active.thread.permissionPersistence !== input.thread.permissionPersistence
+      (input.decision === "approved" &&
+        (turnPosture === "plan" ||
+          active.thread.permissionPersistence !== input.thread.permissionPersistence))
     )
       return turnState("failed");
     const connection = active.connection;
-    if (ownerCurrent === undefined) active.approvals.delete(input.approvalId);
+    if (ownerCurrent === undefined) {
+      active.approvals.delete(input.approvalId);
+      active.approvalPostures.delete(input.approvalId);
+    }
     await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
-        if (ownerCurrent !== undefined) active.approvals.delete(input.approvalId);
+        if (ownerCurrent !== undefined) {
+          active.approvals.delete(input.approvalId);
+          active.approvalPostures.delete(input.approvalId);
+        }
         return connection.answerApproval({
           sessionId: active.sessionId as never,
           requestId: providerRequestId,
@@ -4779,6 +4893,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
+    if (
+      input.turnOperationId !== undefined &&
+      String(active.operationId) !== String(input.turnOperationId)
+    )
+      return turnState("failed", {
+        category: "failed",
+        message: "That turn has already ended, so Stop left the turn running now alone.",
+      });
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =
@@ -4789,12 +4911,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
+    const connection = active.connection;
+    if (connection !== undefined) {
+      const confirmed = await settlesWithin(
+        Effect.runPromise(
+          connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+        ),
+        this.#options.stopConfirmationMs ?? CODE_STOP_CONFIRMATION_MS,
       );
+      // A Stop is only a request, and the caller hears back within the bound.
+      // The turn stays live and holds the thread until the runtime itself
+      // reports how it ended: recording it interrupted here while a runtime
+      // that shares its process kept working let a late completion land on a
+      // turn that already read as ended, and freed the thread under work
+      // that was still running. A runtime that owns its process can also be
+      // ended by Force stop.
+      if (!confirmed) {
+        return {
+          ...turnState("interrupted", {
+            category: "failed",
+            message:
+              connection.forceStop === undefined
+                ? STOP_UNCONFIRMED_MESSAGE
+                : `${STOP_UNCONFIRMED_MESSAGE} Force stop can end it.`,
+          }),
+          stoppedOperationId: active.operationId,
+        };
+      }
     }
     return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
   }
@@ -4806,11 +4949,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.reviewCapture?.close();
-        // Shutdown loses only the open burst, as a crash would.
+        // Shutdown loses only the open burst, as a crash would. The turn's
+        // record stays running, also as a crash leaves it, so the next start
+        // finds it cut off by the restart and continues it: a reboot quits
+        // Octant cleanly, and its turns are owed the same continuation.
         this.#flushBeforeStop(active);
         active.closed = true;
+        active.shutDown = true;
         active.state = "interrupted";
-        this.#persistRuntimeWork(active, "interrupted");
+        this.settleSpendReservation(active.operationId);
         active.abort.abort();
         if (active.connection === undefined) return;
         await Effect.runPromise(
@@ -5587,6 +5734,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return threadWithActiveTurnPosture(thread, this.#active);
   }
 
+  /**
+   * What a pending approval is asked under: the thread's posture as its
+   * running turn holds it, after the window's session grant and the turn's own
+   * narrowing. A thread that cannot be read has no posture an allow could match.
+   */
+  #approvalPosture(active: ActiveTurn): string | undefined {
+    const thread = this.#effectiveThread(active.windowId, active.thread.id);
+    return thread === undefined ? undefined : approvalPostureOf(thread);
+  }
+
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {
     const stored = this.#options.persistence.readCodeThread(threadId);
     if (stored === undefined) return undefined;
@@ -5655,6 +5812,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#options.uuid,
     );
     if (operationEvent === undefined) return;
+    if (operationEvent.kind === "approval-requested") {
+      active.approvalPostures.set(String(operationEvent.approvalId), this.#approvalPosture(active));
+    }
     this.#noteHarnessRetry(active, operationEvent);
     // Text that could not be journaled must not sit under a completed turn.
     const lostText = active.deltaFlushFailure;
@@ -6120,6 +6280,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     outcome: CodeTurnOutcome,
     failure?: CodeOperationFailure,
   ): void {
+    // A turn the host's shutdown stopped is journaled as a crash leaves it:
+    // the runner's own `interrupted` would read as a person's Stop, and the
+    // next start would not continue it.
+    if (active.shutDown === true) return;
     if (outcome === "completed" && active.deltaFlushFailure !== undefined) {
       outcome = "failed";
       failure = evidenceCapacityFailure(active.deltaFlushFailure.error);
@@ -6194,6 +6358,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         state,
       }),
     );
+  }
+}
+
+/**
+ * How long a Stop waits for the runtime to confirm the turn ended: the same
+ * grace Chat gives a shared-process runtime and the renderer waits before it
+ * offers Force stop. A runtime that never answers the interrupt otherwise
+ * left the person's Stop request waiting indefinitely; the turn itself stays
+ * open until the runtime reports how it ended.
+ */
+export const CODE_STOP_CONFIRMATION_MS = 10_000;
+
+const STOP_UNCONFIRMED_MESSAGE =
+  "Stop was not confirmed. The provider may still be running this turn.";
+
+/** Whether `work` settles, either way, before `ms` pass. */
+async function settlesWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([
+      work.then(
+        () => true,
+        () => true,
+      ),
+      expired,
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -6638,8 +6833,11 @@ function baseCheckoutResolver(
   };
 }
 
+const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
+
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
+    remoteHead: (input, signal) => git.remoteHead(input, signal),
     observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
       mapGitObservation(
         await git.observe(

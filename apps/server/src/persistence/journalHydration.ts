@@ -48,7 +48,7 @@ export interface HydrateJournalProjectionInput {
 export function requireJournalHydration(status: JournalHydrationStatus, label: string): void {
   if (status === "snapshot-required") {
     throw new Error(
-      `${label} hydration exceeded the journal scan cap; a snapshot rebuild is required.`,
+      `${label} hydration exceeded the journal scan cap, so Octant refuses to serve a partial view.`,
     );
   }
 }

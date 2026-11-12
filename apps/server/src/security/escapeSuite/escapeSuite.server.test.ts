@@ -56,9 +56,26 @@ describe("escape suite server integration (layer 2)", () => {
     ).toThrow(/principal identity/);
   });
 
-  it("documents layer 3 macOS probes as out-of-band native evidence", () => {
+  it("names a CI job for every layer 3 native probe it lists, and each probe exists", () => {
     const readme = readFileSync(join(ESCAPE_SUITE_FIXTURES_ROOT, "..", "README.md"), "utf8");
-    expect(readme).toMatch(/Out-of-band \/ native evidence/);
     expect(readme).toMatch(/toolCallPolicy/);
+    // A darwin- or bwrap-gated probe skips where its sandbox is absent, so a
+    // probe the README lists but no workflow names would silently never run.
+    const serverSource = join(ESCAPE_SUITE_FIXTURES_ROOT, "..", "..", "..");
+    const repositoryRoot = join(serverSource, "..", "..", "..");
+    const workflows = ["ci.yml", "packaged-work-confinement.yml"]
+      .map((name) => readFileSync(join(repositoryRoot, ".github", "workflows", name), "utf8"))
+      .join("\n");
+    const probes = [
+      ...readme.matchAll(/`((?:process|network|secretStores|providers)\/[\w.]+\.test\.ts)`/g),
+    ]
+      .map((match) => match[1])
+      .filter((probe): probe is string => probe !== undefined);
+    expect(probes.length).toBeGreaterThan(5);
+    for (const probe of probes) {
+      expect(existsSync(join(serverSource, probe)), probe).toBe(true);
+      expect(workflows, probe).toContain(`src/${probe}`);
+    }
+    expect(workflows).toContain("smoke:packaged-work-confinement");
   });
 });

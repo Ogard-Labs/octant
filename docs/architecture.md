@@ -548,6 +548,35 @@ seconds apart), and the systemd unit restarts it on failure, which includes a
 kill by signal. A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
+**Background host and recovery screen.** Settings > General offers "Keep
+Octant running in the background" and, on macOS, "Open Octant at login". Both
+are off by default (maintainer decision, 2026-11-12). The first installs the
+same per-user LaunchAgent or systemd user unit `octant` manages, pointed at the
+installed app's own windowless host (`--octant-host-only
+--octant-background-service`) with no inherited environment, so the host starts
+at login and the service manager restarts it after an unexpected exit while a
+deliberate Quit stays quit. The second switch marks the launch as the service's:
+unlike a Nightly client's host-only launch, it never arms the first-window
+grace that stops a host no client joined, so it runs until an explicit quit. The second is the
+operating system's login item for the app. Each switch shows what the
+operating system reports after a change, so a service `octant` installed shows
+as on. Only Octant's own top-level desktop windows reach these switches
+through the main process: a paired device talks to the host over the network
+and a Nightly client's bridge omits them, so neither can change them. A
+development run and Windows offer neither. When the managed host refuses to
+start and prints its refusal record, the desktop opens a recovery window
+instead of an error dialog and quit. The window is a static page with no
+script that explains the refusal in plain words and offers only the actions
+that refusal allows: for a damaged store, rebuilding from the journal and
+restoring the last verified backup (after a separate native confirmation,
+because a restore replaces what was recorded after the backup); otherwise
+starting again or quitting. Both repairs run the server's own offline store
+maintenance (`apps/server/dist/dbMaintenance.mjs` in the packaged app, the same
+code as the `db:*` scripts) under exclusive ownership, so the authority and
+integrity rules are the store's own. An unfinished local data removal offers
+neither repair. Starting again relaunches the app. See
+[Persistence: startup repair](#persistence).
+
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
 the shared embedded editor and a local-window-only, Project-confined source
 read/save route. Full source, physical identity and revision are checked
@@ -1365,14 +1394,40 @@ after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
-`forceStop` unsupported: the command is refused, the UI never offers it, and
-Stop settles the attempt at once as before. For a provider that supports it, a
+`forceStop` unsupported: the command is refused and the UI never offers it. In
+Chat, its Stop still waits for the runtime to confirm the turn ended before the
+attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
+attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
+confirmed. The provider may still be running this response."), which frees the
+thread without claiming the work stopped. While a Stop is unanswered the
+composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
-did not take stays visible. Work returns `stop-requested` while its exact
-request-owned supported runtime is still ending. Its force command requires the
-same request/thread/turn and an already-aborted owned controller. Code's force
+did not take stays visible. A Code Stop waits at most ten seconds
+(`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
+answers `interrupted` with "Stop was not confirmed. The provider may still be
+running this turn." The turn stays live and holds its thread until the
+runtime itself reports how it ended: its tool activity meanwhile is still
+journaled (streamed reply text after a Stop is not kept), an approval it asks for is declined rather than put to the person,
+host-run tools under the turn already see it cancelled, and its own completed,
+failed or interrupted event, or its late answer to the interrupt, is the turn's
+one terminal outcome. On a runtime with Force stop the answer adds that Force
+stop can end it. Rationale: recording a shared-process turn interrupted at the
+bound freed the thread under work that was still running, and a late
+completion then landed on a turn that already read as ended. A busy host cannot hold Stop back either: every Chat, Work and Code
+turn hands the event loop back (one `setImmediate`) after 10 ms of processing
+provider events (`PROVIDER_EVENT_SLICE_MS`). Rationale: a provider streaming
+deltas as fast as they could be pulled kept each turn's work on one unbroken
+chain of microtasks, so timers and incoming requests never ran until it
+paused; with the slice, a Stop issued into that flood settled the turn at p95
+22–23 ms (Code) and 54–179 ms (Chat) over three sets of 10 runs. Work
+returns `stop-requested` while its exact request-owned supported runtime is
+still ending. Its force command requires the same request/thread/turn and an already-aborted owned controller. Code's force
 command additionally names the original turn operation, rejects replacement
-operations and requires that Stop already reached that controller. Neither path
+operations and requires that Stop already reached that controller. Code's Stop
+names the turn it was pressed for too: a Stop that names a turn no longer current
+is refused and leaves the newer turn running, so a Stop that arrives late cannot
+end a queued message the host sent on. A Stop that names no turn, from a client
+built before the field, still ends the live turn. Neither path
 accepts a PID or kills a shared runtime; the provider owns process verification.
 The normal turn lifecycle records completion/cancellation, preserving queued
 messages and history. A kill failure leaves an explicit recovery error.
@@ -4553,11 +4608,37 @@ flowchart LR
   per short burst (a Code burst also flushes before any other event of its turn
   and when the turn ends), so the authoritative journal fsyncs a bounded number
   of times per second instead of once per token, and a power loss loses at most
-  the burst that was still open — never a committed one.
+  the burst that was still open — never a committed one. A burst is also
+  bounded in size (256 Ki characters of Code text, merged into one event; 64
+  Chat deltas, each its own event), so no single commit, including the one
+  that settles a Stop, grows with how fast the provider streams: an unbounded Chat burst under a flood held nearly 600 deltas and
+  its commit kept Stop waiting 1.4 s.
+  Projecting a streamed Chat delta costs the same however long the reply
+  already is: the Chat projection stores each appended reference as its own
+  row (`chat_streamed_response_projection`) instead of rewriting the attempt
+  row and its turn JSON, reads fold those rows onto the attempt in journal
+  order, and the next whole `chat.attempt-updated@1`, which carries every
+  reference streamed before it, replaces them. A replayed delta that a later
+  whole attempt already carries adds nothing, so rebuild and replay give the
+  same reply. Rationale: rewriting both rows per delta made 2,000 deltas take
+  21–30 s to project (2.7 s with one row per delta), each late delta binding about 580 KB, and a Stop
+  after a long flood waited behind those commits.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Streamed output and a full disk.** Text and reasoning deltas are exempt
+  from a turn's event budget, so each turn also has a streamed-output budget
+  of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A
+  Chat or Code turn that streams past it keeps everything already journaled,
+  journals `[Output truncated by Octant.]` as its last text, interrupts the
+  provider, and ends (Chat: interrupted with `output-budget-exceeded`; Code:
+  failed, as at its event budget). A Work reply is held to 64 KiB with the
+  same marker, counted as it arrives and frozen once truncated. An append that
+  fails on a full disk (`SQLITE_FULL`) commits nothing and carries
+  `reason: "disk-full"`, and every service that reports a failed write says
+  the disk is full and to free space, rather than that persistence is
+  temporarily unavailable.
 - **Startup check.** Startup decodes journal rows to prove the journal is
   readable, then records a disposable watermark: the sequence it verified
   through plus a fingerprint of the exact server build (a hash of every chunk of
@@ -4574,13 +4655,26 @@ flowchart LR
   means a full scan. An incompatible row is quarantined wherever it sits, and a
   diagnostics call with `fresh` always scans everything. Deleting the watermark
   only makes the next start slower.
+- **Startup repair.** The journal is authoritative and projections are
+  rebuildable, so a start whose journal decodes and passes SQLite's integrity
+  check repairs damage confined to projections by itself: a checkpoint ahead
+  of the journal, aggregate heads that disagree with it, a lag catch-up did not
+  close, or a quarantine a compatible upcast can now read. It runs one full
+  rebuild, at most once per start, and logs that it did. Damage the rebuild
+  does not clear, a failed integrity check, a version gap inside the journal
+  and a row this build cannot decode are journal damage and still refuse the
+  start with `recovery-required`, leaving the journal unchanged. The refusal
+  record names what the store needs (`store-damaged`, or `removal-unfinished`
+  for a staged local data removal), and the desktop's
+  [recovery screen](#process-topology) offers only the matching actions.
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.
 - **Projections.** Each feature owns its projection and persistence schema
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
-  wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
+  wholesale (`db:status`, `db:verify`, `db:rebuild` in a source checkout; the
+  recovery screen runs the same rebuild in the installed app). A projection whose state
   lives only in process memory (AgentRuns, Canvases, image jobs, managed
   GitHub clones, artifact replicas) declares `holdsStateInMemory` and replays
   from the start of the journal at every host start, because its stored
@@ -4589,6 +4683,31 @@ flowchart LR
   Automations are also in memory; the host rebuilds them with their own
   hydration after catch-up instead, which leaves them empty and reported
   unloaded rather than partial when it cannot finish (see the next item).
+- **Authoritative projections and derived views.** Every projection applies
+  inside the append's transaction. A projection is authoritative unless it
+  declares `derived`: a failure in an authoritative projection rolls the
+  whole append back (`ProjectionApplicationFailed`), because a command,
+  authority check, or invariant reads its rows. A derived view is one nothing
+  decides from. It applies inside a savepoint; when it throws, its writes are
+  undone, it alone is quarantined at that event and held (it skips every
+  later event and its checkpoint stops advancing, so its lag shows), and the
+  append commits, so a bug in a view never blocks Stop, an approval, or a
+  turn's own events. A storage failure still fails the append. Startup
+  catch-up holds a failing derived view the same way instead of refusing to
+  start, and readiness (`state`) is judged by authoritative projections
+  alone: `db:status` lists a held view under `heldDerivedViews`, `db:verify`
+  still reports the store invalid, and `db:rebuild` replays it (authoritative
+  projections first as one unit, then each derived view on its own, reporting
+  any that still fail as `held` with exit code 1). An authoritative
+  projection may not depend on a derived one. Today only `diagnostics-exports`
+  is derived: its incidents are journaled beside failing turns, and the export
+  that reads them refuses when one is missing. Rationale: usage
+  (`usage`, `code-usage`) feeds spend-ceiling admission and product feedback
+  enforces its note limit and lifecycle from its rows, so both stay
+  authoritative; cache and latency statistics live in process memory, not in
+  journal projections. On the runtime registry (40 projections), a one-event
+  append measured p50 0.67–0.71 ms and p95 1.21–1.40 ms before the split and
+  p50 0.64–0.74 ms and p95 1.13–1.31 ms after, within run-to-run noise.
 - **Startup hydration reads a store's own rows.** Every in-memory store and
   projection rebuilds at start from its own aggregate types, read in journal
   order through the (type, sequence) index, so no store reads, decodes, or
@@ -4950,16 +5069,132 @@ or .zip>` write the same files, built by one host command
   provider session cursors, or earlier events. Already settled turns remain settled;
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
+  A clean shutdown, which a reboot performs, leaves a running turn exactly as a
+  crash does: its runtime-work record stays running and no outcome is journaled,
+  so the next start finds it the same way.
+
+  The host then continues, by itself, each Code turn this restart cut off
+  (maintainers decided on 2026-11-12; on by default). A turn qualifies only
+  when this start's reconciliation found its provider-turn record still
+  running: a turn the person stopped or that failed already reads settled, and
+  a turn already waiting before the restart (a usage-limit stop, or an earlier
+  restart's turn) is not this restart's. Only the thread's newest turn is
+  continued. The host settles the cut-off turn interrupted with the restart as
+  its reason, then starts one turn under the routine host scope with the same
+  message a person's Resume sends (inspect first, do not repeat what may
+  already have taken effect, ask again for approvals and answers). Turn
+  admission rechecks Project access, the harness pause, the provider policy
+  and the spend ceiling at that moment, as for any host turn, and the turn
+  resumes the provider session from the journaled `resumeCursor`. Its
+  operation id is derived from the cut-off turn's, so a repeated recovery lands
+  on the record the first one wrote. A thread waits for its person instead,
+  with the reason in the restart notice, when: Settings › Code › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff`);
+  any of its runtime work is `ambiguous` (a push or pull request step whose
+  outcome the restart left unknown); its own automatic continuation was cut
+  off by a restart twice (the crash-loop guard counts per thread in the host
+  store, keyed by the continuation it last started, and survives the restart
+  it counts); its newest provider session on the same provider and model has
+  no resume cursor, or the turn never reached its provider; its native harness
+  session's recovery is blocked; or admission refuses the turn. A held cut-off
+  turn is still settled interrupted, so the thread reads as stopped rather than
+  waiting for a caller that never comes. Messages the person queued behind the
+  cut-off turn follow the continuation: the host lifts only the queue's
+  `host-restart` hold, under its own scope, so the queue still waits for the
+  continuation to end and still holds on a failed or cancelled one; a queue the
+  person paused stays paused. The host scope reaches a queue only to release
+  it behind such a continuation, in Chat, Work and Code alike. Each
+  start keeps what it did as `restartRecovery` on the host control status (the
+  threads continued and held, ids and reasons only), and a window shows it as
+  "Octant restarted. Continued N threads; M need you", naming and linking only
+  threads that window can open. Chat and Work turns are continued by the same
+  rule (Chat and Work restart recovery, below); subagent runs, coordinator
+  wakes and goal loops are not continued yet.
+  Other running Code work has no process left after a restart. A push or pull
+  request step may already have landed on the remote, so it becomes `ambiguous`
+  and keeps the thread Waiting ("could not confirm how the last step ended")
+  rather than letting it read Ready; its runtime-work record keeps the remote step
+  it makes (a push's remote, branch and commit, or the pull request action) when
+  it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
+  reading the remote branch: pointing at the pushed commit it is `completed`,
+  anywhere else or absent it is `failed` and pushing again is safe, and an
+  unreadable remote leaves it unconfirmed. Observing the pull request settles an
+  unconfirmed creation by looking for the thread's pull request, open or closed,
+  and an unconfirmed comment or review reply from the signed-in person's own
+  comments on the pull request it was posted to. Before posting, the record
+  keeps that pull request's repository and number, a SHA-256 of the text (never
+  the text), and how many of the person's comments there already carried it;
+  only a higher count now shows the post landed, so an older identical comment
+  ("Fixed.") never stands in for it. A comment record without that pull request
+  or count, or one whose branch now carries a different pull request, is never
+  judged against another pull request: it stays unconfirmed. An unconfirmed
+  update or merge stays unconfirmed.
+  File, terminal, test, review, and local Git work, whose result is in the
+  checkout, becomes `interrupted`.
+
+  The same uncertainty can arise without a restart. A push that fails without
+  Git reporting the remote's answer (a dropped connection, a `[remote failure]`
+  the remote never confirmed, a timeout) carries `unconfirmed` on its result
+  and is recorded `ambiguous`, to be settled from the remote branch like a lost
+  push; only a refusal Git did report (a `[rejected]` or `[remote rejected]`
+  ref such as a non-fast-forward or stale lease, refused credentials, a missing
+  repository) is `failed`. A comment posted again on the same pull request
+  while an earlier attempt at the same text is unconfirmed is looked for
+  first, by the same count: higher, the earlier attempt is settled `completed`
+  and nothing is posted; not higher, it is settled `failed` and the comment is
+  posted; unreadable, the comment is refused rather than risked twice. Submissions of one push or pull request step under the same
+  operation id run once: a second arriving while the first still runs waits
+  for it and is answered from the journal. A pull request creation is made
+  safe to repeat by its operation id and by locating the thread's pull request
+  first; the older `idempotencyKey` field is accepted and ignored.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed
   with the `interrupted` category, so the header reads Interrupted, the Board
   keeps the thread under Waiting with the interrupted reason, and the thread
-  takes its next message. The settlement is derived on every start and not
-  journaled, so rebuilding twice reads the same. A turn waiting on a provider
-  usage limit keeps waiting for the reset. An approval the lead was blocked on
-  stays `lost-in-restart` in the harness session: only Resume is offered, and
-  the call it guarded never runs.
+  takes its next message. The start journals that settlement as a system
+  `work.turn-updated@1`, so the next start reads the turn as settled and does
+  not count it as cut off again; a stream that moved on in between is left
+  for the next start, and rebuilding reads the same either way. A turn waiting
+  on a provider usage limit keeps waiting for the reset. An approval the lead
+  was blocked on stays `lost-in-restart` in the harness session: only Resume is
+  offered, and the call it guarded never runs.
+
+  Chat and Work restart recovery continues those turns the way Code restart
+  recovery does: once, as the host, with the message a person's Resume sends,
+  through the mode's ordinary send, which rechecks authority, posture, the
+  harness pause and the spend ceiling at that moment. In Chat the turns are the
+  attempts the start's sweep interrupts (`reapStaleProviderSessions`): an
+  attempt still queued or streaming that no process carries. An attempt already
+  interrupted, cancelled, failed, completed or waiting is retained and never
+  continued. In Work they are the turns the start settles above. Only the
+  thread's newest turn qualifies: for Chat, the newest attempt of the active
+  conversation's tail; a Retry, a rewind or a new message since means the
+  person moved on. The continuation is a send-chat-turn whose submission id, or
+  a Work turn whose request id, is derived from the cut-off attempt or turn, so
+  a repeated recovery finds the turn the first one admitted. That send takes up
+  the cut-off turn's provider session as any next message does: a provider that
+  keeps its own conversation resumes from the journaled `resumeCursor`, a
+  harness session continues when the session decision allows it, and a
+  host-owned conversation is rebuilt from the transcript, which keeps the
+  interrupted reply. The thread waits for its person, with the reason in the
+  restart notice, when Settings › Chat or Settings › Work › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff` on
+  the Chat or Work thread, set only at a local window); its own continuations
+  were cut off twice (the same per-thread crash-loop store as Code, keyed by
+  thread id, which is unique across modes); its provider keeps its own
+  conversation and the cut-off turn carries no resume cursor; the Work turn was
+  still only accepted, or the Chat answer's provider-owned session had not
+  replied yet, so its message may never have reached the provider; its native
+  harness session's restart recovery is blocked (the host lifts it first,
+  through the same blockers a person's Resume checks, because admission refuses
+  a session still recovery-required); or admission refuses the send. Chat and
+  Work keep no journaled push or pull
+  request step, so the uncertain-external-action hold reads nothing there; the
+  continuation message tells the agent to inspect before repeating. Queued
+  messages follow the continuation under the same release as Code. A Chat
+  attempt already waiting on a question or approval at the restart is retained
+  as before, and answering it still settles it interrupted.
 
 - **Fast thread reads.** A window owns Code navigation bootstrap and the
   follow-up navigation list. Its open thread controllers consume that metadata
@@ -4994,7 +5229,16 @@ or .zip>` write the same files, built by one host command
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
   approvals, follow-up offers and message queues use their own metadata-only
-  Machine change topics. A renderer re-reads the authoritative scoped API
+  Machine change topics. Feed sequences are per process, so every frame also
+  carries the host process's epoch, minted at start, and a client resumes
+  with both (`afterSequence` and `epoch`). A cursor from another process gets
+  `snapshot-required` whatever its sequence, since a restart's changes are
+  otherwise missed when the old cursor sits below the new head; a client
+  that sends no epoch (older than epochs) is judged by sequence alone, and a
+  client names an epoch only after a host has reported one, so it still
+  reads an older host. The renderer's reconnect backoff is jittered between
+  half and all of its delay, so a host's windows do not all retry at once. A
+  renderer re-reads the authoritative scoped API
   after a notice, on reconnect or becoming visible, and every thirty seconds
   as recovery. Hidden windows stop recovery timers. In-memory approval
   services publish both creation and settlement, including expiry and
@@ -5101,7 +5345,9 @@ or .zip>` write the same files, built by one host command
   event another names as its cause. The other self-applying
   exception files rather than erases: the completed-thread sweep archives a
   thread the person completed once the Settings window has passed, keeping
-  its transcript, checkout, and journal in place.
+  its transcript, checkout, and journal in place. A sweep pass looks at 50
+  threads at a time and yields to the event loop between batches, so a pass
+  over thousands of threads cannot hold up Stop or an approval answer.
   A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
@@ -5259,7 +5505,10 @@ or .zip>` write the same files, built by one host command
   request, 2026-11-12). Not built yet: today any cancellation or failure
   holds it, and restart recovery holds pending work until an authenticated
   user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
-  send failed. Closing a composer cannot delete an accepted queued attachment.
+  send failed. The one exception built today is a Chat, Work or Code thread the host
+  continues after the restart cut its turn off: the host lifts that queue's restart hold under its
+  own scope, so its messages follow the continuation through the same
+  dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
@@ -7024,7 +7273,7 @@ transaction, so the store fsyncs per burst rather than per token and stays on
 `synchronous = FULL`. The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
-projection, which already holds the attempt's current state. An opt-in
+projection, which folds the references streamed so far onto the attempt. An opt-in
 parameter the host does not know is ignored rather than refused, so a newer
 client on an older host still streams: a bad value on a known opt-in is a 400,
 but a future opt-in degrades to the frames it would have had without it. The receipt is
@@ -8584,11 +8833,9 @@ the model at another size.
   Turn start and settlement are recorded for every provider so a crash or host
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
   The same server admission holds a recovered session until a person resumes it,
-  unless the setting "Resume interrupted turns after a restart" is on (off by
-  default): then a turn with no uncertain side effect resumes by itself, and
-  a turn whose last effect is uncertain still waits for the person
-  (maintainer request, 2026-11-12; not built yet: today every recovered
-  session waits for a person);
+  or until the host lifts it to continue a turn a restart cut off (Code restart
+  recovery, on by default): a turn whose last effect is uncertain still waits
+  for the person (maintainer request, 2026-11-12);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -8648,7 +8895,11 @@ the model at another size.
   window's bootstrap revalidates it), and a Work Project's folder still exists
   at the path it was bound to (`not-ready` names what is missing). That resume journals the lost turn as
   `lost-in-restart` and the dead approvals and questions as expired, so the
-  next restart does not raise the recovery again. Also journaled:
+  next restart does not raise the recovery again. For a Code thread whose turn
+  the restart cut off, the host performs that resume itself, with the same
+  checks, after revalidating checkouts as a window's bootstrap would, and then
+  continues the turn (see Code restart recovery under Persistence); a blocked
+  resume holds the thread for its person. Also journaled:
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session
@@ -10280,6 +10531,24 @@ that is not yet effective for the thread is refused and never reaches the model.
   plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
+  A stdio server has no network unless the bundled catalog entry for its
+  reserved `connector-<id>` package lists hosts (`egress` on
+  `ConnectorCatalogEntry`). The host looks the hosts up from the catalog by the
+  folder its own store wrote; a package never names its own, so a third-party
+  or hand-added server never gets any. Seatbelt cannot name a host, so the
+  process is granted one loopback port (`allowLoopbackPorts`) and the host runs
+  a CONNECT-only proxy there for that session (`hostAllowListProxy`): it
+  tunnels port 443 to the listed names (`*.example.com` covers names below
+  example.com, not example.com), refuses plain requests, other ports, and any
+  name that resolves to this computer or a local network, and stops with the
+  process. `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` point the server at it.
+  Such a server is `proxied-stdio` for grants: it can carry what a thread has
+  read out in a call's arguments, so on a tainted thread every call asks and the
+  answer is single use, exactly as for a network server. Rationale: the
+  alternatives were a global network grant (any host) or no network (the
+  connector cannot work); a host list the host enforces keeps the confinement
+  and the writes limit while allowing the one service the person connected.
+
 - **MCP HTTP session recovery.** A successful initialize and tool listing is a
   connection observation, not permanent service or document readiness. An
   unknown-session HTTP 404, failed network request or unreadable response
@@ -10344,7 +10613,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     remembered where it cannot be is refused and the call keeps waiting.
   - Below Full access, on a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
-    its plugin data. A network (HTTP) server's tool asks for every call there
+    its plugin data (a stdio server a catalog entry gives listed hosts is not
+    one: it asks every call like a network server). A network (HTTP) server's tool asks for every call there
     and the answer is single use, because its arguments can carry out what
     the thread has read. Every MCP result taints its thread, so a network
     tool's grant spares the prompt only until that thread's first tool result.
@@ -10775,6 +11045,29 @@ sight on this computer and Show hidden brings every entry back; that
 preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
+An entry that needs an app the person registers also carries numbered
+`setupSteps`, shown beside Client setup before sign-in: the vendor's part,
+worded only from what the entry and its linked guide already say, then
+Octant's part (the callback address, the client ID, an optional client secret
+linked from a secret store, Save, Sign in). The steps never name a vendor
+screen the catalog cannot vouch for; the guide link stays the authority for
+those.
+
+**Composio.** The catalog lists Composio's hosted MCP server
+(`https://connect.composio.dev/mcp`, probed 2026-11-12: 401 with resource
+metadata, an authorization server with PKCE S256 and public dynamic
+registration) as one sign-in entry. It is how a person reaches Gmail, Google
+Drive and other apps whose vendors offer Octant no client of its own: the
+person signs in to Composio, and Composio holds the vendor sign-ins. That is a
+different custody from every other entry: Composio stores those credentials
+encrypted on its servers, and the content the agent reads or writes passes
+through them, so the vendor's own authorization never reaches the broker.
+Octant does not know Composio's retention. The entry therefore carries a
+`permissionNotice` that says so before sign-in; the sign-in grant to Composio
+itself lives in the credential broker like any other. Per-call approvals,
+taint rules and the confined launch apply unchanged. No Composio API key
+entry exists: the sign-in covers personal and organization accounts alike,
+chosen on Composio's side.
 
 **Atlassian and Airtable setup.** Both non-featured entries use the existing
 MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
@@ -11650,7 +11943,17 @@ mechanisms are:
   current grant, so a thread put in Plan mode mid-turn refuses writes and
   process launches on the next call, and a Plan turn is read-only throughout),
   the turn's confinement, path containment inside the captured root, and the
-  approvals the posture requires. A provider's own built-in tools run under
+  approvals the posture requires. An approval can wait minutes for a person,
+  so when the person allows one of Octant's own native harness tools the call
+  is authorized again against the thread's authority, posture, and taint as
+  they are then, and runs only if that still allows it and asks no more than
+  the person answered: a thread switched to Plan, narrowed from Full access,
+  moved off its Project, or archived while the approval waited refuses the
+  call with its reason, and one that now needs a different approval class or
+  a fresh confirmation refuses it as `approval-stale`. Answering a provider's
+  own approval request (`answer-provider-approval`) stays a read that does not
+  reread the grant: it answers a built-in tool, which the next sentence
+  covers. A provider's own built-in tools run under
   the posture and sandbox the turn was launched with and do not reread the
   thread's grant mid-turn, so lowering it takes effect on them with the next
   turn or when the person stops the turn. The next turn on the thread checks the window's binding again, so
@@ -12154,6 +12457,39 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
+  An approval answered after the thread's posture changed asks again
+  (maintainer decision, 2026-11-12). Each pending approval records the
+  posture it was asked under: the mode, who answers prompts (`autoApprove`),
+  the Full access sandbox, how long grants last (`permissionPersistence`),
+  and the coordinator gate, as `approvalPostureOf` in
+  `packages/domain/src/guardrailPolicy.ts` reads them (a Code turn's posture
+  as the turn holds it, after the window's session grant and the turn's own
+  narrowing; a Work thread's access level and sandbox). The server compares
+  it with the thread's posture when the answer arrives, before anything is
+  delivered: an allow under a different posture is refused with "This
+  thread's permissions changed since this was asked, so it asks again.", the
+  provider is told nothing, and the same approval stays pending, now asked
+  under the current posture, so the person's next answer is judged against
+  it. A denial is delivered whatever the posture became, Plan included. This
+  holds for Code provider and app-managed tool approvals
+  (`answer-provider-approval`, and an owner device's answer), Work requests
+  (`resolve-work-request`), and native-harness approvals in every mode,
+  where a child's request follows its parent thread's posture. Chat declines
+  every provider approval, so nothing there is answered. Rationale:
+  an approval granted under a wider posture must not take effect after the
+  person narrowed it, and an allow given under any other posture was not
+  decided against the one the thread holds now. Re-presenting the same
+  approval rather than minting a new one keeps one identity per provider
+  call and needs no new answer route.
+  A native-harness "always" grant follows the same rule: it records the
+  posture it was granted under and answers a later ask in its class only
+  while the thread still holds that posture. After a permissions change the
+  class asks again (a remembered grant never answers under a posture it was
+  not granted under), and an "always" given under the new posture remembers
+  it afresh; returning to the original posture lets the original grant answer
+  again, since that is the posture the person decided against. Rationale: a
+  remembered grant is an allow answered in advance, so it must not outlive
+  the posture it was given under any more than a pending answer may.
 
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
@@ -12325,6 +12661,55 @@ approval-gated` command that undoes it. The terminal shows no one-time
   owner, never a widening of the automatic admission rule, and the refusal
   says what clears it where the person is, not only in a log. "Sign in with
   the account command in Settings." is the shape.
+- **Which clock an expiry runs on.** A grant or prompt that lives only in the
+  server process expires on the process authority clock
+  (`ProcessAuthorityClock`): wall time read once when the process starts,
+  then advanced only by elapsed time since boot. A wall clock set back cannot
+  extend one, and a sleep counts against it. A restart drops every such grant
+  and starts a fresh epoch, so no stored clock value can block startup. On it
+  today: Code operation approvals, window and launch sessions, managed-root
+  grants, simulator input grants, extension tool approvals, routine proposals
+  and image generation offers (their stated request time), computer-use owners
+  and five-minute app grants, Claude's pre-tool grants, credential command
+  requests, Browser upload and download permissions (which are not restored
+  after a restart), and server preview tunnels. A grant that is stored and
+  must outlive a restart cannot use a process epoch and stays on wall time,
+  stated in UTC: a paired device's registration expiry, and any stored
+  `expiresAt` a later process reads back. Such a grant stays revocable by the
+  person at any time, which is what bounds it when the clock is wrong. Not
+  yet moved: Browser tool approvals, session grants and credential use read
+  wall time though they live in the process. Routine proposals and image
+  generation offers end on a timer alone; a timer is Node's monotonic clock,
+  which on Linux does not count a suspend.
+  _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
+  (`CLOCK_BOOTTIME`): it counts suspend and ignores clock changes. On macOS
+  both libuv (`uv_uptime` in `src/unix/darwin.c`, used by Electron's Node)
+  and Bun (`getSystemUptime` in `src/darwin_c.zig`, read at Bun 1.2) compute
+  `time(NULL)` minus the `kern.boottime`
+  sysctl. That counts sleep, since the calendar advances across sleep while
+  the boot time does not, and it ignores a clock change, because XNU's
+  `clock_set_calendar_microtime` (`osfmk/kern/clock.c`) shifts the boot time
+  by the same delta, forward or backward, whenever the calendar is set. It
+  differs from the code's assumption in two small ways: it has whole-second
+  resolution, so an expiry lands up to a second late or early, and a read
+  that races a clock change can see one value off by that change for one
+  read, because the boot time and the calendar are two separate reads. A
+  high-water mark in `ProcessAuthorityClock` would close the second; it is
+  not built.
+- **Escape probes run where the sandbox ships.** The macOS CI job runs the
+  darwin-gated Seatbelt suites against the real `sandbox-exec`: the
+  confinement profile's write, Keychain, home and egress denials; a confined
+  child that starts its own session; a wrapped runtime's network; the secret
+  guard; a credential command; and an outside provider driver's escape tests.
+  The Linux client-trust job installs Bubblewrap and proves a provider
+  runtime's capsule cannot read the person's credentials beside its Project
+  or inside a home opened as one. The packaged Work confinement gate (App
+  Sandbox, its XPC broker and a security-scoped folder) runs as
+  `bun run smoke:packaged-work-confinement` in its own macOS workflow, on the
+  hosted macOS runner on every push that touches the gate, its workflow or its
+  three scripts, and by hand on any arm64 Mac that already allows UI
+  scripting. Layer details are in the
+  escape suite's `README.md` beside its fixtures.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
   provider `--version` read launch through one shared confinement port
   (`ProcessConfinementPort`), and so do provider runtimes except where the
@@ -13244,6 +13629,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   swapped-in folder is the remaining residual there. Hard links are not
   refused. On Linux a top-level exclusive create that loses the race can leave
   one empty file at the swapped-in location; it never receives bytes.
+  Work renames and deletes, and the native harness's `write` and `edit`, act
+  the same way. Each runs after its containment check and authority decision,
+  on the canonical path the check returned, and a path `rename`, `unlink`, or
+  `writeFile` resolved the ancestors again: an ancestor swapped for a link to a
+  host folder in that window moved, removed, or wrote the host file of that
+  name from the unsandboxed server. A Work rename stays within its directory
+  and renames relative to that directory proved at its canonical path (on
+  Linux under `/proc/self/fd/N`; on macOS by `mv -h` from a child whose working
+  directory `/bin/pwd -P` reports at that path, refusing first when the new
+  name is an existing folder, which `mv` would move the entry into), and a
+  delete removes the name
+  as a mirror removal does. A harness write or edit takes Work's confined
+  write: an existing file is opened where the open must land on its canonical
+  path, and a new file and any missing folders are created under the existing
+  contained folder held open, one no-follow name at a time, with the mode a
+  plain write gave a new file. A write that cannot be proved is refused and
+  writes nothing; another platform refuses all of them.
 
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
@@ -16163,6 +16565,15 @@ documents its authority, privacy, and release boundaries):
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
+- Recovering after a crash or reboot without the terminal (maintainer
+  decision, 2026-11-12): projection-only damage rebuilds at startup, other
+  refusals open the desktop recovery screen, and a default-off background host
+  and open-at-login item keep the host available
+  ([process topology](#process-topology)). Not built yet: a local crash record
+  (Electron crash dumps kept on the device with upload off, added to a support
+  bundle only by choice, and named in the next start's notice), exporting a
+  support bundle from the recovery screen, and one-click restart of terminals,
+  dev servers and extensions a restart ended.
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

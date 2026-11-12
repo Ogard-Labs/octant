@@ -202,7 +202,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         {localHostSurfaces.map((surface) => (
           <OctantCard
             aria-disabled="true"
-            className="remote-shell__surface-card remote-shell__surface-card--local-only p-3"
+            className="remote-shell__surface-card remote-shell__surface-card--local-only p-2"
             key={surface.id}
             role="article"
           >

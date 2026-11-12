@@ -551,6 +551,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           operationId,
           threadId,
           checkoutId: String(current.checkout.id),
+          turnOperationId: String(running.operationId),
         },
       });
       if (response.status !== 200) {

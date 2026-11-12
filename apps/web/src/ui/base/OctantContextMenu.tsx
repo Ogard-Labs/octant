@@ -12,6 +12,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "./NativeContextMenu";
+import { menuIconColumn } from "../shadcn/menu-row";
 import { cn } from "../shadcn/utils";
 import type { OctantMenuItem } from "./OctantMenu";
 
@@ -38,6 +39,9 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
   const menuId = useId();
   const labelId = (index: number) => `${menuId}-item-${index}-label`;
   const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
+  // One icon column for every row when any row has an icon, so the words stand
+  // on one edge.
+  const hasIcons = props.items.some((item) => item.icon !== undefined);
   return (
     <ContextMenu
       onOpenChange={(next, details) => {
@@ -65,7 +69,6 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
               {...(item.description === undefined
                 ? {}
                 : { "aria-describedby": descriptionId(index) })}
-              className="gap-2"
               closeOnClick
               key={item.value}
               label={item.label}
@@ -75,23 +78,17 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
                 props.onValueChange(item.value);
               }}
             >
-              {item.icon === undefined ? null : (
-                <span
-                  aria-hidden="true"
-                  className="flex size-(--oct-icon-md) items-center justify-center"
-                >
+              {hasIcons ? (
+                <span aria-hidden="true" className={menuIconColumn}>
                   {item.icon}
                 </span>
-              )}
+              ) : null}
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-medium" id={labelId(index)}>
+                <span className="truncate" id={labelId(index)}>
                   {item.label}
                 </span>
                 {item.description === undefined ? null : (
-                  <span
-                    className="truncate text-xs text-muted-foreground"
-                    id={descriptionId(index)}
-                  >
+                  <span className="truncate oct-menu-detail" id={descriptionId(index)}>
                     {item.description}
                   </span>
                 )}

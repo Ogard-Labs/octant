@@ -1393,7 +1393,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
+  line-height: var(--oct-line-label);
 }
 
 .setrow-hint {
@@ -1401,7 +1401,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  line-height: var(--oct-leading-detail);
+  line-height: var(--oct-line-detail);
 }
 
 /* The app's own primitives reach the same column. A switch is not a value
@@ -3118,9 +3118,13 @@ html[data-octant-increased-contrast="true"]
   overflow: visible;
   background: var(--oct-settings-card-fill);
   /* A raised card: its edge, the light its top catches and a short shadow
-     come from the one token. The border is clear and stays, because forced
-     colours drop every shadow and would leave the card with no edge. */
-  border: 1px solid transparent;
+     come from the one token. The edge is a clear outline drawn inside the
+     box, and stays, because forced colours drop every shadow and would leave
+     the card with no edge. It is an outline and not a border so it takes no
+     room: a border put the rows' 16px inset at 17px from the card's edge. */
+  border: 0;
+  outline: 1px solid transparent;
+  outline-offset: -1px;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-sm);
 }
@@ -3129,7 +3133,7 @@ html[data-octant-increased-contrast="true"]
   .settings-view
   .settings-card-section--open
   > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
-  border-color: var(--octant-border-strong);
+  outline-color: var(--octant-border-strong);
 }
 
 .settings-view .settings-card-section--open > .setgroup {

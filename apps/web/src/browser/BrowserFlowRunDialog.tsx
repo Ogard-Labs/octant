@@ -192,7 +192,7 @@ export function BrowserFlowRunDialog(props: {
       onConfirm={() => void confirm()}
       onCancel={() => void cancel()}
       details={
-        <div className="grid min-w-0 gap-3">
+        <div className="grid min-w-0 gap-2">
           {run === undefined ? (
             <OctantSelectField
               aria-label="Task to run this flow"
@@ -217,7 +217,7 @@ export function BrowserFlowRunDialog(props: {
               <p>
                 {run.completed} of {run.flow.steps.length} steps completed.
               </p>
-              <ol className="grid min-w-0 gap-3">
+              <ol className="grid min-w-0 gap-2">
                 {run.flow.steps.map((step, index) => (
                   <li key={index} className="grid min-w-0 gap-1">
                     <span>

@@ -99,6 +99,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
     machineChangeFeed.publishCommitted(append),
   );
   const processAuthorityNow = (wallClockMs: number) => processAuthorityClock.clamp(wallClockMs);
+  // Short-lived, in-process grants expire on this clock, so a wall clock set
+  // back or a sleep cannot extend one (see the clock rule in Security and
+  // authority). Durable grants, such as a paired device's, stay on wall time.
+  const processAuthorityTime = processAuthorityClock.now();
   // The secret guard's list as the person changed it. Hydrated here, before
   // any runtime launches, so the first launch already carries the changes.
   configureSecretGuardLocations({ dataDirectory: persistence.dataDirectory });
@@ -150,7 +154,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   });
   const extensionToolApprovalService = new ExtensionToolApprovalService({
     uuid: randomUUID,
-    now: Date.now,
+    now: processAuthorityTime,
     isPairedDeviceScope,
     // The thread must still be active and in the Project the prompt
     // recorded, which is what a paired device's turn was admitted under. A
@@ -200,7 +204,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // rides the same change topic.
   const routineProposalService = new RoutineProposalService({
     uuid: randomUUID,
-    now: Date.now,
+    now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
   // Image generations an agent asked the person to start, answered from a
@@ -208,7 +212,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // rides the same change topic.
   const imageGenerationOffers = new ImageGenerationOfferService({
     uuid: randomUUID,
-    now: Date.now,
+    now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
   // One Automation event store for the host: the Automation area writes
@@ -350,6 +354,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         : undefined;
     },
     processAuthorityNow,
+    processAuthorityTime,
     onWindowRevoked,
     personMemory,
     personMemoryAccess,

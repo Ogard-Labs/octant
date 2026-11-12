@@ -60,7 +60,13 @@
   min-width: 0;
   min-height: var(--oct-title-rail-h);
   justify-content: space-between;
-  padding: 4px var(--octant-window-chrome-reserved-width, 96px) var(--oct-rail-pad-end) 8px;
+  /* The same 8px at both ends, whatever the dock's width. This bar once
+     reserved the room of the title band's trailing controls, which stand over
+     it; the tool row now lives in the band and a wide dock's bar is an empty
+     spacer, and a narrow dock is a dialog that stands away from the band. The
+     reserve (349px of the 300px dock, then the clamp that followed it) left a
+     content box of nothing, so the bar can no longer pad wider than itself. */
+  padding: 4px var(--oct-space-2) var(--oct-rail-pad-end) var(--oct-space-2);
   background: transparent;
   border-bottom: 0;
   font-family: var(--oct-font-display);
@@ -217,6 +223,9 @@
   justify-content: flex-start;
   gap: var(--oct-space-1);
   padding: 0;
+  /* A card's title that is a button has no border of its own: the recipe's
+     transparent 1px one pushed it a pixel right of a title that is not. */
+  border: 0;
   font: inherit;
   text-align: left;
 }
@@ -326,6 +335,9 @@
   flex: none;
   width: 6px;
   height: 6px;
+  /* The 14px slot an icon takes (4 + 6 + 4), so a row's name starts on one
+     column whether its mark is an icon or a dot. */
+  margin-inline: var(--oct-space-1);
   border-radius: 50%;
   background: var(--oct-meta);
 }
@@ -509,10 +521,10 @@
 
 /* The Browser's row takes the tile bar's insets, not the rail's: its first
    glyph stands where a tile's leading icon does (the bar's 12px inset), and its
-   last button ends the 4px the bar's last action does. */
+   last button ends the 8px the bar's last action does. */
 .right-utility-dock__tool .browser-workspace__chrome {
   gap: var(--oct-space-1);
-  padding-inline: var(--browser-row-inset) var(--oct-space-1);
+  padding-inline: var(--browser-row-inset) var(--oct-space-2);
 }
 
 /* A rail holds one line: the title yields before the count and the layout
@@ -581,9 +593,14 @@
 /* The working-tree view's lines and cards were children of a list with no
    padding of their own, while its segmented control and findings head were
    inset, so half the lines sat on the tile's edge. The list owns one gutter
-   and the delivery pane inside it stops adding its own. */
+   and the delivery pane inside it stops adding its own. Its blocks (a line,
+   a callout, a section) had no space between them or under the segmented
+   control, so text started on the control's bottom edge and a callout's edge
+   met the next block's: the list keeps the tile's 12px inset at its top and
+   12px between blocks. */
 .right-utility-dock__tool .git-history__list--changes {
-  padding-inline: var(--oct-space-3);
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3);
 }
 
 .right-utility-dock__tool
@@ -765,18 +782,20 @@
   overflow: hidden;
 }
 
-/* Tool tiles: several open tools drawn together beside a thread, each one
-   live. In a narrow window each is a panel of its own (level 1 of the
-   material): a rounded fill with a sheen, a rim brighter along its top edge,
-   and a seat shadow, with a gap between neighbours. From 681px up the window
-   is a grid of panes, so a tile is square and shares its edges with its
-   neighbours: it draws the one line on its top and left, and the divider's hit
-   area straddles that line. A tile is told apart by its name, not by an
-   outline: the focused one reads in the full ink and the rest a step back. */
+/* Tool tiles: open tools drawn together beside a thread, each one live. A tile
+   is a pane at every width: square, flat, on the one pane fill, sharing its
+   edges with its neighbours, and told apart by its name rather than by an
+   outline (the focused one reads in the full ink, the rest a step back). From
+   681px up the tile draws the one line on its top and left, and the divider's
+   hit area straddles that line. At 680px or less the dock is a sheet, a
+   floating container that keeps its own corner, and it holds one tool (the
+   stored layout is not drawn there), so the tile fills it with no neighbour,
+   no gap and no corner of its own. */
 .dock-tiles {
-  /* Half the gap between two narrow-window tiles: each shared edge is pulled
-     in by it (see DockTiles). Panes share their edges, so there it is 0. */
-  --octant-tile-inset: 4px;
+  /* Half the gap between two tiles. Panes share their edges, so it is 0 at
+     every width (see DockTiles); the variable stays so a gap can never be
+     introduced by one rule alone. */
+  --octant-tile-inset: 0px;
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -802,44 +821,27 @@
   /* The tile clips: anything a tool paints past its box would show in the
      next tile (a Files tree drawn over Vitals). */
   overflow: hidden;
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-panel-fill);
-  box-shadow: var(--octant-shadow-panel-seat);
+  border-radius: 0;
+  background: var(--octant-pane-fill);
 }
 
-/* The rim is drawn above the tool: an inset shadow on the tile itself is
-   painted over by anything the tool fills. */
+/* The line is drawn above the tool, on the tile's top and left edges: the
+   edge it shares with the tile above or beside it is that tile's bottom or
+   right, which draws nothing, so two tiles never show two lines. A border, so
+   forced colours keeps it. */
 .dock-tile::after {
   position: absolute;
   z-index: 3;
   inset: 0;
-  border-radius: inherit;
-  box-shadow: var(--octant-shadow-panel-rim);
+  border-radius: 0;
   content: "";
   pointer-events: none;
 }
 
 @media (min-width: 681px) {
-  .dock-tiles {
-    --octant-tile-inset: 0px;
-  }
-
-  /* Square, flat, and on the one pane fill; the line below is the only edge. */
-  .dock-tile {
-    border-radius: 0;
-    background: var(--octant-pane-fill);
-    box-shadow: none;
-  }
-
-  /* The line is drawn above the tool, on the tile's top and left edges: the
-     edge it shares with the tile above or beside it is that tile's bottom or
-     right, which draws nothing, so two tiles never show two lines. A border,
-     so forced colours keeps it. */
   .dock-tile::after {
     border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
-    border-radius: 0;
-    box-shadow: none;
   }
 }
 
@@ -896,10 +898,14 @@
   flex: none;
   align-items: center;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  /* The trailing inset is the title band's end inset (8px), so a tile's last
+     control ends on the same edge as the band's. */
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  border-bottom: 1px solid var(--octant-border-soft);
+  /* The hairline is inside the 32px bar, not a border that takes a pixel
+     off the content box: the controls centre on the whole-pixel row. */
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
 }
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
@@ -976,6 +982,12 @@
   min-height: 24px;
   flex: none;
   padding: 0;
+}
+
+/* One glyph size in a 24px control (14), for Arrange and Close alike. */
+.dock-tile__control > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
 }
 
 /* The hit area is 8px wide, centred on the edge between two tiles; the line

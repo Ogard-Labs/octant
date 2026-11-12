@@ -13,6 +13,7 @@ import {
   type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionCommandResult,
 } from "@octant/contracts";
+import { APPROVAL_POSTURE_CHANGED_MESSAGE } from "@octant/domain/guardrail-policy";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -86,7 +87,8 @@ export interface NativeHarnessSessionRouteDependencies {
     | "already-settled"
     | "withdrawn"
     | "host-not-offered"
-    | "lost-in-restart";
+    | "lost-in-restart"
+    | "posture-changed";
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
@@ -361,7 +363,8 @@ export function createNativeHarnessSessionRouteHandler(
                 outcome === "already-settled" ||
                 outcome === "withdrawn" ||
                 outcome === "host-not-offered" ||
-                outcome === "lost-in-restart"
+                outcome === "lost-in-restart" ||
+                outcome === "posture-changed"
                   ? outcome
                   : "approval-not-found",
               message:
@@ -373,7 +376,9 @@ export function createNativeHarnessSessionRouteHandler(
                       ? "This command can reach only hosts its approval lists. Nothing was decided."
                       : outcome === "lost-in-restart"
                         ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
-                        : "No pending approval has that id on this thread.",
+                        : outcome === "posture-changed"
+                          ? APPROVAL_POSTURE_CHANGED_MESSAGE
+                          : "No pending approval has that id on this thread.",
             };
       return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
     }

@@ -118,7 +118,11 @@ const DESKTOP_LEASE_SWEEP_INTERVAL_MS = 30_000;
 export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
-    "machineChangeFeed" | "onWindowRevoked" | "processAuthorityNow" | "windowAuthorityStore"
+    | "machineChangeFeed"
+    | "onWindowRevoked"
+    | "processAuthorityNow"
+    | "processAuthorityTime"
+    | "windowAuthorityStore"
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<UsageWiring, "validationEventStore"> &
@@ -134,6 +138,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     options,
     persistence,
     processAuthorityNow,
+    processAuthorityTime,
     providerRuntimeRegistry,
     validationEventStore,
     windowAuthorityStore,
@@ -398,6 +403,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
                 ),
               }),
           destination: () => desktopLeases.destination(),
+          now: processAuthorityTime,
           settings: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
           authority: (owner) =>

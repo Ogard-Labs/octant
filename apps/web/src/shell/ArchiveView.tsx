@@ -105,7 +105,7 @@ export function ArchiveView(props: ArchiveViewProps) {
         <div className="surface-toolbar">
           <OctantSelectField
             aria-label="Filter archive by Project"
-            className="w-auto min-w-48"
+            className="w-auto min-w-[12rem]"
             onValueChange={(value) => setProjectFilter(value)}
             options={[
               { id: ALL_PROJECTS, label: "All Projects" },

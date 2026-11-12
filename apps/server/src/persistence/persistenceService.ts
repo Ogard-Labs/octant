@@ -80,6 +80,7 @@ import {
   ProjectionStorageFailed,
   catchUpProjection,
   quarantineIncompatibleJournal,
+  rebuildProjection,
 } from "./projection";
 import {
   readMemoryEntry,
@@ -132,13 +133,20 @@ import {
   readCodeThreads,
   readCodeThreadView,
   reconcileCodeRestart,
+  type CodeTurnCutOffByRestart,
   type ProjectedCodeRuntimeWork,
 } from "./codeProjection";
 import { readProductFeedbackNote, readProductFeedbackNotes } from "./productFeedbackProjection";
 import { readRunningProjectTerminals } from "./projectTerminalProjection";
 import { readOpenRemoteServerGrants } from "./remoteServerGrantProjection";
 import { readThreadCheckpoint, readThreadCheckpoints } from "./threadCheckpointProjection";
-import { databaseStatus, rebuildAll, type DatabaseStatus } from "./recovery";
+import {
+  damageIsProjectionOnly,
+  databaseStatus,
+  rebuildAll,
+  verifyDatabase,
+  type DatabaseStatus,
+} from "./recovery";
 import {
   readProviderDefaults,
   readProviderCatalog,
@@ -267,6 +275,8 @@ export interface PersistenceService {
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
   ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
+  /** The provider turns this start found the previous host still running. */
+  readonly codeTurnsCutOffByRestart: ReadonlyArray<CodeTurnCutOffByRestart>;
   readonly readCodeReviewFinding: (findingId: CodeReviewFindingId) => CodeReviewFinding | undefined;
   readonly readCodeReviewFindings: (threadId: CodeThreadId) => ReadonlyArray<CodeReviewFinding>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
@@ -305,9 +315,18 @@ export type PersistenceFailureCategory =
   | "storage-busy"
   | "storage-unavailable";
 
+/**
+ * What a `recovery-required` refusal needs, so the desktop recovery screen
+ * offers only actions that can help: a damaged store can be rebuilt or
+ * restored from a verified backup, while an unfinished local data removal must
+ * be finished by the removal itself and is never rebuilt over.
+ */
+export type PersistenceRecovery = "store-damaged" | "removal-unfinished";
+
 export class PersistenceStartupFailed extends Data.TaggedError("PersistenceStartupFailed")<{
   readonly category: PersistenceFailureCategory;
   readonly message: string;
+  readonly recovery?: PersistenceRecovery;
 }> {}
 
 export interface PersistenceLiveOptions {
@@ -400,6 +419,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     throw new PersistenceStartupFailed({
       category: "recovery-required",
       message: "Octant storage requires recovery before startup.",
+      recovery: "removal-unfinished",
     });
   }
   const migration = migrateStoreWithBackup({
@@ -441,13 +461,36 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readonly projection: string;
       readonly durationMs: number;
     }> = [];
-    for (const projection of projections.all()) {
-      const startedAt = performance.now();
-      catchUpProjection({ connection, journal, projection, clock });
-      projectionCatchUp.push({
-        projection: projection.name,
-        durationMs: Math.max(0, performance.now() - startedAt),
-      });
+    // The journal is authoritative and projections are rebuildable, so damage
+    // confined to projections is repaired here rather than refused. The repair
+    // is bounded to one full rebuild per start: damage the rebuild does not
+    // clear is not projection-only, and the status check below refuses it.
+    let projectionsRebuilt = false;
+    const rebuildProjectionsOnce = () => {
+      projectionsRebuilt = true;
+      rebuildAll({ connection, journal, projections, clock });
+      console.warn("Octant rebuilt its projections from the journal at startup.");
+    };
+    try {
+      for (const projection of projections.all()) {
+        const startedAt = performance.now();
+        try {
+          catchUpProjection({ connection, journal, projection, clock });
+        } catch (error) {
+          // A derived view that cannot apply an event stays quarantined and
+          // held behind it, as it does when an append hits the same failure;
+          // no command reads it, so it does not stop the host from starting.
+          if (!(projection.derived === true && error instanceof ProjectionQuarantined)) throw error;
+        }
+        projectionCatchUp.push({
+          projection: projection.name,
+          durationMs: Math.max(0, performance.now() - startedAt),
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof CheckpointAheadOfJournal || error instanceof ProjectionQuarantined))
+        throw error;
+      rebuildProjectionsOnce();
     }
     // After catch-up so heads and the checkout projection are current, and
     // before restart reconciliation so its append continues from the compacted
@@ -473,22 +516,58 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         `Octant removed ${sessionSweep.resumeIdentitiesRemoved} Claude resume identit(ies) and ${sessionSweep.transcriptsRemoved} Octant Harness transcript(s) that no thread or child run records.`,
       );
     }
-    reconcileCodeRestart({ connection, journal, reconciledAt: clock() });
+    const codeTurnsCutOffByRestart = reconcileCodeRestart({
+      connection,
+      journal,
+      reconciledAt: clock(),
+    });
 
     let status = databaseStatus({ connection, journal, projections, compatibility });
-    // A previously quarantined event can become readable after a compatible
-    // persisted-event upcast ships. Quarantine is projection state, not journal
-    // authority, so retry the atomic rebuild once before requiring operator
-    // recovery. A genuinely invalid event quarantines again during replay and
-    // the status check below still fails closed without changing the journal.
-    if (status.state === "quarantined" && status.integrity === "ok" && compatibility.compatible) {
-      rebuildAll({ connection, journal, projections, clock });
+    // Lagging, inconsistent or quarantined projections over a journal that
+    // decodes and passes the integrity check are rebuilt from it. A previously
+    // quarantined event can also become readable after a compatible upcast
+    // ships, since quarantine is projection state, not journal authority. A
+    // genuinely invalid event quarantines again during replay and the check
+    // below still fails closed without changing the journal.
+    if (
+      status.state !== "current" &&
+      status.integrity === "ok" &&
+      compatibility.compatible &&
+      !projectionsRebuilt &&
+      damageIsProjectionOnly(verifyDatabase({ connection, journal, projections, compatibility }))
+    ) {
+      rebuildProjectionsOnce();
       status = databaseStatus({ connection, journal, projections, compatibility });
+    } else if (status.heldDerivedViews !== undefined && status.integrity === "ok") {
+      // A held view that catch-up brought to the head (a fixed build applied
+      // the event it failed on) still has its quarantine row, which would
+      // hold it again at the next append. Only a rebuild retires the row.
+      const caughtUp = status.projections.filter(
+        (projection) => projection.lag === 0 && status.heldDerivedViews?.includes(projection.name),
+      );
+      for (const { name } of caughtUp) {
+        const projection = projections.get(name);
+        if (projection === undefined) continue;
+        try {
+          rebuildProjection({ connection, journal, projection, clock });
+        } catch (error) {
+          if (!(error instanceof ProjectionQuarantined)) throw error;
+        }
+      }
+      if (caughtUp.length > 0) {
+        status = databaseStatus({ connection, journal, projections, compatibility });
+      }
+    }
+    if (status.heldDerivedViews !== undefined) {
+      console.warn(
+        `Octant derived view(s) ${status.heldDerivedViews.join(", ")} are quarantined; run db:rebuild after updating to repair them.`,
+      );
     }
     if (status.state !== "current" || status.integrity !== "ok") {
       throw new PersistenceStartupFailed({
         category: "recovery-required",
         message: "Octant storage requires recovery before startup.",
+        recovery: "store-damaged",
       });
     }
     // Readiness gates answer from the latest inspection and never start one.
@@ -585,6 +664,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         readCodeRuntimeWorkAggregateVersion(connection, workId),
       readCodeRuntimeWork: (workId) => readCodeRuntimeWork(connection, workId),
       readCodeRuntimeWorks: (threadId) => readCodeRuntimeWorks(connection, threadId),
+      codeTurnsCutOffByRestart,
       readCodeReviewFinding: (findingId) => readCodeReviewFinding(connection, findingId),
       readCodeReviewFindings: (threadId) => readCodeReviewFindings(connection, threadId),
       readCodeThreadView: (threadId) => readCodeThreadView(connection, threadId),
@@ -635,12 +715,14 @@ function redactStartupFailure(error: unknown): PersistenceStartupFailed {
     return new PersistenceStartupFailed({
       category: "recovery-required",
       message: "Octant storage requires recovery before startup.",
+      recovery: "store-damaged",
     });
   }
   if (error instanceof ProjectionQuarantined || error instanceof CheckpointAheadOfJournal) {
     return new PersistenceStartupFailed({
       category: "recovery-required",
       message: "Octant storage requires recovery before startup.",
+      recovery: "store-damaged",
     });
   }
   if (error instanceof ProjectionStorageFailed) {
