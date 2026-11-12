@@ -278,11 +278,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   // thread did or what sending refused, then the Project offer and the
   // outside-content mark.
   const all = [...(props.notices ?? []), ...published.values()];
-  // A card is for something to read or act on: a refusal, a failure, or an
-  // offer with an action. A plain fact with no action (a receipt, a note) is
-  // a quiet line like any other passing message.
-  const cards = all.filter((card) => card.tone !== "neutral" || card.action !== undefined);
-  const noted = all.filter((card) => card.tone === "neutral" && card.action === undefined);
+  // A card is for something the person must read or act on, or a fact that
+  // stays until they do. Only a state a surface marks as passing by itself
+  // (and with text it can draw on one line) is the quiet line.
+  const isLine = (card: ComposerNoticeItem) =>
+    card.transient === true && card.action === undefined && typeof card.text === "string";
+  const cards = all.filter((card) => !isLine(card));
+  const noted = all.filter(isLine);
   // A session that compacts holds Send; that is progress, and it outranks the
   // surface's own passing message.
   const lastNote = noted.at(-1);
@@ -291,12 +293,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     : (props.progress ??
       (lastNote === undefined || typeof lastNote.text !== "string"
         ? undefined
-        : { text: lastNote.text }));
-  // Cards that are plain facts are written into the persistent region too: a
-  // card mounts already filled and a status may not be announced by that
-  // alone.
-  // Every note is said in the region even when only the newest is drawn.
-  const facts = noted.filter(
+        : {
+            text: lastNote.text,
+            ...(lastNote.label === undefined ? {} : { label: lastNote.label }),
+          }));
+  // The region says every passing note even when only the newest is drawn.
+  // A card that stays is read where it stands and is not repeated here.
+  const spoken = noted.filter(
     (card) => card !== lastNote || props.progress !== undefined || compacting,
   );
   const alertIds = cards
@@ -413,7 +416,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       <div className={held ? "composer-frame composer-frame--held" : "composer-frame"}>
         {held ? null : startRow}
         {held ? null : (
-          <div aria-live="polite" className="composer-progress" id={regionId} role="status">
+          <div
+            aria-live="polite"
+            className="composer-progress"
+            id={regionId}
+            role="status"
+            {...(progress?.label === undefined ? {} : { "aria-label": progress.label })}
+          >
             {progress === undefined ? null : (
               <span
                 className={progress.quiet === true ? "sr-only" : "composer-progress__line"}
@@ -425,7 +434,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
             )}
             <span className="sr-only">
               {props.description}
-              {facts.map((card) => (
+              {spoken.map((card) => (
                 <Fragment key={card.key}> {card.text}</Fragment>
               ))}
             </span>

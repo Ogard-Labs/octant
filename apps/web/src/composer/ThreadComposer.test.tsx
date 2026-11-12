@@ -181,7 +181,7 @@ describe("ThreadComposer", () => {
             text: "A hint",
             action: <button type="button">Do it</button>,
           },
-          { key: "note", tone: "neutral", text: "A plain note" },
+          { key: "note", tone: "neutral", text: "A passing note", transient: true },
           { key: "warn", tone: "warning", text: "A warning" },
           { key: "fail", tone: "danger", role: "alert", text: "A refusal" },
         ]}
@@ -197,11 +197,76 @@ describe("ThreadComposer", () => {
     expect(
       screen.getAllByRole("alert").map((alert) => alert.textContent?.replace("Do it", "")),
     ).toEqual(["A refusal", "A warning", "A hint"]);
-    // A plain note with no action is never a card: it is the quiet line.
-    expect(container.querySelector(".composer-progress__line")).toHaveTextContent("A plain note");
+    // Only a note marked as passing is the quiet line, never a card.
+    expect(container.querySelector(".composer-progress__line")).toHaveTextContent("A passing note");
     expect(
       container.querySelector(".thread-composer__surface")?.querySelector(".callout"),
     ).toBeNull();
+  });
+
+  it("keeps a plain note that stays as a whole, wrapping card, never the truncated line", () => {
+    const long =
+      "This editable draft includes a selected Side Chat reply. Its source references will be checked when sent. Nothing has been sent or queued.";
+    const { container } = render(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        notices={[
+          { key: "one", tone: "neutral", text: long },
+          { key: "two", tone: "neutral", text: "Reactivate this task before changing it." },
+        ]}
+      />,
+    );
+    // Both show, each as a card of its own with all of its words.
+    const cards = [...(container.querySelector(".composer-notices")?.children ?? [])];
+    expect(cards.map((card) => card.textContent)).toEqual([
+      long,
+      "Reactivate this task before changing it.",
+    ]);
+    // Nothing is cut to one line, and nothing is drawn as the line.
+    expect(container.querySelector(".composer-progress__line")).toBeNull();
+  });
+
+  it("draws a note that stays beside a subagents tray, where the quiet line is not drawn", () => {
+    const { container } = render(
+      <div className="composer">
+        <div className="composer-subagents">Tray</div>
+        <ThreadComposer
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+          notices={[{ key: "one", tone: "neutral", text: "Nothing has been sent or queued." }]}
+        />
+      </div>,
+    );
+    expect(container.querySelector(".composer-notices .callout")).toHaveTextContent(
+      "Nothing has been sent or queued.",
+    );
+  });
+
+  it("says a passing note as the line, takes no card, and keeps a non-string note a card", () => {
+    const base = {
+      input: <textarea aria-label="Message" className="composer-input" />,
+      row: { actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } } },
+    };
+    const { container, rerender } = render(
+      <ThreadComposer
+        {...base}
+        notices={[{ key: "t", tone: "neutral", text: "Starting the first turn…", transient: true }]}
+      />,
+    );
+    expect(container.querySelector(".composer-progress__line")).toHaveTextContent(
+      "Starting the first turn…",
+    );
+    expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
+    // A node cannot be drawn on one line, so it is a card however it is marked.
+    rerender(
+      <ThreadComposer
+        {...base}
+        notices={[{ key: "n", tone: "neutral", text: <b>Rich</b>, transient: true }]}
+      />,
+    );
+    expect(container.querySelector(".composer-progress__line")).toBeNull();
+    expect(container.querySelector(".composer-notices")).toHaveTextContent("Rich");
   });
 
   it("says passing progress in one quiet line that takes no room and never mounts a card", () => {
@@ -236,7 +301,12 @@ describe("ThreadComposer", () => {
       row: { actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } } },
     };
     const refusal = { key: "refusal", tone: "danger" as const, text: "Nothing was sent." };
-    const fact = { key: "fact", tone: "neutral" as const, text: "Files were restored." };
+    const fact = {
+      key: "fact",
+      tone: "neutral" as const,
+      text: "Files were restored.",
+      transient: true as const,
+    };
     const { container, rerender } = render(
       <ThreadComposer {...base} description="Enter a message first." notices={[refusal, fact]} />,
     );

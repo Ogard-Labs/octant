@@ -861,11 +861,14 @@ is a chip in that row, directly after the access control, a globe and the words
 "Outside content" in the warning ink with no fill or edge at rest, shown for as
 long as the fact applies. Pressing it opens a popover with the full sentence and
 the Review action; in a narrow row (under 560px) the chip keeps the globe and
-drops the words, and its name and tooltip keep them. A plain note with no action
-is progress, below. A card as heavy as the pill, plus two rows under it, read as
-four stacked layers for a note that was not an error. Progress that comes and goes by itself
+drops the words, and its name and tooltip keep them. A plain note that stays until the
+person acts (a saved-draft sentence saying nothing was sent, a locked task, a
+handoff or access note, a receipt) is still a card, one for each, wrapping whole,
+never cut to a line and never hidden: only a surface marks a state as passing.
+A card as heavy as the pill, plus two rows under it, read as
+four stacked layers for a note that was not an error. Progress that a surface marks as passing by itself
 (sending, a response streaming, a provider check, a switch that settles, a
-session compacting, a keyboard hint) is never a card and never changes the
+session compacting, a first turn being prepared, a keyboard hint) is never a card and never changes the
 composer's height: it is one quiet line of meta ink in the transcript's bottom
 padding directly above the notice group, leading-aligned with the pill, one
 message at a time with the newest winning, and no line at all where a control
@@ -3467,7 +3470,9 @@ A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
 A refused binding keeps the prior authorized Project and draft. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
-action when available, as one of the composer's notice cards above the pill.
+action when available, as one of the composer's notice cards above the pill. A note that stays until
+the person acts is a card too; only a state its surface marks as passing is the
+quiet line.
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.

@@ -57,8 +57,16 @@ export interface ComposerNoticeItem {
   /** The element id, for a control that names this notice as its description. */
   readonly id?: string;
   readonly text: ReactNode;
-  /** Names the card for assistive technology (a status that carries an action). */
+  /** Names the card, or the status line, for assistive technology. */
   readonly label?: string;
+  /**
+   * Set only for a state that is passing by itself and has no action (a first
+   * turn being prepared). It is then the quiet line, which takes no layout
+   * room, and only while its text is a string. Everything else stays a card
+   * until the person resolves it, however plain: a note that stays must be
+   * readable whole, never cut to one line.
+   */
+  readonly transient?: true;
   readonly action?: ReactNode;
 }
 
@@ -81,6 +89,8 @@ export function noticeRole(notice: ComposerNoticeItem): "alert" | "status" {
  */
 export interface ComposerProgress {
   readonly text: string;
+  /** Names the status region while this is said. */
+  readonly label?: string;
   readonly quiet?: boolean;
 }
 

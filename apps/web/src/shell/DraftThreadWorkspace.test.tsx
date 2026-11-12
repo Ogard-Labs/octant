@@ -892,6 +892,29 @@ describe("DraftThreadWorkspace", () => {
     },
   );
 
+  it.each(["code", "work"] as const)(
+    "says the first turn is being prepared as a named quiet line for %s when there is nothing to cancel",
+    (mode) => {
+      render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          creating
+          mode={mode}
+          pendingMessage="Checking the authoritative receipt…"
+          projects={projects}
+        />,
+      );
+
+      // Passing by itself and with no action: the line, not a card, and the
+      // status region still carries its name.
+      const status = screen.getByRole("status", { name: "First-turn status" });
+      expect(status).toHaveTextContent("Checking the authoritative receipt…");
+      expect(status.querySelector(".composer-progress__line")).not.toBeNull();
+      expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
+      expect(screen.queryByRole("button", { name: "Cancel first turn" })).toBeNull();
+    },
+  );
+
   it.each(["chat", "code", "work"] as const)(
     "does not show a multi-model pool control for %s drafts",
     (mode) => {

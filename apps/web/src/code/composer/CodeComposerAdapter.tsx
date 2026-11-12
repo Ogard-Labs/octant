@@ -881,6 +881,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     {
                       key: "first-turn",
                       label: "First-turn status",
+                      // Without Cancel it is passing by itself: the quiet
+                      // line, still named for assistive technology.
+                      ...(props.onCancelFirstTurn === undefined
+                        ? { transient: true as const }
+                        : {}),
                       tone: "neutral" as const,
                       role: "status" as const,
                       text: props.pendingMessage ?? "Starting the first turn…",
