@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkCellId,
@@ -118,7 +119,15 @@ export class BenchmarkService {
     return this.#options.projection.suites();
   }
 
-  saveSuite(request: BenchmarkSuiteSaveRequest): BenchmarkOutcome<BenchmarkSuite> {
+  /**
+   * On each change, `actor` is who asked, as the route resolved it from the
+   * authenticated principal: a paired device's change is journaled as that
+   * device. Absent means the person at this host.
+   */
+  saveSuite(
+    request: BenchmarkSuiteSaveRequest,
+    actor?: EventActor,
+  ): BenchmarkOutcome<BenchmarkSuite> {
     const { projection, store, clock } = this.#options;
     const existing = projection.suite(String(request.suiteId));
     if (existing === undefined && request.expectedRevision !== undefined) {
@@ -141,17 +150,18 @@ export class BenchmarkService {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
-    store.suiteSaved({ suite });
+    store.suiteSaved({ suite }, actor);
     return ok(suite);
   }
 
   deleteSuite(
     request: BenchmarkSuiteDeleteRequest,
+    actor?: EventActor,
   ): BenchmarkOutcome<{ readonly suiteId: BenchmarkSuite["suiteId"] }> {
     if (this.#options.projection.suite(String(request.suiteId)) === undefined) {
       return refused("not-found", "That suite does not exist.");
     }
-    this.#options.store.suiteDeleted({ suiteId: request.suiteId });
+    this.#options.store.suiteDeleted({ suiteId: request.suiteId }, actor);
     return ok({ suiteId: request.suiteId });
   }
 
@@ -199,7 +209,10 @@ export class BenchmarkService {
   }
 
   /** Stars for one cell; rating again replaces the earlier rating. */
-  rateCell(request: BenchmarkCellRateRequest): BenchmarkOutcome<{
+  rateCell(
+    request: BenchmarkCellRateRequest,
+    actor?: EventActor,
+  ): BenchmarkOutcome<{
     readonly runId: BenchmarkRun["runId"];
     readonly cellId: BenchmarkRun["cells"][number]["cellId"];
     readonly rating: BenchmarkRating;
@@ -216,7 +229,7 @@ export class BenchmarkService {
       ...(request.note === undefined || request.note === "" ? {} : { note: request.note }),
       ratedAt: decodeUtcTimestamp(this.#options.clock()),
     };
-    this.#options.store.cellRated({ runId: run.runId, cellId: cell.cellId, rating });
+    this.#options.store.cellRated({ runId: run.runId, cellId: cell.cellId, rating }, actor);
     return ok({ runId: run.runId, cellId: cell.cellId, rating });
   }
 
@@ -228,10 +241,11 @@ export class BenchmarkService {
   startRun(
     windowId: WindowId,
     request: BenchmarkRunStartRequest,
+    actor?: EventActor,
   ): Promise<BenchmarkOutcome<BenchmarkRun>> {
     const result = this.#starts.then(
-      () => this.#startRun(windowId, request),
-      () => this.#startRun(windowId, request),
+      () => this.#startRun(windowId, request, actor),
+      () => this.#startRun(windowId, request, actor),
     );
     this.#starts = result.then(
       () => undefined,
@@ -243,6 +257,7 @@ export class BenchmarkService {
   async #startRun(
     windowId: WindowId,
     request: BenchmarkRunStartRequest,
+    actor: EventActor | undefined,
   ): Promise<BenchmarkOutcome<BenchmarkRun>> {
     const { projection, store, clock, uuid } = this.#options;
     const existing = projection.run(runKey(request.runId));
@@ -311,7 +326,7 @@ export class BenchmarkService {
         decodeBenchmarkCellId(uuid()),
       ),
     });
-    store.runStarted({ run });
+    store.runStarted({ run }, actor);
     this.#options.runner.kick();
     return ok(run);
   }
@@ -389,6 +404,7 @@ export class BenchmarkService {
 
   async purgeRun(
     request: BenchmarkRunPurgeRequest,
+    actor?: EventActor,
   ): Promise<BenchmarkOutcome<{ readonly runId: BenchmarkRun["runId"] }>> {
     const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
@@ -434,7 +450,7 @@ export class BenchmarkService {
         }
       }
     }
-    this.#options.store.runPurged({ runId: run.runId });
+    this.#options.store.runPurged({ runId: run.runId }, actor);
     return ok({ runId: run.runId });
   }
 }

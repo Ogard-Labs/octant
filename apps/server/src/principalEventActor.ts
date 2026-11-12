@@ -1,5 +1,4 @@
 import { decodeEventActor, type EventActor } from "@octant/contracts";
-import type { ClientPrincipal } from "./clientPrincipal";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 
 /**
@@ -13,6 +12,15 @@ export const LOCAL_PERSON_ACTOR: EventActor = decodeEventActor({
 });
 
 /**
+ * What of an authenticated principal names the actor. A route's
+ * `ClientPrincipal` and the principal an Automation command carries both
+ * have this shape.
+ */
+export type ActingPrincipal =
+  | { readonly kind: "local-window" }
+  | { readonly kind: "remote-device"; readonly deviceId: string };
+
+/**
  * The actor a request's change is journaled with. A paired device does what a
  * local window does (maintainer decision, 2026-11-12), and the journal is
  * what still tells the two apart: a device's change names the device, never
@@ -23,7 +31,7 @@ export const LOCAL_PERSON_ACTOR: EventActor = decodeEventActor({
  * service as an argument; no service reads it from ambient state or from
  * anything the request carried.
  */
-export function eventActorForPrincipal(principal: ClientPrincipal | undefined): EventActor {
+export function eventActorForPrincipal(principal: ActingPrincipal | undefined): EventActor {
   if (principal?.kind !== "remote-device") return LOCAL_PERSON_ACTOR;
   const deviceId = String(principal.deviceId);
   return decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });

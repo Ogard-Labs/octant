@@ -12,6 +12,7 @@ import {
   type AutomationThreadId,
   type AutomationTrigger,
   type AutomationWeeklyResolution,
+  type EventActor,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
@@ -24,6 +25,7 @@ import {
   resolveNextAutomationOccurrence,
   validateAutomationDefinition,
 } from "@octant/domain";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { AutomationEventStore, AutomationEventStoreError } from "./automationEventStore";
 import type {
   AutomationFileSourcePreparation,
@@ -297,6 +299,7 @@ export class AutomationCommandService {
       }),
     );
     this.#store.appendDefinitionCreated({
+      ...personActor(command.principal),
       automation: definition,
       ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && source !== undefined
@@ -385,6 +388,7 @@ export class AutomationCommandService {
           };
     }
     this.#store.appendDefinitionUpdated({
+      ...personActor(command.principal),
       automation: updated,
       ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && configuredSource !== undefined
@@ -437,6 +441,7 @@ export class AutomationCommandService {
       }),
     );
     this.#store.appendDefinitionLifecycleChanged({
+      ...personActor(command.principal),
       automation: changed,
       previousLifecycle: current.lifecycle,
       expectedVersion: current.version,
@@ -527,7 +532,7 @@ export class AutomationCommandService {
       now: this.#now(),
     });
     try {
-      this.#store.appendRunCreated({ run });
+      this.#store.appendRunCreated({ ...personActor(command.principal), run });
     } catch (error) {
       // A crash between append and reply can race the retry; the journal is
       // authoritative, so a conflict resolves to the committed receipt.
@@ -580,6 +585,7 @@ export class AutomationCommandService {
     }
     const now = this.#now();
     this.#store.appendRunCancellation({
+      ...personActor(command.principal),
       automationId: command.automationId,
       runId: run.id,
       previousLifecycle: run.lifecycle,
@@ -716,4 +722,13 @@ function isSchemaParseError(error: unknown): boolean {
     "name" in error &&
     (error as { readonly name?: unknown }).name === "ParseError"
   );
+}
+
+/**
+ * Who a person's command is journaled as. A command carries the principal the
+ * route authenticated, never one the request supplied, so a paired device's
+ * routine names the device. A local window leaves the store's own actor.
+ */
+function personActor(principal: AutomationClientPrincipal): { readonly actor?: EventActor } {
+  return principal.kind === "remote-device" ? { actor: eventActorForPrincipal(principal) } : {};
 }

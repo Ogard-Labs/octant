@@ -1784,7 +1784,7 @@ export class CodeService {
               isRoutineHostScope(authenticatedWindowId) ? "system" : actor,
             );
             if (terminalSession !== undefined) {
-              this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+              this.#terminalSessions?.journalImported(String(thread.id), terminalSession, actor);
             }
           });
         } catch (bindingError) {
@@ -2129,7 +2129,7 @@ export class CodeService {
             actor,
           );
           if (terminalSession !== undefined) {
-            this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+            this.#terminalSessions?.journalImported(String(thread.id), terminalSession, actor);
           }
         });
         this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);

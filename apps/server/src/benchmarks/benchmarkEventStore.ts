@@ -68,26 +68,32 @@ export class BenchmarkEventStore {
     this.#actor = decodeActor(options.actor);
   }
 
-  suiteSaved(payload: BenchmarkSuiteSaved): void {
+  // What a person asks for (a suite saved or deleted, a run started or
+  // purged, a cell rated) takes who asked, resolved from the authenticated
+  // principal. What the runner records about a run it is carrying out names
+  // nobody and keeps the store's actor.
+  suiteSaved(payload: BenchmarkSuiteSaved, actor?: typeof EventActor.Type): void {
     this.#append(
       BENCHMARK_SUITE_AGGREGATE_TYPE,
       String(payload.suite.suiteId),
       BENCHMARK_EVENT_NAMES.suiteSaved,
       payload,
+      actor,
     );
   }
 
-  suiteDeleted(payload: BenchmarkSuiteDeleted): void {
+  suiteDeleted(payload: BenchmarkSuiteDeleted, actor?: typeof EventActor.Type): void {
     this.#append(
       BENCHMARK_SUITE_AGGREGATE_TYPE,
       String(payload.suiteId),
       BENCHMARK_EVENT_NAMES.suiteDeleted,
       payload,
+      actor,
     );
   }
 
-  runStarted(payload: BenchmarkRunStarted): void {
-    this.#appendRun(String(payload.run.runId), BENCHMARK_EVENT_NAMES.runStarted, payload);
+  runStarted(payload: BenchmarkRunStarted, actor?: typeof EventActor.Type): void {
+    this.#appendRun(String(payload.run.runId), BENCHMARK_EVENT_NAMES.runStarted, payload, actor);
   }
 
   cellStarted(payload: BenchmarkCellStarted): void {
@@ -106,23 +112,34 @@ export class BenchmarkEventStore {
     this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellJudged, payload);
   }
 
-  cellRated(payload: BenchmarkCellRated): void {
-    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellRated, payload);
+  cellRated(payload: BenchmarkCellRated, actor?: typeof EventActor.Type): void {
+    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellRated, payload, actor);
   }
 
   runEnded(payload: BenchmarkRunEnded): void {
     this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.runEnded, payload);
   }
 
-  runPurged(payload: BenchmarkRunPurged): void {
-    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.runPurged, payload);
+  runPurged(payload: BenchmarkRunPurged, actor?: typeof EventActor.Type): void {
+    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.runPurged, payload, actor);
   }
 
-  #appendRun(runId: string, eventName: string, payload: unknown): void {
-    this.#append(BENCHMARK_RUN_AGGREGATE_TYPE, runId, eventName, payload);
+  #appendRun(
+    runId: string,
+    eventName: string,
+    payload: unknown,
+    actor?: typeof EventActor.Type,
+  ): void {
+    this.#append(BENCHMARK_RUN_AGGREGATE_TYPE, runId, eventName, payload, actor);
   }
 
-  #append(aggregateType: string, aggregateId: string, eventName: string, payload: unknown): void {
+  #append(
+    aggregateType: string,
+    aggregateId: string,
+    eventName: string,
+    payload: unknown,
+    actor: typeof EventActor.Type = this.#actor,
+  ): void {
     const { journal, connection, uuid, clock } = this.#options;
     journal.append({
       aggregate: { aggregateType, aggregateId: decodeAggregateId(aggregateId) },
@@ -135,7 +152,7 @@ export class BenchmarkEventStore {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(uuid()),
-          actor: this.#actor,
+          actor,
           occurredAt: clock(),
           payload,
         },

@@ -720,7 +720,11 @@ export class WorkThreadService {
               isRoutineHostScope(authenticatedWindowId) ? "system" : actor,
             );
             if (terminalSession !== undefined) {
-              this.#terminalSessions?.journalImported(String(created.id), terminalSession);
+              this.#terminalSessions?.journalImported(
+                String(created.id),
+                terminalSession,
+                isRoutineHostScope(authenticatedWindowId) ? undefined : actor,
+              );
             }
           },
         });

@@ -1,4 +1,5 @@
 import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
 import type { CanvasDesignSystem } from "@octant/contracts/canvas";
@@ -1453,7 +1454,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               origin,
             );
           }
-          return jsonResponse(links.changeSettings(command), 200, origin);
+          return jsonResponse(
+            links.changeSettings(command, eventActorForPrincipal(principal)),
+            200,
+            origin,
+          );
         }
         if (route === "public-shares" && request.method === "GET") {
           if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
@@ -1510,7 +1515,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             return refusedRevoke("unauthorized", "Public links are not available for this canvas.");
           }
           return jsonResponse(
-            await links.revoke(revokeRequest.canvasId, revokeRequest.publicShareId),
+            await links.revoke(
+              revokeRequest.canvasId,
+              revokeRequest.publicShareId,
+              eventActorForPrincipal(principal),
+            ),
             200,
             origin,
           );

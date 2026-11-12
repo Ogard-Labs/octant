@@ -1469,7 +1469,15 @@ describe("CodeService commands", () => {
       terminalSessions,
     });
 
-    await expect(fixture.service.execute(ids.window, command)).resolves.toMatchObject({
+    // The person who brought the session in is who its import names.
+    const importer = {
+      kind: "remote-device",
+      actorId: "00000000-0000-4000-8000-0000000000d1",
+      deviceId: "00000000-0000-4000-8000-0000000000d1",
+    } as never;
+    await expect(
+      fixture.service.execute(ids.window, command, undefined, { actor: importer }),
+    ).resolves.toMatchObject({
       kind: "thread-created",
     });
     expect(record).toHaveBeenCalledWith(
@@ -1482,7 +1490,11 @@ describe("CodeService commands", () => {
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(
+      String(ids.thread),
+      prepared,
+      importer,
+    );
 
     const elsewhere = serviceFixture({
       recordExternalContentIngestion: record,

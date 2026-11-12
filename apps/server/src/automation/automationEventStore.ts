@@ -147,12 +147,18 @@ export interface AutomationEventStoreOptions {
 }
 
 export interface AppendAutomationDefinitionCreatedInput {
+  /**
+   * Who asked, when a person's command made this change: a paired device's is
+   * journaled as that device. Absent means the store's own actor.
+   */
+  readonly actor?: typeof EventActor.Type;
   readonly eventSource?: AutomationEventSourceCheckpoint;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
 }
 
 export interface AppendAutomationDefinitionUpdatedInput {
+  readonly actor?: typeof EventActor.Type;
   readonly eventSource?: AutomationEventSourceCheckpoint;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
@@ -161,6 +167,7 @@ export interface AppendAutomationDefinitionUpdatedInput {
 }
 
 export interface AppendAutomationDefinitionLifecycleChangedInput {
+  readonly actor?: typeof EventActor.Type;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
   readonly fileSourceReview?: AutomationFileSourceReview;
@@ -169,6 +176,7 @@ export interface AppendAutomationDefinitionLifecycleChangedInput {
 }
 
 export interface AppendAutomationRunCreatedInput {
+  readonly actor?: typeof EventActor.Type;
   readonly run: AutomationRun;
 }
 
@@ -184,6 +192,7 @@ export interface AppendAutomationRunStatusChangedInput {
 }
 
 export interface AppendAutomationRunCancellationInput {
+  readonly actor?: typeof EventActor.Type;
   readonly automationId: AutomationId;
   readonly runId: AutomationRunId;
   readonly previousLifecycle: AutomationRunLifecycle;
@@ -386,6 +395,7 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: 1,
       label: "Automation definition create",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -425,6 +435,7 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: expectedVersion + 1,
       label: "Automation definition update",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -464,6 +475,7 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: expectedVersion + 1,
       label: "Automation definition lifecycle change",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -636,6 +648,7 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: 1,
       label: "Automation run create",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }
 
@@ -716,7 +729,7 @@ export class AutomationEventStore {
             eventName: AUTOMATION_FIRST_TURN_DISPATCH_CANCELLED,
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
+            actor: input.actor ?? this.#actor,
             occurredAt: input.updatedAt,
             payload: tombstonePayload,
           },
@@ -725,7 +738,7 @@ export class AutomationEventStore {
             eventName: AUTOMATION_RUN_STATUS_CHANGED,
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
+            actor: input.actor ?? this.#actor,
             occurredAt: input.updatedAt,
             payload: statusPayload,
           },
@@ -947,6 +960,7 @@ export class AutomationEventStore {
     readonly payload: unknown;
     readonly aggregateVersion: number;
     readonly label: string;
+    readonly actor?: typeof EventActor.Type;
   }): EventEnvelope {
     let committed;
     try {
@@ -959,7 +973,7 @@ export class AutomationEventStore {
             eventName: input.eventName,
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
+            actor: input.actor ?? this.#actor,
             occurredAt: input.occurredAt,
             payload: input.payload,
           },

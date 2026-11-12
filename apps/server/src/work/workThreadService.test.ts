@@ -493,7 +493,10 @@ describe("WorkThreadService", () => {
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(
       imported.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared, {
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
     expect(imported.persistence.journal.transaction).toHaveBeenCalledTimes(1);
 
     const elsewhere = serviceFixture({
