@@ -1163,6 +1163,63 @@ describe("browser automation routes", () => {
       expect((await handler(post("profiles", clear)))?.status).toBe(503);
     });
 
+    it("lets a device the host's own person paired review session, upload and download permissions under its own scope, and refuses a hub-introduced device", async () => {
+      const deviceId = "90000000-0000-4000-8000-000000000002";
+      const fromDevice = (path: string, admittedBy: "host-person" | "hub-roster") => {
+        const request = new Request(`http://127.0.0.1/api/browser/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+        });
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: deviceId as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000002" as never,
+            admittedBy,
+          }),
+          scopeId: deviceId as never,
+        });
+        return request;
+      };
+      const sessionGrants = {
+        execute: vi.fn(async () => ({ kind: "browser-session-grants" as const, grants: [] })),
+      };
+      const uploadPermissions = {
+        execute: vi.fn(async () => ({ kind: "upload-permissions" as const, permissions: [] })),
+      };
+      const downloadPermissions = {
+        execute: vi.fn(async () => ({ kind: "download-permissions" as const, permissions: [] })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        sessionGrants,
+        uploadPermissions,
+        downloadPermissions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      for (const [path, port] of [
+        ["session-grants", sessionGrants],
+        ["upload-permissions", uploadPermissions],
+        ["download-permissions", downloadPermissions],
+      ] as const) {
+        expect(await (await route(fromDevice(path, "hub-roster")))?.json()).toMatchObject({
+          reason: "not-local",
+        });
+        expect(port.execute).not.toHaveBeenCalled();
+        expect((await route(fromDevice(path, "host-person")))?.status).toBe(200);
+        // The device's own scope is what the permission's record names.
+        expect(port.execute).toHaveBeenCalledWith(deviceId, { kind: "list" });
+      }
+    });
+
     it("admits only authenticated local session-permission commands and strictly decodes their scope", async () => {
       const sessionGrants = {
         execute: vi.fn(async () => ({ kind: "browser-session-grants" as const, grants: [] })),

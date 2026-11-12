@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
+import { classifyProductAction } from "./authenticatedProductRoutes";
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
@@ -276,13 +277,8 @@ describe("remote route policy", () => {
       "/api/shell/launch-session",
       "/api/desktop/launch-sessions",
       "/api/desktop/window-authorities",
-      "/api/host-control/status",
-      "/api/host-control/lifecycle",
-      "/api/host-control/backup",
-      "/api/host-control/restore",
-      "/api/host-control/thread-retention",
-      "/api/host-control/thread-purge",
-      "/api/host-control/data-map",
+      // The host's whole export is bulk data with no bound for a remote
+      // caller, so it alone of host control stays on the host.
       "/api/host-control/export",
       "/api/replica-store/settings",
       "/api/replica-store/commands",
@@ -293,10 +289,6 @@ describe("remote route policy", () => {
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
     }
-    // Every approval and question across the host's Projects is a local-window
-    // read; the remote listener never forwards it.
-    expect((await fixture.route(request("/api/pending-requests"))).status).toBe(404);
-    expect((await fixture.route(request("/api/fleet-activity"))).status).toBe(404);
 
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();
@@ -854,6 +846,192 @@ describe("remote route policy", () => {
     ).toThrow("local-only");
   });
 
+  it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    for (const path of ["set", "status", "remove", "keys/list", "keys/add", "keys/replace"]) {
+      expect(inspect(`/api/providers/credentials/${path}`, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(`/api/providers/credentials/${path}`, "GET")).toMatchObject({
+        kind: "reject",
+      });
+      // No catalogued action, so the product dispatch refuses every session
+      // but a device the host's own person paired.
+      expect(
+        classifyProductAction(
+          new Request(`${origin}/api/providers/credentials/${path}`, { method: "POST" }),
+        ),
+      ).toBeUndefined();
+    }
+    expect(inspect("/api/providers/credentials/remove-provider", "POST")).toMatchObject({
+      kind: "reject",
+    });
+    expect(inspect("/api/desktop/provider-credentials/set", "POST")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
+  });
+
+  it("forwards the paired device and pairing request routes by their own method, and keeps the desktop bridge's on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const path of ["/api/remote/devices", "/api/remote/pairing-requests"]) {
+      expect(inspect(path, "GET")).toMatchObject(forwarded);
+      expect(inspect(path, "POST")).toMatchObject({ kind: "reject" });
+    }
+    for (const path of [
+      "/api/remote/devices/rename",
+      "/api/remote/devices/revoke",
+      "/api/remote/devices/revoke-all",
+      "/api/remote/pairing-requests/approve",
+      "/api/remote/pairing-requests/deny",
+      "/api/remote/pairing-tickets",
+    ]) {
+      expect(inspect(path, "POST")).toMatchObject(forwarded);
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
+    expect(inspect("/api/desktop/remote/devices", "GET")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
+  });
+
+  it("forwards host control by each route's own method for the product dispatch to judge, and keeps the host export on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const path of ["status", "data-map", "thread-retention"]) {
+      expect(inspect(`/api/host-control/${path}`, "GET")).toMatchObject(forwarded);
+    }
+    for (const path of [
+      "lifecycle",
+      "backup",
+      "restore",
+      "memory-limits",
+      "thread-retention",
+      "thread-purge",
+    ]) {
+      expect(inspect(`/api/host-control/${path}`, "POST")).toMatchObject({
+        ...forwarded,
+        maxBodyBytes: 8_192,
+      });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(
+        classifyProductAction(
+          new Request(`${origin}/api/host-control/${path}`, { method: "POST" }),
+        ),
+      ).toBeUndefined();
+    }
+    expect(inspect("/api/host-control/status", "POST")).toMatchObject({ kind: "reject" });
+    expect(inspect("/api/host-control/export", "GET")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
+  });
+
+  it("forwards a thread's network access rules and answers for the product dispatch to judge", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const path = "/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020";
+    const inspect = (method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("GET")).toMatchObject({ kind: "allow", surface: "authenticated-product" });
+    expect(inspect("POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 16 * 1_024,
+    });
+    // No catalogued action for either method: the product dispatch refuses
+    // every session but a device the host's own person paired.
+    for (const method of ["GET", "POST"]) {
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
+    }
+  });
+
+  it("forwards the person's own reads and lists for the product dispatch to judge: pending requests, fleet activity, provider limits and protected files", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const [path, method] of [
+      ["/api/pending-requests", "GET"],
+      ["/api/pending-requests/defer", "POST"],
+      ["/api/fleet-activity", "GET"],
+      ["/api/provider-usage-limits", "GET"],
+      ["/api/provider-usage-limits/refresh", "POST"],
+      ["/api/protected-files", "GET"],
+      ["/api/protected-files/commands", "POST"],
+    ] as const) {
+      expect(inspect(path, method)).toMatchObject(forwarded);
+      expect(inspect(path, method === "GET" ? "POST" : "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
+    }
+    expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
@@ -1121,10 +1299,10 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "host-control",
-            match: { kind: "prefix", path: "/api/host-control" },
+            id: "host-control-export",
+            match: { kind: "exact", path: "/api/host-control/export" },
             surface: "authenticated-product",
-            methods: ["POST"],
+            methods: ["GET"],
           },
         ],
       }),

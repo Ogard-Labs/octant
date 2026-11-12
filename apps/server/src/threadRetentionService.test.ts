@@ -164,6 +164,24 @@ describe("ThreadRetentionService", () => {
     });
   });
 
+  it("journals a retention window a paired device set as that device", () => {
+    const { journal, service } = openHarness();
+    const deviceId = "71000000-0000-4000-8000-0000000000de";
+    const outcome = service.setWindow(
+      { scope: { kind: "host" }, window: { kind: "duration-days", days: 30 } } as never,
+      "person-paired-device",
+      { kind: "remote-device", actorId: deviceId, deviceId } as never,
+    );
+    expect("kind" in outcome ? outcome.kind : "saved").toBe("saved");
+
+    const events = journal.replayAggregateType({
+      aggregateType: "thread-retention",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(events.at(-1)?.actor).toMatchObject({ kind: "remote-device", deviceId });
+  });
+
   it("purges a named thread from ordinary reads and from the journal so a rebuild cannot resurrect it", async () => {
     const { connection, journal, service, runtime } = openHarness();
     seedChatThread(journal, connection, ids.thread, "Secret title", "user said a secret");

@@ -51,6 +51,7 @@ export type RemoteShellSurfaceKind =
   | "extension-install"
   | "provider-setup"
   | "provider-credentials"
+  | "device-management"
   | "listener-controls"
   | "host-controls";
 
@@ -64,9 +65,9 @@ export interface RemoteShellSurfaceDescriptor {
   readonly catalogAction: string;
   /**
    * Set where the host forwards none of the surface's routes to any device, a
-   * person-paired one included: the desktop bridge, host control, and the
-   * credential and secret stores sit behind the private listener's local-only
-   * prefixes. Such a surface stays unavailable to every session.
+   * person-paired one included: the desktop bridge and the secret stores sit
+   * behind the private listener's local-only prefixes. Such a surface stays
+   * unavailable to every session.
    */
   readonly keptOnHost?: true;
 }
@@ -138,10 +139,16 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
   {
     id: "provider-credentials",
     label: "Provider credentials",
-    description: "Keychain-backed provider credentials stay on the local host.",
+    description: "Store, replace, and clear a provider key in the host's credential store.",
     availability: "local-host-only",
     catalogAction: "provider.credentials.write",
-    keptOnHost: true,
+  },
+  {
+    id: "device-management",
+    label: "Paired devices",
+    description: "List, rename, and revoke paired devices, and approve a new device.",
+    availability: "local-host-only",
+    catalogAction: "desktop.approve-device",
   },
   {
     id: "listener-controls",
@@ -154,10 +161,10 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
   {
     id: "host-controls",
     label: "Host controls",
-    description: "Start, stop, restart, and startup policy stay on the local host.",
+    description:
+      "Stop and restart the host, its startup policy, backups, memory limits, and retention.",
     availability: "local-host-only",
     catalogAction: "host.service.stop",
-    keptOnHost: true,
   },
 ];
 

@@ -21,6 +21,9 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "automation/automationRoutes.ts": "hands the principal to the command service, which resolves it",
   "externalContentRoutes.ts": "builds the device actor from the principal where it clears a mark",
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
+  "localWindowReadRoute.ts": "a parameterless read; changes nothing",
+  "providers/providerUsageLimitsRoutes.ts":
+    "reads the limits and asks the providers again; journals nothing",
   "terminalSessionRoutes.ts": "lists and reads history; changes nothing",
   "remote/remoteHttpAuthentication.ts":
     "answers a device's read of its own standing; that route journals nothing",
@@ -32,10 +35,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
  * Modules whose changes still name their services' fixed actor for a device.
  * The list only shrinks: threading the actor through one removes it here.
  */
-const STILL_NAMES_A_FIXED_ACTOR: ReadonlyArray<string> = [
-  "browserAutomationRoutes.ts",
-  "hostControlRoutes.ts",
-];
+const STILL_NAMES_A_FIXED_ACTOR: ReadonlyArray<string> = ["browserAutomationRoutes.ts"];
 
 function sourceModules(directory: string): ReadonlyArray<string> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

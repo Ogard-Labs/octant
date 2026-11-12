@@ -21,7 +21,11 @@ import {
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import {
+  authenticateRouteWindowId,
+  boundPrincipalIsRestricted,
+  readPrincipalRouteContext,
+} from "./principalRouteContext";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
@@ -218,9 +222,10 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
-      // Whether the host may continue a turn by itself after a restart is a
-      // choice about this computer's unattended work, made at it, as for Code.
-      if (setsRestartContinuation(command) && isNotLocalWindow(request)) {
+      // Whether the host may continue a turn by itself after a restart is the
+      // person's choice about this computer's unattended work, at a window on
+      // it or on a device they paired, as for Code.
+      if (setsRestartContinuation(command) && boundPrincipalIsRestricted(request)) {
         return failureResponse(
           { category: "unauthorized", message: RESTART_CONTINUATION_LOCAL_ONLY },
           403,
@@ -406,16 +411,6 @@ function setsRestartContinuation(command: WorkThreadCommand): boolean {
     command.kind === "set-work-thread-restart-continuation" ||
     (command.kind === "update-work-settings" && command.restartContinuation !== undefined)
   );
-}
-
-/**
- * A request whose principal is anything but a window on this host. Chat and
- * Code refuse the same change from a paired device, so a device acting as the
- * host's own person does not pass here as it does for a Full access raise.
- */
-function isNotLocalWindow(request: Request): boolean {
-  const principal = readPrincipalRouteContext(request)?.principal;
-  return principal !== undefined && principal.kind !== "local-window";
 }
 
 /**

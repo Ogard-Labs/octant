@@ -553,8 +553,13 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
+      // Download, upload and session permissions are reviewed by the host's
+      // own person: at a window on this host or on a device that person paired
+      // (maintainer decision, 2026-11-12). Each service checks the scope it is
+      // handed against the host's own record again, and its journal names the
+      // device.
       if (url.pathname === "/api/browser/download-permissions") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserDownloadPermissionsResult({
               kind: "download-permission-refused",
@@ -580,7 +585,7 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/upload-permissions") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserUploadPermissionsResult({
               kind: "upload-permission-refused",
@@ -606,7 +611,7 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/session-grants") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserSessionGrantsResult({
               kind: "browser-session-refused",

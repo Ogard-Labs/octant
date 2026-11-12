@@ -2,6 +2,7 @@ import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -44,7 +45,9 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
-      if (principal.principal.kind !== "local-window") {
+      // The limits are the person's own account figures: read at a window
+      // on this host or on a device that person paired.
+      if (!principalActsAsHostPerson(principal.principal)) {
         return response({ message: "Provider limits require a local window." }, 403, origin);
       }
     } catch (error) {

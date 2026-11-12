@@ -53,17 +53,34 @@ describe("protected files routes", () => {
     expect(change).not.toHaveBeenCalled();
   });
 
-  it("refuses a change from a paired device", async () => {
+  it("changes the list from a device the host's own person paired, journaled as that device, and refuses a hub-introduced device and an unproved pairing", async () => {
     const { handler, change } = route();
-    const remote = request(PROTECTED_FILES_COMMAND_PATH, "POST", add);
-    bindPrincipalRouteContext(remote, {
-      principal: { kind: "remote-device" } as never,
-      scopeId: windowId,
-    });
-    const response = await handler(remote);
-    expect(response?.status).toBe(403);
-    expect(await response?.json()).toMatchObject({ reason: "unauthorized" });
+    const deviceId = "74000000-0000-4000-8000-0000000000de";
+    const fromDevice = (admittedBy?: "host-person" | "hub-roster") => {
+      const remote = request(PROTECTED_FILES_COMMAND_PATH, "POST", add, false);
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          deviceId,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: decodeWindowId(deviceId),
+      });
+      return remote;
+    };
+    for (const restricted of [undefined, "hub-roster"] as const) {
+      const response = await handler(fromDevice(restricted));
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ reason: "unauthorized" });
+    }
     expect(change).not.toHaveBeenCalled();
+
+    expect((await handler(fromDevice("host-person")))?.status).toBe(200);
+    expect(change).toHaveBeenCalledWith(add, {
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
   });
 
   it("refuses removing a built-in group that was not confirmed", async () => {
