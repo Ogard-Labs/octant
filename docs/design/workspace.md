@@ -867,8 +867,12 @@ has one. Each tile has one bar, the tool's own header (the Browser's bar is its 
 with an Arrange menu (Move left, right, up and down where the caps allow, Show
 alone, Hide from view) and Close at its trailing edge; the strip lists only the
 tools that are not shown. Stacked, a page showed four bars and named the tool
-three times. A divider is a hairline that shows a quiet strong role while hovered
-or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
+three times. Every tile is a panel of its own (a rounded fill with a rim and a
+seat shadow; [DESIGN.md](../../DESIGN.md#shapes-and-depth) owns the material),
+with the window frame's 8px gap between tiles and between the stage and the
+dock, on the same top and bottom lines as the stage. The gap is the divider's
+hit area: it is empty at rest, shows a quiet strong role while hovered or held,
+and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to
