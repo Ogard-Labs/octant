@@ -43,7 +43,7 @@ export function RoutineCalendar(props: {
           }
           type="button"
         >
-          <ChevronLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ChevronLeft aria-hidden="true" size={14} />
         </OctantIconButton>
         <h3 className="routine-calendar__month">{month.label}</h3>
         <OctantIconButton
@@ -53,7 +53,7 @@ export function RoutineCalendar(props: {
           }
           type="button"
         >
-          <ChevronRight aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ChevronRight aria-hidden="true" size={14} />
         </OctantIconButton>
       </header>
 

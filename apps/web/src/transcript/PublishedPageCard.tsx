@@ -34,12 +34,7 @@ export function PublishedPageCard(props: { readonly page: ThreadPublishedPage })
           Published to {host} · opens in your browser
         </span>
       </span>
-      <ExternalLink
-        aria-hidden="true"
-        className="published-page-card__icon"
-        size={14}
-        strokeWidth={1.8}
-      />
+      <ExternalLink aria-hidden="true" className="published-page-card__icon" size={14} />
     </a>
   );
 }

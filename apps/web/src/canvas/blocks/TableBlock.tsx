@@ -447,7 +447,6 @@ export function TableBlock({
                   aria-hidden="true"
                   className="canvas-block__table-group-chevron"
                   size={12}
-                  strokeWidth={2}
                 />
                 <span className="canvas-block__table-group-label">{label}</span>
                 <span className="canvas-block__table-group-count">
@@ -461,7 +460,7 @@ export function TableBlock({
                   comment anchored to one of its rows is never out of sight. */}
               {open || openThreads === 0 ? null : (
                 <span className="canvas-block__table-group-comments">
-                  <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <MessageSquare aria-hidden="true" size={12} />
                   <span aria-hidden="true">{openThreads}</span>
                   <span className="visually-hidden">
                     {`${String(openThreads)} open ${openThreads === 1 ? "comment" : "comments"} in this group`}
@@ -565,7 +564,7 @@ export function TableBlock({
                     type="button"
                     variant="bare"
                   >
-                    <Pin aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <Pin aria-hidden="true" size={12} />
                   </OctantButton>
                 </li>
               );
@@ -656,7 +655,7 @@ function RowCommentMarker(props: {
       type="button"
       variant="bare"
     >
-      <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+      <MessageSquare aria-hidden="true" size={12} />
       {props.count === 0 ? null : <span>{props.count}</span>}
     </OctantButton>
   );

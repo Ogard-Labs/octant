@@ -41,7 +41,7 @@ export function SidebarMore(props: SidebarMoreProps) {
             className="sidebar-rail__button window-no-drag"
           >
             <span aria-hidden="true" className="sidebar-rail__face">
-              <Ellipsis size={16} strokeWidth={1.7} />
+              <Ellipsis size={16} />
             </span>
           </OctantMenuTrigger>
         </OctantTooltip>
@@ -51,7 +51,7 @@ export function SidebarMore(props: SidebarMoreProps) {
           aria-label="More destinations"
           className="sidebar-item window-no-drag justify-start"
         >
-          <Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+          <Ellipsis aria-hidden="true" className="icon" size={16} />
           <span className="sidebar-label">More</span>
         </OctantMenuTrigger>
       )}
@@ -70,7 +70,7 @@ export function SidebarMore(props: SidebarMoreProps) {
                     key={item.id}
                     onClick={item.onSelect}
                   >
-                    <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
+                    <Icon aria-hidden={true} className="icon" size={16} />
                     <span>{item.label}</span>
                   </OctantMenuItem>
                 );
@@ -79,7 +79,7 @@ export function SidebarMore(props: SidebarMoreProps) {
             <OctantMenuSeparator />
             <OctantMenuGroup aria-label="Sidebar">
               <OctantMenuItem onClick={props.onCustomizeSidebar}>
-                <PanelLeft aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
+                <PanelLeft aria-hidden={true} className="icon" size={16} />
                 <span>Customize sidebar</span>
               </OctantMenuItem>
             </OctantMenuGroup>

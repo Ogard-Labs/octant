@@ -192,8 +192,8 @@ describe("render fan-out of a streaming Code turn", () => {
     // follows the thread only while a tool that shows the turn is open.
     const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
     await userEvent.click(
-      within(within(dock).getByRole("group", { name: "Quick tools" })).getByRole("button", {
-        name: "Open Environment",
+      within(screen.getByRole("toolbar", { name: "Tools" })).getByRole("button", {
+        name: "Environment",
       }),
     );
     await waitFor(() =>

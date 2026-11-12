@@ -54,7 +54,7 @@ export function ApprovedWorkingFolderControl(props: {
       title="Working folder"
       trigger={
         <>
-          <FolderTree aria-hidden="true" size={12} strokeWidth={1.8} />
+          <FolderTree aria-hidden="true" size={12} />
           {/* Said in words too: the danger ink alone is colour, and the alert
               that explains it is inside the closed popup. */}
           <span>{valid ? chipLabel : `${chipLabel} · not usable`}</span>

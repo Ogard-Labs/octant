@@ -1741,7 +1741,6 @@ describe("CanvasWorkspaceTab in the narrow dock sheet", () => {
       <RightUtilityDock
         canvas={<CanvasWorkspaceTab tab={canvasTab} client={client} />}
         isNarrow
-        launchableSurfaces={[canvasSurface]}
         onClose={onClose}
         onCloseTab={vi.fn()}
         onCommitWidth={vi.fn()}
@@ -1990,6 +1989,30 @@ describe("CanvasWorkspaceTab choice blocks", () => {
       },
     });
     expect(await screen.findByText(/Answers sent/)).toBeInTheDocument();
+  });
+
+  it("sends the same answer again as a new message after the tab is reopened", async () => {
+    const user = userEvent.setup();
+    const queue = queueClient();
+    const send = async () => {
+      const view = render(
+        <CanvasWorkspaceTab
+          tab={canvasTab}
+          client={createCanvasClient(withChoice)}
+          queueClient={queue as never}
+        />,
+      );
+      await user.click(await screen.findByRole("radio", { name: /Staged/ }));
+      await user.click(screen.getByRole("button", { name: "Send to the Chat thread" }));
+      expect(await screen.findByText(/Answers sent/)).toBeInTheDocument();
+      view.unmount();
+    };
+    await send();
+    await send();
+
+    expect(queue.execute).toHaveBeenCalledTimes(2);
+    const [first, second] = queue.execute.mock.calls.map((call) => call[0].requestId);
+    expect(second).not.toBe(first);
   });
 
   it("reads only where the window has no way to send to the Canvas's thread", async () => {

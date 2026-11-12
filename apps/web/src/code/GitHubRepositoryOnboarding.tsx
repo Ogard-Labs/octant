@@ -586,7 +586,7 @@ function DestinationStep(props: {
         type="button"
         variant="outline"
       >
-        <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+        <FolderOpen aria-hidden="true" size={16} />
         <span className="project-dialog__folder-name">
           {props.destination?.displayName ??
             (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}

@@ -238,8 +238,8 @@
 .project-section > .sidebar-section {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -344,7 +344,7 @@
   background: var(--oct-fg-soft);
 }
 
-/* The active Project is marked by its label's ink alone: a filled pill would
+/* The active Project is marked by its label's ink alone: a filled chip would
    turn the header back into the row the reader keeps mistaking for one. */
 .project-row[data-active="true"] {
   color: var(--oct-fg);

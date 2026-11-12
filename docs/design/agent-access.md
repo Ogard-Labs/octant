@@ -8,8 +8,7 @@ Owner: maintainer · Started: 2026-11-11
 Build status: all five slices are built: grants, the endpoint, the bridge,
 direct keys, and visibility (Settings › Remote access › Agent access, "Started
 by" on threads and in Needs you, push labels, and the paired-device view and
-revoke). Not built yet: naming the agent as the sender of each turn it sent
-(see Visibility). The built rules are in
+revoke), with each turn an agent sent named for it. The built rules are in
 [Architecture: Security and authority](../architecture.md#security-and-authority)
 and [Decisions and requirements](decisions.md).
 
@@ -221,11 +220,18 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
 - A thread an outside agent started shows "Started by <agent name>" in its
   pane header and on its sidebar row, read from `GET /api/agent-grants/threads`,
   which names each such thread with its grant's current name.
-- Its turns should show the agent as the sender. Not built: the host records
-  which threads an agent started, not which of a thread's turns it sent, and a
-  turn id is the host's own, found only after the send. Recording the sender
-  needs the send to return its turn; until then every turn in such a thread
-  reads as before, and the header names the agent.
+- Every turn an agent sent, in a thread it started or in a Project thread the
+  person made, shows "Sent by <agent name>" under its prompt, and the prompt
+  is announced as a message from the agent rather than "Your message". The
+  host journals the turn by the id its turn record keeps, which the sender
+  chooses before the send: a Code turn's operation id, a Chat turn's submission
+  id, a Work turn's id. A turn start without such an id is refused, and a send
+  the host refused records nothing. The label follows the prompt when the
+  person forks the Code thread or branches the Chat thread: a fork's inherited
+  turns are named under the thread that ran them, and a Chat branch's copied
+  turns keep their submission ids. The names come with the "Started by" list
+  (`GET /api/agent-grants/threads`, the newest 2,000 turns), so a renamed grant
+  renames its turns.
 
 ### Revocation and expiry
 
@@ -250,11 +256,14 @@ the agent ran one on, not only the threads it started.
 
 ### Journal
 
-Aggregate `agent-access`: `agent-access.grant-created@1`,
-`grant-changed@1`, `credential-enrolled@1`, `credential-rotated@1`,
-`grant-revoked@1`, `grant-expired@1`. Events carry the grant id, name, scope,
-key fingerprints, and the deciding principal, never a key or a hash. Thread
-events an outside agent causes carry `actor: outside-agent:<grantId>`.
+Aggregate `agent-access-grant`, one stream per grant:
+`agent-access.grant-created@1`, `grant-changed@1`, `key-enrolled@1`,
+`key-removed@1`, `direct-key-rotated@1`, `grant-revoked@1` (by the person, at
+expiry, or after 30 idle days), `thread-started@1`, and `turn-sent@1`. Events
+carry the grant id, name, scope, key fingerprints, thread and turn ids, and
+the deciding principal, never a key or a hash. The product events an agent's
+requests cause are journaled under the paired-device principal whose device
+id is the grant's scope id.
 
 ## 5. Threat model
 

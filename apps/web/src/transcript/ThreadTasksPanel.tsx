@@ -27,15 +27,15 @@ export interface ThreadTasksPanelProps {
 function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
   switch (state) {
     case "running":
-      return <LoaderCircle aria-hidden="true" size={12} strokeWidth={1.8} />;
+      return <LoaderCircle aria-hidden="true" size={12} />;
     case "waiting":
-      return <Clock3 aria-hidden="true" size={12} strokeWidth={1.8} />;
+      return <Clock3 aria-hidden="true" size={12} />;
     case "completed":
-      return <Check aria-hidden="true" size={12} strokeWidth={1.8} />;
+      return <Check aria-hidden="true" size={12} />;
     case "failed":
-      return <CircleX aria-hidden="true" size={12} strokeWidth={1.8} />;
+      return <CircleX aria-hidden="true" size={12} />;
     case "pending":
-      return <Circle aria-hidden="true" size={12} strokeWidth={1.8} />;
+      return <Circle aria-hidden="true" size={12} />;
   }
 }
 

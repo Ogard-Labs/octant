@@ -66,7 +66,7 @@ export function DeckBlock(props: {
           type="button"
           variant="secondary"
         >
-          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          <Play aria-hidden="true" size={12} />
           Present
         </OctantButton>
       </header>
@@ -221,7 +221,7 @@ function DeckPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronLeft aria-hidden="true" size={16} />
             </OctantButton>
             <OctantButton
               aria-label="Next slide"
@@ -231,7 +231,7 @@ function DeckPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronRight aria-hidden="true" size={16} />
             </OctantButton>
             <FullscreenButton fullscreen={fullscreen} />
           </div>

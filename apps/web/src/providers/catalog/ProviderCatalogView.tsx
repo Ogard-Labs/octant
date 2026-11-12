@@ -43,6 +43,7 @@ import {
   type ProviderCatalogStatus,
 } from "./providerCatalogPresentation";
 import "../../styles/provider-catalog.css";
+import { MARK_TICK_STROKE_WIDTH } from "../../ui/IconDefaults";
 
 /** Discovery as this window has it. Absent where the window cannot scan the host. */
 export interface ProviderCatalogDiscovery {
@@ -608,7 +609,11 @@ function SetupSteps(
           key={step.id}
         >
           <span aria-hidden="true" className="provider-catalog__step-marker">
-            {step.progress === "done" ? <Check size={14} strokeWidth={2} /> : index + 1}
+            {step.progress === "done" ? (
+              <Check size={14} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+            ) : (
+              index + 1
+            )}
           </span>
           <div className="provider-catalog__step-body">
             <span className="provider-catalog__step-title">
@@ -634,7 +639,7 @@ function SetupSteps(
       {props.entry.state.next.kind === "done" ? (
         <li className="provider-catalog__step" data-progress="done">
           <span aria-hidden="true" className="provider-catalog__step-marker">
-            <Check size={14} strokeWidth={2} />
+            <Check size={14} strokeWidth={MARK_TICK_STROKE_WIDTH} />
           </span>
           <div className="provider-catalog__step-body">
             <p className="provider-catalog__sentence" role="status">

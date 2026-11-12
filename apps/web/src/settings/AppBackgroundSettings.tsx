@@ -15,6 +15,7 @@ import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 /** The host's shared background image library, read through the window's authority. */
 export interface BackgroundImageLibrary {
@@ -325,7 +326,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                       </span>
                       {selectedPresetId === preset.id ? (
                         <span aria-hidden="true" className="settings-app-background__preset-mark">
-                          <Check size={12} strokeWidth={2.4} />
+                          <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                         </span>
                       ) : null}
                     </OctantButton>
@@ -363,7 +364,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 type="button"
                 variant="ghost"
               >
-                <Upload aria-hidden="true" size={14} strokeWidth={1.7} />
+                <Upload aria-hidden="true" size={14} />
               </OctantIconButton>
               {photos.length === 0 ? null : (
                 <OctantPopover
@@ -371,7 +372,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   onOpenChange={setLibraryOpen}
                   open={libraryOpen}
                   title="Photos on this host"
-                  trigger={<Images aria-hidden="true" size={14} strokeWidth={1.7} />}
+                  trigger={<Images aria-hidden="true" size={14} />}
                   triggerClassName="shell-icon-button"
                   triggerLabel="Choose an uploaded photo"
                   triggerVariant="ghost-icon"
@@ -623,11 +624,7 @@ function PhotoThumbnail(props: {
       data-empty={url === null ? "true" : "false"}
       role="img"
     >
-      {url === null ? (
-        <ImageIcon aria-hidden="true" size={16} strokeWidth={1.6} />
-      ) : (
-        <img alt="" src={url} />
-      )}
+      {url === null ? <ImageIcon aria-hidden="true" size={16} /> : <img alt="" src={url} />}
     </span>
   );
 }

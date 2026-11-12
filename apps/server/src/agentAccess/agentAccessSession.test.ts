@@ -47,11 +47,14 @@ function grant(overrides: Partial<AgentGrantScope> = {}): AgentGrant {
 
 const autoThread = "30000000-0000-4000-8000-000000000004";
 const chatThread = "30000000-0000-4000-8000-000000000005";
+const turnKey = "60000000-0000-4000-8000-000000000001";
 const otherModelThread = "30000000-0000-4000-8000-000000000006";
+const workThread = "30000000-0000-4000-8000-000000000007";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
   const turned: Array<{ threadId: string; mode: string }> = [];
+  const sentTurns: Array<{ threadId: string; turnKey: string }> = [];
   let starting = 0;
   const service: AgentSessionDependencies["service"] = {
     threadOwner: (threadId: string) =>
@@ -67,6 +70,9 @@ function deps() {
       turned.push({ threadId, mode });
     },
     turnThreadsOf: () => [],
+    recordTurnSent: (input) => {
+      sentTurns.push({ threadId: input.threadId, turnKey: input.turnKey });
+    },
     holdTurnStart: () => {
       const startingAlready = starting;
       starting += 1;
@@ -78,6 +84,7 @@ function deps() {
     threadId === ownThread ||
     threadId === autoThread ||
     threadId === chatThread ||
+    threadId === workThread ||
     threadId === otherModelThread
       ? { projectId: granted }
       : threadId === strangerThread
@@ -101,8 +108,15 @@ function deps() {
           ? { kind: "chat", modelId: "fake-model" }
           : threadId === otherModelThread
             ? { ...askFirst, modelId: "other-model" }
-            : undefined;
-  return { service, threadProject, threadAccess, recorded, turned };
+            : threadId === workThread
+              ? {
+                  kind: "work",
+                  modelId: "fake-model",
+                  access: "ask-first",
+                  fullAccessSandbox: false,
+                }
+              : undefined;
+  return { service, threadProject, threadAccess, recorded, turned, sentTurns };
 }
 
 const guard = (
@@ -190,7 +204,7 @@ describe("the agent grant guard", () => {
       guard({
         path: "/api/code/commands",
         method: "POST",
-        body: { kind: "start-provider-turn", threadId: strangerThread },
+        body: { kind: "start-provider-turn", operationId: turnKey, threadId: strangerThread },
       }),
     ).toBe("refused");
   });
@@ -292,7 +306,7 @@ describe("a grant that narrows after the agent made threads", () => {
         {
           path: "/api/code/commands",
           method: "POST",
-          body: { kind: "start-provider-turn", threadId },
+          body: { kind: "start-provider-turn", operationId: turnKey, threadId },
         },
         { highestLevel },
       );
@@ -324,7 +338,7 @@ describe("prompts an outside agent sends", () => {
     await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: projectThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
     });
     expect(order).toEqual([`marked ${projectThread}`, "sent"]);
   });
@@ -349,7 +363,7 @@ describe("prompts an outside agent sends", () => {
     const answer = await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: ownThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: ownThread },
     });
     expect(answer.status).toBe(503);
     expect(dispatch).not.toHaveBeenCalled();
@@ -388,7 +402,7 @@ describe("threads the person made in a granted Project", () => {
         {
           path: "/api/code/commands",
           method: "POST",
-          body: { kind: "start-provider-turn", threadId },
+          body: { kind: "start-provider-turn", operationId: turnKey, threadId },
         },
         { threads: "project", models: ["fake-model"] },
       );
@@ -413,7 +427,7 @@ describe("threads the person made in a granted Project", () => {
     await session.send({
       path: "/api/code/commands",
       method: "POST",
-      body: { kind: "start-provider-turn", threadId: projectThread },
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
     });
     expect(turned).toEqual([{ threadId: projectThread, mode: "code" }]);
   });
@@ -452,5 +466,123 @@ describe("stopping a revoked agent's turns", () => {
     expect((await cancel(projectThread)).status).toBe(200);
     expect((await cancel(strangerThread)).status).toBe(403);
     expect(sent).toEqual(["/api/code/commands"]);
+  });
+});
+
+describe("the sender of each turn", () => {
+  function session(answer: (body: Readonly<Record<string, unknown>>) => Response) {
+    const fixture = deps();
+    const created = createAgentSession({
+      grant: grant({ threads: "project", modes: ["code", "work", "chat"] }),
+      signal: new AbortController().signal,
+      deps: {
+        ...fixture,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent: () => undefined,
+        dispatch: async ({ request }) => answer((await request.json()) as Record<string, unknown>),
+      },
+    });
+    return { session: created, sentTurns: fixture.sentTurns };
+  }
+  // What the host answers when it starts the turn the request named.
+  const started = (body: Readonly<Record<string, unknown>>) =>
+    Response.json(
+      body["kind"] === "send-chat-turn"
+        ? { kind: "turn-created", turn: { submissionId: body["submissionId"] } }
+        : { kind: "provider-turn-state", operationId: body["operationId"], state: "running" },
+    );
+
+  it("records the id each accepted turn keeps, so the transcript can name the agent", async () => {
+    const { session: agent, sentTurns } = session(started);
+    await agent.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
+    });
+    await agent.send({
+      path: "/api/chat/commands",
+      method: "POST",
+      body: { kind: "send-chat-turn", submissionId: turnKey, threadId: chatThread },
+    });
+    expect(sentTurns).toEqual([
+      { threadId: projectThread, turnKey },
+      { threadId: chatThread, turnKey },
+    ]);
+  });
+
+  it("records a Work turn the host started, and nothing when it cannot tell whether the turn started", async () => {
+    const send = {
+      path: "/api/work/turns",
+      method: "POST" as const,
+      body: { kind: "start-work-thread-turn", turnId: turnKey, threadId: workThread },
+    };
+    const accepted = session(() =>
+      Response.json({ kind: "accepted", turn: { turnId: turnKey, threadId: workThread } }),
+    );
+    await accepted.session.send(send);
+    expect(accepted.sentTurns).toEqual([{ threadId: workThread, turnKey }]);
+    const ambiguous = session(() =>
+      Response.json({ kind: "ambiguous", turnId: turnKey, threadId: workThread }),
+    );
+    await ambiguous.session.send(send);
+    expect(ambiguous.sentTurns).toEqual([]);
+  });
+
+  it("records nothing for a turn the host refused, even one it answered with HTTP 200, or for an answer", async () => {
+    const send = {
+      path: "/api/code/commands",
+      method: "POST" as const,
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: projectThread },
+    };
+    for (const answer of [
+      () => Response.json({ kind: "refused" }, { status: 409 }),
+      // A start refused before launch answers 200 with the refusal in the result.
+      () =>
+        Response.json({
+          kind: "operation-failed",
+          operationId: turnKey,
+          failure: { code: "refused" },
+          admission: "refused",
+        }),
+      () =>
+        Response.json({
+          kind: "provider-turn-state",
+          operationId: turnKey,
+          state: "failed",
+          failure: { code: "refused" },
+          admission: "refused",
+        }),
+      // An answer naming a different turn is not this request's turn.
+      () =>
+        Response.json({
+          kind: "provider-turn-state",
+          operationId: "60000000-0000-4000-8000-000000000099",
+          state: "running",
+        }),
+    ]) {
+      const refusedSend = session(answer);
+      await refusedSend.session.send(send);
+      expect(refusedSend.sentTurns).toEqual([]);
+    }
+    const { session: agent, sentTurns } = session(started);
+    await agent.send({
+      path: "/api/chat/commands",
+      method: "POST",
+      body: { kind: "answer-chat-turn-question", threadId: chatThread },
+    });
+    expect(sentTurns).toEqual([]);
+  });
+
+  it("refuses a turn start that names no id to record it by", () => {
+    expect(
+      guard(
+        {
+          path: "/api/code/commands",
+          method: "POST",
+          body: { kind: "start-provider-turn", threadId: projectThread },
+        },
+        { threads: "project" },
+      ),
+    ).toBe("refused");
   });
 });

@@ -4,6 +4,7 @@ import "../styles.css";
 import "../styles/components.css";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { IconDefaults } from "../ui/IconDefaults";
 import { Schema } from "effect";
 import {
   CanvasBlockId,
@@ -174,7 +175,9 @@ if (reading.kind === "refused" || rootElement === null) {
 } else {
   createRoot(rootElement).render(
     <StrictMode>
-      <CanvasPreviewPage input={reading.input} />
+      <IconDefaults>
+        <CanvasPreviewPage input={reading.input} />
+      </IconDefaults>
     </StrictMode>,
   );
 }

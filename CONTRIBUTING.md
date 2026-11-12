@@ -19,6 +19,12 @@ bun install --frozen-lockfile
 
 - `bun run dev` — hot-reloading desktop loop (Vite renderer + Electron; the
   shell spawns the server from source, so server edits need an app relaunch).
+- The component gallery, a page that draws the shared controls and the
+  design tokens with the shipped stylesheets and no host, is served by the
+  same Vite renderer in development only: with `bun run dev` running, open
+  `http://localhost:5173/component-gallery.html` (the renderer port is
+  `OCTANT_DEV_WEB_PORT`), or run `bun run --cwd apps/web dev` and open the same
+  path on the port it prints. The production build does not include it.
 - `bun --cwd packages/cli src/bin.ts server run` and, in another terminal,
   `bun --cwd packages/cli src/bin.ts web` — headless host plus browser client.
 - `bun run build && bun run package:desktop` — unsigned `out/Octant.app`.

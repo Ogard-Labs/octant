@@ -22,12 +22,7 @@ export function RoutineReceiptCard(props: { readonly routine: ThreadRoutineRecei
   const { routine } = props;
   return (
     <div className="routine-receipt-card window-no-drag">
-      <CalendarClock
-        aria-hidden="true"
-        className="routine-receipt-card__icon"
-        size={16}
-        strokeWidth={1.8}
-      />
+      <CalendarClock aria-hidden="true" className="routine-receipt-card__icon" size={16} />
       <span className="routine-receipt-card__text">
         <span className="routine-receipt-card__label">Created automation</span>
         <span className="routine-receipt-card__title">{routine.name}</span>

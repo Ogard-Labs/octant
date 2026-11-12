@@ -385,6 +385,7 @@ import {
   AgentKeyEnrolledV1,
   AgentKeyRemovedV1,
   AgentThreadStartedV1,
+  AgentTurnSentV1,
 } from "@octant/contracts/agent-access";
 import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
@@ -782,6 +783,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_ACCESS_EVENT_NAMES.directKeyRotated, 1, AgentDirectKeyRotatedV1)
     .register(AGENT_ACCESS_EVENT_NAMES.grantRevoked, 1, AgentGrantRevokedV1)
     .register(AGENT_ACCESS_EVENT_NAMES.threadStarted, 1, AgentThreadStartedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.turnSent, 1, AgentTurnSentV1)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)

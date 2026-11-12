@@ -55,7 +55,7 @@ export function ServerProjectsSidebarGroup(props: {
                 type="button"
                 variant="bare"
               >
-                <Network aria-hidden="true" size={16} strokeWidth={1.5} />
+                <Network aria-hidden="true" size={16} />
                 <span className="project-row__copy">
                   <span>
                     {project.name}
@@ -72,7 +72,7 @@ export function ServerProjectsSidebarGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+                <SquarePen aria-hidden="true" size={14} />
               </OctantButton>
             </div>
             {threads.length === 0 ? null : (

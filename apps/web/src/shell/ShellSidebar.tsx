@@ -545,12 +545,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
             />
             {filterShown && filter !== undefined ? (
               <div className="sidebar-search" role="search">
-                <Search
-                  aria-hidden="true"
-                  className="sidebar-search__icon"
-                  size={14}
-                  strokeWidth={1.8}
-                />
+                <Search aria-hidden="true" className="sidebar-search__icon" size={14} />
                 <OctantInput
                   aria-label="Filter threads"
                   className="sidebar-search__field"

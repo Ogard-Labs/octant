@@ -280,7 +280,7 @@ function GlyphMark({ glyph }: { readonly glyph: CanvasMatrixGlyph }) {
             stroke="var(--canvas-matrix-glyph-ink)"
             strokeLinecap="round"
             strokeLinejoin="round"
-            strokeWidth="1.6"
+            strokeWidth="1.5"
           />
         </>
       ) : glyph === "partial" ? (

@@ -294,7 +294,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 
   const searchField = (
     <label className="surface-toolbar__search code-project-pull-requests__search">
-      <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+      <Search aria-hidden="true" size={14} />
       <span className="sr-only">Search pull requests</span>
       <OctantInput
         aria-label="Search pull requests"
@@ -315,7 +315,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={14} strokeWidth={1.7} />
+          <X aria-hidden="true" size={14} />
         </OctantButton>
       )}
     </label>
@@ -394,13 +394,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         dock ? (
           <SurfaceEmpty
             detail="Only a Code Project with a github.com origin lists pull requests."
-            icon={<GitPullRequest size={20} strokeWidth={1.5} />}
+            icon={<GitPullRequest size={20} />}
             title="No pull-request source for this Project"
           />
         ) : (
           <SurfaceEmpty
             detail="Add a Code Project to see pull requests here."
-            icon={<GitPullRequest size={20} strokeWidth={1.5} />}
+            icon={<GitPullRequest size={20} />}
             title="No Code Projects yet"
           />
         )
@@ -424,7 +424,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </OctantButton>
           }
           detail="Pull requests show up here once a Project's Git remote points at github.com. Add one, then check again."
-          icon={<GitPullRequest size={20} strokeWidth={1.5} />}
+          icon={<GitPullRequest size={20} />}
           title={dock ? "This Project isn't on GitHub" : "None of your Code Projects is on GitHub"}
         />
       ) : null}
@@ -627,7 +627,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                       type="button"
                       variant="ghost"
                     >
-                      <RefreshCw aria-hidden="true" size={16} strokeWidth={1.5} />
+                      <RefreshCw aria-hidden="true" size={16} />
                     </OctantButton>
                   </OctantTooltip>
                 </>
@@ -662,7 +662,7 @@ function FilterMenu(props: {
         }
         tooltip="Filter"
       >
-        <ListFilter aria-hidden="true" size={16} strokeWidth={1.5} />
+        <ListFilter aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
@@ -854,7 +854,7 @@ function RepositorySettingsMenu(props: {
             : `Repository settings. Agents may merge in ${mergeRepositories.join(", ")}`
         }
       >
-        <Settings2 aria-hidden="true" size={16} strokeWidth={1.5} />
+        <Settings2 aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
@@ -914,7 +914,7 @@ function RepositoryGroup(props: {
         props.project === undefined ? undefined : (
           <OctantMenuRoot>
             <WorkListMenuTrigger label={`${props.title} settings`} tooltip="Repository settings">
-              <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.5} />
+              <MoreHorizontal aria-hidden="true" size={14} />
             </WorkListMenuTrigger>
             <OctantMenuPortal>
               <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
@@ -1033,7 +1033,7 @@ const PullRequestRow = memo(function PullRequestRow(props: {
       extras={
         row.linkedThreads.length === 0 ? null : (
           <span className="work-list__linked" title={`Linked: ${linked}`}>
-            <Link2 aria-hidden="true" size={12} strokeWidth={1.7} />
+            <Link2 aria-hidden="true" size={12} />
             <span className="sr-only">Linked: {linked}</span>
           </span>
         )
@@ -1063,9 +1063,7 @@ const PullRequestRow = memo(function PullRequestRow(props: {
               <StatusChip label={attention.label} status={attention.tone} />
             </span>
           )}
-          {resolved ? (
-            <Check aria-hidden="true" className="work-list__ok" size={14} strokeWidth={1.8} />
-          ) : null}
+          {resolved ? <Check aria-hidden="true" className="work-list__ok" size={14} /> : null}
         </>
       }
       updatedAt={row.updatedAt}

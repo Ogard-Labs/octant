@@ -382,7 +382,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           type="button"
           variant="outline"
         >
-          <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+          <FolderOpen aria-hidden="true" size={16} />
           <span className="project-dialog__folder-name">
             {folder?.displayName ??
               (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
@@ -430,7 +430,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             type="button"
             variant="outline"
           >
-            <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+            <FolderOpen aria-hidden="true" size={16} />
             <span className="project-dialog__folder-name">
               {browsing === "create" ? "Waiting for the folder browser…" : "Choose a folder"}
             </span>
@@ -570,11 +570,11 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             value={[source]}
           >
             <OctantToggleGroupItem className="segment" value="folder">
-              <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+              <FolderOpen aria-hidden="true" size={14} />
               Folder
             </OctantToggleGroupItem>
             <OctantToggleGroupItem className="segment" value="github">
-              <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+              <FolderGit2 aria-hidden="true" size={14} />
               GitHub
             </OctantToggleGroupItem>
           </OctantToggleGroup>

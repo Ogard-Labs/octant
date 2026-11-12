@@ -477,9 +477,13 @@ const TYPOGRAPHY_ROWS = [
 
 describe("Settings search coverage", () => {
   const sourceRoot = join(import.meta.dirname, "..");
+  // The component gallery draws sample Settings rows to show the row's shape;
+  // they are not rows of any Settings page, so search has nothing to index.
   const sources = readdirSync(sourceRoot, { recursive: true })
     .map(String)
-    .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
+    .filter(
+      (name) => name.endsWith(".tsx") && !name.includes(".test.") && !/^gallery[\\/]/.test(name),
+    )
     .map((name) => readFileSync(join(sourceRoot, name), "utf8"));
   const registered = new Set(
     octantSettingsRegistry.sections.flatMap((section) =>

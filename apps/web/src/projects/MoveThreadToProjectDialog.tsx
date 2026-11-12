@@ -138,7 +138,7 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
                 >
                   <span className="move-thread__title">
                     <ProjectIcon
-                      fallback={<Folder aria-hidden="true" size={14} strokeWidth={1.8} />}
+                      fallback={<Folder aria-hidden="true" size={14} />}
                       projectId={String(project.id)}
                       size={14}
                     />

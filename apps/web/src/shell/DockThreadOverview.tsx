@@ -154,12 +154,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
         >
           {environmentRows.map((row) => (
             <div className="dock-card__row" data-row={row.key} key={row.key}>
-              <row.icon
-                aria-hidden="true"
-                className="dock-card__icon"
-                size={14}
-                strokeWidth={1.7}
-              />
+              <row.icon aria-hidden="true" className="dock-card__icon" size={14} />
               <span className="dock-card__label" title={row.label}>
                 {row.label}
               </span>
@@ -224,7 +219,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
               </span>
               <span className="dock-card__meta" data-checks={props.pullRequest.checks}>
                 {props.pullRequest.checks === "passing" ? (
-                  <Check aria-hidden="true" size={12} strokeWidth={2} />
+                  <Check aria-hidden="true" size={12} />
                 ) : null}
                 {checksWords(props.pullRequest.checks)}
               </span>
@@ -248,7 +243,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
                 type="button"
                 variant="bare"
               >
-                <Icon aria-hidden="true" className="dock-card__icon" size={14} strokeWidth={1.7} />
+                <Icon aria-hidden="true" className="dock-card__icon" size={14} />
                 <span className="dock-card__label">{output.label}</span>
                 <span className="dock-card__meta">
                   {output.kind === "canvas" ? "Canvas" : (output.detail ?? "")}
@@ -271,12 +266,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
               type="button"
               variant="bare"
             >
-              <LoaderCircle
-                aria-hidden="true"
-                className="dock-card__spinner"
-                size={14}
-                strokeWidth={1.7}
-              />
+              <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
               <span className="dock-card__label">{thread.title}</span>
               {thread.projectName === undefined ? null : (
                 <span className="dock-card__meta">{thread.projectName}</span>
@@ -320,7 +310,7 @@ function BackgroundTasksCard(props: {
           type="button"
           variant="bare"
         >
-          <FoldIcon aria-hidden="true" className="dock-card__icon" size={14} strokeWidth={1.7} />
+          <FoldIcon aria-hidden="true" className="dock-card__icon" size={14} />
           <span className="dock-card__label dock-card__label--meta">
             {`${props.finished.length.toLocaleString("en")} finished`}
           </span>
@@ -345,14 +335,9 @@ function TaskRow(props: { readonly task: DockThreadBackgroundTask; readonly runn
       variant="bare"
     >
       {props.running ? (
-        <LoaderCircle
-          aria-hidden="true"
-          className="dock-card__spinner"
-          size={14}
-          strokeWidth={1.7}
-        />
+        <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
       ) : (
-        <Check aria-hidden="true" className="dock-card__icon" size={14} strokeWidth={1.7} />
+        <Check aria-hidden="true" className="dock-card__icon" size={14} />
       )}
       <span className="dock-card__label">{task.task}</span>
       <span className="dock-card__meta">
@@ -371,7 +356,7 @@ function RemoteAccessRow(props: { readonly remoteAccess: DockRemoteAccess }) {
   const { remoteAccess } = props;
   return (
     <div className="dock-card__row" data-row="remote-access">
-      <Radio aria-hidden="true" className="dock-card__icon" size={14} strokeWidth={1.7} />
+      <Radio aria-hidden="true" className="dock-card__icon" size={14} />
       <span className="dock-card__label">Remote access</span>
       <span className="dock-card__meta">
         <OctantSwitch

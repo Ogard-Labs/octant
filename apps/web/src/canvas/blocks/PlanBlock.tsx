@@ -239,9 +239,7 @@ function PlanStatusMark({
   readonly task: CanvasPlanTask;
 }) {
   const Icon = STATUS_ICON[task.status];
-  const mark = (
-    <Icon aria-hidden="true" className="canvas-plan__task-mark" size={16} strokeWidth={1.8} />
-  );
+  const mark = <Icon aria-hidden="true" className="canvas-plan__task-mark" size={16} />;
   if (setStatus === undefined) return mark;
   return (
     <OctantMenu
@@ -250,7 +248,7 @@ function PlanStatusMark({
         return {
           value: status,
           label: STATUS_LABEL[status],
-          icon: <StatusIcon aria-hidden="true" size={16} strokeWidth={1.8} />,
+          icon: <StatusIcon aria-hidden="true" size={16} />,
         };
       })}
       onValueChange={(value) => {
@@ -287,7 +285,7 @@ function PlanStartTask({
       type="button"
       variant="ghost"
     >
-      <Play aria-hidden="true" size={12} strokeWidth={1.8} />
+      <Play aria-hidden="true" size={12} />
       Start
     </OctantButton>
   );

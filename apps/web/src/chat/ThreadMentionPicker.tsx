@@ -180,7 +180,7 @@ export function ThreadMentionTypeahead(props: {
                 type="button"
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
-                <Hash aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Hash aria-hidden="true" size={12} />
                 <span>{candidate.title}</span>
                 <span className="thread-mention__meta">
                   {`${threadModeLabel(candidate.mode)} · ${threadPlacementLabel(candidate.placement)}`}
@@ -211,7 +211,7 @@ export function ThreadMentionChips(props: {
     <ul aria-label="Mentioned threads" className="thread-mention__chips">
       {props.chips.map((chip) => (
         <li className="chip thread-mention__chip" key={String(chip.threadId)}>
-          <Hash aria-hidden="true" size={12} strokeWidth={1.8} />
+          <Hash aria-hidden="true" size={12} />
           <span>{chip.title}</span>
           <span className="thread-mention__chip-receipt">
             {chip.unavailableReason === undefined
@@ -231,7 +231,7 @@ export function ThreadMentionChips(props: {
               type="button"
               variant="ghost"
             >
-              <MessagesSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+              <MessagesSquare aria-hidden="true" size={12} />
               <span>{chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat"}</span>
             </OctantButton>
           )}
@@ -243,7 +243,7 @@ export function ThreadMentionChips(props: {
             type="button"
             variant="bare"
           >
-            <X aria-hidden="true" size={12} strokeWidth={1.8} />
+            <X aria-hidden="true" size={12} />
           </OctantButton>
         </li>
       ))}

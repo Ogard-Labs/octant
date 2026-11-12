@@ -143,7 +143,7 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Attach folder");
   });
 
-  it("carries host and Project context on the start row above the composer's pill", () => {
+  it("carries host and Project context on the start row above the composer's box", () => {
     const { container } = render(<WorkComposerAdapter {...baseProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const tray = container.querySelector(".composer-tray");
@@ -154,7 +154,7 @@ describe("WorkComposerAdapter", () => {
     if (frame === null || tray === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    // The row is in the composer, outside the pill the person types in.
+    // The row is in the composer, outside the box the person types in.
     expect(frame.contains(tray)).toBe(true);
     expect(container.querySelector(".thread-composer__surface")?.contains(tray)).toBe(false);
     expect(
@@ -326,7 +326,7 @@ describe("WorkComposerAdapter interactions", () => {
     );
 
     pasteImage(screen.getByLabelText("First message"));
-    // The refusal is a card above the pill, not a line among the chips.
+    // The refusal is a card above the box, not a line among the chips.
     const refusal = await screen.findByText(
       "The selected model does not accept images. Choose an image-capable model.",
     );

@@ -2,6 +2,7 @@ import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
+import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import {
   decodeCodeThreadId,
   type CodeCheckoutId,
@@ -22,16 +23,19 @@ import type { CodeController } from "../code/useCodeController";
 import { composerContextOccupancy } from "../context/ComposerContextMeter";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
-import {
-  parseRepository,
-  type useRepositoryPullRequests,
-} from "../environment/useRepositoryPullRequests";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
+import { DockBrowserCard } from "../shell/DockBrowserCard";
+import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
+import type { DockCardControls } from "../shell/RightUtilityDockSurface";
+import { DockTerminalCard } from "../shell/DockTerminalCard";
+import { dismissLiveBrowserCard, useAgentBrowserCard } from "../threadActivity/browserCardActivity";
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
 import { runningNowThreads } from "../shell/dockThreadOverviewModel";
 import { remoteAccessAdministrationOf, type OctantHostBridge } from "../shell/hostBridge";
+import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
+import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
 import { RightUtilityDock } from "../shell/RightUtilityDock";
 import type {
   RightUtilityDockResolution,
@@ -39,6 +43,7 @@ import type {
   RightUtilityDockSurfaceId,
 } from "../shell/rightUtilityDockModel";
 import {
+  minimisedUtilityTabIds,
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
   type ThreadUtilityDockKey,
@@ -69,9 +74,22 @@ export interface DockContainerProps {
     | "closeBottomPanelTab"
     | "closeDock"
     | "closeDockTab"
+    | "hideDockCard"
+    | "hideDockTile"
+    | "minimiseDockTool"
+    | "restoreDockTool"
+    | "runDockToolMenu"
+    | "toggleDockTool"
+    | "moveDockTile"
+    | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
     | "openBottomTool"
+    | "resizeDockTileColumn"
+    | "resizeDockTileColumns"
+    | "showDockTabAlone"
+    | "showDockTabBelow"
+    | "showDockTabBeside"
     | "openCodeSurface"
     | "openDockTab"
     | "openLinkedProjectPullRequestThread"
@@ -134,8 +152,13 @@ export interface DockContainerProps {
   readonly displayedDockState: ThreadUtilityDockState;
   readonly dockPresentationWidth: number;
   readonly dockPresentedOpen: boolean;
-  readonly dockPullRequests: ReturnType<typeof useRepositoryPullRequests>;
+  /** The pull requests the thread is about, listed in More tools. */
+  readonly dockReferences: ReadonlyArray<DockUtilityLauncherReference>;
+  /** What the row of tool buttons shows and does; see `buildDockToolButtons`. */
+  readonly dockToolButtons: DockToolButtonsModel;
   readonly dockResolution: RightUtilityDockResolution;
+  /** Whether one tool could be shown for the pane, so each tile answers for itself. */
+  readonly dockResolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
   readonly dockSidecarsByThread: ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>;
   readonly dockTabs: ReturnType<typeof describeUtilityTabs>;
   readonly dockThread?: {
@@ -147,8 +170,6 @@ export interface DockContainerProps {
   /** Whether the dock's thread runs on this computer rather than a paired one. */
   readonly dockThreadOnThisComputer: boolean;
   readonly dockThreadKey?: ThreadUtilityDockKey;
-  readonly dockThreadProjectId?: ProjectId;
-  readonly dockThreadRepository?: string;
   /**
    * Present while the active pane is a new Code task with no thread yet: the
    * tools its title band shows disabled until the task starts.
@@ -156,7 +177,6 @@ export interface DockContainerProps {
   readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
-  readonly launchableDockSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly navigation: ShellNavigationModel;
   readonly now: number;
   readonly overviewThread?: DockOverviewThread;
@@ -182,8 +202,6 @@ export interface DockContainerProps {
   readonly windowCapability: string;
   readonly writtenDocumentsByThread: ReadonlyMap<ThreadUtilityDockKey, WrittenDocumentOffers>;
 }
-
-const NO_DOCK_REFERENCES: ReadonlyArray<never> = [];
 
 /**
  * The right utility dock and the bottom utility panel: the thread's tools,
@@ -218,19 +236,18 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     displayedDockState,
     dockPresentationWidth,
     dockPresentedOpen,
-    dockPullRequests,
+    dockReferences,
+    dockToolButtons,
     dockResolution,
+    dockResolveSurface,
     dockSidecarsByThread,
     dockTabs,
     dockThread,
     dockThreadHost,
     dockThreadKey,
     dockThreadOnThisComputer,
-    dockThreadProjectId,
-    dockThreadRepository,
     dockToolsAwaitingThread,
     isNarrow,
-    launchableDockSurfaces,
     navigation,
     now,
     overviewThread,
@@ -271,29 +288,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     () => remoteAccessAdministrationOf(hostBridge),
     [hostBridge],
   );
-
-  const launchableDockReferences = useMemo(() => {
-    const dockRepository = parseRepository(dockThreadRepository);
-    if (
-      dockPullRequests.status !== "ready" ||
-      dockRepository === undefined ||
-      dockThreadProjectId === undefined
-    ) {
-      return NO_DOCK_REFERENCES;
-    }
-    return dockPullRequests.rows.slice(0, 5).map((row) => ({
-      id: String(row.url),
-      label: `#${String(row.number)} ${row.title}`,
-      detail: `${dockRepository.owner}/${dockRepository.name}`,
-      onOpen: () =>
-        actions.selectProjectPullRequestIdentity({
-          projectId: dockThreadProjectId,
-          repositoryOwner: dockRepository.owner,
-          repositoryName: dockRepository.name,
-          number: row.number,
-        }),
-    }));
-  }, [actions, dockPullRequests, dockThreadProjectId, dockThreadRepository]);
 
   // A coordinator's workers, from the thread list this window already holds:
   // the Agents tool lists them and asks the host only for their runs.
@@ -571,6 +565,37 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     );
   })();
 
+  // The shelf: a card for each minimised tool, and for the agent's live Browser
+  // while it is out of sight. A Browser card is only a preview: it never counts
+  // as the Browser being in sight, which is the pane's and the tiles' to say.
+  const agentBrowserContext = useAgentBrowserCard(
+    activeMode === "chat" ? undefined : dockThread?.threadId,
+  );
+  const agentBrowserLive = agentBrowserContext !== undefined;
+  const shelfEntries = useMemo(
+    () =>
+      dockShelfEntries(displayedDockState, {
+        agentBrowserLive,
+        terminalPossible: activeMode === "code",
+      }),
+    [activeMode, agentBrowserLive, displayedDockState],
+  );
+
+  /** The Browser context of the page a card stands for, when that page has one of its own. */
+  function contextOf(entry: DockShelfEntry): string | undefined {
+    return displayedDockState.tabs.find((tab) => tab.id === entry.tabId)?.browserContextId;
+  }
+
+  function hideCard(entry: DockShelfEntry) {
+    // The card goes and nothing else: the tool stays open, its button in the row,
+    // and no page or shell is closed or stopped. A card that showed because the
+    // agent's session is live is also dismissed for that session.
+    actions.hideDockCard(entry.tabId);
+    if (entry.surface === "browser" && dockThread !== undefined) {
+      dismissLiveBrowserCard(dockThread.threadId);
+    }
+  }
+
   return (
     <>
       <RightUtilityDock
@@ -644,10 +669,27 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         desktop={threadUtility("desktop")}
         debug={threadUtility("debug")}
         vitals={threadUtility("vitals")}
-        launchableSurfaces={launchableDockSurfaces}
-        launchableReferences={launchableDockReferences}
+        {...(isNarrow
+          ? {
+              toolRow: {
+                dragSource: false,
+                model: dockToolButtons,
+                onMenuAction: actions.runDockToolMenu,
+                onPress: actions.toggleDockTool,
+                references: dockReferences,
+              },
+            }
+          : {})}
         onClose={actions.closeDock}
-        onCloseTab={actions.closeDockTab}
+        onCloseTab={(tabId) => {
+          // Closing the Browser tab dismisses the live session's card too, so
+          // reopening the tab and hiding it again does not bring the card back.
+          const closed = displayedDockState.tabs.find((tab) => tab.id === tabId);
+          if (closed?.surface === "browser" && dockThread !== undefined) {
+            dismissLiveBrowserCard(dockThread.threadId);
+          }
+          actions.closeDockTab(tabId);
+        }}
         onCommitWidth={(width) => {
           actions.setPreviewContextWidth(width);
           actions.setDockWidthChosen(true);
@@ -663,6 +705,42 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           bottomPanelOpen && activeBottomSurface?.id === "plan" ? undefined : threadUtility("plan")
         }
         resolution={dockResolution}
+        {...(dockThread === undefined || activeMode === "chat"
+          ? {}
+          : {
+              shelf: {
+                entries: shelfEntries,
+                onHide: (tabId: string) => {
+                  const entry = shelfEntries.find((candidate) => candidate.tabId === tabId);
+                  if (entry !== undefined) hideCard(entry);
+                },
+                onShow: actions.restoreDockTool,
+                // Keyed by thread and checkout: a card belongs to one shell and
+                // never shows another thread's under its own name.
+                renderCard: (entry: DockShelfEntry, controls: DockCardControls) => {
+                  const contextId = contextOf(entry);
+                  return entry.surface === "browser" ? (
+                    <DockBrowserCard
+                      client={browserAutomationClient}
+                      {...(contextId === undefined ? {} : { contextId })}
+                      key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
+                      onExpand={controls.onShow}
+                      onHide={controls.onHide}
+                      threadId={decodeBrowserThreadId(dockThread.threadId)}
+                    />
+                  ) : dockThread.mode === "code" ? (
+                    <DockTerminalCard
+                      checkoutId={dockThread.checkoutId}
+                      client={codeClient}
+                      key={`terminal:${dockThread.threadId}:${String(dockThread.checkoutId)}`}
+                      onExpand={controls.onShow}
+                      onHide={controls.onHide}
+                      threadId={decodeCodeThreadId(dockThread.threadId)}
+                    />
+                  ) : null;
+                },
+              },
+            })}
         renderTab={(descriptor) => {
           const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
           if (utilityTab === undefined) return null;
@@ -711,6 +789,20 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("tests")
         }
         tabs={dockTabs}
+        tiles={{
+          ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),
+          minimised: minimisedUtilityTabIds(displayedDockState),
+          narrow: isNarrow,
+          onHideTile: actions.hideDockTile,
+          onMinimise: actions.minimiseDockTool,
+          onMove: actions.moveDockTile,
+          onResizeColumn: actions.resizeDockTileColumn,
+          onResizeColumns: actions.resizeDockTileColumns,
+          onShowAlone: actions.showDockTabAlone,
+          onShowBelow: actions.showDockTabBelow,
+          onShowBeside: actions.showDockTabBeside,
+          resolveSurface: dockResolveSurface,
+        }}
         width={dockPresentationWidth}
       />
       {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (

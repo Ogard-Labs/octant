@@ -91,7 +91,7 @@ export const WorkListRow = memo(function WorkListRow(props: WorkListRowProps) {
           data-state={props.state.tone}
           role="img"
         >
-          <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+          <Icon aria-hidden="true" size={14} />
         </span>
         {props.repository === undefined ? null : (
           <span className="work-list__meta-text">{props.repository}</span>
@@ -194,7 +194,7 @@ export function WorkListSortMenu<T extends string>(props: {
   return (
     <OctantMenuRoot>
       <WorkListMenuTrigger label={props.label} tooltip="Sort and group">
-        <ArrowUpDown aria-hidden="true" size={16} strokeWidth={1.5} />
+        <ArrowUpDown aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">

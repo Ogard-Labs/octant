@@ -1,4 +1,5 @@
-import { BrowserPreviewThumbnail } from "./BrowserPreviewThumbnail";
+import { reportBrowserActivity } from "./browserCardActivity";
+import { useBrowserThreadSnapshot } from "./useBrowserThreadSnapshot";
 import { ThreadActivityPreviewContext } from "./ThreadActivityEnvironment";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
@@ -13,21 +14,11 @@ import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNo
 import { OctantButton } from "../ui/base/OctantButton";
 import { computerUseApproveLabel } from "../computerUse/computerUseApprovalCopy";
 
-/** The slowest a preview of an unchanged page is asked for again. */
-const MAX_UNCHANGED_POLL_MS = 5_000;
-
-/**
- * Browser sessions whose preview the person hid, by thread and session. Held
- * for the life of the page because the preview remounts with its pane, and a
- * preview that came back after being closed would not be closed.
- */
-const hiddenBrowserPreviews = new Set<string>();
-
 export interface ThreadActivityPictureInPictureProps {
   /**
-   * Whether this thread's Browser is already on screen (a pane, the dock, or
-   * the bottom panel). A preview of a page the person can see is a copy of it,
-   * so none is drawn and no picture is asked for.
+   * Whether this thread's Browser is already on screen (a pane, a tile of the
+   * dock, or the bottom panel). A card of a page the person can see would be a
+   * copy of it, so the dock shows none while this is true.
    */
   readonly browserVisible?: boolean;
   readonly browserClient?: BrowserAutomationClient;
@@ -45,7 +36,7 @@ export interface ThreadActivityPictureInPictureProps {
    * a dismissal across remounts.
    */
   readonly onOpenBrowser?: (activity: { readonly sessionIds: ReadonlyArray<string> }) => void;
-  /** Shows this thread's Browser because the person opened the preview. */
+  /** Brings this thread's Browser forward when the agent hands the page over to sign in. */
   readonly onShowBrowser?: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
@@ -57,25 +48,28 @@ export interface ThreadActivityPictureInPictureProps {
  * existing exact-thread clients, while Browser activity can ask the shell to
  * reveal the already-authoritative Browser surface.
  *
- * Browser activity appears as a small live picture only while the Browser is
- * out of sight. Computer Use keeps its card, since an approval cannot wait for
- * the person to go looking for it.
+ * Browser activity is read here without a picture and told to the dock, whose
+ * card shows the page while the Browser is out of sight. Computer Use keeps its
+ * card here, since an approval cannot wait for the person to go looking for it.
  */
 export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPictureProps) {
-  const [browserSnapshot, setBrowserSnapshot] = useState<BrowserAutomationSnapshot>();
   const [computerSession, setComputerSession] = useState<ComputerUseSessionView>();
   const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [, setHiddenRevision] = useState(0);
   const activityGeneration = useRef(0);
-  const browserSignature = useRef("");
+  const browserSnapshot = useBrowserThreadSnapshot({
+    client: props.browserClient,
+    enabled: props.enabled !== false,
+    liveOnly: true,
+    picture: false,
+    ...(props.pollIntervalMs === undefined ? {} : { pollIntervalMs: props.pollIntervalMs }),
+    threadId: props.threadId,
+  });
 
   const browserPreviewKey =
     browserSnapshot?.context === undefined
       ? undefined
       : `${String(props.threadId)}:${String(browserSnapshot.context.contextId)}`;
-  const browserPreviewHidden =
-    browserPreviewKey !== undefined && hiddenBrowserPreviews.has(browserPreviewKey);
   // The agent handed the page to the person to sign in: bring the Browser
   // forward once for that hand-off, wherever the person is in the thread. A
   // take-over is the person's own click in the Browser, so it needs no pull.
@@ -93,49 +87,9 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     broughtForward.current = handOff;
     showBrowser();
   }, [browserPreviewKey, props.threadId, showBrowser, waitingForPerson]);
-  // A picture is asked for only while one could be seen.
-  const wantsPicture = props.browserVisible !== true && !browserPreviewHidden;
-  const hasPolledActivity =
-    (wantsPicture && browserSnapshot !== undefined && isBrowserActivity(browserSnapshot)) ||
-    (computerSession !== undefined && isComputerUseActivity(computerSession));
-  const pollIntervalMs = props.pollIntervalMs ?? (hasPolledActivity ? 1_000 : 5_000);
-
-  /** Resolves to whether the read changed what the preview would show. */
-  const loadBrowser = useCallback(
-    async (signal?: AbortSignal): Promise<boolean> => {
-      const generation = activityGeneration.current;
-      if (props.browserClient === undefined) {
-        browserSignature.current = "";
-        setBrowserSnapshot(undefined);
-        return true;
-      }
-      try {
-        const next = await props.browserClient.inspectThread(
-          wantsPicture
-            ? { threadId: props.threadId }
-            : { threadId: props.threadId, freshPicture: false },
-          signal,
-        );
-        if (signal?.aborted === true || generation !== activityGeneration.current) return true;
-        const live =
-          String(next.threadId) === String(props.threadId) && isBrowserActivity(next)
-            ? next
-            : undefined;
-        const signature = browserPictureSignature(live);
-        if (signature === browserSignature.current) return false;
-        browserSignature.current = signature;
-        setBrowserSnapshot(live);
-        return true;
-      } catch (error) {
-        if (signal?.aborted === true || isAbortError(error)) return true;
-        if (generation !== activityGeneration.current) return true;
-        browserSignature.current = browserPictureSignature(undefined);
-        setBrowserSnapshot(undefined);
-        return true;
-      }
-    },
-    [props.browserClient, props.threadId, wantsPicture],
-  );
+  const pollIntervalMs =
+    props.pollIntervalMs ??
+    (computerSession !== undefined && isComputerUseActivity(computerSession) ? 1_000 : 5_000);
 
   const loadComputerUse = useCallback(
     async (signal?: AbortSignal) => {
@@ -167,34 +121,11 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   useEffect(() => {
     if (props.enabled === false) {
       activityGeneration.current += 1;
-      browserSignature.current = "";
-      setBrowserSnapshot(undefined);
       setComputerSession(undefined);
       return;
     }
     const controller = new AbortController();
-    let browserInFlight = false;
     let computerInFlight = false;
-    let unchangedReads = 0;
-    let browserDueAt = 0;
-    const refreshBrowser = async () => {
-      // A page that has not changed is asked about less and less often, down
-      // to one look every few seconds, so a still page costs next to nothing.
-      if (browserInFlight || Date.now() < browserDueAt) return;
-      browserInFlight = true;
-      try {
-        const changed = await loadBrowser(controller.signal);
-        unchangedReads = changed ? 0 : unchangedReads + 1;
-      } finally {
-        browserInFlight = false;
-      }
-      browserDueAt =
-        Date.now() +
-        Math.min(
-          Math.max(pollIntervalMs, MAX_UNCHANGED_POLL_MS),
-          pollIntervalMs * 2 ** Math.min(unchangedReads, 3),
-        );
-    };
     const refreshComputer = async () => {
       if (computerInFlight) return;
       computerInFlight = true;
@@ -202,28 +133,17 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         computerInFlight = false;
       });
     };
-    // Paused while the window is hidden: a preview nobody can see takes no
-    // pictures.
-    const stop = scheduleVisibleInterval(
-      () => {
-        void refreshBrowser();
-        void refreshComputer();
-      },
-      pollIntervalMs,
-      { runImmediately: true },
-    );
+    // Paused while the window is hidden: nobody can see a card then.
+    const stop = scheduleVisibleInterval(() => void refreshComputer(), pollIntervalMs, {
+      runImmediately: true,
+    });
     return () => {
       controller.abort();
       stop();
     };
-  }, [loadBrowser, loadComputerUse, pollIntervalMs, props.enabled]);
+  }, [loadComputerUse, pollIntervalMs, props.enabled]);
 
-  const currentBrowserSnapshot =
-    props.enabled !== false &&
-    browserSnapshot !== undefined &&
-    String(browserSnapshot.threadId) === String(props.threadId)
-      ? browserSnapshot
-      : undefined;
+  const currentBrowserSnapshot = browserSnapshot;
   const currentComputerSession =
     props.enabled !== false &&
     computerSession !== undefined &&
@@ -247,6 +167,20 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     announcedBrowserSessionKey.current = browserSessionKey;
     props.onOpenBrowser?.({ sessionIds: browserSessionIds });
   }, [browserSessionIds, browserSessionKey, props.onOpenBrowser]);
+
+  // The dock's card for this session, and the window's dock toggle, read this
+  // instead of asking the host again.
+  const browserSessionContext = browserSessionIds[0];
+  const threadKey = String(props.threadId);
+  const browserInSight = props.browserVisible === true;
+  useEffect(
+    () =>
+      reportBrowserActivity(threadKey, {
+        contextId: browserSessionContext,
+        inSight: browserInSight,
+      }),
+    [browserInSight, browserSessionContext, threadKey],
+  );
 
   const representedComputerUseSessionId = currentComputerSession?.sessionId;
   useEffect(() => {
@@ -313,15 +247,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     }
   }
 
-  function hideBrowserPreview() {
-    if (browserPreviewKey === undefined) return;
-    hiddenBrowserPreviews.add(browserPreviewKey);
-    setHiddenRevision((revision) => revision + 1);
-  }
-
   const hasComputerUse = currentComputerSession !== undefined;
-  const showBrowserPreview =
-    currentBrowserSnapshot !== undefined && props.browserVisible !== true && !browserPreviewHidden;
 
   const computerUsePreview = !hasComputerUse ? null : collapsed ? (
     <>
@@ -333,9 +259,9 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         variant="secondary"
       >
         <span className="thread-activity-pip__pulse" />
-        <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+        <MonitorUp aria-hidden="true" size={14} />
         <span>Computer Use active</span>
-        <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
+        <Eye aria-hidden="true" size={14} />
       </OctantButton>
       <div className="thread-activity-pip__collapsed-controls">
         {currentComputerSession.pendingApproval === undefined ? null : (
@@ -410,7 +336,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
             {currentComputerSession.pendingApproval === undefined ? (
               <span className="thread-activity-pip__pulse" />
             ) : null}
-            <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+            <MonitorUp aria-hidden="true" size={14} />
             <strong>Computer Use</strong>
             {currentComputerSession.pendingApproval === undefined ? (
               <span>
@@ -449,13 +375,6 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     <ThreadActivityPreviewContext.Provider value={presentation}>
       <div className="thread-activity-frame">
         <div className="thread-activity-frame__content">{props.children}</div>
-        {showBrowserPreview ? (
-          <BrowserPreviewThumbnail
-            onClose={hideBrowserPreview}
-            snapshot={currentBrowserSnapshot}
-            {...(props.onShowBrowser === undefined ? {} : { onOpen: props.onShowBrowser })}
-          />
-        ) : null}
         {computerUsePreview}
       </div>
     </ThreadActivityPreviewContext.Provider>
@@ -472,7 +391,7 @@ function ComputerUseActivityPreview(props: {
     return (
       <div className="thread-activity-pip__permission">
         <div className="thread-activity-pip__permission-title">
-          <MonitorUp aria-hidden="true" size={16} strokeWidth={1.7} />
+          <MonitorUp aria-hidden="true" size={16} />
           <h3>Allow computer access?</h3>
         </div>
         <p>{props.session.pendingApproval.summary}</p>
@@ -500,7 +419,7 @@ function ComputerUseActivityPreview(props: {
   }
   return (
     <div className="thread-activity-pip__visual thread-activity-pip__empty">
-      <MonitorUp aria-hidden="true" size={24} strokeWidth={1.5} />
+      <MonitorUp aria-hidden="true" size={20} />
       <strong>{computerUseState(props.session.state)}</strong>
       <span>
         Native pixels stay on the authoritative host; activity and approvals remain visible.
@@ -522,37 +441,6 @@ function browserActivitySessionIds(snapshot: BrowserAutomationSnapshot): Readonl
     for (const entry of snapshot.contexts) add(String(entry.context.contextId));
   }
   return ids;
-}
-
-function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {
-  const active = (state: string | undefined) =>
-    state === "creating" || state === "active" || state === "stopping" || state === "failed";
-  if (snapshot.contexts !== undefined && snapshot.contexts.length > 0) {
-    return snapshot.contexts.some((entry) => active(entry.context.state));
-  }
-  return active(snapshot.context?.state);
-}
-
-/**
- * What the preview would draw from a read. Two reads with the same signature
- * are one picture, so the second is not a change and costs no render; the
- * observation's own revision moves on every look and says nothing about the page.
- */
-function browserPictureSignature(snapshot: BrowserAutomationSnapshot | undefined): string {
-  if (snapshot === undefined) return "none";
-  return JSON.stringify([
-    snapshot.status,
-    snapshot.context?.contextId,
-    snapshot.context?.state,
-    snapshot.contexts?.length,
-    snapshot.observation?.url,
-    snapshot.observation?.title,
-    snapshot.observation?.stale,
-    snapshot.observation?.viewport?.width,
-    snapshot.observation?.viewport?.height,
-    snapshot.observation?.screenshotDataUrl,
-    snapshot.waitingForPerson,
-  ]);
 }
 
 function isComputerUseActivity(session: ComputerUseSessionView): boolean {
