@@ -670,8 +670,17 @@ runs, not when it was recorded.
   hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
 - Every wait has a limit: `timeoutMs` up to 10 minutes, 10 seconds when
   it names none, on both Browsers. The 10-minute ceiling is a Settings default
-  the person can change (maintainer request, 2026-11-12). Not built yet: today
-  the ceiling is a fixed 30 seconds. A wait that runs out fails and names the
+  the person can change (maintainer request, 2026-11-12). Built: the ceiling
+  is 10 minutes (`MAX_BROWSER_WAIT_MS`). Not built yet: it is a fixed limit,
+  not a setting. The waits of one `steps` call share it: a batch whose waits
+  together would last longer (a wait that names no limit counts as 10
+  seconds) is refused as malformed, because one call has to answer inside the
+  time a runtime allows an app-managed call (eleven minutes under the Claude
+  runtime), which is also why the ceiling is not higher. A page's idle
+  interval is 10 minutes too, so an admitted wait keeps its page for the
+  wait's own limit and 30 seconds more: the hold is fixed when the wait is
+  dispatched, so a call that hangs past it still cannot extend the page's
+  life. A wait that runs out fails and names the
   conditions that never held. A ref in a wait becomes the snapshot's selector
   without the identity check an action makes, because waiting for an element
   to change or leave is the point.

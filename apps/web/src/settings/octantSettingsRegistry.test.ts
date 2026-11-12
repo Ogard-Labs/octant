@@ -128,6 +128,7 @@ describe("octantSettingsRegistry", () => {
       "public-link-service",
       "browser-site-approvals",
       "browser-agent-downloads",
+      "browser-captures-per-thread",
       "tool-approvals",
       "network-limits",
       "safe-networks",
@@ -295,6 +296,8 @@ describe("octantSettingsRegistry", () => {
       "subagent-concurrency-on-host",
       "subagent-concurrency-per-thread",
       "subagent-working-minutes",
+      "subagent-no-limit-full-access",
+      "subagent-provider-wait-minutes",
       "default-model",
       "vision-reviewer",
     ]);

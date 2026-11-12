@@ -28,14 +28,40 @@ export type AgentRunConcurrency = typeof AgentRunConcurrency.Type;
 
 export const DEFAULT_AGENT_RUN_CONCURRENCY: AgentRunConcurrency = { perThread: 4, onHost: 8 };
 
-export const DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES = 30;
+/**
+ * Two working hours: a helper given a real implementation or review task
+ * was being cut off at the earlier 30 minutes while still making progress.
+ * The limit still exists by default because a provider that goes silent
+ * holds its helper slot until the limit fires.
+ */
+export const DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES = 120;
 export const MAX_AGENT_RUN_WORKING_TIME_MINUTES = 240;
 const AgentRunWorkingTimeLimit = Schema.Int.pipe(
   Schema.between(1, MAX_AGENT_RUN_WORKING_TIME_MINUTES),
 );
 
+/**
+ * How long a helper waits for a provider that is full before it ends
+ * Interrupted. Half an hour by default: a turn holding the slot is often a
+ * long one, and the earlier five minutes ended helpers that would have
+ * started a few minutes later. The ceiling matches the working-time ceiling.
+ */
+export const DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 30;
+export const MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 240;
+const AgentRunProviderSlotWaitLimit = Schema.Int.pipe(
+  Schema.between(1, MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES),
+);
+
 export const AgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
+  /**
+   * A person's choice that helpers of a thread at Full access work with no
+   * time limit. Optional so settings journaled before it existed replay as
+   * limited; it never lifts the limit for a thread below Full access.
+   */
+  noWorkingTimeLimitAtFullAccess: Schema.optional(Schema.Boolean),
+  /** Optional so settings journaled before it existed replay as the default. */
+  providerSlotWaitMinutes: Schema.optional(AgentRunProviderSlotWaitLimit),
   creationPosture: AgentRunCreationPosture,
   /** Optional so settings journaled before it existed replay as the defaults. */
   concurrency: Schema.optional(AgentRunConcurrency),
@@ -60,6 +86,10 @@ export const DEFAULT_AGENT_RUN_POLICY_SETTINGS: Omit<AgentRunPolicySettings, "up
 
 export const UpdateAgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
+  /** Absent keeps the current choice. */
+  noWorkingTimeLimitAtFullAccess: Schema.optional(Schema.Boolean),
+  /** Absent keeps the current wait. */
+  providerSlotWaitMinutes: Schema.optional(AgentRunProviderSlotWaitLimit),
   creationPosture: AgentRunSelectableCreationPosture,
   /** Absent keeps the current limits. */
   concurrency: Schema.optional(AgentRunConcurrency),
@@ -72,6 +102,21 @@ export function effectiveAgentRunConcurrency(
   settings: Pick<AgentRunPolicySettings, "concurrency">,
 ): AgentRunConcurrency {
   return settings.concurrency ?? DEFAULT_AGENT_RUN_CONCURRENCY;
+}
+
+/**
+ * The working-time limit for a helper's next attempt, in minutes, or `none`.
+ * None needs both the person's choice and a parent thread at Full access.
+ */
+export function agentRunWorkingTimeLimitMinutes(
+  settings: Pick<
+    AgentRunPolicySettings,
+    "workingTimeLimitMinutes" | "noWorkingTimeLimitAtFullAccess"
+  >,
+  thread: { readonly threadAtFullAccess: boolean },
+): number | "none" {
+  if (settings.noWorkingTimeLimitAtFullAccess === true && thread.threadAtFullAccess) return "none";
+  return settings.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES;
 }
 
 export const decodeAgentRunPolicySettings = Schema.decodeUnknownSync(AgentRunPolicySettings);

@@ -139,6 +139,11 @@ export class BrowserCaptureStore {
     });
   }
 
+  /** The ids of the captures whose bytes this thread still holds. */
+  held(threadId: BrowserThreadId): ReadonlySet<string> {
+    return this.#store.attachmentIdsInScope(String(threadId));
+  }
+
   remove(threadId: BrowserThreadId, captureId: BrowserCaptureId): Promise<void> {
     return this.#store.remove(String(threadId), String(captureId));
   }

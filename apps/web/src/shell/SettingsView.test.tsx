@@ -1927,6 +1927,18 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
   });
 
+  it("keeps 200 Browser captures a thread until the person chooses another number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Browser captures" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Captures kept per thread" })).toHaveValue(200);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Decrease Captures kept per thread" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
+  });
+
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {

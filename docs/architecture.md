@@ -2429,7 +2429,7 @@ Settled managed attempts record active milliseconds and the chosen limit through
 
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12; not built yet: today the default is 30 minutes and none is not offered). The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
+from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12). None is one Helper agents setting (`noWorkingTimeLimitAtFullAccess`): it applies to a child whose thread has Full access when the attempt starts (a Code thread's `executionPolicy` or a Work thread's `access`), never to a child of any other thread, and such an attempt records its working time with no limit. With no limit nothing local ends a child whose provider goes silent after startup: it keeps its capacity slot until it is cancelled or the host restarts, which the setting's description says. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -3661,9 +3661,16 @@ the thread it came from.
   Complete; `full-access-ineligible` when the Code thread now has Full access;
   `execution-profile-mismatch` when its provider or model changed. A
   follow-up due while a turn is running or being started in the thread runs
-  after that turn instead of being skipped (maintainer request, 2026-11-12;
-  not built yet: today a busy thread refuses as `thread-busy` and the
-  follow-up is skipped, not waited on). A refusal fails the run with its
+  after that turn instead of being skipped (maintainer request, 2026-11-12).
+  Its claimed run waits journaled as `dispatching` with no dispatch intent,
+  so it survives a restart; the scheduler offers it again on every pass,
+  at most 15 seconds apart, and each offer repeats every check above before
+  anything is sent, so a thread archived or marked Done during the wait
+  still refuses. A follow-up archived while it waits ends its run
+  `cancelled`, a paused one keeps waiting, and one still waiting a day past
+  its time fails as `follow-up-missed`. The run's one first-turn request id
+  keeps the turn from being sent twice. (`thread-busy` is no longer
+  recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
@@ -4397,7 +4404,9 @@ of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
 as a link card beside the drawn snapshot. A turn keeps at most 512 steps
 by default, a number the person can change (maintainer request, 2026-11-12;
-not built yet: today a constant 64), in arrival
+not built yet: today a constant 64, kept until a step is journaled and
+streamed as a change, because each tool event now restates the whole list
+and those bytes grow with the square of the limit), in arrival
 order and sets a truncated flag when it called more. Chat carries them as
 `ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
 `WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
@@ -4778,8 +4787,8 @@ flowchart LR
   `record`. The bytes live in the host's managed
   attachment store and the journal holds only a reference, the page origin, URL,
   title, content hash, and time. A thread keeps its newest 200 captures by
-  default, a number the person can change (maintainer request, 2026-11-12;
-  not built yet: today a constant 32), and they
+  default, a number the person can change from 1 to 500 in Settings ›
+  Permissions (maintainer request, 2026-11-12), and they
   are erased with the thread. Only a local window that can open the thread reads
   them, never a paired device. They never reach a Canvas share, replica sync, or
   a diagnostics export. They leave the host only in an export the local owner
@@ -6186,8 +6195,9 @@ and hands the run slot it was about to use to the next waiter. A start refused f
 or authority ends the wait with that reason (`workspace-denied`,
 `authority-drift`) and does not retry. Thirty minutes by default, a setting
 the person can change, is the longest a helper waits (maintainer request,
-2026-11-12; not built yet: today it is a constant five minutes, the idle
-bound of a Chat turn); past it the helper ends Interrupted with
+2026-11-12): Helper agents settings hold it as `providerSlotWaitMinutes`,
+from 1 to 240, and the host reads it at every check, so a change applies to
+helpers already waiting; past it the helper ends Interrupted with
 `capacity-unavailable` and the sentence that names what is full, and Retry
 starts it again once a slot frees. A longer wait would mean a person's
 unanswered question is holding the slot, and the helper should say so rather

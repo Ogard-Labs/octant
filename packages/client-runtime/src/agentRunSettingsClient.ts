@@ -15,6 +15,10 @@ export interface AgentRunSettingsClient {
   current(): Promise<AgentRunPolicySettings>;
   update(input: {
     readonly workingTimeLimitMinutes?: number;
+    /** Absent keeps the current choice. */
+    readonly noWorkingTimeLimitAtFullAccess?: boolean;
+    /** Absent keeps the current wait. */
+    readonly providerSlotWaitMinutes?: number;
     readonly creationPosture: AgentRunSelectableCreationPosture;
     /** Absent keeps the current limits. */
     readonly concurrency?: AgentRunConcurrency;

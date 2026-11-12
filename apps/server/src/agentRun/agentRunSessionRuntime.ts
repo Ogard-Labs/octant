@@ -72,8 +72,11 @@ const DEFAULT_MAX_EVENTS = 256;
  * live Code child was cut off at the previous two-minute bound while still
  * calling tools. The bound still has to exist: a provider that wedges holds its
  * capacity reservation until it fires, and nothing else ends a silent turn.
- * Thirty minutes is long enough for a bounded implementation or review task and
- * short enough that a stuck child frees its slot within one working session.
+ * Two hours is the default because children given a real implementation or
+ * review task were cut off at the earlier thirty minutes while still working;
+ * a stuck child still frees its slot within one working session. A person may
+ * choose another bound, or none for a thread at Full access, in which case
+ * only a cancel, the provider, or a host restart ends a silent turn.
  *
  * Time spent waiting for a person's approval or answer does not count: a child
  * cut off while its approval card sat unanswered loses its work through no
@@ -81,7 +84,7 @@ const DEFAULT_MAX_EVENTS = 256;
  * There is no separate wall-time bound; a waiting child keeps its slot until
  * the person answers, someone cancels it, or the host restarts.
  */
-export const MANAGED_AGENT_RUN_TURN_DEADLINE_MS = 30 * 60_000;
+export const MANAGED_AGENT_RUN_TURN_DEADLINE_MS = 120 * 60_000;
 /**
  * How long teardown may wait for the provider to confirm it ended the session.
  *
@@ -322,8 +325,11 @@ export interface AgentRunSessionRuntimeOptions {
   readonly capacityEnforcement?: SchedulerCapacityEnforcement;
   readonly maxEvents?: number;
   readonly timeoutMs?: number;
-  /** Person-owned settings, read for each new attempt; agents cannot supply this value. */
-  readonly workingTimeLimitMs?: () => number;
+  /**
+   * Person-owned settings, read for each new attempt; agents cannot supply
+   * this value. `none` runs the attempt with no working-time limit.
+   */
+  readonly workingTimeLimitMs?: (run: AgentRun) => number | "none";
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
   /** Publishes ephemeral managed-child transcript facts to the host read model. */
@@ -336,7 +342,7 @@ export interface AgentRunSessionRuntimeOptions {
   readonly onSessionStarted?: (input: {
     readonly runId: AgentRunId;
     readonly resumed: boolean;
-    readonly workingTimeLimitMs: number;
+    readonly workingTimeLimitMs: number | "none";
   }) => void;
   /** Input attribution for the bounded display history; it never exposes private cursors. */
   readonly onUserMessage?: (input: {
@@ -985,7 +991,7 @@ export function createAgentRunSessionRuntime(
       markFinished();
     };
 
-    const workingTimeLimitMs = options.workingTimeLimitMs?.() ?? timeoutMs;
+    const workingTimeLimitMs = options.workingTimeLimitMs?.(run) ?? timeoutMs;
     let workingTime: AgentRunWorkingTime | undefined;
     const controller = new AbortController();
     controller.signal.addEventListener(
@@ -1455,7 +1461,8 @@ interface ManagedSessionInput {
   readonly recordContinuation: (state: "delivery-unknown" | "delivered") => boolean;
   readonly requireResumeCursor: boolean;
   readonly maxEvents: number;
-  readonly timeoutMs: number;
+  /** `none` runs the turn with no working-time limit. */
+  readonly timeoutMs: number | "none";
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
@@ -1506,9 +1513,9 @@ interface WorkingTimeDeadline {
   readonly dispose: () => void;
 }
 
-function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
-  let remainingMs = boundMs;
-  let workingSince = Date.now();
+function startWorkingTimeDeadline(limitMs: number | "none"): WorkingTimeDeadline {
+  let workedMs = 0;
+  let workingSince: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let personWaits = 0;
   let settled = false;
@@ -1518,27 +1525,37 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
   });
   const work = (): void => {
     workingSince = Date.now();
-    timer = setTimeout(() => {
-      settled = true;
-      remainingMs = 0;
-      timer = undefined;
-      reach();
-    }, remainingMs);
+    // With no limit the clock still runs, so the attempt's working time is
+    // recorded; only the timer that would end the turn is never armed.
+    if (limitMs === "none") return;
+    timer = setTimeout(
+      () => {
+        settled = true;
+        workedMs = limitMs;
+        workingSince = undefined;
+        timer = undefined;
+        reach();
+      },
+      Math.max(0, limitMs - workedMs),
+    );
+  };
+  const pause = (): void => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    if (workingSince === undefined) return;
+    workedMs += Math.max(0, Date.now() - workingSince);
+    workingSince = undefined;
   };
   work();
   return {
     reached,
-    elapsedMs: () =>
-      Math.min(
-        boundMs,
-        Math.max(0, boundMs - remainingMs + (timer === undefined ? 0 : Date.now() - workingSince)),
-      ),
+    elapsedMs: () => {
+      const worked =
+        workedMs + (workingSince === undefined ? 0 : Math.max(0, Date.now() - workingSince));
+      return limitMs === "none" ? worked : Math.min(limitMs, worked);
+    },
     awaitPerson: () => {
-      if (personWaits === 0 && timer !== undefined) {
-        clearTimeout(timer);
-        timer = undefined;
-        remainingMs = Math.max(0, remainingMs - (Date.now() - workingSince));
-      }
+      if (personWaits === 0) pause();
       personWaits += 1;
       let released = false;
       return () => {
@@ -1550,8 +1567,7 @@ function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
     },
     dispose: () => {
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
-      timer = undefined;
+      pause();
     },
   };
 }
@@ -1572,6 +1588,7 @@ function runManagedSession(
   return Effect.scoped(
     Effect.gen(function* () {
       const deadline = startWorkingTimeDeadline(input.timeoutMs);
+      const limit = input.timeoutMs === "none" ? {} : { limitMs: input.timeoutMs };
       yield* Effect.addFinalizer(() => Effect.sync(deadline.dispose));
       const state: ManagedSessionState = {
         outcome: undefined,
@@ -1671,7 +1688,7 @@ function runManagedSession(
               activeMs,
               totalActiveMs: activeMs,
               attempts: 1,
-              limitMs: input.timeoutMs,
+              ...limit,
             });
           }),
         ),
@@ -1687,7 +1704,7 @@ function runManagedSession(
           activeMs,
           totalActiveMs: activeMs,
           attempts: 1,
-          limitMs: input.timeoutMs,
+          ...limit,
         },
       };
       if (finished === "timed-out") {
@@ -1697,7 +1714,7 @@ function runManagedSession(
         state.timedOut = true;
         return {
           kind: "interrupted",
-          reason: `Working-time limit reached (${input.timeoutMs / 60_000} minutes). Retry or Resume starts a fresh working-time window; waiting for your input did not count.`,
+          reason: `Working-time limit reached${limit.limitMs === undefined ? "" : ` (${limit.limitMs / 60_000} minutes)`}. Retry or Resume starts a fresh working-time window; waiting for your input did not count.`,
           ...(evidence === undefined ? {} : { evidence }),
         };
       }

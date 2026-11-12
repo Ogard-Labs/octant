@@ -663,9 +663,20 @@ describe("follow-up fire-time decision", () => {
     ).toMatchObject({ reason: "thread-unavailable" });
   });
 
-  it("refuses a thread marked done and skips one already running a turn", () => {
+  it("refuses a thread marked done", () => {
     expect(decide({ done: true })).toMatchObject({ reason: "thread-done" });
-    expect(decide({ busy: true })).toMatchObject({ reason: "thread-busy" });
+  });
+
+  it("waits for a thread that is running a turn instead of skipping the follow-up", () => {
+    expect(decide({ busy: true })).toEqual({ kind: "waiting" });
+  });
+
+  it("refuses a busy thread that has also moved on, rather than waiting on it", () => {
+    expect(decide({ busy: true, archived: true })).toMatchObject({ reason: "thread-unavailable" });
+    expect(decide({ busy: true, done: true })).toMatchObject({ reason: "thread-done" });
+    expect(decide({ busy: true }, "2026-11-02T09:01:00.000Z")).toMatchObject({
+      reason: "follow-up-missed",
+    });
   });
 
   it("refuses when the thread's provider, model, or posture no longer matches", () => {

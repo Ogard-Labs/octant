@@ -843,6 +843,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
+          id: settingId("subagent-no-limit-full-access"),
+          label: "No helper time limit at Full access",
+          scope: "app",
+          keywords: "helper agents subagents working time limit none unlimited full access",
+        },
+        {
+          id: settingId("subagent-provider-wait-minutes"),
+          label: "Minutes a helper waits for a full provider",
+          scope: "app",
+          keywords:
+            "helper agents subagents provider full capacity wait minutes request slot limit",
+        },
+        {
           id: settingId("default-model"),
           label: "Default model",
           scope: "app",
@@ -1168,6 +1181,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
+          id: settingId("browser-captures-per-thread"),
+          label: "Browser captures kept per thread",
+          scope: "host",
+          keywords:
+            "browser captures screenshots recordings kept per thread limit retention storage",
         },
         {
           id: settingId("tool-approvals"),

@@ -136,6 +136,11 @@ export interface AgentRunOrchestrationServiceOptions {
   readonly parentSessions?: AgentRunParentSessionPort;
   /** Without it a child waiting for a provider slot is ended, never started on a stale grant. */
   readonly parentAuthority?: AgentRunParentAuthorityPort;
+  /**
+   * The person's setting for how long a helper waits for a full provider,
+   * read at each check so a change applies to helpers already waiting.
+   */
+  readonly providerSlotWaitLimitMs?: () => number;
 }
 
 export interface AdmitAgentRunInput {
@@ -161,6 +166,7 @@ export class AgentRunOrchestrationService {
   readonly #processes: AgentRunProcessSupervisorPort | undefined;
   readonly #parentSessions: AgentRunParentSessionPort | undefined;
   readonly #parentAuthority: AgentRunParentAuthorityPort | undefined;
+  readonly #providerSlotWaitLimitMs: () => number;
   readonly #reservations = new Map<AgentRunId, string>();
   /**
    * Runs already parked on their dependencies when this service was built,
@@ -200,6 +206,8 @@ export class AgentRunOrchestrationService {
     this.#processes = options.processes;
     this.#parentSessions = options.parentSessions;
     this.#parentAuthority = options.parentAuthority;
+    this.#providerSlotWaitLimitMs =
+      options.providerSlotWaitLimitMs ?? (() => AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS);
     for (const run of this.#persistence.snapshot().values()) {
       if (
         run.lifecycleStatus === "waiting" &&
@@ -678,10 +686,11 @@ export class AgentRunOrchestrationService {
           Date.parse(left.updatedAt) - Date.parse(right.updatedAt) ||
           String(left.id).localeCompare(String(right.id)),
       );
+    const waitLimitMs = this.#providerSlotWaitLimitMs();
     for (const run of waiters) {
       if (this.#cancelling.has(run.id)) continue;
-      if (agentRunProviderSlotWaitExpired(run, nowMs)) {
-        this.#endProviderSlotWait(run);
+      if (agentRunProviderSlotWaitExpired(run, nowMs, waitLimitMs)) {
+        this.#endProviderSlotWait(run, waitLimitMs);
         continue;
       }
       // The parent's grant is read now: a wait is long enough for the parent to
@@ -763,10 +772,10 @@ export class AgentRunOrchestrationService {
     }
   }
 
-  #endProviderSlotWait(run: AgentRun): void {
+  #endProviderSlotWait(run: AgentRun, waitLimitMs: number): void {
     const refusal =
       this.#providerSlotRefusals.get(run.id) ?? "Other work was still using the provider.";
-    const minutes = Math.round(AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS / 60_000);
+    const minutes = Math.round(waitLimitMs / 60_000);
     this.#interruptWaiter(
       run,
       run.version,

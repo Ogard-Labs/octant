@@ -54,6 +54,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   isSettingsSectionAvailable,
@@ -196,7 +197,11 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID } from "@octant/contracts";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  LOCAL_HOST_ID,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+} from "@octant/contracts";
 import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
 import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
@@ -1560,6 +1565,25 @@ function ActiveSectionContent({
                   onCheckedChange={(checked) =>
                     props.onSettingsChange({ agentBrowserDownloads: checked })
                   }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Browser captures">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many screenshots and recordings each thread keeps, newest first. Default ${DEFAULT_BROWSER_CAPTURES_PER_THREAD}. A smaller number drops a thread's older captures, and a larger one never brings them back.`}
+                focused={focusedSetting === settingId("browser-captures-per-thread")}
+                label="Captures kept per thread"
+                scope="host"
+                settingId="browser-captures-per-thread"
+              >
+                <OctantNumberStepper
+                  label="Captures kept per thread"
+                  max={MAX_BROWSER_CAPTURES_PER_THREAD}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ browserCapturesPerThread: value })}
+                  value={props.settings.browserCapturesPerThread}
                 />
               </SettingRow>
             </div>

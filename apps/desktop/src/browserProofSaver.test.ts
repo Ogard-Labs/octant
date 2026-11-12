@@ -1,4 +1,4 @@
-import { MAX_BROWSER_RECORDING_BYTES } from "@octant/contracts";
+import { MAX_BROWSER_CAPTURES_PER_THREAD, MAX_BROWSER_RECORDING_BYTES } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserProofSaverError, createBrowserProofSaver } from "./browserProofSaver";
 
@@ -92,12 +92,15 @@ describe("createBrowserProofSaver", () => {
       [{ fileNumber: 1, dataUrl: PNG, path: "/etc/passwd" }],
       [{ fileNumber: 1, dataUrl: "data:text/html;base64,AAAA" }],
       [{ fileNumber: 0, dataUrl: PNG }],
-      [{ fileNumber: 100, dataUrl: PNG }],
+      [{ fileNumber: MAX_BROWSER_CAPTURES_PER_THREAD + 1, dataUrl: PNG }],
       [
         { fileNumber: 1, dataUrl: PNG },
         { fileNumber: 1, dataUrl: PNG },
       ],
-      Array.from({ length: 33 }, (_, index) => ({ fileNumber: index + 1, dataUrl: PNG })),
+      Array.from({ length: MAX_BROWSER_CAPTURES_PER_THREAD + 1 }, (_, index) => ({
+        fileNumber: index + 1,
+        dataUrl: PNG,
+      })),
     ]) {
       await expect(save({ sender: {} }, bad)).rejects.toBeInstanceOf(BrowserProofSaverError);
     }

@@ -21,7 +21,18 @@ const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
  * host already hands the model, so its size is bounded by the screenshot
  * envelope; a recording has its own bound, `MAX_BROWSER_RECORDING_BYTES`.
  */
-export const MAX_BROWSER_CAPTURES_PER_THREAD = 32;
+/**
+ * How many captures a thread keeps unless the person chose another number.
+ * 200, because a long Browser task passed the earlier 32 in one sitting and
+ * lost the screenshots its first steps named. A screenshot is at most about
+ * 40 KiB, so 200 hold about 8 MiB beside the recordings' 16 MiB.
+ */
+export const DEFAULT_BROWSER_CAPTURES_PER_THREAD = 200;
+/**
+ * The most a person may choose, and the bound every listing and save is
+ * sized for: 500 screenshots are about 20 MiB of bytes per thread.
+ */
+export const MAX_BROWSER_CAPTURES_PER_THREAD = 500;
 /**
  * How many of those captures may be recordings. A recording is up to 2 MiB,
  * fifty times a screenshot, so eight bound a thread's recordings at about
@@ -33,9 +44,8 @@ export const MAX_BROWSER_CAPTURE_BYTES = Math.floor(
 );
 
 /**
- * One aggregate per thread (aggregate id = thread id) so the newest
- * `MAX_BROWSER_CAPTURES_PER_THREAD` captures are exactly the newest aggregate
- * versions, and a confirmed thread purge finds the events by `threadId`.
+ * One aggregate per thread (aggregate id = thread id) so the newest captures
+ * the thread keeps are exactly the newest aggregate versions, and a confirmed thread purge finds the events by `threadId`.
  */
 export const BROWSER_CAPTURE_AGGREGATE_TYPE = "browser-capture";
 export const BROWSER_CAPTURE_KEPT = "browser.capture-kept@1";
