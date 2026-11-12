@@ -258,6 +258,7 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .dock-card__chevron {
@@ -305,12 +306,16 @@
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The fold row's own words are a hint, not a name: they keep the regular weight. */
 .dock-card__label--meta {
   color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 
 .dock-card__meta {
