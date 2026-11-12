@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const read = (file: string) => readFileSync(resolve(import.meta.dirname, "../styles", file), "utf8");
+const read = (file: string) =>
+  readFileSync(resolve(import.meta.dirname, "../styles", file), "utf8");
 const shell = read("shell.css");
 const dock = read("dock.css");
 const settings = read("settings.css");
@@ -50,8 +51,8 @@ describe("the shell's edges and gaps", () => {
   });
 
   it("makes each rail button its 32px face, and centres the first face on the title rail", () => {
-    expect(rule(shell, ".sidebar-rail__button")).toMatch(/border:\s*0;/);
-    expect(rule(usage, ".rail-usage__ring")).toMatch(/border:\s*0;/);
+    expect(rule(shell, ".sidebar-rail__button")).toMatch(/margin:\s*-1px;/);
+    expect(rule(usage, ".rail-usage__ring")).toMatch(/margin:\s*-1px;/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(
       /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 32px\) \/ 2\)/,
@@ -75,7 +76,9 @@ describe("the shell's edges and gaps", () => {
   });
 
   it("draws a Settings card's edge inside its box so its rows keep an exact 16px inset", () => {
-    const card = settings.slice(settings.indexOf(".settings-card-section--open\n  > :is(.setgroup"));
+    const card = settings.slice(
+      settings.indexOf(".settings-card-section--open\n  > :is(.setgroup"),
+    );
     const body = card.slice(0, card.indexOf("}"));
     expect(body).toMatch(/border:\s*0;/);
     expect(body).toMatch(/outline:\s*1px solid transparent;/);

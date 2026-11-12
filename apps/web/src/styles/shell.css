@@ -451,9 +451,10 @@ html[data-octant-native-host="true"]
   min-height: 0;
   flex: 0 0 auto;
   padding: 0;
-  /* The button is its 32px face: the recipe's transparent 1px border made
-     it 34px around the face. */
-  border: 0;
+  /* The recipe's transparent 1px border made the button 34px around its 32px
+     face; the margin gives the border back, so the button takes its face's
+     32px in the column. */
+  margin: -1px;
 }
 
 .sidebar-rail__face {

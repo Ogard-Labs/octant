@@ -1877,42 +1877,42 @@ rail clamp or drawer. The workspace sidebar supports resizing.
 Each of these was measured off by a pixel or more in a render before it was a
 rule:
 
-- *The title band's icon buttons* are 28px and stand 4px apart wherever the
+- _The title band's icon buttons_ are 28px and stand 4px apart wherever the
   band shows a row of them: the window controls, the tool row, the sidebar's
   header actions. The band keeps one inset at both of its ends, 8px, so Show
   sidebar is as far from the left edge as the last toggle is from the right. A
   slot a Project fills only sometimes (Open in, Project actions) takes no room
   and no gap while it is empty.
-- *A tile's bar* ends on the band's 8px, and its Arrange and Close are 24px
+- _A tile's bar_ ends on the band's 8px, and its Arrange and Close are 24px
   controls with one 14px glyph, centred on a whole pixel: the bar's hairline is
   drawn inside its 32px, not as a border that takes one off the controls'
   centreline. The Browser's row follows the bar's insets.
-- *The icon rail's* face is its button (32px with no border of its own, 2px
+- _The icon rail's_ face is its button (32px in the column, 2px
   apart), and the first face is centred on the title rail's centreline, so it
   stands level with the band's controls beside it (6px down in the 44px rail).
-- *A dock never clips.* The room the title band's controls take over the dock's
+- _A dock never clips._ The room the title band's controls take over the dock's
   bar is clamped to what the bar has beside its start inset, so a dock narrower
   than those controls (the 280px minimum) keeps its column inside the window.
-- *A card's inset is exactly 16px* (a Settings card draws its edge as an
+- _A card's inset is exactly 16px_ (a Settings card draws its edge as an
   outline inside its box, not as a border) and a dock card's title and its rows
   stand on one edge: a title that is a button has no border, and a row's mark,
   whether an icon or a dot, takes one 14px slot, so every name starts on one
   column.
-- *Rows are whole pixels.* A row whose height is the sum of its lines sets
+- _Rows are whole pixels._ A row whose height is the sum of its lines sets
   them from the role leadings rounded to a pixel (`--oct-line-label`,
   `--oct-line-detail`, `--oct-line-meta`, `--oct-line-snug`,
   `--oct-line-tight`): a Settings row, a thread row in the sidebar (two lines,
   52px) and a dialog's paragraph. The roles keep their sizes.
-- *The composer's columns are the same in every mode.* The row under the box
+- _The composer's columns are the same in every mode._ The row under the box
   starts on the box's inset, so its first control stands under attach in Chat,
   Work and Code alike (an empty leading group takes no gap). The prompt's line
   is the transcript size times the body leading, rounded to the nearest even
   pixel (`--oct-composer-line`), so the 28px controls centre on whole pixels
   and the one-line box is 44px at the default 13px (46px at 14px, 48px at
   16px).
-- *A foot ends where the rows above it end.* The account row's chevron stands
+- _A foot ends where the rows above it end._ The account row's chevron stands
   on the navigation inset (12px), the edge a thread's status mark ends on.
-- *At a phone's width* the start screen's composer stands the panel's 20px from
+- _At a phone's width_ the start screen's composer stands the panel's 20px from
   each edge, as a thread's composer does (its width is the viewport less 40px),
   with no margin or padding of its own on top.
 
