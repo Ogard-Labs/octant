@@ -344,6 +344,33 @@ describe("CodeGitPane", () => {
     );
   });
 
+  it("says a push whose connection broke may have reached the remote", async () => {
+    const client = codeClient();
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: "git-mutation-state",
+      operationId: ids.operation,
+      gitOperationId: ids.git,
+      mutation: "push",
+      state: "failed",
+      detail: "fatal: the remote end hung up unexpectedly",
+      unconfirmed: true,
+    });
+    render(
+      <CodeGitPane
+        client={client}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={gitObservation}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Push exact branch" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Push may have reached the remote.*Refresh to check the remote branch before pushing again/i,
+    );
+  });
+
   it("names the profile setting when a commit has no identity to use", async () => {
     const client = codeClient();
     (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValue({

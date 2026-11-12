@@ -2538,6 +2538,42 @@ CREATE INDEX validation_evidence_authority_idx
         ON agent_access_turn_projection(last_sequence);
     `,
   },
+  {
+    version: 99,
+    name: "create_chat_streamed_response_refs",
+    // A streamed delta's reference, one row per delta, so applying a delta
+    // costs the same however long the reply already is. Reads fold these
+    // rows onto the attempt; the next whole attempt event carries them and
+    // removes them. Rebuilt from the Chat journal like the attempt rows.
+    sql: `
+      CREATE TABLE chat_streamed_response_projection (
+        attempt_id TEXT NOT NULL CHECK(length(attempt_id) = 36),
+        thread_id TEXT NOT NULL CHECK(length(thread_id) = 36),
+        content_id TEXT NOT NULL CHECK(length(content_id) = 36),
+        response_ref_json TEXT NOT NULL CHECK(json_valid(response_ref_json)),
+        updated_at TEXT NOT NULL CHECK(length(trim(updated_at)) > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (attempt_id, last_sequence)
+      ) STRICT;
+      CREATE INDEX chat_streamed_response_thread_idx
+        ON chat_streamed_response_projection(thread_id);
+    `,
+  },
+  {
+    version: 100,
+    name: "create_code_restart_continuation_store",
+    // The crash-loop guard for continuing a Code turn a restart cut off: the
+    // continuation the host last started on each thread and how many of its
+    // chain a restart has cut off. Host-local, not a journaled fact: it must
+    // survive exactly the restart it counts, and nothing replays it.
+    sql: `
+      CREATE TABLE code_restart_continuation_store (
+        thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+        operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+        attempts INTEGER NOT NULL CHECK(attempts > 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

@@ -1187,7 +1187,6 @@ function PullRequestWorkspaceSurface(
       client={props.client}
       createOperationId={() => props.nextUuid() as never}
       executionPolicy={policy}
-      idempotencyKey={`code-tab:${props.tab.id}`}
       onRefresh={() => void observe()}
       {...(props.browserAutomationClient === undefined
         ? {}

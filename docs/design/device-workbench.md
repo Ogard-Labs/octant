@@ -188,15 +188,16 @@ device shell parses again, so the address is passed single-quoted, as typed
 text is. `am start` can exit 0 after printing `Error: Activity not started`,
 so such a line makes the action `failed`.
 
-Open URL is an effect, not input. Only a person (`local-user` or
-`remote-device` in `requestedBy`) may ask for it; an agent or the host is
-refused, as with Repair input.
+Open URL is an effect, not input. A person (`local-user` or
+`remote-device` in `requestedBy`) or an agent may ask for it; the host is
+refused (maintainer request, 2026-11-12).
 Plan refuses it; Full access sends it unasked; on an approval-gated thread
 every address raises its own confirmation, which names the whole address and
 is bound to it, and Allow input never covers it. Evidence and its log keep only
 `open-url completed (<origin>; path and query not recorded)`: the tool's own
 output can quote the address, so none of it is kept, for the same reason typed
-text is redacted. The agent tools do not offer Open URL.
+text is redacted. Not built yet: today an agent is refused, as with Repair
+input, and the agent tools do not offer Open URL.
 
 ## Volume
 
@@ -276,12 +277,13 @@ at most) while a live view is open. No Simulator is read more than once every 2
 seconds, and never per frame; the pane picks the change up with its next
 snapshot. The Android emulator streams rotated frames and needs none of this.
 
-Rotate is an effect, not input. Only a person (`local-user` or
-`remote-device` in `requestedBy`) may ask for it; an agent or the host is
-refused. Plan refuses it; Full access sends it unasked; on an approval-gated
+Rotate is an effect, not input. A person (`local-user` or
+`remote-device` in `requestedBy`) or an agent may ask for it; the host is
+refused (maintainer request, 2026-11-12). Plan refuses it; Full access sends it unasked; on an approval-gated
 thread each Rotate raises its own confirmation, and Allow input never covers
 it. Evidence and its log record `rotate to <orientation> completed` (`rotate completed` when the host chose) and
-nothing from the device. The agent tools do not offer Rotate.
+nothing from the device. Not built yet: today an agent is refused and the
+agent tools do not offer Rotate.
 
 ## Record screen
 
@@ -312,9 +314,10 @@ a file that is not an ordinary single-link media file, empty, or too large is
 refused as `failed` with a reason, and the raw file is removed whatever the
 outcome. A recording left by a host that stopped is swept with stale captures.
 
-Authority follows Open URL: only a person (`local-user` or `remote-device`)
-may ask for either action, an agent or the host is refused, `octant_apple`
-does not offer them, and the contract requires `requestedBy`. Starting is an
+Authority follows Open URL: a person (`local-user` or `remote-device`) or an
+agent may ask for either action, the host is refused, and the contract
+requires `requestedBy` (maintainer request, 2026-11-12). Not built yet: today
+an agent is refused and `octant_apple` does not offer them. Starting is an
 effect: Plan refuses it, Full access starts it unasked, and an approval-gated
 thread confirms it ("Record this Simulator's screen?"); Allow input never
 covers it. Stopping ends what a person already approved, so it never asks
@@ -513,6 +516,8 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 
 ### Boot from the Android pane
 
+Snapshot boot is a setting, off by default (maintainer request, 2026-11-12;
+not built yet: today every boot is cold and there is no setting). With it off,
 Octant starts the emulator as `emulator -avd <name> -no-window -no-audio
 -no-snapshot`: every boot is cold, and the emulator neither loads nor saves a
 quickboot snapshot. A snapshot written at power-off loaded "successfully" on the
@@ -596,7 +601,9 @@ a keyboard it cannot read or does not accept is refused
 wrong. Any other text, including punctuation, letters such as æ, ø, å, or é, and
 other scripts, is refused whole (`unsupported-character`) and nothing is typed;
 the evidence note says so, and the agent may type the text some other way
-(for example by opening a URL or a deep link). A paste through
+(for example by opening a URL or a deep link). Refusing punctuation is a known
+gap to fix, by a route that can prove what it typed; the rule that nothing is
+ever typed wrong stays. A paste through
 `xcrun simctl pbcopy` and Command-V was tried and removed: on Xcode 27 the copy
 exits 0 and sets nothing, and neither the copy nor the keystroke can tell whether
 the field took the text, so it reported success for text that never arrived

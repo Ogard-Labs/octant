@@ -277,7 +277,10 @@ describe("WindowChrome", () => {
 
   it("normalizes rendered semantic headings and strong text below browser bold", () => {
     const stylesheet = document.createElement("style");
-    stylesheet.textContent = styles;
+    // jsdom does not apply `@layer` rules, and the heading defaults sit in the
+    // base layer; an unconditional `@media` block stands in for the layer so
+    // the weights they declare are still read from the real stylesheet.
+    stylesheet.textContent = styles.replace(/@layer base \{/g, "@media all {");
     document.head.append(stylesheet);
 
     const fixture = document.createElement("section");

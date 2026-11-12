@@ -59,6 +59,7 @@ import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  makeEventLoopShare,
   makeIdleTimeout,
   makeTurnTextParagraphs,
   type IdleTimeout,
@@ -313,6 +314,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let reachedTerminalEvent = false;
+      const shareEventLoop = makeEventLoopShare();
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -430,6 +432,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       }
       let handledEvents = 0;
       let response = "";
+      const appendResponse = makeBoundedResponse();
       let tasks: ThreadTaskProgressList | undefined;
       // New tasks a full plan turned away, kept until the restatement that
       // follows them can drop the tasks they replace.
@@ -454,6 +457,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
+            Stream.tap(() => shareEventLoop),
             Stream.tap(() => idle.touch),
             // Liveness only restarts the idle clock above; nothing else sees it.
             Stream.filter((event) => event.kind !== "liveness"),
@@ -527,7 +531,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 }
                 if (event.kind === "child-agent-activity") input.onChildActivity?.(event);
                 if (event.kind === "text-delta") {
-                  response = appendBoundedResponse(response, event.text);
+                  response = appendResponse(event.text);
                   input.onDelta?.(response);
                 }
                 if (endsHarnessRetryWait(event)) input.onRetryCleared?.();
@@ -873,22 +877,33 @@ function isProviderFailure(error: unknown): error is ProviderFailure {
   );
 }
 
-function appendBoundedResponse(current: string, delta: string): string {
-  const next = current + delta;
-  if (textEncoder.encode(next).byteLength <= MAX_WORK_TURN_RESPONSE_BYTES) return next;
-  const marker = RESPONSE_TRUNCATION_MARKER;
-  const budget = MAX_WORK_TURN_RESPONSE_BYTES - textEncoder.encode(marker).byteLength;
-  let truncated = current;
-  while (
-    textEncoder.encode(truncated + marker).byteLength > MAX_WORK_TURN_RESPONSE_BYTES &&
-    truncated.length > 0
-  ) {
-    truncated = truncated.slice(0, Math.max(0, truncated.length - 16));
-  }
-  if (textEncoder.encode(truncated).byteLength > budget) {
-    truncated = truncated.slice(0, Math.max(0, truncated.length - 32));
-  }
-  return `${truncated}${marker}`;
+/**
+ * A Work reply bounded to MAX_WORK_TURN_RESPONSE_BYTES. It counts bytes as
+ * deltas arrive: re-encoding the whole reply on every delta made a long reply
+ * quadratic. It stops at the first delta that does not fit, because truncating
+ * again on every later delta shaved the kept text and its marker each time.
+ */
+function makeBoundedResponse(): (delta: string) => string {
+  const markerBytes = Buffer.byteLength(RESPONSE_TRUNCATION_MARKER, "utf8");
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  return (delta) => {
+    if (truncated) return text;
+    const deltaBytes = Buffer.byteLength(delta, "utf8");
+    if (bytes + deltaBytes <= MAX_WORK_TURN_RESPONSE_BYTES) {
+      text += delta;
+      bytes += deltaBytes;
+      return text;
+    }
+    truncated = true;
+    const kept = Buffer.from(text + delta, "utf8");
+    let end = MAX_WORK_TURN_RESPONSE_BYTES - markerBytes;
+    // Back off to a character boundary rather than splitting a UTF-8 sequence.
+    while (end > 0 && ((kept[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+    text = `${kept.subarray(0, end).toString("utf8")}${RESPONSE_TRUNCATION_MARKER}`;
+    return text;
+  };
 }
 
 function truncateMessage(message: string): string {

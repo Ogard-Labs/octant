@@ -47,7 +47,7 @@ export function PopoverPopup({
   return (
     <PopoverPrimitive.Popup
       className={cn(
-        "z-[var(--oct-z-popup)] rounded-xl bg-popover p-2.5 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] rounded-xl bg-popover p-2 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="popover-content"

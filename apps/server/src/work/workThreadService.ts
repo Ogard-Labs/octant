@@ -122,6 +122,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -523,6 +524,10 @@ export class WorkThreadService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          // Absent reads as on, so only a stored off needs a value.
+          ...((command.restartContinuation ?? current.restartContinuation) === false
+            ? { restartContinuation: false }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -911,6 +916,25 @@ export class WorkThreadService {
         this.#projection.applyUsageResume({
           eventName: USAGE_RESUME_CANCELLED,
           payload: { resume: scheduled.record },
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
+      if (command.kind === "set-work-thread-restart-continuation") {
+        const off = !command.continueAfterRestart;
+        if ((current.restartContinuationOff === true) === off) {
+          return { kind: "thread-updated", thread: current };
+        }
+        const { restartContinuationOff: _off, ...rest } = current;
+        const updated = decodeWorkThread({
+          ...rest,
+          ...(off ? { restartContinuationOff: true } : {}),
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+          kind: "thread-updated",
+          thread: updated,
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
@@ -1960,7 +1984,10 @@ export class WorkThreadService {
       return this.#failure("stale", "Work thread changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Octant Work thread service is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Octant Work thread service is unavailable."),
+      );
     }
     return this.#failure("unavailable", "Octant Work thread service is unavailable.");
   }

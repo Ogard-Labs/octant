@@ -886,9 +886,11 @@ design left a choice open.
   app-managed tools use). A refused read starts nothing.
 - **Starts.** The launch decision is asked on every read as a request the
   person at the machine did not make, as a paired device's is, so an agent can
-  start a `static` server and never starts or reads through a `repo-tooling`
-  one (`local-host-required`, in every posture), even one already running
-  under a person's approval. Reason: running repository tooling stays the person's act
+  start a `static` server and never starts a `repo-tooling` one
+  (`local-host-required`, in every posture). Its code tool may read through a
+  `repo-tooling` server that is already approved and running, which starts
+  nothing (maintainer request, 2026-11-12). Not built yet: today that read is
+  refused as well. Reason: starting repository tooling stays the person's act
   at the machine (D4), and an agent's call is not that act. An agent's read
   never resets the crash budget either; reopening the file in the editor stays
   the person's retry.
@@ -1094,12 +1096,17 @@ format nobody has).
   and one adapter package state (extension, component, package digest,
   lifecycle version), as slice 6's approval does. One that cannot be appended
   is not in force.
-- **Starting.** Start is a person's act at a local window, every time. A start
-  succeeds only while an approval covers the configuration's current digest and
-  the adapter's current package state. Any edit of the configuration, or any
-  change to the package (update, switch, trust, uninstall), needs a new
-  confirmation. Full access does not skip it: the posture governs what an
-  agent may do unasked, and no agent starts a session.
+- **Starting.** A person starts a session at a local window, and an agent may
+  start one under [Debugger authority](#debugger-authority). Below Full
+  access a start succeeds only while an approval covers the configuration's
+  current digest and the adapter's current package state. Any edit of the
+  configuration, or any change to the package (update, switch, trust,
+  uninstall), needs a new confirmation. At Full access a start needs no
+  confirmation; Plan refuses it
+  ([the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). Not built yet: today Start is a person's
+  act at a local window every time, Full access does not skip the
+  confirmation, and no agent starts a session.
 - **Launch decision.** A pure `decideDebugSessionStart` takes the host
   platform, the thread's mode and posture, who caused the start, the approval,
   and whether the configuration's paths still resolve. It returns a launch
@@ -1257,12 +1264,17 @@ frame ends the session. Each request has a 10-second deadline and reports
 
 ### Debugger authority
 
-- **Local person only.** Starting, controlling (breakpoints, stepping,
-  `evaluate`), and stopping a session is the person at a local window whose
+- **The person at a local window.** A person starts, controls (breakpoints,
+  stepping, `evaluate`), and stops a session from a local window whose
   Project binding holds the thread, checked on every request as a terminal's
   input is. Another local window holding the thread may control the session.
-- **No agent.** No provider, tool call, subagent, routine, or hook can start,
-  control, or read a session. Nothing a session shows enters a prompt.
+- **Agents.** An agent in the thread may start, control, and read that
+  thread's session: unasked at Full access, approval-gated per configuration
+  below it, and refused in Plan
+  ([the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). Not built yet: today no provider, tool
+  call, subagent, routine, or hook can start, control, or read a session, and
+  nothing a session shows enters a prompt.
 - **Code only, macOS and Linux.** As the companion.
 
 **Decision DB7: paired devices neither
@@ -1275,10 +1287,14 @@ new surface in the first slices. Rejected: remote observe now (a later,
 remote-approvable `code.debug.observe` read of the stopped state, without
 `evaluate`, can be proposed once the local panel ships); remote control.
 
-**Decision DB8: no agent debug tools in
-this addendum.** Recommended because an agent driving a debugger runs the
-program and reads its memory, which needs its own approval and taint design.
-Rejected: a read-only agent tool for the stopped state now.
+**Decision DB8: agent debug tools follow the thread's level.** An agent may
+start, control, and read a debug session: unasked at Full access,
+approval-gated per configuration below it, and refused in Plan (maintainer
+request, 2026-11-12). Recommended because at Full access the same agent
+already runs the program from an unwrapped shell and reads what it prints, so
+refusing the debugger there protects nothing. Rejected: no agent debug tools,
+the earlier rule; a read-only agent tool for the stopped state only. Not built
+yet: today there are no agent debug tools.
 
 ### Debugger data and privacy
 
@@ -1917,10 +1933,11 @@ alternatives considered and the reason for the choice follow it.
 
 1. **D1. Source of the first server.** Octant bundles the pinned `typescript`
    native binary, about 24 MB per architecture. It is already a dependency, it
-   speaks LSP natively, and it runs no repository code. Rejected for now: using
-   the Project's own installed TypeScript, which runs a repository-supplied
-   binary and so would be `repo-tooling`; it could come later as a person's
-   explicit choice. Rejected: a third-party language-server dependency, which
+   speaks LSP natively, and it runs no repository code. The Project's own
+   installed TypeScript runs a repository-supplied binary and so is
+   `repo-tooling`; it is used only as the person's explicit choice, a
+   per-Project setting "Use the Project's own toolchain" (maintainer request,
+   2026-11-12). Not built yet: today only the bundled binary is used. Rejected: a third-party language-server dependency, which
    adds a dependency for nothing the bundled binary lacks.
 
 2. **D2. Bundled server on by default.** The bundled server is on for Code,

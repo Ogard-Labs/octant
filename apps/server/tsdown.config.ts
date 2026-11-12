@@ -15,7 +15,11 @@ export default defineConfig({
     ],
     onlyBundle: false,
   },
-  entry: { main: "src/main.ts", canvasExportWorker: "src/canvas/canvasExportWorker.mjs" },
+  entry: {
+    main: "src/main.ts",
+    dbMaintenance: "src/maintenanceCli.ts",
+    canvasExportWorker: "src/canvas/canvasExportWorker.mjs",
+  },
   format: ["esm"],
   platform: "node",
   target: "es2024",

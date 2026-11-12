@@ -166,10 +166,10 @@ authority, privacy, and release boundaries.
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [Mobile maturity](design/mobile-maturity.md).
-- **Hosted relay** — only its contracts and policy exist. Designed as an opt-in, self-hostable, ciphertext-only
-  fallback for already-paired apps, accepted 2026-10-26 as self-hosted only;
-  no reachability gap over LAN, Tailscale, or SSH has been demonstrated, and an
-  Octant-run relay waits on written evidence of one. Design: [design/hosted-relay.md](design/hosted-relay.md).
+- **Hosted relay** — canceled 2026-10-30 and removed: its design and its unused
+  contracts and policy are no longer in the repository. Hub and spokes covers
+  remote reach ([design](design/hub-and-spokes.md)), and no reachability gap
+  over LAN, Tailscale, or SSH was demonstrated.
 - **Full extension host and the rest of the language tooling** — language
   servers and a debugger are built as separately launched companions; Monaco
   and explicit external-editor handoff remain primary, and a full IDE or

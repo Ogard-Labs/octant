@@ -215,6 +215,15 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // Whether the host may continue a turn by itself after a restart is a
+      // choice about this computer's unattended work, made at it, as for Code.
+      if (setsRestartContinuation(command) && refusesFullAccessRaise(request)) {
+        return failureResponse(
+          { category: "unauthorized", message: RESTART_CONTINUATION_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
       return jsonResponse(
         decodeWorkThreadCommandResult(
           await dependencies.service.execute(authenticatedWindowId, command),
@@ -382,6 +391,16 @@ function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
     default:
       return false;
   }
+}
+
+const RESTART_CONTINUATION_LOCAL_ONLY =
+  "Continue after restart is set at a window on this computer.";
+
+function setsRestartContinuation(command: WorkThreadCommand): boolean {
+  return (
+    command.kind === "set-work-thread-restart-continuation" ||
+    (command.kind === "update-work-settings" && command.restartContinuation !== undefined)
+  );
 }
 
 /** A request whose principal is anything but a window on this host. */

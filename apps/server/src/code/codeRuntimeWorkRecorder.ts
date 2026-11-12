@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import {
   decodeCodeRuntimeWork,
   decodeCodeRuntimeWorkId,
   type CodeRuntimeWork,
   type CodeRuntimeWorkId,
   type CodeRuntimeWorkKind,
+  type CodeRuntimeRemoteStep,
   type CodeRuntimeWorkState,
   type CodeOperationCommand,
   type CodeOperationResult,
@@ -61,6 +63,8 @@ export interface CodeRuntimeWorkPlan {
   readonly kind: CodeRuntimeWorkKind;
   readonly starts: boolean;
   readonly reachesNetwork: boolean;
+  /** What the work does on a remote, recorded so a lost outcome can be settled later. */
+  readonly remoteStep?: CodeRuntimeRemoteStep;
 }
 
 /**
@@ -86,7 +90,11 @@ export class CodeRuntimeWorkRecorder {
   readonly #actor: typeof EventActor.Type;
   readonly #open = new Map<
     CodeRuntimeWorkUnitId,
-    { readonly version: number; readonly state: CodeRuntimeWorkState }
+    {
+      readonly version: number;
+      readonly state: CodeRuntimeWorkState;
+      readonly remoteStep: CodeRuntimeRemoteStep | undefined;
+    }
   >();
 
   constructor(options: CodeRuntimeWorkRecorderOptions) {
@@ -102,8 +110,9 @@ export class CodeRuntimeWorkRecorder {
     readonly id: CodeRuntimeWorkUnitId;
     readonly threadId: CodeThreadId;
     readonly kind: CodeRuntimeWorkKind;
+    readonly remoteStep: CodeRuntimeRemoteStep | undefined;
   }): CodeRuntimeWorkRecordOutcome {
-    return this.#record(input.id, input.threadId, input.kind, "running");
+    return this.#record(input.id, input.threadId, input.kind, "running", input.remoteStep);
   }
 
   /**
@@ -156,10 +165,33 @@ export class CodeRuntimeWorkRecorder {
     readonly kind: CodeRuntimeWorkKind;
     readonly state: CodeRuntimeWorkState;
   }): CodeRuntimeWorkRecordOutcome {
-    const outcome = this.#record(input.id, input.threadId, input.kind, input.state);
+    const outcome = this.#record(
+      input.id,
+      input.threadId,
+      input.kind,
+      input.state,
+      this.#open.get(input.id)?.remoteStep,
+    );
     if (outcome.status === "recorded" && input.state !== "running" && input.state !== "waiting")
       this.#open.delete(input.id);
     return outcome;
+  }
+
+  /**
+   * Record what an open unit's remote step turned out to be, once the host
+   * has resolved it. A comment learns its pull request and the prior count of
+   * matching comments only after the record opened, and both must be durable
+   * before the post, or a crash during the post leaves nothing to settle by.
+   */
+  describeRemoteStep(input: {
+    readonly id: CodeRuntimeWorkUnitId;
+    readonly threadId: CodeThreadId;
+    readonly kind: CodeRuntimeWorkKind;
+    readonly remoteStep: CodeRuntimeRemoteStep;
+  }): CodeRuntimeWorkRecordOutcome {
+    const current = this.#open.get(input.id);
+    if (current === undefined) return { status: "not-owned" };
+    return this.#record(input.id, input.threadId, input.kind, current.state, input.remoteStep);
   }
 
   /** Whether this recorder currently owns an open record for the unit. */
@@ -172,12 +204,17 @@ export class CodeRuntimeWorkRecorder {
     threadId: CodeThreadId,
     kind: CodeRuntimeWorkKind,
     state: CodeRuntimeWorkState,
+    remoteStep: CodeRuntimeRemoteStep | undefined,
   ): CodeRuntimeWorkRecordOutcome {
     const current = this.#open.get(id);
     // One record per state change. A turn that reports `running` again after it
     // was opened has not moved, and a row saying so would push its work past
     // work that actually finished in between.
-    if (current?.state === state) return { status: "unchanged" };
+    if (
+      current?.state === state &&
+      JSON.stringify(current.remoteStep) === JSON.stringify(remoteStep)
+    )
+      return { status: "unchanged" };
     let expectedVersion: number;
     let work: CodeRuntimeWork;
     try {
@@ -187,6 +224,7 @@ export class CodeRuntimeWorkRecorder {
         kind,
         state,
         updatedAt: this.#clock(),
+        ...(remoteStep === undefined ? {} : { remoteStep }),
       });
     } catch {
       // A unit id that is not a work identity is a wiring mistake, not a
@@ -218,7 +256,7 @@ export class CodeRuntimeWorkRecorder {
       // there.
       return { status: "failed", kind: "journal-unavailable" };
     }
-    this.#open.set(id, { version: expectedVersion + 1, state });
+    this.#open.set(id, { version: expectedVersion + 1, state, remoteStep });
     return { status: "recorded" };
   }
 }
@@ -242,11 +280,17 @@ export class CodeRuntimeWorkRecorder {
  * same unfinished work twice and let one of the two waits clear while the
  * other did not.
  */
-export function codeRuntimeWorkStarted(
-  command: CodeOperationCommand,
-): { readonly id: CodeRuntimeWorkUnitId; readonly kind: CodeRuntimeWorkKind } | undefined {
+export function codeRuntimeWorkStarted(command: CodeOperationCommand):
+  | {
+      readonly id: CodeRuntimeWorkUnitId;
+      readonly kind: CodeRuntimeWorkKind;
+      readonly remoteStep: CodeRuntimeRemoteStep | undefined;
+    }
+  | undefined {
   const plan = codeRuntimeWorkPlan(command);
-  return plan?.starts === true ? { id: plan.id, kind: plan.kind } : undefined;
+  return plan?.starts === true
+    ? { id: plan.id, kind: plan.kind, remoteStep: plan.remoteStep }
+    : undefined;
 }
 
 /**
@@ -293,15 +337,58 @@ export function codeRuntimeWorkPlan(
         kind: "git",
         starts: true,
         reachesNetwork: command.kind === "push-git",
+        ...(command.kind === "push-git"
+          ? {
+              remoteStep: {
+                kind: "push",
+                remote: command.remote,
+                remoteRef: command.remoteRef,
+                commitOid: command.expectedHeadOid,
+              },
+            }
+          : {}),
       };
     case "create-pull-request":
     case "update-pull-request":
     case "comment-pull-request":
     case "merge-pull-request":
-      return { id: command.operationId, kind: "delivery", starts: true, reachesNetwork: true };
+      return {
+        id: command.operationId,
+        kind: "delivery",
+        starts: true,
+        reachesNetwork: true,
+        remoteStep:
+          command.kind === "comment-pull-request"
+            ? {
+                kind: "pull-request",
+                action: "comment",
+                commentDigest: pullRequestCommentDigest(command.body),
+                ...(command.reviewThreadId === undefined
+                  ? {}
+                  : { reviewThreadId: command.reviewThreadId }),
+              }
+            : {
+                kind: "pull-request",
+                action:
+                  command.kind === "create-pull-request"
+                    ? "create"
+                    : command.kind === "update-pull-request"
+                      ? "update"
+                      : "merge",
+              },
+      };
     default:
       return undefined;
   }
+}
+
+/**
+ * What identifies a comment's text on GitHub. GitHub keeps a posted body with
+ * its line endings normalised and its surrounding whitespace dropped, so the
+ * digest is taken over the same form or a posted comment would never match.
+ */
+export function pullRequestCommentDigest(body: string): string {
+  return createHash("sha256").update(body.replace(/\r\n?/g, "\n").trim(), "utf8").digest("hex");
 }
 
 /**
@@ -347,8 +434,11 @@ export function codeRuntimeWorkStateFrom(
       }
     case "git-mutation-state":
       // A rejection is Git declining to move: the checkout is untouched and the
-      // caller was told exactly why, so nothing is left unresolved.
-      return result.state === "completed" ? "completed" : "failed";
+      // caller was told exactly why, so nothing is left unresolved. A push
+      // whose connection broke is different: Git never said whether the
+      // remote took it, so it is owed the same remote check a lost push gets.
+      if (result.state === "completed") return "completed";
+      return result.unconfirmed === true ? "ambiguous" : "failed";
     case "pull-request-state":
       switch (result.state) {
         case "unavailable":

@@ -77,8 +77,10 @@ id and are answered through the parent's session. Mistral Vibe keeps
 `VIBE_ENABLE_SUBAGENTS="false"` except at Full access in Work and Code.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
-provider's memory, telemetry, and self-update channels stay off at every
-level. Work and Code share one capability set, so each runtime starts a Work
+provider's telemetry and self-update channels stay off at every
+level. The provider's own memory is off unless the person turns on its
+setting for that provider account, which is off by default (maintainer
+request, 2026-11-12; not built yet: today it is off with no setting). Work and Code share one capability set, so each runtime starts a Work
 session with its shell at the thread's level exactly as it starts a Code
 session, as the
 [architecture's Work rules](../architecture.md#modes-chat-work-and-code)
@@ -277,7 +279,12 @@ most one every five seconds per turn. The Chat, Work, and Code runners count it
 as activity, so their idle timeout measures a session that stopped producing
 anything rather than one that is still writing. Every other consumer ignores
 it: it carries no content and reaches no transcript, journal, usage figure, or
-turn event budget. A session that goes fully silent still times out.
+turn event budget. A session that goes fully silent still times out, at the
+stalled-turn limit: a setting in Settings › Providers & Models, 30 minutes by
+default, which may be turned off. A provider tool call the runtime reports as
+running pauses that clock, as an app-managed call does; Force stop is
+unchanged (maintainer request, 2026-11-12). Not built yet: today the limit is
+a fixed five minutes and a running provider tool call does not pause it.
 
 Codex sends nothing while the model streams a tool call's arguments: the
 installed 0.163.0 app-server schema has no argument-delta notification, and
@@ -394,7 +401,9 @@ profile allows and why. The wire mapping that follows from it:
 - Approval-gated and auto-accept-edits send `approvalPolicy: "untrusted"`.
   Under an external sandbox `on-request` runs every command without asking
   (codex-rs `exec_policy.rs`, rust-v0.164.0); `untrusted` asks for each command
-  Codex does not know to be read-only and for every patch. Plan and Chat keep
+  Codex does not know to be read-only and for every patch. On an
+  auto-accept-edits thread the driver answers each file-change request itself,
+  so the person is asked for commands and not for patches. Plan and Chat keep
   `never`, so a write fails at the profile rather than at a prompt.
 - Full access keeps `danger-full-access` and an unwrapped process.
 
@@ -780,8 +789,11 @@ to that connection's immutable session and exact offered catalogue. Complete
 permission rules are updated before each prompt; the deprecated tool toggle
 payload is omitted because it replaces those rules. App tools require a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
-runtime. Ordinary inherited configuration does not supply that attestation and
-continues to report app tools as unsupported. Process exit, stream failure,
+runtime. Ordinary inherited configuration does not supply that attestation and,
+below Full access, continues to report app tools as unsupported. At Full access
+such a runtime is still offered Octant's tools, labelled as mixed with tools
+Octant did not supply (maintainer request, 2026-11-12; not built yet: today
+it reports app tools as unsupported at every level). Process exit, stream failure,
 interruption, and scope cleanup retire pending tool requests.
 
 ## Subscription sign-in dialects

@@ -16,6 +16,10 @@ and the release scope
 Authenticated snapshots and exports to a folder or a gist stay as
 [Canvas: Shares](canvas.md#shares) describes them.
 
+Scope hold: public Canvas links take no new scope until
+[the Full access rule](../architecture.md#security-and-authority) is built
+(maintainer request, 2026-11-12).
+
 Approved by the maintainer on 2026-10-20: the service can read what it is
 sent, so it can draw the page and link previews. The host side, the wire
 contract, and the reference service (`apps/share`) are implemented. On

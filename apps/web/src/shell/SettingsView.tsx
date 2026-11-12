@@ -201,6 +201,7 @@ import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
+import { BackgroundHostSettings } from "../settings/BackgroundHostSettings";
 import {
   MarketplaceFetchDisclosure,
   MarketplaceFetchSettings,
@@ -2251,6 +2252,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
             />
           </SettingRow>
+          <BackgroundHostSettings
+            bridge={props.hostBridge}
+            focused={focusedSetting === settingId("background-host")}
+          />
         </div>
       </SettingsSection>
       {/* Outside the desktop app the one row says this copy never updates

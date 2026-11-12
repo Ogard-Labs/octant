@@ -278,7 +278,6 @@ function MarkdownLink(props: { readonly href: string; readonly children: ReactNo
       />
       <OctantContextMenuContent>
         <OctantContextMenuItem
-          className="gap-2"
           closeOnClick
           disabled={actions?.openInApp === undefined}
           label="Open in Octant"
@@ -292,12 +291,7 @@ function MarkdownLink(props: { readonly href: string; readonly children: ReactNo
           </span>
           <span className="flex min-w-0 flex-1">Open in Octant</span>
         </OctantContextMenuItem>
-        <OctantContextMenuItem
-          className="gap-2"
-          closeOnClick
-          label="Open in external browser"
-          onClick={openExternal}
-        >
+        <OctantContextMenuItem closeOnClick label="Open in external browser" onClick={openExternal}>
           <span
             aria-hidden="true"
             className="flex size-(--oct-icon-md) items-center justify-center"
@@ -306,7 +300,7 @@ function MarkdownLink(props: { readonly href: string; readonly children: ReactNo
           </span>
           <span className="flex min-w-0 flex-1">Open in external browser</span>
         </OctantContextMenuItem>
-        <OctantContextMenuItem className="gap-2" closeOnClick label="Copy URL" onClick={copyUrl}>
+        <OctantContextMenuItem closeOnClick label="Copy URL" onClick={copyUrl}>
           <span
             aria-hidden="true"
             className="flex size-(--oct-icon-md) items-center justify-center"

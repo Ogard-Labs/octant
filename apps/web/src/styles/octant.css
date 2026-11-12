@@ -144,6 +144,15 @@
   --oct-leading-label: 1.35;
   --oct-leading-meta: 1.4;
   --oct-leading-detail: 1.45;
+  /* The same leadings as whole pixels, for a row whose height is the sum of its
+     lines: at 13px a label's 1.35 is 17.55px, and two such lines put a row on
+     a fraction. `em` is the using element's own size, so a role keeps its
+     size and only its line box is rounded. */
+  --oct-line-tight: round(calc(var(--oct-leading-tight) * 1em), 1px);
+  --oct-line-snug: round(calc(var(--oct-leading-snug) * 1em), 1px);
+  --oct-line-label: round(calc(var(--oct-leading-label) * 1em), 1px);
+  --oct-line-meta: round(calc(var(--oct-leading-meta) * 1em), 1px);
+  --oct-line-detail: round(calc(var(--oct-leading-detail) * 1em), 1px);
   --oct-leading-code: 1.7;
 
   --oct-weight-regular: 400;
@@ -235,6 +244,13 @@
      popup's edge by the menu inset. Before these, each recipe sized its own
      row and the same line of text was 24, 26, 30 or 34px tall. */
   --oct-menu-row-h: 28px;
+  /* A row with a second line (a described choice). */
+  --oct-menu-row-two-h: 44px;
+  --oct-menu-row-gap: var(--oct-space-2);
+  /* A row's trailing column (a select's check mark): the inset, a 16px mark and the gap. */
+  --oct-menu-row-trail: calc(
+    var(--oct-menu-row-inset) + var(--oct-icon-md) + var(--oct-menu-row-gap)
+  );
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
   --oct-disabled-opacity: 0.75;
@@ -457,12 +473,6 @@ button {
 p {
   text-wrap: pretty;
 }
-h1,
-h2,
-h3,
-h4 {
-  text-wrap: balance;
-}
 /* Keyboard focus draws one neutral edge, declared here and nowhere else. A
    focus fill alone was the hover fill, so a keyboard user could not tell the
    control they were on from the one under the pointer (WCAG 2.4.7). The edge
@@ -526,7 +536,8 @@ html[data-octant-input="pointer"] :focus-visible {
 }
 
 html[data-octant-input="pointer"] [data-slot="input"]:focus-visible,
-html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible {
+html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible,
+html[data-octant-input="pointer"] [data-slot="combobox-input-group"]:focus-within {
   border-color: var(--octant-border-strong);
 }
 
@@ -658,8 +669,7 @@ html {
 }
 
 /* ─── type ──────────────────────────────────────────────────────────── */
-.h1,
-h1 {
+.h1 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-fs-h1);
   line-height: var(--oct-leading-tight);
@@ -667,8 +677,7 @@ h1 {
   margin: 0;
   font-weight: var(--oct-weight-display);
 }
-.h2,
-h2 {
+.h2 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-fs-h2);
   line-height: var(--oct-leading-heading);
@@ -676,8 +685,7 @@ h2 {
   margin: 0;
   font-weight: var(--oct-weight-display);
 }
-.h3,
-h3 {
+.h3 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
@@ -685,14 +693,58 @@ h3 {
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
 }
-.h4,
-h4 {
+.h4 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
   font-weight: var(--oct-weight-display);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
+}
+/* The page's own heading look is a base default for reading content, so it
+   lives in the base layer: an unlayered bare-element rule beats every Tailwind
+   utility, which drew a card's title (text-base) at the h2 size, 44px, and a
+   popover's title the same. A heading a recipe sizes takes the recipe's size;
+   a bare heading with no class of its own still takes these. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  h1 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-fs-h1);
+    line-height: var(--oct-leading-tight);
+    letter-spacing: var(--oct-tracking-tight);
+    margin: 0;
+    font-weight: var(--oct-weight-display);
+  }
+  h2 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-fs-h2);
+    line-height: var(--oct-leading-heading);
+    letter-spacing: var(--oct-tracking-tight);
+    margin: 0;
+    font-weight: var(--oct-weight-display);
+  }
+  h3 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-text-xl);
+    font-weight: var(--oct-weight-display);
+    line-height: var(--oct-leading-snug);
+    letter-spacing: var(--oct-tracking-snug);
+    margin: 0;
+  }
+  h4 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-text-lg);
+    font-weight: var(--oct-weight-display);
+    line-height: var(--oct-leading-snug);
+    letter-spacing: var(--oct-tracking-snug);
+    margin: 0;
+  }
 }
 .lead {
   font-size: var(--oct-text-lg);
@@ -974,14 +1026,15 @@ h4 {
   flex: 0 0 auto;
 }
 /* A leading status mark sits with the sentence; the half-line offset keeps
-   it on the first line's optical axis for multi-line text. Most callouts
-   warn, so the mark borrows the warning text role unless the tone says
-   otherwise - hue alone must never be the only signal (DESIGN.md colour
-   roles pair each status surface with its text role). */
+   it on the first line's optical axis for multi-line text. A neutral notice
+   states a fact, so its mark is in neutral ink (a yellow icon on a message
+   that is not a warning is wrong); only a tone that means something takes its
+   text role - hue alone must never be the only signal (DESIGN.md colour roles
+   pair each status surface with its text role). */
 .callout > svg {
   flex: 0 0 auto;
   margin-top: 1px;
-  color: var(--oct-warn-fg);
+  color: var(--oct-meta);
 }
 .callout .callout-title {
   font-family: var(--oct-font-display);
@@ -1019,6 +1072,10 @@ h4 {
 .callout[data-tone="danger"] {
   background: var(--oct-danger-soft);
   border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
+}
+.callout-warn > svg,
+.callout[data-tone="warning"] > svg {
+  color: var(--oct-warn-fg);
 }
 .callout-danger > svg,
 .callout[data-tone="danger"] > svg {
@@ -4569,9 +4626,17 @@ input.switch:checked::after {
    box was a card with a field's worth of empty room, and under a thread the
    50px box held 6px more above the words than under them. */
 .composer-input {
+  /* The prompt's line in whole pixels (to the nearest even one), so the box and
+     the 28px controls centred in it land on whole pixels at any transcript
+     size: 13px gives a 20px line and the 44px box (cell + two insets). */
+  --oct-composer-line: round(
+    nearest,
+    calc(var(--oct-transcript-font-size) * var(--oct-leading-body)),
+    2px
+  );
   display: block;
   width: 100%;
-  min-height: calc(1lh + 24px);
+  min-height: calc(var(--oct-composer-line) + 24px);
   max-height: 180px;
   padding: 12px var(--oct-composer-gutter);
   border: 0;
@@ -4581,7 +4646,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-transcript-font-size);
-  line-height: var(--oct-leading-body);
+  line-height: var(--oct-composer-line);
   resize: none;
   field-sizing: content;
 }
@@ -4601,6 +4666,11 @@ input.switch:checked::after {
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */
 .composer-field {
+  --oct-composer-line: round(
+    nearest,
+    calc(var(--oct-transcript-font-size) * var(--oct-leading-body)),
+    2px
+  );
   display: flex;
   align-items: flex-end;
   gap: var(--oct-composer-gap);
@@ -4623,9 +4693,9 @@ input.switch:checked::after {
   /* The prompt's own type, so a line here measures what a line of the prompt
      does, whatever transcript size the person chose. */
   font-size: var(--oct-transcript-font-size);
-  line-height: var(--oct-leading-body);
+  line-height: var(--oct-composer-line);
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
-  margin-bottom: calc((1lh + 24px - var(--oct-composer-cell)) / 2);
+  margin-bottom: calc((var(--oct-composer-line) + 24px - var(--oct-composer-cell)) / 2);
 }
 /* The microphone's failure is said in the notice card above the box, where it
    wraps; beside the control it was cut to fit, and a cut failure is not read.
@@ -5096,12 +5166,6 @@ input.switch:checked::after {
 /* The mark sits on the first line's axis, however many lines follow. */
 .callout.composer-notice > svg {
   margin-top: calc((1lh - 16px) / 2);
-}
-/* A note that only states a fact (a saved draft, a locked task) draws its
-   mark in meta ink. The callout's default mark is the warning ink, which made
-   "nothing has been sent" read as a warning. */
-.callout.composer-notice[data-tone="neutral"] > svg {
-  color: var(--oct-meta);
 }
 .callout.composer-notice > .callout__body {
   flex: 1 1 200px;

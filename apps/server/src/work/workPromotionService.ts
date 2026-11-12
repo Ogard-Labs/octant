@@ -183,7 +183,7 @@ export class WorkPromotionService {
     if (result.status !== "ok") {
       throw new WorkPromotionServiceError(
         "unavailable",
-        "Work promotion hydration exceeded the journal scan cap; a snapshot rebuild is required.",
+        "Work promotion hydration exceeded the journal scan cap, so Octant refuses to serve a partial view.",
       );
     }
     for (const frame of result.frames) {

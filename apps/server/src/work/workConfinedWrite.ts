@@ -3,6 +3,7 @@ import type {
   WorkFilesystemPort,
   WorkOpenDirectory,
   WorkOpenWriteFile,
+  WorkWriteOpenOptions,
 } from "./workFilesystemPort";
 
 export interface WorkConfinedCreateParent {
@@ -29,6 +30,8 @@ export interface WorkConfinedWriteRequest {
   readonly parent?: WorkConfinedCreateParent;
   /** When true, a missing path is created exclusively instead of refused. */
   readonly allowCreate: boolean;
+  /** Permission bits for a created file; the port's private default when absent. */
+  readonly createMode?: number;
   readonly bytes: Uint8Array;
 }
 
@@ -49,28 +52,27 @@ export interface WorkConfinedWriteRequest {
  */
 export async function writeConfinedWorkFile(request: WorkConfinedWriteRequest): Promise<boolean> {
   if (request.allowCreate && request.parent !== undefined) {
-    return await writeCreatedUnderParent(request.filesystem, request.parent, request.bytes);
+    return await writeCreatedUnderParent(request, request.parent);
   }
-  const existing = await openWrite(request.filesystem, request.canonicalPath, false);
+  const existing = await openWrite(request, false);
   if (existing !== undefined) {
     return await writeOpened(existing, request.bytes, request.expected);
   }
   if (!request.allowCreate) return false;
-  const created = await openWrite(request.filesystem, request.canonicalPath, true);
+  const created = await openWrite(request, true);
   if (created === undefined) return false;
   return await writeOpened(created, request.bytes);
 }
 
 async function writeCreatedUnderParent(
-  filesystem: WorkFilesystemPort,
+  request: WorkConfinedWriteRequest,
   parent: WorkConfinedCreateParent,
-  bytes: Uint8Array,
 ): Promise<boolean> {
   const leaf = parent.remaining[parent.remaining.length - 1];
   if (leaf === undefined) return false;
   let directory: WorkOpenDirectory;
   try {
-    directory = await filesystem.openDirectory(parent.absolutePath);
+    directory = await request.filesystem.openDirectory(parent.absolutePath);
   } catch {
     return false;
   }
@@ -89,8 +91,8 @@ async function writeCreatedUnderParent(
       await directory.close().catch(() => undefined);
       directory = next;
     }
-    const created = await directory.openWriteFile(leaf, { exclusiveCreate: true });
-    return await writeOpened(created, bytes);
+    const created = await directory.openWriteFile(leaf, writeOptions(request, true));
+    return await writeOpened(created, request.bytes);
   } catch {
     return false;
   } finally {
@@ -115,15 +117,26 @@ async function openOrCreateChildDirectory(
 }
 
 async function openWrite(
-  filesystem: WorkFilesystemPort,
-  canonicalPath: string,
+  request: WorkConfinedWriteRequest,
   exclusiveCreate: boolean,
 ): Promise<WorkOpenWriteFile | undefined> {
   try {
-    return await filesystem.openWriteFile(canonicalPath, { exclusiveCreate });
+    return await request.filesystem.openWriteFile(
+      request.canonicalPath,
+      writeOptions(request, exclusiveCreate),
+    );
   } catch {
     return undefined;
   }
+}
+
+function writeOptions(
+  request: WorkConfinedWriteRequest,
+  exclusiveCreate: boolean,
+): WorkWriteOpenOptions {
+  return request.createMode === undefined
+    ? { exclusiveCreate }
+    : { exclusiveCreate, createMode: request.createMode };
 }
 
 async function writeOpened(

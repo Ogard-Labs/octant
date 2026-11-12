@@ -202,6 +202,51 @@ describe("pull-request action port", () => {
     ).toBe(true);
   });
 
+  it("reads only the signed-in person's own comments, and only in a thread of this pull request", async () => {
+    const comments = (nodes: ReadonlyArray<unknown>) => ({
+      viewer: { login: "me" },
+      repository: { pullRequest: { comments: { nodes } } },
+    });
+    const { port, run } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: comments([
+            { author: { login: "me" }, body: "Looks right." },
+            { author: { login: "someone" }, body: "Looks right." },
+            { author: { login: "me" }, body: "Fixed." },
+          ]),
+        }),
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            viewer: { login: "me" },
+            node: {
+              pullRequest: {
+                number: 8,
+                repository: { name: "octant", owner: { login: "octant" } },
+              },
+              comments: { nodes: [{ author: { login: "me" }, body: "Fixed." }] },
+            },
+          },
+        }),
+      },
+      { exitCode: 1, stdout: "" },
+    ]);
+    await expect(port.ownComments(identity, signal)).resolves.toEqual({
+      status: "read",
+      bodies: ["Looks right.", "Fixed."],
+    });
+    // A thread on another pull request says nothing about this one.
+    await expect(
+      port.ownComments({ ...identity, threadNodeId: "PRRT_other" }, signal),
+    ).resolves.toEqual({ status: "unavailable" });
+    await expect(port.ownComments(identity, signal)).resolves.toEqual({ status: "unavailable" });
+    expect(run.mock.calls[1]?.[0]).toContain("thread=PRRT_other");
+  });
+
   it("points a stacked pull request at another base without touching its branch", async () => {
     const { port, run } = fixture([{ exitCode: 0, stdout: "" }]);
     await expect(port.retarget({ ...identity, baseBranch: "main" }, signal)).resolves.toEqual({

@@ -845,17 +845,8 @@ body {
   font-size: var(--octant-ui-font-size);
 }
 
-h1,
 strong {
   font-weight: 600;
-}
-
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-weight: var(--oct-weight-display);
 }
 
 /* Unlayered element rules beat every Tailwind utility, so a filled Button
@@ -869,6 +860,19 @@ h6 {
     background: transparent;
     border: 0;
     font: inherit;
+  }
+
+  /* Heading weight is a base default too, so a recipe's own weight utility wins. */
+  h1 {
+    font-weight: 600;
+  }
+
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: var(--oct-weight-display);
   }
 }
 
@@ -1142,10 +1146,12 @@ h6 {
    short of the icon boxes above it, so it sits two pixels further in and
    its centre lands on the icon column: 10px keeps the 20px avatar centred on
    the 20px column of the 16px navigation icons at the 12px inset, which is
-   why these two values stay off the 4px scale. */
+   why these two values stay off the 4px scale. Only the start is pulled in:
+   the chevron ends on the navigation inset, the edge a thread's status mark
+   ends on above it. */
 .sidebar-profile .sidebar-item {
   min-height: var(--oct-nav-head-h);
-  padding-inline: 10px;
+  padding-inline: 10px var(--oct-nav-inset);
   gap: 6px;
 }
 
@@ -1823,15 +1829,19 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .workspace-disclosure__action {
   display: flex;
   /* 28px, the control step; 29 fitted no other row or button. */
-  min-height: 28px;
+  min-height: var(--oct-menu-row-h);
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-secondary);
+  gap: var(--oct-menu-row-gap);
+  padding: 0 var(--oct-menu-row-inset);
+  /* The Menu option role: this row is a menu row where it stands in a menu and
+     a button where it stands in the tool strip's overflow list. */
+  color: var(--oct-fg);
   border-radius: var(--oct-radius-sm);
   cursor: default;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-align: left;
 }
 
@@ -1876,6 +1886,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .dock-utility-launcher__reference-detail {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+.workspace-disclosure__action:has(.dock-utility-launcher__reference-detail) {
+  min-height: var(--oct-menu-row-two-h);
 }
 
 .workspace-pane__panel {
@@ -5436,7 +5449,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   flex-direction: column;
   gap: 0;
   min-height: 0;
-  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-2);
+  padding: var(--oct-menu-inset);
   overflow: auto;
 }
 
@@ -5466,19 +5479,20 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-3);
+  gap: var(--oct-menu-row-gap);
   width: 100%;
   height: auto;
-  min-height: 28px;
+  min-height: var(--oct-menu-row-h);
   min-width: 0;
-  padding: 0 var(--oct-space-2);
+  padding: 0 var(--oct-menu-row-inset);
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
   border-radius: var(--oct-radius-sm) 0 0 var(--oct-radius-sm);
   cursor: default;
   font: inherit;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 

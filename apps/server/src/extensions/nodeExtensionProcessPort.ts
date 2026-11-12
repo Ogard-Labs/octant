@@ -367,6 +367,11 @@ async function prepareProcessLaunch(
     ...writeRoots.map((path) => seatbeltRule("file-write*", path)),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.sandbox.allowNetwork ? ["(allow network*)"] : []),
+    ...(input.sandbox.allowLoopbackPorts ?? []).flatMap((port) =>
+      Number.isInteger(port) && port > 0 && port < 65536
+        ? [`(allow network-outbound (remote ip "localhost:${String(port)}"))`]
+        : [],
+    ),
     ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   ].join("\n");
   return {

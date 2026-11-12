@@ -38,7 +38,11 @@ A conversation whose turn was cut off by a host restart shows a notice above
 its composer: "Octant restarted before this turn finished. Review any changes
 before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
-connection alone do not show it. Nothing continues automatically.
+connection alone do not show it. A turn a restart cut off continues by
+itself, once, as the host, unless its thread is held: Continue after restart is
+off in Settings or for the thread, its last effect is uncertain, or its provider
+cannot resume it. Only a held thread shows this notice (maintainer request,
+2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.
@@ -50,9 +54,16 @@ Neither the composer draft nor its attachment selections change.
 
 The persisted queue identity is derived from the interrupted session's recovery
 identity, so concurrent windows, repeated clicks, and a lost response cannot
-queue a second continuation. Existing unrelated queued messages must be reviewed
-and removed before this action can queue the continuation;
-Resume never unpauses its other messages. A refused recovery leaves the notice
+queue a second continuation. Existing unrelated queued messages need no review
+first: the continuation is queued ahead of them and they stay queued. The
+message queue holds for changed authority, uncertain delivery, the person's own
+cancel, and a Work thread's Done mark. After an ordinary provider failure or a
+clean restart it continues by itself once, and a second failure in a row holds
+it. A paired device may queue (maintainer request, 2026-11-12;
+[Architecture: persistence](../architecture.md#persistence) owns the queue).
+Not built yet: today queued messages must be reviewed and removed before Resume
+can queue the continuation, any failure or restart holds the queue until a
+person resumes it, and a paired device cannot queue. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the
 ordinary message queue, including any later admission refusal. A tool may have
 taken effect before the crash without recording its result; Resume is not an
@@ -370,7 +381,11 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   thread a coordinator once its creation is confirmed, before the first
   message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
   coordinating** on a coordinator (never on a worker), the **Wake when a message
-  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
+  the **Continue after restart** checkbox, on until a person turns it off for
+  that thread ([Architecture: Persistence](../architecture.md#persistence)).
+  A Chat or Work thread's row menu carries the same **Continue after restart**
+  checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
@@ -877,8 +892,10 @@ with the stage: no gap and no corner, one 1px line between two panes
 ([DESIGN.md](../../DESIGN.md#shapes-and-depth) owns the material), and one
 under the title band along the top. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
-and the meta ink while grabbed, and keeps no accent line after a click. A window of 680px or less keeps
-its rounded tiles. Columns stand side by side only when the tile area can give each 280px and
+and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
+sheet over the page (a floating container with its own 12px corner) that holds
+one tool, so its tile is the same square pane with no neighbour: a tile is square
+and flat at every width, and no width gives one a corner, a rim or a gap. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to
@@ -1534,9 +1551,12 @@ deleted, and the host keeps deriving the board data and status policy
 thread rows, the dock overview, the planner board read, the sibling-thread
 tools and side tasks read the same projections. Turning the plugin on again
 brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
-add menu under attach, after a confirmation, and the card moves to Done and
-stays there; a Code thread reaches Done only by its objectively satisfied
-delivery target
+add menu under attach, with no confirmation, and the card moves to Done and
+stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
+delivery target, or when a person marks it Done whatever that target says,
+which is recorded as the person's override. An agent never marks a thread Done
+(maintainer request, 2026-11-12). Not built yet: today Mark done asks for a
+confirmation and a person cannot mark a Code thread Done
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and
@@ -1577,13 +1597,15 @@ is pointer-only. A row has no hairline under it, the row under the pointer takes
 control hover fill with the row radius, and clicking it opens the pull request
 exactly as before.
 
-Sort offers Recently updated (the default), Least recently updated and
-Repository, and a **Group by repository** check item. The snapshot carries each
-pull request's last update and not its creation time, so Newest and Oldest are
-not offered. Filter offers State (open, draft), Review (needs review, changes
-requested, approved) and Checks (passing, failing, pending); a pull request's
-author is not compared with the signed-in GitHub account, so a "mine" filter is
-not offered either. Sort, grouping and filters are remembered in this window's
+Sort offers Recently updated (the default), Least recently updated, Newest,
+Oldest and Repository, and a **Group by repository** check item. Newest and
+Oldest order by creation time, which the snapshot carries beside each
+pull request's last update. Filter offers State (open, draft), Review (needs review, changes
+requested, approved), Checks (passing, failing, pending) and **Mine**, which
+keeps the pull requests whose author is the signed-in GitHub account
+(maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+creation time and the author is not compared with the account, so Newest,
+Oldest and Mine are not offered. Sort, grouping and filters are remembered in this window's
 local storage, and a filter that is narrowing the list marks its button.
 Searching is unchanged and covers the title, author, branches, repository,
 number and linked threads.

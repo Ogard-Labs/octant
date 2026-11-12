@@ -3,7 +3,15 @@ import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface MachineChangeClient {
-  subscribe(afterSequence: number, signal: AbortSignal): AsyncGenerator<MachineChangeFrame>;
+  /**
+   * `epoch` names the host process `afterSequence` came from, as the last
+   * frame read reported it. A host started since answers `snapshot-required`.
+   */
+  subscribe(
+    afterSequence: number,
+    signal: AbortSignal,
+    epoch?: string,
+  ): AsyncGenerator<MachineChangeFrame>;
 }
 
 export function createMachineChangeClient(options: {
@@ -14,12 +22,15 @@ export function createMachineChangeClient(options: {
   validateBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
   return {
-    subscribe(afterSequence, signal) {
+    subscribe(afterSequence, signal, epoch) {
       if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
         return rejected(new Error("Machine change cursor is invalid."));
       }
       const url = new URL("/api/machine/changes", options.baseUrl);
       url.searchParams.set("afterSequence", String(afterSequence));
+      // Sent only once a host has named its epoch, so a host older than
+      // epochs, which refuses any other parameter, still answers.
+      if (epoch !== undefined) url.searchParams.set("epoch", epoch);
       return parseFrames(
         fetch(url.toString(), {
           method: "GET",
