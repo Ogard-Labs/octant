@@ -507,6 +507,14 @@
   border-bottom: 1px solid var(--oct-border);
 }
 
+/* The Browser's row takes the tile bar's insets, not the rail's: its first
+   glyph stands where a tile's leading icon does (the bar's 12px inset), and its
+   last button ends the 4px the bar's last action does. */
+.right-utility-dock__tool .browser-workspace__chrome {
+  gap: var(--oct-space-1);
+  padding-inline: var(--browser-row-inset) var(--oct-space-1);
+}
+
 /* A rail holds one line: the title yields before the count and the layout
    control do, and the layout control keeps the rail's 28px button height so
    the rail keeps its height instead of wrapping onto two lines. */

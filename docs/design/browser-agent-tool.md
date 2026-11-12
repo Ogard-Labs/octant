@@ -967,11 +967,11 @@ packaged, personal-account or cross-platform acceptance evidence.
 
 ### Take over and Hand back
 
-- While a page is open, the Browser pane's toolbar carries **Take over** beside
-  the driver indicator, on the desktop and the headless Browser alike. One click
+- While a page is open, the Browser pane's toolbar carries **Take over** as an icon
+  button after the address field (in the More menu when the trailing icons do not fit), on the desktop and the headless Browser alike. One click
   holds every agent Browser call on that page for the person: the sign-in
   hold, under another name (`waitingForPerson` is `take-over`), not a second
-  mechanism. The pane then reads "You have the page" and shows **Hand back**
+  mechanism. The status icon then reads "You have the page" and the toolbar shows **Hand back**
   in place of Take over. Hand back releases the hold.
 - While held, an agent Browser call is refused with `browser-person-took-over`
   and a message saying the person took over and that it should say it is

@@ -4947,11 +4947,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   white-space: nowrap;
 }
 
-.composer-model-picker__chevron {
-  flex: 0 0 auto;
-  color: var(--octant-text-muted);
-}
-
 .composer-model-picker__menu {
   box-sizing: border-box;
   display: grid;
@@ -5604,34 +5599,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
     width: min(360px, calc(100vw - 32px));
   }
 }
-.work-folder-bar {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--oct-space-3);
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-.work-folder-bar__project {
-  flex: 0 1 auto;
-  overflow: hidden;
-  min-width: 0;
-  color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.work-folder-bar__folder {
-  overflow: hidden;
-  min-width: 0;
-  font-family: var(--oct-font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .parallel-runs {
   display: flex;
   flex-direction: column;
@@ -7845,9 +7812,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   flex: 0 0 auto;
   padding-inline: 2px;
   background: transparent;
-}
-.work-folder-bar > svg {
-  flex: 0 0 auto;
 }
 @media (hover: none) {
   .content-tab > .content-tab__close {

@@ -243,6 +243,12 @@
   --oct-icon-sm: 14px;
   --oct-icon-md: 16px;
   --oct-icon-lg: 20px;
+  /* The composer's columns. The box's attach and send buttons are one cell, the
+     row under it repeats that cell, and the prompt's text and the row's first
+     text start the same distance in: inset + cell + gap + gap. */
+  --oct-composer-cell: 28px;
+  --oct-composer-inset: var(--oct-space-2);
+  --oct-composer-gap: var(--oct-space-1);
   --oct-icon-mark: 32px;
 
   --oct-avatar-sm: 24px;
@@ -4597,9 +4603,9 @@ input.switch:checked::after {
 .composer-field {
   display: flex;
   align-items: flex-end;
-  gap: var(--oct-space-1);
+  gap: var(--oct-composer-gap);
   min-width: 0;
-  padding-inline: var(--oct-space-2);
+  padding-inline: var(--oct-composer-inset);
 }
 .composer-field__prompt {
   flex: 1 1 auto;
@@ -4619,7 +4625,7 @@ input.switch:checked::after {
   font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
-  margin-bottom: calc((1lh - 4px) / 2);
+  margin-bottom: calc((1lh + 24px - var(--oct-composer-cell)) / 2);
 }
 /* The microphone's failure is said in the notice card above the box, where it
    wraps; beside the control it was cut to fit, and a cut failure is not read.
@@ -4639,7 +4645,7 @@ input.switch:checked::after {
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
 .composer-field__attach + .composer-field__prompt .composer-input {
-  padding-inline-start: var(--oct-space-1);
+  padding-inline-start: var(--oct-composer-gap);
 }
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
@@ -4648,98 +4654,171 @@ input.switch:checked::after {
    with the control corner, 8px in from the 12px corner of the box. */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
-  min-height: 28px;
-  height: 28px;
+  min-height: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
   box-shadow: none;
 }
 .composer-field__attach button[data-size="icon"],
 .composer-field__actions button[data-size="icon"] {
-  width: 28px;
-  min-width: 28px;
+  width: var(--oct-composer-cell);
+  min-width: var(--oct-composer-cell);
   padding: 0;
 }
-/* The thread's facts stand under the box, as one quiet line with no fill or
-   edge of its own: where the thread runs, the surface's row of controls, the
-   plan's windows, and the thread's info. */
+/* The row under the box is one line on the box's own columns, with no fill
+   or edge of its own. The box's field is padded 8px, holds a 28px attach
+   button, a 4px gap and the prompt's 4px inset, so the prompt's text starts
+   44px in and the send button ends 8px short of the right edge. The row has
+   the same 8px (the frame's padding) and the same cells: the Project's icon in
+   a 28px cell stands under attach and its name starts at 44px; the model's
+   name, the approval control and the context ring end the row, the last two in
+   28px cells so the ring is centred under send. A fixed 28px high, so the
+   space under a composer is the same wherever it stands. */
 .composer-under {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 0 var(--oct-space-2);
+  gap: var(--oct-space-2);
   min-width: 0;
-  min-height: 28px;
-  padding: 0 var(--oct-space-1);
+  height: var(--oct-composer-cell);
+  padding: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+/* The frame is the container the row's width rules ask (a container cannot be
+   restyled by its own query). */
+.composer-frame:not(.composer-frame--held) {
   container: composer-under / inline-size;
 }
 .composer-under:empty {
   display: none;
 }
-/* At a phone's width the line cannot be one. It is then two: where the thread
-   runs with the thread's info at its trailing edge, and the row of controls
-   under them. In source order the info fell to a third line of its own. A
-   thread with no place to name keeps the order, since its row and its info
-   still share a line. */
-@container composer-under (max-width: 440px) {
-  .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
-    order: 1;
-  }
-  /* A thread with no place to name (its context wrapper empty, which still stands first in the DOM) leads with the row. At this width the row
-     is two lines, and the info fell to a third of its own. The row leaves the
-     info room beside it, and the info stands at the end of the row's last
-     line. */
-  .composer-under
-    > :is(
-      .composer-row:first-child,
-      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
-    ) {
-    flex: 1 1 0;
-    max-width: calc(100% - var(--oct-space-2) - 28px);
-  }
-  .composer-under
-    > :is(
-      .composer-row:first-child,
-      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
-    )
-    ~ .thread-info {
-    align-self: flex-end;
-  }
+/* The Project's control: an icon in the attach button's cell, then its name.
+   Where the thread's info hangs from it, it is the button; otherwise it is
+   plain text. */
+.composer-place {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--oct-composer-gap) * 2);
+  min-width: 0;
 }
-.composer-under > .thread-plan-windows {
+.composer-place__icon {
+  display: inline-flex;
+  flex: 0 0 var(--oct-composer-cell);
+  align-items: center;
+  justify-content: center;
+  width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
+}
+.composer-place__name,
+.composer-place__folder {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--oct-meta);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-place__folder {
+  font-family: var(--oct-font-mono);
+  font-weight: var(--oct-weight-regular);
+}
+.composer-place--control {
+  max-width: 100%;
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
+  padding: 0 var(--oct-space-2) 0 0;
+  font-size: var(--oct-text-xs);
+}
+.composer-place--control .composer-place__icon {
+  color: var(--oct-meta);
+}
+.composer-place--control .thread-info__attention {
+  flex: 0 0 auto;
+  margin-inline-start: var(--oct-space-1);
+}
+.composer-under > .thread-info:has(.composer-place--control) {
   flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  /* The recipe's 1px edge is transparent but takes room: pull the wrapper out
+     so the icon stands exactly under attach. */
+  margin-inline-start: -1px;
 }
-/* In a narrow pane the line wraps; the thread's info then keeps the trailing
-   edge it has on one line, not the start of a line of its own. */
-.composer-under > .thread-info {
-  margin-inline-start: auto;
+/* At a phone's width the row cannot be one line. It is then two: the Project
+   (with the thread's info beside it) and under it the row of controls, whose
+   trailing cells stay under send. A thread with no place to name keeps its
+   info and its controls on the one line. */
+@container composer-under (max-width: 440px) {
+  .composer-under {
+    flex-wrap: wrap;
+    height: auto;
+    row-gap: 0;
+  }
+  .thread-composer__context {
+    flex: 1 1 0;
+    max-width: none;
+  }
+  .composer-under > .thread-info:has(.composer-place--control) {
+    flex: 1 1 0;
+    max-width: none;
+  }
+  .composer-under
+    > :is(
+      .thread-composer__context:not(:empty, :has(> :only-child:empty)),
+      .thread-info:has(.composer-place--control)
+    )
+    ~ .composer-row {
+    flex: 1 0 100%;
+  }
 }
-/* The surface's own row: what the thread may do leading, the context ring
-   and the model trailing. It takes the line's free space, so the plan's
-   windows and the thread's info stay at the trailing edge. */
+/* The surface's own row: its extra controls leading, then the model's name,
+   the approval control and the context ring at the trailing edge. */
 .composer-row {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
   align-items: center;
   min-width: 0;
-  min-height: 28px;
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
   gap: var(--oct-space-1);
   border-top: 0;
 }
 .composer-actions {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
+  min-width: 0;
   gap: var(--oct-space-1);
   margin-inline-start: auto;
+}
+.composer-row > .composer-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The row's gap (4px) and this make one --oct-space-2 between the left group
+     and the right, at every width; the labels that shorten give the room. */
+  padding-inline-start: calc(var(--oct-space-2) - var(--oct-space-1));
+}
+.composer-actions > .thread-plan-windows {
+  /* The compact meter is small, and its figure never shrinks under what follows. */
+  flex: 0 0 auto;
+  margin-inline-end: var(--oct-space-1);
 }
 /* A narrow column shortens the model's name before anything else moves, and
    when even that is not enough the row wraps rather than pushing the send
    control past the frame's edge, where it went missing at 430px. */
 .composer-row .composer-model-picker {
+  display: flex;
   min-width: 0;
+  max-width: 200px;
   flex: 0 1 auto;
+}
+.composer-row .composer-model-picker__trigger {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 /* One control size and one label size across the whole row. Measured before
    this rule, a single row carried heights of 26, 28 and 29 and label sizes of
@@ -4752,8 +4831,8 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"] {
-  min-height: 28px;
-  height: 28px;
+  min-height: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
   border-radius: var(--oct-radius-sm);
 }
 /* The composer is one raised object, so nothing riding its row draws a second
@@ -4773,10 +4852,10 @@ input.switch:checked::after {
    controls on the page are. */
 .composer-row button[data-size="icon"],
 .thread-info > button[data-size="icon"] {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: var(--oct-composer-cell);
+  min-width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
+  min-height: var(--oct-composer-cell);
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
@@ -4786,9 +4865,10 @@ input.switch:checked::after {
    bordered picker, opening from the row's left edge. */
 .composer-row [role="combobox"] {
   width: auto;
+  min-width: 0;
   max-width: 190px;
-  min-height: 28px;
-  padding-inline: 8px var(--oct-space-6);
+  min-height: var(--oct-composer-cell);
+  padding-inline: 8px;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
   color: var(--oct-meta);
@@ -4801,6 +4881,28 @@ input.switch:checked::after {
    title band above them read as one system. The model picker is a button
    recipe and keeps the recipe's own hover; a product class may not repaint
    it (ui:check counts that as a repaint). */
+/* Full access keeps its words beside its icon, in the warning ink (danger
+   without the sandbox), so it cannot be read as asking first. */
+.composer-row .code-composer-choice__trigger[data-mode="full-access"] {
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-1) var(--oct-space-2);
+}
+.code-composer-choice__word {
+  color: var(--oct-danger-fg);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+.code-composer-choice__word[data-sandboxed="true"] {
+  color: var(--oct-warn-fg);
+}
+.composer-row .code-composer-choice__trigger[data-mode="full-access"] > svg {
+  color: var(--oct-danger-fg);
+}
+/* No control in the row carries a chevron: a label opens its menu without one. */
+.composer-row [role="combobox"] > svg,
+.composer-row [role="combobox"] > [aria-hidden="true"] {
+  display: none;
+}
 .composer-row [role="combobox"]:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
@@ -4812,7 +4914,7 @@ input.switch:checked::after {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  min-height: 28px;
+  min-height: var(--oct-composer-cell);
   padding-block: 0;
   padding-inline: 8px var(--oct-space-2);
   color: var(--oct-meta);
@@ -4830,20 +4932,16 @@ input.switch:checked::after {
    person reads, so its name keeps the ordinary meta ink (the blanket disabled
    opacity left it at 2.11:1 on the page). It does not look pressable: the
    button ignores the pointer, shows the default cursor and takes no hover
-   fill, and only the chevron is dimmed. Every other disabled picker keeps the
-   ordinary disabled look. */
+   fill. Every other disabled picker keeps the ordinary disabled look. */
 .composer-model-picker__trigger--locked:disabled {
   opacity: 1;
-}
-.composer-model-picker__trigger--locked:disabled .composer-model-picker__chevron {
-  opacity: 0.4;
 }
 
 /* An unavailable provider is still a toolbar item, not a second outlined
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
 .composer-row .composer-model-picker--empty {
-  min-height: 28px;
+  min-height: var(--oct-composer-cell);
   padding: 0;
   border: 0;
   background: transparent;
@@ -4918,7 +5016,7 @@ input.switch:checked::after {
 }
 /* A row starts where the box's first control does. */
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
-  padding-inline: var(--oct-space-2);
+  padding-inline: var(--oct-composer-inset);
 }
 /* The composer's one raised surface: a container, so its corner is the
    container token at one line and at four. */
@@ -5028,7 +5126,7 @@ input.switch:checked::after {
   position: absolute;
   top: 12px;
   /* Clear of send at the box's trailing edge. */
-  right: calc(var(--oct-space-2) * 2 + 28px);
+  right: calc(var(--oct-space-2) * 2 + var(--oct-composer-cell));
   padding: 1px var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   box-shadow: inset 0 0 0 1px var(--oct-border);
@@ -5046,12 +5144,19 @@ input.switch:checked::after {
 }
 .thread-composer__context {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 60%;
   align-items: center;
-  height: 28px;
+  height: var(--oct-composer-cell);
   min-width: 0;
-  padding-inline: var(--oct-space-1);
+  padding: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+.thread-composer__context > .code-checkout-bar,
+.thread-composer__context > .composer-place {
+  width: auto;
+  min-width: 0;
 }
 /* A surface's context can be a wrapper with nothing in it yet (a Code thread
    whose checkout has not been read): it then holds no place in the line. */
@@ -5059,12 +5164,14 @@ input.switch:checked::after {
 .thread-composer__context:has(> :only-child:empty) {
   display: none;
 }
-/* The thread's info panel: a quiet icon button at the end of the row and one
-   menu above it. What it holds (access level, credential commands, provider
+/* The thread's info panel: the Project's own button, or where the surface
+   has none a quiet icon after it, and one menu above it. What it holds (access level, credential commands, provider
    cloud sessions, continuing elsewhere) used to sit at four places on the
    thread page, two of them outside the reading column. */
 .thread-info {
-  position: relative;
+  /* Not positioned: the panel is placed against the row (`.composer-under`),
+     whatever stands before the trigger, so it cannot run past the composer. */
+  position: static;
   display: inline-flex;
   flex: 0 0 auto;
 }
@@ -5076,7 +5183,7 @@ input.switch:checked::after {
    as a piece of a web page, not as part of the window. */
 .thread-info__panel {
   position: absolute;
-  right: 0;
+  left: 0;
   bottom: calc(100% + var(--oct-space-1));
   z-index: 5;
   display: grid;

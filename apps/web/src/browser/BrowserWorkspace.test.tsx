@@ -13,6 +13,74 @@ import { threadImageOffers } from "../composer/threadImageOffers";
 import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
+/** The toolbar's trailing more menu holds the actions that have no button of their own. */
+async function openMore(): Promise<void> {
+  await userEvent.click(await screen.findByRole("button", { name: "More Browser actions" }));
+}
+async function chooseMoreAction(name: string): Promise<void> {
+  await openMore();
+  await userEvent.click(await screen.findByRole("menuitem", { name }));
+}
+// The drawing bar appears after the capture is taken, read and decoded. On a
+// slow runner that chain outlasted the one-second default. Stay under the
+// package's 15 s test timeout.
+const DRAWING_OPENS_WITHIN_MS = 8_000;
+
+/**
+ * Choose Draw on page once the page it draws on has settled. The component
+ * retires any drawing request still on its way when that page first appears,
+ * in an effect that runs after the commit; a choice that lands before that
+ * effect is retired with it and no drawing ever opens. A person cannot choose
+ * that fast; a test can, and on a slow runner it did. Every test that starts a
+ * drawing goes through here so none can skip the flush.
+ */
+async function chooseDrawOnPage(): Promise<void> {
+  await screen.findByRole(
+    "button",
+    { name: "More Browser actions" },
+    { timeout: DRAWING_OPENS_WITHIN_MS },
+  );
+  await act(async () => {});
+  await chooseMoreAction("Draw on page");
+}
+/** What the more menu offers now; the menu is closed again afterwards. */
+async function moreActionNames(): Promise<ReadonlyArray<string>> {
+  await openMore();
+  const names = (await screen.findAllByRole("menuitem")).map((item) => {
+    const labelled = item.getAttribute("aria-labelledby");
+    return (
+      (labelled === null ? null : document.getElementById(labelled)?.textContent) ??
+      item.getAttribute("aria-label") ??
+      item.textContent ??
+      ""
+    );
+  });
+  await userEvent.keyboard("{Escape}");
+  return names;
+}
+
+/** The toolbar row's width, as the resize observer reports it. */
+function widthOfToolbar(width: number): () => void {
+  class FixedObserver {
+    constructor(private readonly notify: (entries: ReadonlyArray<never>) => void) {}
+    observe(): void {
+      this.notify([]);
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  vi.stubGlobal("ResizeObserver", FixedObserver);
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(0, 0, this.classList.contains("browser-workspace__chrome") ? width : 0, 0);
+    });
+  return () => {
+    rect.mockRestore();
+    vi.unstubAllGlobals();
+  };
+}
+
 const localServers = vi.hoisted(() => ({
   snapshot: undefined as unknown,
   open: async (_listenerId: string): Promise<unknown> => undefined,
@@ -163,12 +231,23 @@ describe("BrowserWorkspace", () => {
       threadId,
     } as const;
     const view = render(<BrowserWorkspace client={browser} tab={tab as never} />);
-    expect(await screen.findByText("Agent can use this Browser.")).toBeVisible();
+    // With no page open the sentence rides on the profile icon's tooltip.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Agent can use this Browser."),
+      ),
+    );
+    expect(screen.queryByRole("img", { name: /idle/ })).toBeNull();
     const disconnected = client();
     vi.mocked(disconnected.inspectThread).mockRejectedValue(new Error("disconnected"));
     view.rerender(<BrowserWorkspace client={disconnected} tab={tab as never} />);
-    expect(screen.queryByText("Agent can use this Browser.")).toBeNull();
-    expect(screen.getByText("Browser availability is unknown.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Browser availability is unknown."),
+      ),
+    );
   });
   it("keeps an invalid host response inside polling failure handling", async () => {
     const browser = client();
@@ -179,7 +258,10 @@ describe("BrowserWorkspace", () => {
         tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
       />,
     );
-    expect(await screen.findByText("Browser availability is unknown.")).toBeVisible();
+    expect(await screen.findByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+      "title",
+      expect.stringContaining("Browser availability is unknown."),
+    );
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
     expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
   });
@@ -190,6 +272,25 @@ describe("BrowserWorkspace", () => {
     expect(styles.indexOf(".browser-workspace__chrome")).toBeLessThan(
       styles.indexOf(".browser-workspace__native"),
     );
+  });
+
+  it("draws the address field with the control corner and the field border, and no pill", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const field = styles.match(/\.browser-workspace__field \{([^}]*)\}/)?.[1] ?? "";
+
+    expect(field).toMatch(/border-radius:\s*var\(--oct-radius-sm\)/);
+    expect(field).toMatch(/border:\s*1px solid var\(--input\)/);
+    expect(field).toMatch(/min-width:\s*120px/);
+    for (const selector of [
+      ".browser-workspace__chrome",
+      ".browser-workspace__field",
+      ".browser-workspace__status",
+      ".browser-workspace__mark",
+    ]) {
+      const rule = styles.match(new RegExp(`${selector.replace(".", "\\.")} \\{([^}]*)\\}`))?.[1];
+      expect(rule, selector).toBeDefined();
+      expect(rule).not.toMatch(/radius-pill/);
+    }
   });
 
   it("reattaches the authoritative current thread context without renderer-local identity", async () => {
@@ -213,7 +314,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
     expect(browser.inspectThread).toHaveBeenCalledWith({ threadId }, expect.any(AbortSignal));
     expect(browser.inspect).not.toHaveBeenCalled();
   });
@@ -720,7 +821,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
     enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() =>
@@ -778,7 +879,7 @@ describe("BrowserWorkspace", () => {
       const browser = withContext(takeCapture);
       render(<BrowserWorkspace client={browser} tab={tab} />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Screenshot" }));
+      await chooseMoreAction("Screenshot");
       await waitFor(() =>
         expect(takeCapture).toHaveBeenCalledWith({
           threadId,
@@ -806,7 +907,7 @@ describe("BrowserWorkspace", () => {
           }) as any,
       );
       render(<BrowserWorkspace client={withContext(takeCapture)} tab={tab} />);
-      fireEvent.click(await screen.findByRole("button", { name: "Screenshot" }));
+      await chooseMoreAction("Screenshot");
       expect(
         await screen.findByText("This screenshot could not be kept: the picture is too large."),
       ).toBeVisible();
@@ -815,13 +916,13 @@ describe("BrowserWorkspace", () => {
       expect(screen.getByRole("region", { name: "Browser automation" })).toHaveClass(
         "browser-workspace--message",
       );
-      expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
+      expect(await moreActionNames()).toContain("Screenshot");
     });
 
     it("is absent when the client cannot keep a capture", async () => {
       render(<BrowserWorkspace client={withContext()} tab={tab} />);
-      expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
-      expect(screen.queryByRole("button", { name: "Screenshot" })).not.toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
+      expect(await moreActionNames()).not.toContain("Screenshot");
     });
     describe("Draw on page", () => {
       const captureId = "a0000000-0000-4000-8000-000000000002";
@@ -863,21 +964,9 @@ describe("BrowserWorkspace", () => {
         return browser;
       }
 
-      // The drawing bar appears after the capture is taken, read and decoded.
-      // On a slow runner that chain outlasted the one-second default and a
-      // different test of this group failed on each run. Stay under the
-      // package's 15 s test timeout.
-      const DRAWING_OPENS_WITHIN_MS = 8_000;
-
       async function openDrawing(browser: BrowserAutomationClient) {
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(
-          await screen.findByRole(
-            "button",
-            { name: "Draw on page" },
-            { timeout: DRAWING_OPENS_WITHIN_MS },
-          ),
-        );
+        await chooseDrawOnPage();
         return screen.findByRole(
           "toolbar",
           { name: "Drawing tools" },
@@ -943,7 +1032,7 @@ describe("BrowserWorkspace", () => {
         );
         const browser = drawable(takeCapture);
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        await chooseDrawOnPage();
         expect(
           await screen.findByText(
             "There is nothing to draw on: the Browser gave no picture of this page. A page with a sign-in field is never pictured.",
@@ -1073,7 +1162,7 @@ describe("BrowserWorkspace", () => {
           fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
           // The composer is still uploading; the person discards and draws again.
           fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
-          fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+          await chooseDrawOnPage();
           await screen.findByRole("toolbar", { name: "Drawing tools" });
           const layer = screen.getByRole("application", { name: "Page capture to draw on" });
           drag(layer, [20, 20], [120, 60]);
@@ -1096,18 +1185,18 @@ describe("BrowserWorkspace", () => {
         ).toBeVisible();
         expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
         await waitFor(() =>
-          expect(screen.getByRole("button", { name: "Draw on page" })).toHaveFocus(),
+          expect(screen.getByRole("button", { name: "More Browser actions" })).toHaveFocus(),
         );
         // Leave nothing waiting for the next test's thread composer.
         threadImageOffers.subscribe(`work:${threadId}`, () => ({ status: "accepted" as const }))();
       });
 
-      it("returns focus to the Draw on page button when the drawing is discarded", async () => {
+      it("returns focus to the more menu that opened drawing when the drawing is discarded", async () => {
         const browser = drawable();
         await openDrawing(browser);
         fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
         await waitFor(() =>
-          expect(screen.getByRole("button", { name: "Draw on page" })).toHaveFocus(),
+          expect(screen.getByRole("button", { name: "More Browser actions" })).toHaveFocus(),
         );
       });
 
@@ -1121,7 +1210,7 @@ describe("BrowserWorkspace", () => {
         );
         const browser = drawable(takeCapture);
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        await chooseDrawOnPage();
         await waitFor(() => expect(takeCapture).toHaveBeenCalledOnce());
         fireEvent.click(screen.getByRole("button", { name: "Reload" }));
         await waitFor(() => expect(browser.act).toHaveBeenCalled());
@@ -1143,27 +1232,29 @@ describe("BrowserWorkspace", () => {
         const without = withContext();
         without.readCapture = vi.fn(async () => ({ captureId, dataUrl: pictureUrl }) as any);
         const first = render(<BrowserWorkspace canDrawOnPage client={without} tab={tab} />);
-        expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
-        expect(screen.queryByRole("button", { name: "Draw on page" })).toBeNull();
+        expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
+        expect(await moreActionNames()).not.toContain("Draw on page");
         first.unmount();
 
         const noComposer = drawable();
         render(<BrowserWorkspace client={noComposer} tab={tab} />);
-        expect(await screen.findByRole("button", { name: "Screenshot" })).toBeVisible();
-        expect(screen.queryByRole("button", { name: "Draw on page" })).toBeNull();
+        const offered = await moreActionNames();
+        expect(offered).toContain("Screenshot");
+        expect(offered).not.toContain("Draw on page");
       });
 
       it("cannot be started while an element is being pointed at, and pointing is refused while drawing", async () => {
         pointing.armed = true;
         const browser = drawable();
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        const draw = await screen.findByRole("button", { name: "Draw on page" });
-        expect(draw).toBeDisabled();
-        // It says why, for a pointer and for assistive technology.
-        expect(draw).toHaveAttribute(
-          "title",
+        await openMore();
+        const draw = await screen.findByRole("menuitem", { name: "Draw on page" });
+        expect(draw).toHaveAttribute("aria-disabled", "true");
+        // It says why, as the item's description.
+        expect(draw).toHaveAccessibleDescription(
           "Finish or cancel pointing at an element before drawing on the page",
         );
+        await userEvent.keyboard("{Escape}");
         cleanup();
 
         pointing.armed = false;
@@ -1207,7 +1298,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open in default browser" }));
+    await chooseMoreAction("Open in default browser");
     await waitFor(() =>
       expect(openBrowserExternal).toHaveBeenCalledWith("https://example.com/current"),
     );
@@ -1294,7 +1385,7 @@ describe("BrowserWorkspace", () => {
     enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await screen.findByText("Browser failed");
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More Browser actions" })).toBeInTheDocument();
   });
 
   it("shows its start page without a warning when the page it held has closed", async () => {
@@ -1555,7 +1646,7 @@ describe("BrowserWorkspace", () => {
         }
       />,
     );
-    expect(await screen.findByText("· Person hold")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /· Person hold/ })).toBeInTheDocument();
     unmount();
     vi.mocked(browser.inspectThread).mockResolvedValue({
       status: "running",
@@ -1577,7 +1668,7 @@ describe("BrowserWorkspace", () => {
         }
       />,
     );
-    expect(await screen.findByText("· 5m idle")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /· 5m idle/ })).toBeInTheDocument();
   });
 
   it.each([
@@ -1624,7 +1715,7 @@ describe("BrowserWorkspace", () => {
           />,
         );
 
-        expect(await screen.findByText(expected)).toBeInTheDocument();
+        expect(await screen.findByRole("img", { name: new RegExp(expected) })).toBeInTheDocument();
       } finally {
         restoreDom();
       }
@@ -1669,8 +1760,116 @@ describe("BrowserWorkspace", () => {
           }}
         />,
       );
-      await screen.findByRole("button", { name: "Stop" });
+      await screen.findByRole("button", { name: "More Browser actions" });
     }
+
+    it("draws one row: history icons, the address field, then the trailing buttons", async () => {
+      await renderHeadless(holdingClient());
+      const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
+      if (row === null) throw new Error("The toolbar row is missing.");
+      const order = [...row.querySelectorAll("button, input")].map((control) =>
+        control.getAttribute("aria-label"),
+      );
+      const profile = order.findIndex((name) => name?.startsWith("Browser profile") === true);
+      // Keyboard order is the visual order: history, the address, Take over, the
+      // profile icon, then the more menu.
+      expect(order.slice(0, 4)).toEqual(["Back", "Forward", "Reload", "Browser URL"]);
+      expect(order.indexOf("Take over")).toBe(4);
+      expect(profile).toBe(5);
+      expect(order.at(-1)).toBe("More Browser actions");
+      expect(within(row).queryByText("Preview")).toBeNull();
+    });
+
+    it("draws an empty address field and no status icon while no page is open", async () => {
+      render(
+        <BrowserWorkspace
+          client={client()}
+          tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
+        />,
+      );
+      const profile = await screen.findByRole("button", { name: /^Browser profile/ });
+      const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
+      expect(row?.querySelector(".browser-workspace__field [role=img]")).toBeNull();
+      expect(row?.querySelector("[role=img]")).toBeNull();
+      expect(screen.queryByRole("button", { name: "More Browser actions" })).toBeNull();
+      expect(profile).toBeVisible();
+    });
+
+    it("draws the status icon after the address while a page is open", async () => {
+      await renderHeadless(holdingClient());
+      const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
+      if (row === null) throw new Error("The toolbar row is missing.");
+      const field = row.querySelector(".browser-workspace__field");
+      expect(field?.querySelector("[role=img]")).toBeNull();
+      const status = within(row).getByRole("img", { name: /idle/ });
+      expect(
+        status.compareDocumentPosition(screen.getByRole("button", { name: "Take over" })),
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
+    it("keeps every other action reachable from the more menu", async () => {
+      await renderHeadless(holdingClient());
+      expect(await moreActionNames()).toEqual(["Stop this Browser session"]);
+    });
+
+    it("moves the status and Take over into the more menu when the row is too narrow for the address beside them", async () => {
+      const restore = widthOfToolbar(300);
+      try {
+        await renderHeadless(holdingClient());
+        expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
+        expect(screen.queryByRole("img", { name: /idle/ })).toBeNull();
+        expect(await moreActionNames()).toEqual(
+          expect.arrayContaining(["Take over", "Stop this Browser session"]),
+        );
+        expect(screen.getByRole("button", { name: "Back" })).toBeVisible();
+        expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeVisible();
+        expect(screen.getByRole("button", { name: /^Browser profile/ })).toBeVisible();
+      } finally {
+        restore();
+      }
+    });
+
+    it("keeps the status and Take over beside the address when the row is wide", async () => {
+      const restore = widthOfToolbar(640);
+      try {
+        await renderHeadless(holdingClient());
+        expect(screen.getByRole("button", { name: "Take over" })).toBeVisible();
+        expect(screen.getByRole("img", { name: /idle/ })).toBeVisible();
+        expect(await moreActionNames()).not.toContain("Take over");
+      } finally {
+        restore();
+      }
+    });
+
+    it("takes the page from the more menu when the row is narrow", async () => {
+      const restore = widthOfToolbar(300);
+      try {
+        const browser = holdingClient();
+        await renderHeadless(browser);
+        await chooseMoreAction("Take over");
+        expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
+      } finally {
+        restore();
+      }
+    });
+
+    it("keeps the profile choices reachable from the more menu at the narrowest page-open row", async () => {
+      const restore = widthOfToolbar(288);
+      try {
+        await renderHeadless(holdingClient());
+        expect(screen.queryByRole("button", { name: /^Browser profile/ })).toBeNull();
+        expect(await moreActionNames()).toEqual(
+          expect.arrayContaining([
+            "Profile: Private (current)",
+            "Profile: Project",
+            "Profile: Personal",
+          ]),
+        );
+        expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeVisible();
+      } finally {
+        restore();
+      }
+    });
 
     it("takes the page on one click, says so, and hands it back on one click", async () => {
       const browser = holdingClient();
@@ -1678,12 +1877,14 @@ describe("BrowserWorkspace", () => {
 
       await userEvent.click(await screen.findByRole("button", { name: "Take over" }));
       expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
-      expect(await screen.findByText("You have the page")).toBeInTheDocument();
+      expect(await screen.findByRole("img", { name: /You have the page/ })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("button", { name: "Hand back" }));
       expect(browser.handBack).toHaveBeenCalledWith({ threadId });
-      await waitFor(() => expect(screen.queryByText("You have the page")).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.queryByRole("img", { name: /You have the page/ })).not.toBeInTheDocument(),
+      );
       expect(screen.getByRole("button", { name: "Take over" })).toBeInTheDocument();
     });
 
@@ -1698,7 +1899,7 @@ describe("BrowserWorkspace", () => {
       } as any);
       await renderHeadless(browser);
       expect(await screen.findByRole("button", { name: "Hand back" })).toBeInTheDocument();
-      expect(screen.getByText("You have the page")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: /You have the page/ })).toBeInTheDocument();
     });
 
     it("names the active owner and reclaims locally without handing the page back to the agent", async () => {
@@ -1724,10 +1925,16 @@ describe("BrowserWorkspace", () => {
         return local;
       });
       await renderHeadless(browser);
-      expect(await screen.findByText("Owner: Synthetic owner phone")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("img", { name: /Owner: Synthetic owner phone/ }),
+      ).toBeInTheDocument();
+      // The one action the person needs while a remote owner holds the page is
+      // the trailing button; Hand back is in the more menu.
+      expect(screen.queryByRole("button", { name: "Hand back" })).toBeNull();
+      expect(await moreActionNames()).toContain("Hand back");
       await userEvent.click(screen.getByRole("button", { name: "Reclaim locally" }));
       expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
-      expect(await screen.findByText("You have the page")).toBeInTheDocument();
+      expect(await screen.findByRole("img", { name: /You have the page/ })).toBeInTheDocument();
       expect(browser.handBack).not.toHaveBeenCalled();
     });
 
@@ -1836,7 +2043,7 @@ describe("BrowserWorkspace", () => {
           />,
         );
 
-        expect(await screen.findByText("Shared live page")).toBeInTheDocument();
+        expect(await screen.findByRole("img", { name: /Shared live page/ })).toBeInTheDocument();
         await waitFor(() => expect(attachBrowserSurface).toHaveBeenCalled());
         overlay.className = overlayClass;
         await act(async () => {
@@ -1888,7 +2095,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
     fireEvent.change(screen.getByLabelText("Browser URL"), {
       target: { value: "https://example.com/draft" },
     });
@@ -1926,6 +2133,54 @@ describe("BrowserWorkspace", () => {
     const nativeBridge = {
       getHostCapabilities: vi.fn(async () => ({ liveBrowserSupported: true }) as any),
     } as any;
+
+    it("keeps the folded profile choices disabled until the task default is read, then lets them work", async () => {
+      const restore = widthOfToolbar(288);
+      try {
+        const browser = client();
+        vi.mocked(browser.inspectThread).mockResolvedValue({
+          status: "running",
+          threadId: threadId as any,
+          context: { ...context, presentation: "headless" } as any,
+          evidence: [],
+        } as any);
+        let release: (state: any) => void = () => undefined;
+        browser.readTaskProfile = vi.fn(() => new Promise((resolve) => (release = resolve)) as any);
+        browser.selectTaskProfile = vi.fn();
+        render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+        await openMore();
+        const personal = await screen.findByRole("menuitem", { name: /Profile: Personal/ });
+        expect(personal).toHaveAttribute("aria-disabled", "true");
+        await userEvent.click(personal);
+        expect(browser.stop).not.toHaveBeenCalled();
+        expect(browser.create).not.toHaveBeenCalled();
+        await userEvent.keyboard("{Escape}");
+
+        await act(async () => {
+          release({
+            threadId,
+            mode: "work",
+            version: 1,
+            profile: "private",
+            contextId: context.contextId,
+          });
+        });
+        await openMore();
+        await waitFor(() =>
+          expect(screen.getByRole("menuitem", { name: /Profile: Personal/ })).not.toHaveAttribute(
+            "aria-disabled",
+            "true",
+          ),
+        );
+        await userEvent.click(screen.getByRole("menuitem", { name: /Profile: Personal/ }));
+        expect(
+          await screen.findByText("Change this task’s default Browser profile?"),
+        ).toBeVisible();
+        expect(browser.stop).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
 
     it("offers an explicit one-off Private open when task-default controls refuse the read", async () => {
       const browser = client();
@@ -2137,7 +2392,7 @@ describe("BrowserWorkspace", () => {
     );
 
     it.each(["native-live", "headless"] as const)(
-      "exposes login permission only on the native Browser consumer, not %s fallback",
+      "offers Login permission in the more menu only on the native Browser consumer, and opens its review there, not on the %s fallback",
       async (presentation) => {
         const browser = client();
         browser.manageCredentialUse = vi.fn(async () =>
@@ -2153,11 +2408,12 @@ describe("BrowserWorkspace", () => {
           }),
         );
         render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
-        await screen.findByRole("button", { name: "Stop" });
+        await screen.findByRole("button", { name: "More Browser actions" });
         if (presentation === "headless")
-          expect(screen.queryByRole("button", { name: "Login permission" })).toBeNull();
+          expect(await moreActionNames()).not.toContain("Login permission");
         else {
-          fireEvent.click(await screen.findByRole("button", { name: "Login permission" }));
+          expect(await moreActionNames()).toContain("Login permission");
+          await chooseMoreAction("Login permission");
           expect(
             await screen.findByRole("dialog", { name: "Browser login permission" }),
           ).toBeTruthy();

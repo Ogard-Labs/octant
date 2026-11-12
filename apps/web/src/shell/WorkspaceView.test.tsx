@@ -2041,7 +2041,7 @@ describe("WorkspaceView tab isolation", () => {
     const { rerender } = render(
       <WorkspaceView {...firstProps} browserAutomationClient={browserAutomationClient} />,
     );
-    expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "More Browser actions" })).toBeVisible();
 
     const secondProps = propsFor(secondTab);
     const secondLayout = {
@@ -2064,7 +2064,7 @@ describe("WorkspaceView tab isolation", () => {
     );
 
     expect(screen.getByRole("button", { name: "Start browser" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More Browser actions" })).not.toBeInTheDocument();
   });
 
   it("closes a Browser tab locally without waiting for authoritative cleanup", async () => {

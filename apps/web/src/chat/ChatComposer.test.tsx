@@ -379,7 +379,7 @@ describe("ChatComposer", () => {
     await user.click(await screen.findByRole("option", { name: "Provider B" }));
     await user.click(screen.getByRole("combobox", { name: "Model" }));
     await user.click(await screen.findByRole("option", { name: "Model B" }));
-    await user.click(screen.getByRole("button", { name: "Disable web research" }));
+    await user.click(screen.getByRole("button", { name: "Web research" }));
     await user.click(screen.getByRole("combobox", { name: "Research routing" }));
     await user.click(await screen.findByRole("option", { name: "Provider-native" }));
 
