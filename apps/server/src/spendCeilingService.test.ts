@@ -230,6 +230,36 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("admitted");
   });
 
+  it("journals a paired device's ceiling with the device as its actor and as who set it, and a local window's as the local user", () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const setBy = (actor?: never) => {
+      const { journal, service } = openService();
+      const before = journal.headSequence();
+      const set = service.execute(
+        "person-paired-device",
+        {
+          kind: "set-spend-ceiling",
+          scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+          expectedVersion: decodeAggregateVersion(0),
+          policy: { tokenBudget: 1_000 },
+          window: { kind: "calendar", period: "day", timeZone: "UTC" },
+        },
+        actor,
+      );
+      const events = journal.replay({ afterSequence: before as never, limit: 100 } as never);
+      return {
+        journaled: events.map((event) => event.actor),
+        setBy: set.kind === "set" ? set.ceiling.setBy : undefined,
+      };
+    };
+
+    expect(setBy(device)).toEqual({ journaled: [device], setBy: device });
+    const local = setBy();
+    expect(local.journaled.map((actor) => actor.kind)).toEqual(["local-user"]);
+    expect(local.setBy).toMatchObject({ kind: "local-user" });
+  });
+
   it("reserves remaining tokens so concurrent turns cannot both admit past the ceiling", () => {
     const { service } = openService();
     const set = service.execute("local-window", {
