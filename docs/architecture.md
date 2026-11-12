@@ -241,7 +241,8 @@ The design rests on a small set of invariants that every package obeys:
   reason to extend the seam in its own change, not to bypass it.
 - **Threads, boards, and Done.** Use the unified real-thread hierarchy and
   server-authoritative Work/Code boards. Chat has no board. A Code thread is
-  Done only when its user-confirmed delivery target is objectively satisfied. A
+  Done when its user-confirmed delivery target is objectively satisfied, or
+  when a person marks it Done as their own override. A
   Work thread is Done when a person marks it Done. An agent cannot mark any
   thread Done.
 - **Remote clients never exceed what the host granted.** Remote clients never
@@ -555,6 +556,8 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
+A per-Project setting, "Use the Project's own toolchain", is specified there
+too (maintainer request, 2026-11-12; not built yet).
 Agents read the same servers through one read-only app-managed tool,
 `octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
 `definition`, and `references` operations are allowed in Plan and ask nothing.
@@ -562,8 +565,10 @@ It is offered on a Code turn whose provider carries Octant's tools only when a
 server an agent may start (`static` and effective, so the Settings switch is
 honoured) covers a file a bounded scan finds in the turn's checkout or extra
 folders. It reads the saved file, never an editor's draft, returns at most
-200 references, and never starts or reads through a server that runs
-repository tooling, approved or not
+200 references, never starts a server that runs
+repository tooling, and may read through one that is already approved and
+running (maintainer request, 2026-11-12; not built yet: today it never reads
+through one, approved or not)
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`
 component kind (Code only, quarantined like any executable component), the
@@ -576,8 +581,12 @@ configuration digest and adapter package state) and starts it; the adapter and
 the program run in one capsule confined as a terminal, on the session's own
 `proxied` egress under the thread's rules below Full access, and the session
 ends at once when the thread, its posture, its checkout, the confirmation, or
-the Project goes. The routes under `/api/code/debug/` are local-window only
-with no remote action, no agent tool reaches a session, and nothing a session
+the Project goes. An agent may also start, control and read a debug session:
+unasked at Full access, approval-gated per configuration below it, and refused
+in Plan; a paired device that is not an owner device stays refused (maintainer
+request, 2026-11-12). Not built yet: today the routes under `/api/code/debug/`
+are local-window only with no remote action and no agent tool reaches a
+session. Nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
 breakpoints (configuration saved locally per endpoint/window/thread/checkout,
@@ -750,6 +759,12 @@ showed. A remembered origin covers Private pages only; a page in a Project or
 Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
+At Full access a Private page needs no site approval and may navigate across
+origins; a profile page keeps its site approval at every level, which the
+person can remember or widen to "Allow all sites in this profile"
+([the Full access rule](#security-and-authority); maintainer request,
+2026-11-12). Not built yet: today a Private page asks for each site at Full
+access too, and no profile-wide answer exists.
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
 other one as `plan-mode-read-only`, a recording included, from one table of
@@ -758,15 +773,24 @@ discarded ([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mod
 Downloads in the agent's Browser
 are blocked on every page unless the person turns on "Let agents download
 files" in Settings (a shell setting only a local window writes, off by
-default). Then a download an agent action starts is held in a private
+default below Full access and on by default at Full access). Then a download
+an agent action starts is held in a private
 temporary folder of the host, never the workspace, and saved only by the
-agent's `download-save`, which asks the person every time, at every access
-level, before creating a new file in `downloads/` of the thread's workspace;
-programs and installers and a symbolic link are refused, and a paired device,
+agent's `download-save` as a new file in `downloads/` of the thread's
+workspace. At Full access the save does not ask; below it the save asks the
+person, and the answer can be remembered per site. The path checks hold at
+every level. A symbolic link is refused at every level, programs, installers
+and scripts only below Full access, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked. Ordinary uploads ask
-once per use at every access level. A local person may separately review a
+download the person starts in the Browser pane saves to the Downloads folder
+at every level. Ordinary uploads do not ask at Full access; below it they ask
+and the answer can be remembered per site. The size and held-file caps are
+Settings defaults, not constants (maintainer request, 2026-11-12). Not built
+yet: today the save and each upload ask every time at every access level,
+agent downloads are off by default at every level, programs and installers
+are refused at every level, a person's own download in the Browser pane is
+blocked, and the caps are constants. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
@@ -836,6 +860,10 @@ The local-server adapter binds its private tool endpoint to one connection's
 session and exact offered catalogue, and reports app tools only with a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
+At Full access a runtime whose inherited configuration cannot prove that
+exclusivity is still offered Octant's tools, labelled as mixed; below Full
+access the rule is unchanged (maintainer request, 2026-11-12; not built yet:
+today such a runtime is offered none at any level).
 
 **Browser and Computer are tools, not mentions.** The host offers them on
 every eligible turn, and the agent uses them when the person's request needs
@@ -846,7 +874,9 @@ queued message still decodes, is kept with the turn as journaled, and is
 ignored; the composers drop it from a restored draft with a note.
 
 - **Browser** is offered in Work and Code when the provider carries app-managed
-  tools, never in Chat. The first effect on each origin asks inline. In Plan
+  tools, never in Chat. The first effect on each origin asks inline; at Full
+  access only a signed-in profile page asks
+  ([the Full access rule](#security-and-authority)). In Plan
   the definition is present, the reads of the page already open still run
   under every other gate, and every effect is refused.
 - **Computer** is offered in Chat, Work, and Code only when all of these hold:
@@ -871,12 +901,16 @@ intent at the moment of action instead:
 
 - The first Computer action on each application in a thread asks, even under
   Full access: no app grant exists until the person approves one, and the
-  tool never reads the execution policy to skip the ask. A grant lasts five
-  minutes and covers that application, owner, and authority only.
-- Once outside content has entered the thread (a Browser page, a tool result,
+  tool never reads the execution policy to skip the ask. A grant lasts the
+  thread and covers that application, owner, and authority only; a setting
+  can remember it for the Project (maintainer request, 2026-11-12; not built
+  yet: today a grant lapses after five minutes).
+- Below Full access, once outside content has entered the thread (a Browser page, a tool result,
   imported content), no standing grant carries a Computer action: every
   action asks again, for that one action, and the ask names what marked the
-  thread.
+  thread. At Full access outside content does not make later actions ask
+  again (maintainer request, 2026-11-12; not built yet: today it does at
+  every level).
 - The approval card shows the agent's stated reason, quoted as its words, and
   the outside sources with their last read.
 - Only the person at this Mac approves control of this Mac. A paired device or
@@ -1044,7 +1078,9 @@ document as a future version. Frames follow the
   authority; images only from its own thread), is reached by its own thread's
   agent and by a window in Chat, follows its thread into a Chat Project
   without joining that Project's inventory or memory, is erased with the
-  thread's purge, exports to the host folder, and is never mirrored, shared,
+  thread's purge, exports to the host folder, can be shared through the
+  export destinations (maintainer request, 2026-11-12; not built yet: today
+  it is never shared), and is never mirrored
   or published to a replica. [Canvas](design/canvas.md#agent-tool-and-recipes)
   owns the rule. This has shipped.
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
@@ -1054,8 +1090,11 @@ document as a future version. Frames follow the
   blocks, a dashboard among them; closed diagram node roles (process, decision,
   terminator), edge styles, and group tones drawn by the one deterministic
   layout; a Gantt view of `plan`; and import of a bounded Mermaid subset into
-  typed diagram blocks. Mermaid never renders; an unknown construct fails
-  closed and stays a code block.
+  typed diagram blocks. A diagram outside the translated subset renders with
+  a bundled renderer inside the existing sandboxed no-network frame, and its
+  raw source shows only when rendering fails (maintainer request, 2026-11-12;
+  not built yet: today Mermaid never renders, and an unknown construct fails
+  closed and stays a code block).
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -1089,7 +1128,9 @@ document as a future version. Frames follow the
   cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
-  shipped.
+  shipped. A design or prototype also has a per-Canvas "Allow network" switch
+  that only the person sets, off by default (maintainer request, 2026-11-12;
+  not built yet: today no running frame is given a connection).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a
   new Canvas holding one `document`-size `design`. It is a create in every
@@ -1144,7 +1185,7 @@ typed catalog was rejected because every new look becomes a schema change and
 no closed set reaches a finished design or article. A separate origin, or an
 Electron view per artifact, was rejected because it cannot be laid out in the
 thread and does not exist for a remote browser; revisit if a frame ever needs
-script with `allow-same-origin`. Rendering Mermaid was rejected as a second
+script with `allow-same-origin`. Rendering Mermaid for the translated subset was rejected as a second
 layout, and an external design service because it sends Project content to a
 third party and makes a core capability depend on one vendor.
 
@@ -1167,7 +1208,10 @@ effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
 address (Allow input never covers it), and evidence keeps only the origin. **Rotate** turns the device between portrait
 and landscape for a person who asked; it is an effect confirmed on its own
-(Allow input never covers it). An agent can also read a device without a
+(Allow input never covers it). An agent may request these device effects too
+(a recording, a URL, a rotation, and the rest): unasked at Full access and
+approval-gated below it (maintainer request, 2026-11-12; not built yet: today
+only a person's request starts these three). An agent can also read a device without a
 picture: `octant_android` `describe-ui` lists the labelled elements on screen
 with centres in tap pixels, and its `tap` takes an element `target` matched
 exactly by resource-id, then content-desc, then text, refusing none or several
@@ -1432,7 +1476,9 @@ which Chat's no-filesystem rule does not cover, and the switch says so. Octant-m
 Canvas) are unaffected; they run on the host, not in the provider's
 environment.
 
-Provider-owned memory stays off in every mode. A provider's global memory
+Provider-owned memory stays off in every mode unless the person turns it on
+for that key provider account, a setting that is off by default (maintainer
+request, 2026-11-12; not built yet: today it is off with no setting). A provider's global memory
 follows its own rules into every Project, outside Octant's controls: Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
 sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
@@ -1459,23 +1505,31 @@ authoritative.
   Octant tools to every thread in a Project (not a Side Chat) on every
   provider that takes them, Octant Harness included. Its operations are
   `list`, `create`, `supersede`, `retract`, and `help`. `list` reads the
-  active entries and is open to the turn. Every write is a proposal: the
+  active entries and is open to the turn. At Full access an agent's write is
+  accepted without a confirmation, marked agent-written with its thread and
+  shown in the thread; below Full access the Project setting "Agents may
+  write Project memory without asking" (off by default) does the same
+  (maintainer request, 2026-11-12; not built yet: today every write is a
+  proposal at every level). Otherwise a write is a proposal: the
   thread shows the person a card with the exact change, and only their
   confirmation writes it, through the same memory command path and checks
   (archived Project, mode switched off, memory version) as the person's own
   edit. The proposal carries the memory version the agent saw, so a change
   made against memory that moved while the card waited is not applied.
-  Declined, expired (ten minutes), and cancelled proposals change nothing
-  and tell the agent so. Plan mode refuses every write before asking; a turn
+  Declined and cancelled proposals change nothing
+  and tell the agent so; an unanswered proposal waits in Needs you (not built
+  yet: today it expires after ten minutes). Plan mode refuses every write before asking; a turn
   with nobody at a window on this computer (a routine's run, a resumed turn,
-  a paired device's turn) is refused writes, because no card can reach the
-  person. Rationale: memory reaches every later turn in the Project, so an
+  a paired device's turn) is refused a write that needs a card, because no card can reach the
+  person. Rationale: memory reaches every later turn in the Project, so below
+  Full access an
   unreviewed write would be a lasting prompt-injection path. No answer is
   ever remembered: a write on a thread that read outside content asks like
   any other, and its card names what the thread read.
 - **Agent-written provenance.** A confirmed agent write is authored by the
   person who confirmed it and marked `agent-authored` with the thread's mode
-  and id; Project Overview shows "Written by an agent in a … thread" with the
+  and id; a write accepted without a confirmation carries the same mark and
+  names no confirming person. Project Overview shows "Written by an agent in a … thread" with the
   thread, and data export carries the provenance with the entry. The
   person retracts such an entry like any other. A thread purge removes the
   thread id from the entry and keeps the entry. Older events decode unchanged:
@@ -2371,7 +2425,7 @@ Settled managed attempts record active milliseconds and the chosen limit through
 
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, has a default 30-minute working-time limit. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
+from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12; not built yet: today the default is 30 minutes and none is not offered). The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -2416,7 +2470,11 @@ endpoint model is a target only once its tools are verified. With no explicit ta
 mapping and host/Project model slots (Settings names them model roles). An unconfigured route can inherit the
 authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
-visible. Off, paused, tainted, and unauthorized parents cannot start helpers.
+visible. Off, paused, and unauthorized parents cannot start helpers. A parent
+that read outside content can: at Full access delegation is not refused and
+the mark follows into the child; below Full access the person (the reviewer at
+Auto) is asked once per thread (maintainer request, 2026-11-12). Not built
+yet: today a tainted parent cannot start helpers at any level.
 
 Parent conversation context is opt-in and fixed at admission. Chat uses its
 admitted conversation; Work and Code expose bounded accepted prompts and
@@ -2497,9 +2555,12 @@ child cannot continue, and unsupported continuation never becomes a silent
 fresh start. The prior result must first reach its parent or be explicitly
 collected; a refused follow-up keeps that result available. Status reads do not
 consume replies. Only complete replies that fit the tool response bound are
-consumed, by `wait`. A reply `wait` hands back marks the parent as having read
+consumed, by `wait`. A reply `wait` hands back from a child that was itself
+marked marks the parent as having read
 outside content first, as a delivered reply does, because the child may relay
-what it fetched; a mark that cannot be recorded keeps the reply owed.
+what it fetched; a mark that cannot be recorded keeps the reply owed
+(maintainer request, 2026-11-12; not built yet: today every child reply marks
+its parent).
 
 Managed Claude children persist the identity written by the adapter in private,
 purgeable child content, bound to the admitted child and saved session. This
@@ -2546,10 +2607,14 @@ Done); Chat has no board. Code lists active open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
 thread-owned PR status onto Code board cards. A Code thread is Done only when
 its user-confirmed delivery target is objectively satisfied; ambiguous state
-resolves to Waiting, and no person's mark overrides it. A Work thread is Done
+resolves to Waiting. A person may mark a Code thread Done whatever its
+delivery target says, recorded as the person's override (maintainer request,
+2026-11-12; not built yet: today no person's mark overrides it). A Work thread is Done
 when a person
 marks it Done (`confirm-work-thread-completion`, naming the thread's current
-title). The mark is final: it needs no evidence text, and stale supporting
+title). Marking Work Done needs no confirmation, and Reopen undoes it in one
+click (maintainer request, 2026-11-12; not built yet: today the mark is
+undone only by archiving and reactivating the thread, below). The mark is final: it needs no evidence text, and stale supporting
 evidence, a later rename, or an outstanding child run does not return the card
 to Waiting. Requiring fresh, matching evidence filled boards with Waiting cards
 for work the person had already finished. The host refuses the mark from a
@@ -2609,10 +2674,12 @@ hold for every action in it:
 - **Force-push.** Rewriting the thread's own branch uses force-with-lease
   (`push-git` with `force`), which names the remote head it replaces, so a
   branch someone else moved is refused by Git. The host accepts a force only on
-  the thread's own delivery branch. A plain force-push, or any push to the
-  default branch, happens only with the person's approval for that one act,
+  the thread's own delivery branch. A plain force-push
+  happens only with the person's approval for that one act,
   which a standing Full access grant does not stand in for; the person's own
-  click in a window is that approval. Both are journaled with the thread's
+  click in a window is that approval. A push to the default branch follows a
+  Project setting (maintainer request, 2026-11-12; not built yet: today it
+  needs the same one-act approval). Both are journaled with the thread's
   other Git work.
 - **Labels, close, and reopen.** `update-pull-request` also adds and removes
   labels the repository already has (a label it lacks is refused, never
@@ -2620,19 +2687,21 @@ hold for every action in it:
   alone, and reopening a merged pull request is refused. The branch is never
   deleted.
 - **Comments and review replies.** `comment-pull-request` posts a comment, or a
-  reply in one review thread, under the person's name. The agent drafts it by
-  asking: the approval shows the whole text, and the host posts only with an
-  approval for that act, at every level, because it cannot tell at Full access
-  whether the person asked.
+  reply in one review thread, under the person's name. At Full access it
+  does not ask. Below Full access the Project switch "Agents may comment on
+  pull requests" stands in for the per-post ask; with the switch off the agent
+  drafts the post by asking, and the approval shows the whole text
+  (maintainer request, 2026-11-12). Not built yet: today the host posts only
+  with an approval for that act, at every level.
 - **Watching its own pull request.** The tool's `watch` lets the host wake the
   thread when its pull request changes, instead of the agent polling; it is
   not a forge change, and `unwatch` ends it. The host resolves the thread's own
-  open linked pull request (the agent names none), and `watch` asks the person
-  for that act at every level, because it lets the host start turns in the
-  thread later, when nobody may be there. Plan refuses `watch` (not `unwatch`,
-  which only takes reach away and never asks), and so does a turn the host
-  started on its own (`automation-recursion`), such as a wake: nobody is there
-  to approve it, and a wake must not renew its own watch. The rules are under
+  open linked pull request (the agent names none), and `watch` needs no
+  approval at any level (maintainer request, 2026-11-12; not built yet: today
+  `watch` asks the person for that act at every level). Plan refuses `watch` (not `unwatch`,
+  which only takes reach away), and so does a turn the host
+  started on its own (`automation-recursion`), such as a wake:
+  a wake must not renew its own watch. The rules are under
   [Merge when ready and Auto-fix](#modes-chat-work-and-code) below.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
@@ -2672,27 +2741,27 @@ hold for every action in it:
   every thread in that Project; a routine's choice covers only the thread one
   of its runs created (a new-thread Code run of the same Project), and only
   while the live routine is enabled and still allows it, because the narrower
-  reading keeps a merge from reaching work nobody scheduled. A comment still
-  asks every time.
+  reading keeps a merge from reaching work nobody scheduled. A comment follows
+  its own rule above.
   Agents do not approve or request changes on a pull request; the forge does
   not let a pull request's author approve their own.
 
-| Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                                                                                                                                                                                                                                             |
-| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                                                                                                                                                                                                                                                  |
-| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                                                                                                                                                                                                                                     |
-| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                                                                                                                                                                                                                                                  |
-| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                                                                                                                                                                                                                                        |
-| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch; any other thread's branch   | Yes (`push-git` with `force: with-lease`)                                                                                                                                                                                                                                                                                                    |
-| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's approval for this one act, at every level                                                                            | Without that approval; another thread's branch              | Yes (`push-git`; a standing Full access grant does not cover it)                                                                                                                                                                                                                                                                             |
-| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                                                                                                                                                                                                                                                  |
-| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Yes (`update-pull-request` with labels; the person's `actions` route)                                                                                                                                                                                                                                                                        |
-| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post at every level, Full access included, because it posts under their name and the text is shown whole | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                                                                                   |
-| Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Yes: the person's `actions` route, from a local window, on the head they read                                                                                                                                                                                                                                                                |
-| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                                                                       |
-| Watch its own pull request                 | Agent asks; person allows                                                                    | The person's approval for each watch, at every level; stopping it never asks                                                      | Plan; a host-started turn; another pull request             | Yes (the tool's `watch` and `unwatch`; see Merge when ready and Auto-fix)                                                                                                                                                                                                                                                                    |
-| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; Merge when ready from a window, phone, or web client with the same confirmation; an agent's merge on request (`merge-pull-request`, asks each time), or without asking when a Project's Agents may merge switch or a routine's merge choice allows it |
+| Action                                     | Who                                                                                          | Approval                                                                                                                                                    | Still refused                                               | Built                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                                                       | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                                                                                                                                                                                                                                             |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                                                 | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                                                                                                                                                                                                                                                  |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                                                 | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                                                                                                                                                                                                                                     |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                                                 | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                                                                                                                                                                                                                                                  |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                                                 | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                                                                                                                                                                                                                                        |
+| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                                                 | A protected or a shared branch; any other thread's branch   | Yes (`push-git` with `force: with-lease`)                                                                                                                                                                                                                                                                                                    |
+| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's approval for this one act, at every level; a push to the default branch follows a Project setting (not built yet)                              | Without that approval; another thread's branch              | Yes (`push-git`; a standing Full access grant does not cover it)                                                                                                                                                                                                                                                                             |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                                                 | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                                                                                                                                                                                                                                                  |
+| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                                                 | Creating repository-wide labels                             | Yes (`update-pull-request` with labels; the person's `actions` route)                                                                                                                                                                                                                                                                        |
+| Review replies and comments                | Agent or person                                                                              | None at Full access; below it the Project switch "Agents may comment on pull requests", else each post asks (not built yet: every post asks at every level) | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                                                                                   |
+| Approve or request changes                 | Person                                                                                       | —                                                                                                                                                           | The pull request's own author, by the forge's rule          | Yes: the person's `actions` route, from a local window, on the head they read                                                                                                                                                                                                                                                                |
+| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                                          | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                                                                       |
+| Watch its own pull request                 | Agent or person                                                                              | None at any level (not built yet: the person approves each watch)                                                                                           | Plan; a host-started turn; another pull request             | Yes (the tool's `watch` and `unwatch`; see Merge when ready and Auto-fix)                                                                                                                                                                                                                                                                    |
+| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                                                      | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; Merge when ready from a window, phone, or web client with the same confirmation; an agent's merge on request (`merge-pull-request`, asks each time), or without asking when a Project's Agents may merge switch or a routine's merge choice allows it |
 
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
@@ -2906,9 +2975,10 @@ the desktop window can do these.
 two switches (`POST /api/code/project-pull-requests/merge-when-ready` and
 `/auto-fix`; `POST /api/code/project-pull-requests/switches` reads them). The
 person's click is the approval; nothing else turns either on. Beside them, a
-thread's agent may ask to watch its own pull request; the person's approval of
-that one act is the click (maintainer decision, 2026-11-05: an agent waiting on
-CI or reviewers should be woken, not left polling).
+thread's agent may watch its own pull request, which needs no approval
+(maintainer decision, 2026-11-05: an agent waiting on
+CI or reviewers should be woken, not left polling; maintainer request,
+2026-11-12, removed the per-watch approval, which is still asked today).
 
 - **Who.** Auto-fix: only a `local-window` principal; its route answers 403 to
   a paired device before decoding. Merge when ready: a `local-window`
@@ -3104,7 +3174,13 @@ approval.
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
-and brings their requests to the person. The planner below is now a
+and brings their requests to the person. Its wake, round and start bounds
+are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
+60 starts an hour, and the person may fix the workers' level when creating the
+coordinator at a local window, Full access included; a mark on the coordinator
+does not lower a fixed level, and the coordinator itself stays read-only
+(maintainer request, 2026-11-12; not built yet: today the bounds are the
+constants 6, 3 and 12 and no level can be fixed). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
 take the coordinator's read-only gate and roster, its `start` proposes through
 the planner's proposal path whatever the start setting, and designation also
@@ -3580,10 +3656,11 @@ the thread it came from.
   adapting: `thread-unavailable` when the thread is gone, archived, or in
   another Project; `thread-done` when a person marked it Done (Work) or
   Complete; `full-access-ineligible` when the Code thread now has Full access;
-  `execution-profile-mismatch` when its provider or model changed; and
-  `thread-busy` when a turn is running or being started in it. A busy thread
-  is skipped, not waited on: waiting would put a scheduled turn behind the
-  person's own at a time nobody chose. A refusal fails the run with its
+  `execution-profile-mismatch` when its provider or model changed. A
+  follow-up due while a turn is running or being started in the thread runs
+  after that turn instead of being skipped (maintainer request, 2026-11-12;
+  not built yet: today a busy thread refuses as `thread-busy` and the
+  follow-up is skipped, not waited on). A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
@@ -3645,7 +3722,8 @@ where its title would rank does not matter, and the renderer does not read the
 transcript to attach the chip. In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
-reply, at most three times a turn. The target's own Chat turn, provider,
+reply, at most three times a turn by default, a count the person can change
+(maintainer request, 2026-11-12; not built yet: today it is a constant). The target's own Chat turn, provider,
 Project, and authority remain authoritative; an active target returns Waiting
 rather than being interrupted or duplicated. Coordination is one hop (the
 target's turn is offered no ask) and unavailable, unauthorized, or deleted
@@ -3819,10 +3897,11 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
 - **Who may message whom.** A thread may message only another active thread of
   its own Project; any other id (unknown, another Project or mode, a child
   run, itself) refuses `unauthorized` in the same words, so a refusal never
-  confirms a thread exists. Only Code turns are offered the messaging
-  operations and a Project has one mode, so this means Code to Code inside one
-  Project. Chat threads, Work threads, and child runs neither send nor
-  receive: Work turns carry no messages, so a Work thread's `octant_threads`
+  confirms a thread exists. Code and Work turns are offered the messaging
+  operations and a Project has one mode, so this means Code to Code or Work to
+  Work inside one Project (maintainer request, 2026-11-12, for Work). Chat
+  threads and child runs neither send nor receive. Not built yet: today Work
+  turns carry no messages, so a Work thread's `octant_threads`
   offers no `send` (see the rationale below). A recipient is named by the same
   `<thread id>@<project id>` reference `list` returns; one whose Project part
   is not the sender's current Project refuses `unauthorized` in the same
@@ -3903,13 +3982,16 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     ordinary delivery block after the ordinary delivery checks. A message
     refused at that check leaves the turn with only its prompt. No separate
     initiator kind is journaled for it.
-  - **Bounds.** One wake turn at a time per thread and at most six per thread
-    in any hour; a message past either bound waits for the next turn. Each
+  - **Bounds.** One wake turn at a time per thread and at most 30 per thread
+    in any hour by default; a message past either bound waits for the next turn. Each
     message carries a hop count: zero from a turn a person or a routine
     started, and one more than the message that woke the sender's turn
-    otherwise. A message whose hop count is three or more is delivered but
+    otherwise. A message whose hop count is ten or more by default is delivered but
     wakes nothing, so two agents answering each other stop waking each other
-    after three rounds and continue only when a person runs a turn. The host
+    after ten rounds and continue only when a person runs a turn. Both numbers
+    are settings, per coordinator for a coordinator and its workers
+    (maintainer request, 2026-11-12; not built yet: today they are the
+    constants six wakes an hour and three rounds). The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
     ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
@@ -3991,9 +4073,8 @@ it creates a worker thread, under the rules in
   reach Work under the same rules as Code. Messaging does not: a message is
   carried by the recipient's next turn, and only Code turns assemble that
   context, so a message to a Work thread would wait unread for good. Until a
-  rule says how a Work turn carries, frames, and confirms a message, Work
-  threads neither send nor receive, the most conservative reading of the
-  approval.
+  Work turn carries, frames, and confirms a message, which the rule above now
+  asks for, Work threads neither send nor receive.
 
 - **Who may see whom.** The caller is a Work or Code thread's turn; the
   targets are the other threads of the same Project, which are all of its
@@ -4048,7 +4129,8 @@ it creates a worker thread, under the rules in
   profile whose non-empty allowlist does not name `octant_threads`; the tool is
   omitted when no operation is left. In Work they reach every turn whose
   provider carries app-managed tools, as Work's other tools do. A turn may make 8 `read` and 4 `wait`
-  calls; the next refuses `rate-limited`. Every `read` and `wait` whose input
+  calls by default, counts the person can change (maintainer request,
+  2026-11-12; not built yet: today they are constants); the next refuses `rate-limited`. Every `read` and `wait` whose input
   decodes counts, refused or not, so probing references spends the same
   budget as reading them. `list` is not counted. Each answered `read` and
   `wait` is journaled as `thread.sibling-observed@1` on the reader's own
@@ -4300,12 +4382,16 @@ transcript (see [DESIGN.md](../DESIGN.md) Transcript). Code replays them from
 its journaled `tool-activity` events. Chat and Work record exactly the same
 step per tool call and nothing more: the provider's tool call id, the tool
 name, a state (`started`, `running`, `completed`, `failed`), and an optional
-progress or result message of at most 2048 bytes, redacted before it is kept. No tool
+progress or result message of at most 2048 bytes, redacted before it is kept. A
+setting, on by default, also keeps each call's bounded input and output in
+purgeable storage (maintainer request, 2026-11-12). Not built yet: today no tool
 input and no tool output is captured, except the `published` page a call put
 outside this host (its `https` address and title, and the host's own snapshot
 of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
-as a link card beside the drawn snapshot. A turn keeps at most 64 steps in arrival
+as a link card beside the drawn snapshot. A turn keeps at most 512 steps
+by default, a number the person can change (maintainer request, 2026-11-12;
+not built yet: today a constant 64), in arrival
 order and sets a truncated flag when it called more. Chat carries them as
 `ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
 `WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
@@ -4669,7 +4755,9 @@ flowchart LR
   animated PNG) of the agent's page during one call that asked for it with
   `record`. The bytes live in the host's managed
   attachment store and the journal holds only a reference, the page origin, URL,
-  title, content hash, and time. A thread keeps its newest 32 captures and they
+  title, content hash, and time. A thread keeps its newest 200 captures by
+  default, a number the person can change (maintainer request, 2026-11-12;
+  not built yet: today a constant 32), and they
   are erased with the thread. Only a local window that can open the thread reads
   them, never a paired device. They never reach a Canvas share, replica sync, or
   a diagnostics export. They leave the host only in an export the local owner
@@ -5107,19 +5195,24 @@ or .zip>` write the same files, built by one host command
   submission or retry.
   One dispatcher per thread sends through the mode's ordinary turn admission,
   regardless of harness. Every dispatch checks the current Project, provider,
-  model, checkout, access and context policy. Only normal turn completion
-  advances the queue automatically. Cancellation, failure, changed authority,
+  model, checkout, access and context policy. Normal turn completion
+  advances the queue automatically. The person's own cancel, changed authority,
   unavailable attachments, uncertain delivery and a Work thread's Done mark
-  hold it with a visible reason.
-  Restart recovery also holds pending work until an authenticated user resumes
-  it; recovery never restores a temporary grant or guesses that an ambiguous
+  hold it with a visible reason. After an ordinary provider failure or a
+  clean restart the queue continues by itself once, with no review of the
+  queued messages first; a second failure in a row holds it (maintainer
+  request, 2026-11-12). Not built yet: today any cancellation or failure
+  holds it, and restart recovery holds pending work until an authenticated
+  user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
   send failed. Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
   resuming, or remove and resubmit the message with the new settings. Local
-  authenticated windows share the queue; paired remote queue commands remain
-  unavailable until dispatch can revalidate the originating device's grants.
+  authenticated windows share the queue, and a paired device may queue
+  (maintainer request, 2026-11-12; not built yet: today paired remote queue
+  commands remain unavailable until dispatch can revalidate the originating
+  device's grants).
   A committed queue change or terminal turn event wakes only its thread's
   dispatcher. Response text and unrelated journal writes do not scan other
   queues. A recovery pass runs once per second to catch runtime state that
@@ -5256,9 +5349,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
   same way. Turning a native feature on never turns on a provider's own
-  memory, telemetry, or self-update: those channels stay off by their own
+  memory, telemetry, or self-update: telemetry and self-update stay off by their own
   switches ([Security and authority](#security-and-authority)), because they
-  send data the person did not choose to send.
+  send data the person did not choose to send, and the provider's own memory
+  follows its own per-account setting, off by default
+  ([Modes](#modes-chat-work-and-code)).
 
   How the person turns it on (built):
 
@@ -5498,7 +5593,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
-  trusted; the catalog lists effective outside drivers in their own group from
+  trusted; one "Install and trust" flow covers inspect, install, trust and
+  enable, with digest-bound trust and confinement unchanged (maintainer
+  request, 2026-11-12; not built yet: today these are separate steps); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
@@ -5627,10 +5724,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the thread shows it as a card where the person picks the profile and model,
   lets the agent draw the visual itself, or cancels. Generate runs only a
   profile and model the host can run when the answer arrives, checked again
-  before the job is queued. "Don't ask again in this thread" keeps that
-  profile and model for the thread in host memory only, so a restart asks
-  again, and a kept choice the host can no longer run is dropped and asked
-  again rather than swapped. An offer lives at most ten minutes and is given
+  before the job is queued. The "do not ask again" choice keeps that
+  profile and model, is journaled per Project and survives a restart, and a
+  routine in that Project may use it (maintainer request, 2026-11-12; not
+  built yet: today "Don't ask again in this thread" keeps the choice for the
+  thread in host memory only, so a restart asks again, and a routine's turn
+  is not offered the tool). A kept choice the host can no longer run is
+  dropped and asked again rather than swapped. An offer lives at most ten minutes and is given
   up when its turn stops or its window goes away; Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
@@ -5841,7 +5941,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, and the broker keeps that session and the
+  `octant provider sign-in` command, or opts in to "Use my AWS profile",
+  which reads the person's existing cloud profile (maintainer request,
+  2026-11-12; not built yet: today only the device-code sign-in exists), and the broker keeps that session and the
   temporary credentials it mints for the instance's one account and role. The
   server describes each Converse request to the broker's
   `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
@@ -6035,7 +6137,7 @@ seconds, which protects a follow-up or a quick reply, and only ask after that if
 nobody took it. A person who replies later can still find every slot taken by
 a helper and get `capacity-unavailable`. Another provider's helpers are not held
 back by it. They also ask every five seconds while any helper waits, because a
-rate limit frees by the clock, oldest first, and the five-minute limit is
+rate limit frees by the clock, oldest first, and the wait limit is
 checked on that round whatever has freed meanwhile. A helper's own failed try gives its
 slot back without counting as a freed one, so a start that keeps failing is
 retried on that five-second round and never in a loop. The slot is asked for before the child is marked
@@ -6048,7 +6150,9 @@ needs a check after a restart keeps waiting until the person lets it go.
 
 Nothing the helper was admitted under is trusted when its slot frees. The
 host reads the parent again, with no request to carry it: if the helper-agent
-setting is off, the parent thread has read untrusted content, is archived or
+setting is off, the parent thread has read untrusted content where the
+delegation rule ([Modes](#modes-chat-work-and-code)) does not let it delegate
+(not built yet: today any such read ends the helper), is archived or
 moved to another Project than the helper was routed under, or its live grant
 no longer allows starting helpers or covers the helper's, the helper ends
 Interrupted (`authority-drift`) and never starts. The same read gates every
@@ -6057,8 +6161,10 @@ and one queued for a run slot. Such a child that then
 finds the provider full takes the slot wait, under its reason and its own clock,
 and hands the run slot it was about to use to the next waiter. A start refused for the child's own workspace
 or authority ends the wait with that reason (`workspace-denied`,
-`authority-drift`) and does not retry. Five minutes, the idle bound of a Chat
-turn, is the longest a helper waits; past it the helper ends Interrupted with
+`authority-drift`) and does not retry. Thirty minutes by default, a setting
+the person can change, is the longest a helper waits (maintainer request,
+2026-11-12; not built yet: today it is a constant five minutes, the idle
+bound of a Chat turn); past it the helper ends Interrupted with
 `capacity-unavailable` and the sentence that names what is full, and Retry
 starts it again once a slot frees. A longer wait would mean a person's
 unanswered question is holding the slot, and the helper should say so rather
@@ -7137,21 +7243,21 @@ watched has ended.
 
 _Failures._
 
-| What happens                                                                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A turn is running, or another compaction is                                                                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| The runtime reports failure (Pi with no `result`, Claude `failed`)                                                 | `failed` (`runtime-failed`), carrying the adapter's `sessionMayHaveChanged`. Unchanged (Pi) reads as nothing changed and the person can retry; may-have-changed (Claude today) says so, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| The host summary request fails                                                                                     | `failed` (`summary-failed`); nothing changes, and the person can retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| The host summary is not smaller than what it replaces                                                              | `failed` (`summary-not-smaller`); nothing changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| A pin, an exclusion, or the thread's provider or model changes while the host summary is being written             | `failed` (`context-changed`); nothing is committed, and the person can compact again. A provider or model change is journaled on the thread, so the context ledger's version is not the only guard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| The request times out                                                                                              | `failed` (`timed-out`). A host summary call is cancelled on the existing maintenance timeout (30 seconds) and nothing changes. A runtime compaction gets the inactivity bound a Code turn has (five minutes), because it is a model call over the whole session that streams nothing until it ends. It is then interrupted and the session stopped: Codex runs the compaction as a turn of its own in an app-server other sessions share and keeps running it after a stop, so only its `interrupt` ends it before a later turn would queue behind it; Claude and Octant Harness refuse an interrupt with no turn in flight, and the stop ends theirs. It is recorded as one that may have changed the session. |
-| The runtime refuses after the request was journaled (its install changed, Octant Harness finds nothing to compact) | `failed` (`runtime-failed`); the adapter decided before asking, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| The session cannot be opened (the checkout or folder is gone, the window lost access to it, the resume fails)      | `failed` (`subject-unavailable`); the runtime was never asked, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| The runtime lacks the request (older Codex, OpenCode, Pi, Claude)                                                  | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| The provider is disabled, signed out or over a spend ceiling                                                       | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                              |
-| The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                           |
-| The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| What happens                                                                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A turn is running, or another compaction is                                                                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| The runtime reports failure (Pi with no `result`, Claude `failed`)                                                 | `failed` (`runtime-failed`), carrying the adapter's `sessionMayHaveChanged`. Unchanged (Pi) reads as nothing changed and the person can retry; may-have-changed (Claude today) says so, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| The host summary request fails                                                                                     | `failed` (`summary-failed`); nothing changes, and the person can retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| The host summary is not smaller than what it replaces                                                              | `failed` (`summary-not-smaller`); nothing changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| A pin, an exclusion, or the thread's provider or model changes while the host summary is being written             | `failed` (`context-changed`); nothing is committed, and the person can compact again. A provider or model change is journaled on the thread, so the context ledger's version is not the only guard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| The request times out                                                                                              | `failed` (`timed-out`). A host summary call is cancelled on the existing maintenance timeout (30 seconds) and nothing changes. A runtime compaction gets the inactivity bound a Code turn has (the stalled-turn setting, 30 minutes by default; five minutes today), because it is a model call over the whole session that streams nothing until it ends. It is then interrupted and the session stopped: Codex runs the compaction as a turn of its own in an app-server other sessions share and keeps running it after a stop, so only its `interrupt` ends it before a later turn would queue behind it; Claude and Octant Harness refuse an interrupt with no turn in flight, and the stop ends theirs. It is recorded as one that may have changed the session. |
+| The runtime refuses after the request was journaled (its install changed, Octant Harness finds nothing to compact) | `failed` (`runtime-failed`); the adapter decided before asking, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| The session cannot be opened (the checkout or folder is gone, the window lost access to it, the resume fails)      | `failed` (`subject-unavailable`); the runtime was never asked, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| The runtime lacks the request (older Codex, OpenCode, Pi, Claude)                                                  | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| The provider is disabled, signed out or over a spend ceiling                                                       | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 **Compacting a session by a rule.** A person can also have Octant compact a
 thread without asking each time, by a rule set in Settings (General →
@@ -8201,7 +8307,9 @@ the model at another size.
   and locale variables, and what the harness sets, never a provider
   credential. Only a harness tool result that brings in outside content taints
   the thread: `web-fetch` and `web-search`. A finished child's reply taints
-  its parent however it arrives (it may relay what the child fetched): handed
+  its parent only when the child itself was tainted (maintainer request,
+  2026-11-12; not built yet: today every child reply taints its parent),
+  however it arrives (it may relay what the child fetched): handed
   back by an `octant_agents` `wait`, which records the mark before it returns
   the reply, or delivered as a new turn, journaled before the turn is
   admitted; a reply whose taint cannot be recorded stays owed. Local `read`, `grep`, `glob`, `bash`,
@@ -8296,7 +8404,10 @@ the model at another size.
   configured deployments, because its catalogue lists base models that are not
   deployments. The model picker marks an unverified model "Chat only" with a "Verify
   tools" action (in Chat, on the selected model), and Settings → Octant
-  Harness says the same for a slot's chosen model.
+  Harness says the same for a slot's chosen model. The host also runs the
+  verification by itself the first time a model is used, because it is a
+  capability probe, not a grant; the manual action stays (maintainer request,
+  2026-11-12; not built yet: today only the Verify tools action runs it).
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -8414,7 +8525,12 @@ the model at another size.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread.
   Turn start and settlement are recorded for every provider so a crash or host
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
-  The same server admission holds a recovered session until a person resumes it;
+  The same server admission holds a recovered session until a person resumes it,
+  unless the setting "Resume interrupted turns after a restart" is on (off by
+  default): then a turn with no uncertain side effect resumes by itself, and
+  a turn whose last effect is uncertain still waits for the person
+  (maintainer request, 2026-11-12; not built yet: today every recovered
+  session waits for a person);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -8481,10 +8597,12 @@ the model at another size.
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
   answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
   or the Code thread's own inline question path), or until the turn is
-  interrupted or ten minutes pass. `NativeHarnessApprovalStore` likewise
+  interrupted. `NativeHarnessApprovalStore` likewise
   blocks a tool call that needs a person until a decision arrives
-  (`POST /api/native-harness/sessions/:thread/approvals`), the turn is
-  interrupted, or ten minutes pass. For both, expiry ends the call (as
+  (`POST /api/native-harness/sessions/:thread/approvals`) or the turn is
+  interrupted. Neither expires: both wait until answered (maintainer request,
+  2026-11-12). Not built yet: today both also end after ten minutes; that
+  expiry ends the call (as
   `question-expired`, or as a denied call) and is journaled as `expired`, the
   same way whether the timer or the clock caught it: the host checks the
   clock whenever a question or approval is asked, answered, or listed
@@ -9833,7 +9951,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   thread's working-directory change, each resolution of a turn's selected
   extensions, Settings' reconcile) turns off both of any two same-named skills
   that are on and share a thread, and lists the collision for the person to
-  choose. That normalises an activation file written before this rule. It also
+  choose. When one of the two is the Project's copy, the Project's copy is
+  used instead, with a notice (maintainer request, 2026-11-12; not built yet:
+  today both are turned off). That normalises an activation file written before this rule. It also
   fires when a skill whose stored "on" was briefly not discovered (an archived
   worktree, a branch switch, a missing root) comes back after another
   same-named skill was turned on: both stay off, a user-global or built-in one
@@ -10042,9 +10162,14 @@ that is not yet effective for the thread is refused and never reaches the model.
   the provider's app-managed tool transport. The host resolves the selection
   against the thread's own mode scope, connects the supervised session for
   that scope, offers only the selected tools, and refuses the turn when the
-  provider or model cannot carry Octant's tools. Every call waits for an
-  approval in the turn's window, shown in the open thread, unless a
-  remembered approval covers it (next item). Who may answer:
+  provider or model cannot carry Octant's tools. Below Full access every call
+  waits for an approval in the turn's window, shown in the open thread, unless
+  a remembered approval covers it (next item). At Full access a tool of a
+  trusted and enabled server runs without asking, on a thread marked by
+  outside content too
+  ([the Full access rule](#security-and-authority); maintainer request,
+  2026-11-12). Not built yet: today every call asks at every level unless a
+  remembered approval covers it. Who may answer:
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
     may drive (bound to the Project the prompt recorded).
@@ -10062,11 +10187,13 @@ that is not yet effective for the thread is refused and never reaches the model.
   At most 32 of those approvals
   wait at once across the whole host; the cap is shared by every thread and
   window, not counted per thread. A call past that cap is denied immediately
-  with the refusal a declined call already uses, and answering or expiry
-  frees the slot. An unanswered approval expires after five minutes and the
-  call is denied; the host checks that against the clock whenever approvals
-  are listed, answered, or requested, so a prompt whose timer fired late (a
-  busy host, a machine that slept) cannot still be approved or hold a slot.
+  with the refusal a declined call already uses, and answering frees the
+  slot. An unanswered approval does not expire: it waits in Needs you until a
+  person answers it, and a host-run turn with no window (a routine, a goal
+  loop) waits there too instead of being refused (maintainer request,
+  2026-11-12). Not built yet: today an unanswered approval expires after five
+  minutes and the call is denied, checked against the clock whenever approvals
+  are listed, answered, or requested.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
@@ -10118,7 +10245,9 @@ that is not yet effective for the thread is refused and never reaches the model.
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
-  `extension-tool-grant` aggregate), never for the whole server. The grant
+  `extension-tool-grant` aggregate). The person can also allow all tools of
+  one server at once, at every level (maintainer request, 2026-11-12; not
+  built yet: today a grant covers one tool, never the whole server). The grant
   binds the Project, extension, package, component, and MCP tool name, the
   package version and digest, and a SHA-256 of the tool's name, description,
   and input schema as its server listed them at connect; the provider-facing
@@ -10140,10 +10269,12 @@ that is not yet effective for the thread is refused and never reaches the model.
     is approved once, whether the device or a local window answers.
     Remembering is an answer at the machine, and the person who sent that
     turn is not at it.
-  - A thread with no Project and a Plan turn are asked for every call, and
-    the answer covers that call alone. An answer that asks to be remembered
-    where it cannot be is refused and the call keeps waiting.
-  - On a thread that has taken in outside content, a grant holds only for a
+  - A Plan turn is asked for every call, and the answer covers that call
+    alone. A Chat thread outside a Project can remember a grant for the
+    account (maintainer request, 2026-11-12; not built yet: today a thread
+    with no Project is asked for every call). An answer that asks to be
+    remembered where it cannot be is refused and the call keeps waiting.
+  - Below Full access, on a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
     its plugin data. A network (HTTP) server's tool asks for every call there
     and the answer is single use, because its arguments can carry out what
@@ -10202,7 +10333,10 @@ that is not yet effective for the thread is refused and never reaches the model.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every billed desktop and every desktop off this machine. Billed desktops
+  every desktop off this machine, and every billed desktop while the setting
+  "Confirm each billed desktop" is on, which it is by default (maintainer
+  request, 2026-11-12; not built yet: today every billed desktop is confirmed
+  and no setting exists). Billed desktops
   are off until a person at a local window sets a monthly spend cap; each
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
@@ -11110,7 +11244,11 @@ every eligible Chat, Work, and Code turn, under the offer and approval rules in
 selection exists. The public plugin capability is bound to one task, window,
 provider, model, and access posture, and may pass the agent's one-line reason
 for an action to the host, which shows it on the approval and grants nothing
-for it. Each application needs a five-minute approval; stop, cancellation, changed authority, or disable revokes
+for it. The first action in each application asks once and the grant lasts the
+thread; a setting can remember it for the Project. At Full access outside
+content does not make later actions ask again; below Full access that re-ask
+stays (maintainer request, 2026-11-12). Not built yet: today each
+application's approval lapses after five minutes. Stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 Lifecycle evidence retains the exact tool authority: Chat may have no Project;
@@ -11483,9 +11621,55 @@ mechanisms are:
     (Mistral Vibe included), Pi, and the Octant Harness run without Octant's
     OS sandbox, and Octant answers each of their approval requests allow.
     The network is open. No class still prompts at this level, irreversible
-    actions and publishing to an outside target included. An agent acts on
+    actions and publishing to an outside target included, apart from the
+    closed list in the Full access rule below. An agent acts on
     pull requests, pushes, and merges only because the person asked in the
     thread; that is behavior, journaled, not a prompt.
+  - **The Full access rule.** At Full access, in Work and Code, nothing
+    prompts, nothing expires into a refusal, and nothing is refused because
+    the thread read outside content, except the closed list below (maintainer
+    request, 2026-11-12). The list is the whole of it: a rule anywhere in the
+    specifications that asks at Full access and is not on the list is wrong,
+    and the list wins. Adding an ask at Full access means adding it here in
+    the same change, with its reason.
+    1. Every hard line: no telemetry, secrets never journaled, signed
+       updates, authority checked on the host, the journal, Plan read-only,
+       spend ceilings, and an agent never marking a thread Done.
+    2. Merge, plain force-push, and push to the default branch, which follow
+       the pull-request merge rules and the Project's "Agents may merge"
+       switch.
+    3. Computer use: the first action in each application asks, once per
+       thread, because it drives the person's real desktop.
+    4. The Browser on a signed-in profile: a site approval per origin and
+       profile, which the person can remember or widen to "Allow all sites
+       in this profile". A Private page needs none.
+    5. Paying, buying, or sending a message as the person.
+    6. Billed or off-machine desktops: the spend cap is mandatory, and
+       inside it the confirmation of each billed or off-machine lease and
+       each transfer to a cloud desktop is a setting, on by default.
+    7. Who may choose Full access: a local window, or an owner device the
+       person marked. No other paired device and no agent grant raises a
+       thread to it.
+    8. The one-time warning when a machine or a Project first picks it.
+
+    Rationale: the same agent already holds an unwrapped shell and an open
+    network at this level, so an ask on a download, a site, a Model Context
+    Protocol tool, or a device effect costs the person's attention and
+    protects nothing the shell does not already reach. The list keeps the
+    asks whose effect is irreversible, visible to other people, spends
+    money, or acts on what only the person holds. Not built yet: the rules
+    this replaces still ask today; each owning section marks its own.
+
+  - **Unattended work.** At every level a wait is the safe state, so an ask
+    never turns into a refusal by timing out: an unanswered approval or
+    question waits in Needs you until a person answers it. A time, count, or
+    size limit is a default the person can change in Settings unless it
+    protects a hard line or the integrity of stored data; a fixed constant
+    needs its reason stated beside it (maintainer request, 2026-11-12). Not
+    built yet: the limits the owning sections name are still constants, and
+    the asks that still expire after ten minutes (a routine proposal, a
+    routine's pause or archive ask, an image offer, a credential request)
+    have not been changed to wait.
   - **Opt-in sandbox at Full access.** A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:
@@ -11562,7 +11746,7 @@ mechanisms are:
       access" beside a Project's default mode. In the terminal: `octant
 settings sandbox on|off [--work]`. Only a window on this host can turn
       it off for a Full access thread, because that change names Full access,
-      which a paired device cannot.
+      which a paired device that is not an owner device cannot.
       Verified with the real Seatbelt profile on macOS: writes inside the
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
@@ -11616,11 +11800,16 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
     answer leaves new Work threads at Ask first. A new Work thread takes its
     Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a paired device cannot pick Full
-    access for it.
-  - **Computer and Browser keep their first-action ask** at every level,
-    Full access included: each asks at the first action in each app, by a
-    separate maintainer decision, and this rule does not change it.
+    first, Accept edits, or Full access, and a paired device that is not an
+    owner device cannot pick Full access for it.
+  - **Computer keeps its first-action ask** at every level, Full access
+    included: it asks at the first action in each application, once per
+    thread. The Browser asks at Full access only on a signed-in profile; a
+    Private page asks nothing there. Both are entries in the Full access
+    rule above (maintainer request, 2026-11-12, replacing the earlier
+    decision that both asked at every level). Not built yet: the Browser
+    still asks for each site on a Private page, and a Computer grant still
+    lapses after five minutes.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
@@ -11694,7 +11883,9 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   with approval policy `never`, with no Octant wrapping for any provider
   runtime, and nothing asks there, a publish of a Project file to a
   provider's hosted service included. A review reply posted under the
-  person's name still asks at every level.
+  person's name still asks at every level today; the rule is that it asks
+  only below Full access and only where the Project's "Agents may comment on
+  pull requests" switch is off ([Modes](#modes-chat-work-and-code)).
   Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
   declares its own reviewer. Every other ACP agent reports
   `harnessAutoReview` `unsupported`, and Settings › Providers & Models › Capabilities
@@ -11862,7 +12053,9 @@ access` agree); a thread's own change is journaled as
   revoked on the thread's next mode change. A paired device may lower a
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
-  access is chosen in the Octant window on this host." `octant agent` keeps
+  access is chosen in the Octant window on this host." An owner device the
+  person marked may do both (maintainer request, 2026-11-12; not built yet:
+  today it is refused as any paired device is). `octant agent` keeps
   sending Full access exactly when the Project remembers it, and
   `octant agent --access <mode>` asks for any mode on a new thread:
   `full-access` is remembered for the Code Project through the same
@@ -12301,7 +12494,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   account's own sign-in just as a stored Bedrock key does. An AWS profile
   was the documented Bedrock route until 2026-10-26; nothing kept its files
   from the commands. The wrapped postures now deny `~/.aws`, but Full access
-  does not, so the refusal stands.
+  does not, so the refusal stands unless the person opts in with "Use my AWS
+  profile" (maintainer request, 2026-11-12; not built yet).
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
@@ -12330,7 +12524,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
   both installed binaries carry it beside the first), the session-quality
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
-  built-in agents, and marketplace auto-install. The runtime's release-note,
+  built-in agents, and marketplace auto-install. The provider's own memory
+  alone has a setting per key provider account, off by default, that turns
+  it on (maintainer request, 2026-11-12; not built yet: today it is off on
+  every launch); telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
   Feature-flag fetching stays off: Anthropic's environment-variable reference
@@ -13218,9 +13415,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices are refused on profile pages. A managed child, named routine
+  paired devices that are not owner devices are refused on profile pages. A managed child, named routine
   or selected terminal session may use an existing sign-in only through an
-  explicit local-person host/recipient/model/authority/profile/HTTPS session permission,
+  explicit local-person grant, "this routine or child may use this profile on
+  these sites", which is persistent and survives a host restart and an app
+  update (maintainer request, 2026-11-12; not built yet: today it is a
+  host/recipient/model/authority/profile/HTTPS session permission that lapses
+  on every restart and must be reviewed again). It is
   revalidated before effects and observations; it owns its context and receives
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
   A paired device sees only that a signed-in page exists. The
@@ -13244,7 +13445,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   everywhere until reconfirmed, and the desktop app loads them into the profile's
   Electron session, with `chrome.tabs` for the profile's own pages and
   `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn waits
-  for a local window, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  for a local window or an owner device, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -13392,6 +13593,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   back; that hold is the person's at a window of this computer, checked by the
   route, and the gateway does not admit its paths
   ([Person and agent together](design/browser-agent-tool.md#person-and-agent-together)).
+  An owner device the person marked at a local window is the exception
+  (maintainer request, 2026-11-12): it may raise a thread to Full access or
+  start one there, navigate and type in the host's agent Browser, write to a
+  thread terminal, and answer profile site approvals. Its approval answers
+  ride the five-minute unlock session by default; an unlock for each answer is
+  a setting. Every other paired device keeps the limits above
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
+  Not built yet: today these four are refused to an owner device as to any
+  other paired device.
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget
@@ -13876,12 +14086,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     (`y` or `yes`); any other answer denies the request, and an input that
     ends without an answer leaves it pending for `octant pair approve`. It
     changes no firewall rule and runs no Tailscale command.
-- **Hosted relay.** Canceled (maintainer decision, 2026-10-30) because hub and
-  spokes covers remote reach. Only its wire contract and pure policy exist, and
-  nothing calls them. The design of a ciphertext-only relay that splices an
-  already-paired app's pinned TLS session to the host stays in
-  [Hosted relay](design/hosted-relay.md) as a record, and it reopens only on
-  written evidence of a reachability gap and a maintainer's request. The
+- **Hosted relay.** Removed. It was canceled (maintainer decision, 2026-10-30)
+  because hub and spokes covers remote reach, and its specification, wire
+  contract and pure policy are removed. The
   listener and client trust rules above are the whole of remote reachability.
 - **Provider keys on a host without the desktop app.** The desktop saves an
   endpoint's API key or bearer token over native IPC from its own renderer,
@@ -14441,8 +14648,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Its `/api/desktop/provider-sign-in/begin` and `/poll` routes take exactly
   the caller the provider key routes take (bridge secret, window capability,
   no `Origin`, loopback), and the private listener never forwards them; the
-  browser sign-in route never begins a device code, so a code appears only in
-  the terminal that asked for it. The broker builds the tenant's device
+  browser sign-in route never begins a device code. A code may be shown in a
+  local desktop window as well as in the terminal that asked for it
+  (maintainer request, 2026-11-12; not built yet: today a code appears only
+  in the terminal). The broker builds the tenant's device
   authorization URL from its closed issuer host and refuses a verification
   page off a closed list; the server follows an issued code until the broker
   settles it, so an interrupted command never leaves a grant without a
@@ -14953,7 +15162,10 @@ cards; general Azure CLI credentials remain unavailable by design.
   device. The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
-- **Linux access-time mediation is not yet shipped.** Existing Bubblewrap
+- **Linux access-time mediation is not yet shipped.** Parked (maintainer
+  request, 2026-11-12): the candidate is unselected with zero production
+  coverage, and no further work is scheduled until
+  [the Full access rule](#security-and-authority) is built. Existing Bubblewrap
   file covers are prepared at launch; they do not enforce the complete rule
   for absent files or later companion/alias changes. The replacement must use
   the original structured rules and exact own-account exceptions, preserve live
@@ -15811,9 +16023,11 @@ only artifact the update feed lists; the disk image is a download, never an
 update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
-desktop shell, then the Linux AppImage with its signed feed, then Windows, and
-Windows Work and Code only after an explicitly approved Windows confinement
-design is documented. Finding and removing worktrees on this computer is
+desktop shell, then the Linux AppImage with its signed feed, then Windows.
+Windows Work and Code run at Full access, which uses no sandbox (maintainer
+request, 2026-11-12); the guarded levels stay refused there until an explicitly
+approved Windows confinement design is documented. Not built yet: today Work
+and Code are refused on Windows at every level. Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -15853,7 +16067,7 @@ documents its authority, privacy, and release boundaries):
   service ([connector rules](#extensions-and-skills)).
 - A Code thread's own Git and pull-request work (push, draft, ready, stacked,
   and force-with-lease on its own branch, a plain force-push the person asks
-  for, title, body, labels, drafted replies a person sends, close or reopen
+  for, title, body, labels, comments and review replies, close or reopen
   with approval, and merge, auto-merge, or a stack merge the person allowed), a
   person's merge from any of their windows, phone, or web client, and
   host-local routines (Automation Center, Chat routines included), under the
@@ -15864,8 +16078,9 @@ documents its authority, privacy, and release boundaries):
   person's request in the turn, after the person approves that one merge; an
   agent's merge on a Project setting or routine; the Merge when ready and
   Auto-fix switches the person turns on there; and a thread's watch on its own
-  pull request, which the person allows. The rest of the allowed actions are
-  not built yet.
+  pull request, which needs no approval (maintainer request, 2026-11-12; not
+  built yet: today the person allows each watch). The rest of the allowed
+  actions are not built yet.
 - Linked external secret stores, built for the 1Password CLI
   ([linked secret stores](#linked-secret-stores)): a pointer in the credential
   broker, the value fetched at use and never kept.
@@ -15894,6 +16109,12 @@ or weakening an invariant each still needs a separate explicit action
 by a maintainer. Existing scoped exceptions remain documented in this
 architecture.
 
+**Scope hold** (maintainer request, 2026-11-12). Bots, the Nightly shared-host
+client, public Canvas links, Browser upload and download manifests, and the
+Windows building blocks beyond running Work and Code at Full access take no new
+scope until [the Full access rule](#security-and-authority) is built. What is
+built or specified for them stays as it is.
+
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
 server on every OS. server. The sequence is the Linux desktop shell, then the Linux
@@ -15916,10 +16137,11 @@ loads the native owner without acquiring a profile, and the credential fixture
 uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel; native host admission and credentials remain
-separate prerequisites. Windows Work and Code stay
+separate prerequisites. Windows Work and Code below Full access stay
 unavailable until an approved Windows confinement design is documented: the confinement port
-supports only macOS and Linux and refuses every other platform, so Work and
-Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
+supports only macOS and Linux and refuses every other platform, so the guarded
+levels fail closed there, and Full access, which uses no confinement, is the
+one level they run at (not built yet: today every level is refused). Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 The Windows owned-control prerequisite is an original in-process Node-API
@@ -16101,7 +16323,7 @@ paths and server/member/roster P-256 identity. A missing trusted helper leaves
 the credential store unavailable. Native CI exercises synthetic targets on an
 ephemeral Windows runner. Complete foreground boot and lifecycle composition,
 owner-presence unlock and Windows app packaging remain separate work.
-Work and Code remain refused until their native confinement boundary is proven.
+Work and Code below Full access remain refused until their native confinement boundary is proven.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
@@ -16217,7 +16439,8 @@ Work and Code remain refused until their native confinement boundary is proven.
   Automatic checks are a setting that defaults to off — a store
   that never recorded the choice decodes to off, and the host starts with
   them off until the persisted choice arrives — then checks daily once the
-  person turns the switch on. A check is a
+  person turns the switch on. First run asks once whether to check for
+  updates (maintainer request, 2026-11-12; not built yet: today nothing asks). A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
 
@@ -16229,7 +16452,7 @@ is current.
 Artifact replicas, when the person turns sync on, go only to a store that
 person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
-does not open a hosted relay or an Octant cloud account.
+does not open an Octant cloud account.
 
 Public Canvas links are in scope under the rules in
 [Canvas public links](design/canvas-public-links.md), served by the reference
