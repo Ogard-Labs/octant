@@ -68,12 +68,7 @@ describe("a reply cut off at the output limit", () => {
   it("writes the continuation into the composer draft and leaves sending to the person", async () => {
     const user = userEvent.setup();
     render(
-      <ThreadStatsProvider
-        lineVisible
-        onLineVisibleChange={() => undefined}
-        subjectKey={THREAD_ID}
-        summary={summary("max-tokens")}
-      >
+      <ThreadStatsProvider subjectKey={THREAD_ID} summary={summary("max-tokens")}>
         <OutputLimitContinueProvider mode="chat" threadId={THREAD_ID}>
           <TranscriptOutputLimitNote restoreKey={THREAD_ID} />
         </OutputLimitContinueProvider>

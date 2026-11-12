@@ -2495,6 +2495,28 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 96,
+    name: "create_journal_verification_watermark",
+    // The sequence startup last verified the journal through, so the next
+    // start decodes only the rows after it. Disposable: deleting the row only
+    // makes the next start slower. Any rewrite or delete of a journal row
+    // clears it in the same transaction, whichever code path made the change.
+    sql: `
+      CREATE TABLE journal_verification_watermark (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        verified_through INTEGER NOT NULL CHECK(verified_through >= 0),
+        fingerprint TEXT NOT NULL CHECK(length(fingerprint) > 0),
+        verified_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TRIGGER event_journal_update_clears_verification_watermark
+        AFTER UPDATE ON event_journal
+        BEGIN DELETE FROM journal_verification_watermark; END;
+      CREATE TRIGGER event_journal_delete_clears_verification_watermark
+        AFTER DELETE ON event_journal
+        BEGIN DELETE FROM journal_verification_watermark; END;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {
