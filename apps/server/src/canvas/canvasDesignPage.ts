@@ -15,6 +15,7 @@ import {
   type CanvasProvenance,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
+import { CANVAS_NETWORK_PROXY_PATH_PREFIX } from "@octant/contracts/canvas-network";
 import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share";
 import {
   DESIGN_FRAME_KIT,
@@ -42,11 +43,39 @@ import { getDefaultToken } from "@octant/theme";
 export const CANVAS_DESIGN_PAGE_POLICY =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 
-/** Every response from the page route, a page or a refusal, carries these. */
-export function canvasDesignPageHeaders(contentType: string): Record<string, string> {
+/**
+ * The policy of a page whose Canvas has **Allow network** on: the same policy
+ * with one directive changed. `connect-src` names the page's own proxy path,
+ * through its token and the trailing slash, so a script's request can go
+ * there and to no other path on this host or anywhere else. Images, fonts,
+ * media, frames, forms, and the sandbox stay as they are.
+ */
+export function canvasDesignPageNetworkPolicy(networkBase: string): string {
+  return CANVAS_DESIGN_PAGE_POLICY.replace("connect-src 'none'", `connect-src ${networkBase}`);
+}
+
+/**
+ * Where one page's requests go: this host's origin, as the frame reached it,
+ * and the page's token.
+ */
+export function canvasDesignPageNetworkBase(origin: string, token: string): string {
+  return `${origin}${CANVAS_NETWORK_PROXY_PATH_PREFIX}${token}/`;
+}
+
+/**
+ * Every response from the page route, a page or a refusal, carries these. A
+ * page is handed a `networkBase` only while its Canvas's switch is on.
+ */
+export function canvasDesignPageHeaders(
+  contentType: string,
+  networkBase?: string,
+): Record<string, string> {
   return {
     "content-type": contentType,
-    "content-security-policy": CANVAS_DESIGN_PAGE_POLICY,
+    "content-security-policy":
+      networkBase === undefined
+        ? CANVAS_DESIGN_PAGE_POLICY
+        : canvasDesignPageNetworkPolicy(networkBase),
     "referrer-policy": "no-referrer",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -70,6 +99,13 @@ export interface CanvasDesignRunGrant {
    * design read from a shared snapshot, which carries no image to resolve.
    */
   readonly provenance?: CanvasProvenance;
+  /**
+   * A local window asked for this page while its Canvas's **Allow network**
+   * switch was on. Only such a ticket can be served with a proxy path; a
+   * shared snapshot's, a published page's, and a paired device's never carry
+   * it.
+   */
+  readonly network?: true;
 }
 
 // A reader asks for a ticket just before it loads the page, so only a handful
@@ -208,6 +244,41 @@ const BRIDGE_SCRIPT = `(function () {
 })();`;
 
 /**
+ * Written after the bridge for a page whose Canvas has **Allow network** on.
+ * The page's policy admits one path on this host, so a `fetch` of an address
+ * elsewhere would be refused by the browser; this sends it to that path, and
+ * the host fetches it under the destination rule. It is a convenience, not a
+ * boundary: a page that replaces `fetch` again, or calls the path itself,
+ * reaches the same proxy and nothing more. Only `GET` is offered, and none of
+ * the page's own headers are passed on.
+ */
+function networkScript(networkBase: string): string {
+  return `(function () {
+  "use strict";
+  var proxy = ${JSON.stringify(`${networkBase}fetch?url=`)};
+  var direct = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    var address;
+    try {
+      address = new URL(typeof input === "string" ? input : input && input.url ? input.url : String(input), document.baseURI);
+    } catch (_) { return direct(input, init); }
+    if ((address.protocol !== "http:" && address.protocol !== "https:") || address.origin === location.origin) {
+      return direct(input, init);
+    }
+    var method = String((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    if (method !== "GET") return Promise.reject(new TypeError("Allow network offers GET requests only."));
+    return direct(proxy + encodeURIComponent(address.href), {
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: init && init.signal ? init.signal : undefined
+    });
+  };
+})();`;
+}
+
+/**
  * One frame shown at a time on a device size, as in a static design: the one
  * the address names, the one holding the section it names, or else the start
  * frame. A document shows every frame in order and is measured by its body.
@@ -230,12 +301,14 @@ const UNTHEMED_PAGE = "html { color-scheme: light; background: white; color: bla
 /**
  * The page for one running design. Declared images the host resolved are
  * written in as `data:` images, and any other is a placeholder, so the page
- * requests nothing.
+ * requests nothing, unless it is handed a `networkBase`: then its script may
+ * ask the host to fetch through that path.
  */
 export function renderCanvasDesignPage(
   block: CanvasDesignBlock,
   startFrameId: string,
   assets: ReadonlyArray<CanvasDesignAssetResolution>,
+  networkBase?: string,
 ): string {
   const isDocument = block.size === "document";
   const viewportWidth =
@@ -263,6 +336,7 @@ export function renderCanvasDesignPage(
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
     `<script>${BRIDGE_SCRIPT}</script>`,
+    ...(networkBase === undefined ? [] : [`<script>${networkScript(networkBase)}</script>`]),
     `<meta name="viewport" content="width=${viewportWidth}">`,
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     `<style>${UNTHEMED_PAGE}</style>`,

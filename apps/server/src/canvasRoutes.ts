@@ -89,12 +89,22 @@ import {
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
 import {
   canvasDesignPageHeaders,
+  canvasDesignPageNetworkBase,
   canvasDesignPagePath,
   canvasDesignPageRefusal,
   issueSharedDesignRun,
   renderCanvasDesignPage,
   type CanvasDesignRunTickets,
 } from "./canvas/canvasDesignPage";
+import type { CanvasNetworkAccessService } from "./canvas/canvasNetworkAccessService";
+import { canvasNetworkProxyResponse, type CanvasNetworkProxy } from "./canvas/canvasNetworkProxy";
+import {
+  CANVAS_NETWORK_PROXY_PATH_PREFIX,
+  decodeCanvasNetworkAccessCommand,
+  decodeCanvasNetworkAccessResult,
+  decodeCanvasNetworkAccessView,
+  type CanvasNetworkAccessRefusalReason,
+} from "@octant/contracts/canvas-network";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -172,6 +182,14 @@ export interface CanvasRouteDependencies {
    * not serve them, and a running design then answers that it cannot run here.
    */
   readonly designRunTickets?: CanvasDesignRunTickets;
+  /**
+   * The per-Canvas **Allow network** switch and the proxy a running page's
+   * requests go through. Absent, no Canvas has a switch and no page a proxy.
+   */
+  readonly canvasNetwork?: {
+    readonly access: CanvasNetworkAccessService;
+    readonly proxy: Pick<CanvasNetworkProxy, "fetch">;
+  };
   /**
    * The host's snapshot of a page a Work or Code thread published, when the
    * window may read that thread. Absent leaves published pages unrunnable.
@@ -274,7 +292,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "public-shares" &&
       route !== "public-share-revoke" &&
       route !== "public-link-settings" &&
-      route !== "thread-reference-cards"
+      route !== "thread-reference-cards" &&
+      route !== "network-access" &&
+      !route.startsWith(NETWORK_PROXY_ROUTE_PREFIX)
     ) {
       return undefined;
     }
@@ -287,6 +307,12 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
     // no window credential; the single-use ticket is the whole authority, and
     // it was issued only after the same read check as the Canvas itself.
     if (route === "design-page") return serveDesignPage(dependencies, request, url);
+    // A running page asks for a fetch the same way: its origin is opaque and
+    // it holds no window credential, so the token in the path is the whole
+    // authority, and nothing else the request carries is read.
+    if (route.startsWith(NETWORK_PROXY_ROUTE_PREFIX)) {
+      return serveNetworkRequest(dependencies, request, url, route);
+    }
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failureResponse("Renderer origin is not allowed.", 400, null);
     }
@@ -1517,6 +1543,99 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return failureResponse("Public links request is invalid.", 405, origin);
       }
 
+      if (route === "network-access" && (request.method === "GET" || request.method === "POST")) {
+        const access = dependencies.canvasNetwork?.access;
+        if (request.method === "GET") {
+          if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+            return failureResponse("Canvas network request is invalid.", 400, origin);
+          }
+          let canvasId;
+          try {
+            canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+          } catch {
+            return failureResponse("Canvas ID is invalid.", 400, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            canvasId,
+          );
+          if (context.kind !== "ok" || access === undefined) {
+            return failureResponse(
+              "Canvas network is not available for this canvas.",
+              context.kind === "unauthorized" ? 403 : 404,
+              origin,
+            );
+          }
+          return jsonResponse(
+            decodeCanvasNetworkAccessView({
+              kind: "canvas-network-access",
+              canvasId,
+              allowed: access.isAllowed(canvasId),
+            }),
+            200,
+            origin,
+          );
+        }
+
+        const refusedNetwork = (reason: CanvasNetworkAccessRefusalReason, message: string) =>
+          jsonResponse(
+            decodeCanvasNetworkAccessResult({
+              kind: "canvas-network-access-refused",
+              reason,
+              message,
+            }),
+            200,
+            origin,
+          );
+        // Letting a Canvas's pages send its content to the internet is a
+        // person's choice at this machine. A paired device and an agent grant
+        // are other principals, and no agent tool reaches this route.
+        if (principal.kind !== "local-window") {
+          return refusedNetwork(
+            "local-window-required",
+            "Only a person at this machine can change a Canvas's network.",
+          );
+        }
+        const body = await readJson(request);
+        if (body.kind !== "ok") {
+          return refusedNetwork("malformed", "Canvas network request is malformed.");
+        }
+        let command;
+        try {
+          command = decodeCanvasNetworkAccessCommand(body.value);
+        } catch {
+          return refusedNetwork("malformed", "Canvas network request is malformed.");
+        }
+        if (access === undefined) {
+          return refusedNetwork("unavailable", "This host does not offer a Canvas network.");
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          command.canvasId,
+        );
+        if (
+          context.kind !== "ok" ||
+          dependencies.canvasProjection.getById(command.canvasId) === undefined
+        ) {
+          return refusedNetwork(
+            "canvas-unavailable",
+            "That Canvas is not available in this workspace.",
+          );
+        }
+        access.set(command.canvasId, command.allowed);
+        return jsonResponse(
+          decodeCanvasNetworkAccessResult({
+            kind: "canvas-network-access",
+            canvasId: command.canvasId,
+            allowed: access.isAllowed(command.canvasId),
+          }),
+          200,
+          origin,
+        );
+      }
+
       if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {
         const folders = dependencies.canvasExportFolderService;
         // Reading where a Canvas exports to and choosing it are the same
@@ -2238,6 +2357,11 @@ async function issueDesignRun(
     startFrameId: String(startFrameId),
     block,
     provenance: definition.provenance,
+    // A paired device's page never carries the mark, whatever the switch says:
+    // the proxy answers on this machine's loopback host, for a frame here.
+    ...(reader.kind === "window" && dependencies.canvasNetwork?.access.isAllowed(input.canvasId)
+      ? { network: true as const }
+      : {}),
   });
   return {
     kind: "ready",
@@ -2331,10 +2455,68 @@ async function serveDesignPage(
     dependencies.resolveDesignAssets === undefined
       ? []
       : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
-  return new Response(renderCanvasDesignPage(grant.block, grant.startFrameId, assets), {
-    status: 200,
-    headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
-  });
+  // A token is minted only for a frame a browser on this machine is loading:
+  // the desktop's prototype host has no route to this host, so its page keeps
+  // the policy that names nothing. The switch is read again here, since it
+  // may have gone off after the ticket was issued.
+  const token =
+    grant.network === true && grant.canvasId !== undefined && destination === "iframe"
+      ? dependencies.canvasNetwork?.access.issueToken(grant.canvasId)
+      : undefined;
+  const networkBase =
+    token === undefined ? undefined : canvasDesignPageNetworkBase(url.origin, token);
+  return new Response(
+    renderCanvasDesignPage(grant.block, grant.startFrameId, assets, networkBase),
+    { status: 200, headers: canvasDesignPageHeaders("text/html; charset=utf-8", networkBase) },
+  );
+}
+
+const NETWORK_PROXY_ROUTE_PREFIX = CANVAS_NETWORK_PROXY_PATH_PREFIX.slice("/api/canvas/".length);
+const NETWORK_PROXY_ROUTE = /^network\/([A-Za-z0-9_-]{43})\/fetch$/;
+
+/**
+ * One fetch on behalf of a running page. The token names the Canvas and is
+ * live only while that Canvas's switch is on. The request's cookies, origin,
+ * and headers are not read and nothing of them is passed on; the address to
+ * fetch is the one thing the page chooses, and the proxy holds it to the
+ * destination rule.
+ */
+async function serveNetworkRequest(
+  dependencies: CanvasRouteDependencies,
+  request: Request,
+  url: URL,
+  route: string,
+): Promise<Response> {
+  const match = NETWORK_PROXY_ROUTE.exec(route);
+  const token = match?.[1];
+  if (token === undefined) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  const network = dependencies.canvasNetwork;
+  // A page's request arrives by address alone. One a session carried here (a
+  // paired device's, forwarded by the remote gateway) is not a frame on this
+  // machine, whatever token it names.
+  const canvasId =
+    readPrincipalRouteContext(request) === undefined
+      ? network?.access.canvasForToken(token)
+      : undefined;
+  if (network === undefined || canvasId === undefined) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "token-not-live" });
+  }
+  if (request.method !== "GET") {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "method-not-allowed" });
+  }
+  // A browser names what it is loading. A script's request is the only kind
+  // answered, so a fetched page is never drawn as a document on this origin.
+  const destination = request.headers.get("sec-fetch-dest");
+  if (destination !== null && destination !== "empty") {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "not-a-script-request" });
+  }
+  const target = url.searchParams.get("url");
+  if (url.searchParams.size !== 1 || target === null) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  return canvasNetworkProxyResponse(await network.proxy.fetch(canvasId, target));
 }
 
 function toInventoryEntry(

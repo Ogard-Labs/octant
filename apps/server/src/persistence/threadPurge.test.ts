@@ -721,6 +721,31 @@ describe("thread purge sweep", () => {
     expect(remaining).toEqual([]);
   });
 
+  it("erases a Canvas's network switch with the Canvas, with its Project and with its thread", async () => {
+    const switched = (harness: Harness) =>
+      harness.connection
+        .prepare(
+          "SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'canvas-network-access'",
+        )
+        .all();
+
+    const byProject = openHarness();
+    seedCanvasFamily(byProject, threads.work);
+    expect(switched(byProject)).toEqual([{ aggregate_id: uuidFor("work", "canvas") }]);
+    erasePurgedProjectData({
+      connection: byProject.connection,
+      projectId,
+      canvasIds: [uuidFor("work", "canvas")],
+    });
+    expect(switched(byProject)).toEqual([]);
+
+    const byThread = openHarness();
+    seedThreadTraces(byThread, threads.code);
+    expect(switched(byThread)).toEqual([{ aggregate_id: uuidFor("code", "canvas") }]);
+    await purgeThread(byThread, "code", threads.code.id);
+    expect(switched(byThread)).toEqual([]);
+  });
+
   it("erases a Project's language server approvals and egress records with the Project, and only that Project's", () => {
     const harness = openHarness();
     const otherProjectId = "c3630000-0000-4000-8000-000000000011";
@@ -1152,6 +1177,8 @@ function seedCanvasFamily(harness: Harness, thread: SeededThread): void {
     versionId: uuidFor(thread.mode, "version"),
     writerId: thread.marker,
   });
+  // A person's "Allow network" choice for the Canvas names it and nothing else.
+  insertEvent(harness.connection, "canvas-network-access", canvasId, { canvasId, allowed: true });
   const shareId = uuidFor(thread.mode, "share");
   insertEvent(harness.connection, "canvas-share", shareId, {
     record: {

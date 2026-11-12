@@ -68,6 +68,7 @@ export * from "./canvasSkill";
 export * from "./canvasShare";
 export * from "./canvasExport";
 export * from "./canvasExportFolder";
+export * from "./canvasNetwork";
 export * from "./canvasPublicShare";
 export * from "./guardrailLowering";
 export * from "./providerTooling";

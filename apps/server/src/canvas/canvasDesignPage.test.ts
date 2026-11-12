@@ -1,7 +1,11 @@
 import { CANVAS_DESIGN_ASSETS_MAX_BYTES, type CanvasDesignBlock } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_DESIGN_EXPORT_RUNNING_POLICY,
+  CANVAS_DESIGN_PAGE_POLICY,
   CanvasDesignRunTickets,
+  canvasDesignPageHeaders,
+  canvasDesignPageNetworkBase,
   issueSharedDesignRun,
   renderCanvasDesignExportFrames,
   renderCanvasDesignPage,
@@ -63,6 +67,80 @@ describe("a running design's page", () => {
   });
 });
 
+describe("a running design's page with its Canvas's network on", () => {
+  const base = canvasDesignPageNetworkBase("http://127.0.0.1:4455", "t".repeat(43));
+
+  it("names its own proxy path for a script's requests and leaves every other directive alone", () => {
+    expect(base).toBe(`http://127.0.0.1:4455/api/canvas/network/${"t".repeat(43)}/`);
+    const policy = canvasDesignPageHeaders("text/html", base)["content-security-policy"] ?? "";
+    expect(policy.split("; ")).toEqual(
+      CANVAS_DESIGN_PAGE_POLICY.split("; ").map((directive) =>
+        directive === "connect-src 'none'" ? `connect-src ${base}` : directive,
+      ),
+    );
+    // Without a base, the page keeps the policy that names nothing.
+    expect(canvasDesignPageHeaders("text/html")["content-security-policy"]).toBe(
+      CANVAS_DESIGN_PAGE_POLICY,
+    );
+  });
+
+  it("routes a fetch through the proxy path only when the host hands the page one", () => {
+    const block = checkout("<p>Cart</p><script>function pay() {}</script>");
+    expect(renderCanvasDesignPage(block, "cart", [])).not.toContain("/api/canvas/network/");
+    const page = renderCanvasDesignPage(block, "cart", [], base);
+    expect(page).toContain(JSON.stringify(`${base}fetch?url=`));
+    expect(page.indexOf(base)).toBeLessThan(page.indexOf("function pay()"));
+  });
+
+  it("sends a page's fetch of another address to the proxy as a bare GET, and offers no other method", async () => {
+    const page = renderCanvasDesignPage(checkout("<p>Cart</p>"), "cart", [], base);
+    const script = page.split("<script>")[2]?.split("</script>")[0] ?? "";
+    const calls: Array<readonly [unknown, unknown]> = [];
+    const pageWindow = {
+      fetch: (input: unknown, init?: unknown): Promise<unknown> => {
+        calls.push([input, init]);
+        return Promise.resolve("answered");
+      },
+    };
+    // The host's script, run as the page would run it.
+    new Function("window", "document", "location", script)(
+      pageWindow,
+      { baseURI: "http://127.0.0.1:4455/api/canvas/design-page?ticket=x" },
+      { origin: "http://127.0.0.1:4455" },
+    );
+
+    await pageWindow.fetch("https://api.example.com/v1?q=a b", {
+      headers: { authorization: "Bearer page-secret" },
+      credentials: "include",
+    });
+    expect(calls[0]?.[0]).toBe(
+      `${base}fetch?url=${encodeURIComponent("https://api.example.com/v1?q=a%20b")}`,
+    );
+    expect(calls[0]?.[1]).toEqual({
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: undefined,
+    });
+
+    await expect(
+      pageWindow.fetch("https://api.example.com/", { method: "POST", body: "x" }),
+    ).rejects.toThrow(/GET requests only/);
+    expect(calls).toHaveLength(1);
+
+    // An address on the host itself is left as asked; the page's policy
+    // admits only the proxy path there.
+    await pageWindow.fetch("/api/canvas/get");
+    expect(calls[1]?.[0]).toBe("/api/canvas/get");
+  });
+
+  it("is never the policy an exported file carries", () => {
+    expect(CANVAS_DESIGN_EXPORT_RUNNING_POLICY).toContain("connect-src 'none'");
+    expect(CANVAS_DESIGN_EXPORT_RUNNING_POLICY).not.toContain("/api/canvas/network/");
+  });
+});
+
 describe("a shared prototype's page", () => {
   const canvasId = "11111111-1111-4111-8111-111111111111";
   const versionId = "22222222-2222-4222-8222-222222222222";
@@ -93,6 +171,9 @@ describe("a shared prototype's page", () => {
     // A shared design names no image and so needs no authority to resolve one.
     expect(grant?.provenance).toBeUndefined();
     expect(grant?.block.assets).toBeUndefined();
+    // A share never carries the sharer's "Allow network": a reader's page
+    // can ask this host to fetch nothing.
+    expect(grant?.network).toBeUndefined();
     // The ticket opened once.
     expect(tickets.redeem(page?.split("ticket=")[1] ?? "")).toBeUndefined();
   });

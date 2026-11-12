@@ -1,7 +1,7 @@
 import { ExtensionActivationScope } from "@octant/contracts/extensions";
 import { canvasExportPluginTargets } from "../canvas/canvasExportPluginTargets";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
   CANVAS_REFRESH_MAX_SKILL_OPTIONS,
@@ -57,6 +57,8 @@ import type {
   CanvasProvenance,
 } from "@octant/contracts/canvas";
 import { CanvasDesignRunTickets } from "../canvas/canvasDesignPage";
+import { CanvasNetworkAccessService } from "../canvas/canvasNetworkAccessService";
+import { CanvasNetworkProxy } from "../canvas/canvasNetworkProxy";
 import { DesignSystemFiles, designSystemFolders } from "../designSystems/designSystemFiles";
 import {
   projectCanvasBrand,
@@ -177,6 +179,12 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly threadReadAuthority?: NonNullable<
       Parameters<typeof createCanvasRouteHandler>[0]["threadReadAuthority"]
     >;
+    /**
+     * The names this host's own listeners answer to, which a Canvas page's
+     * proxy never fetches from. Wired after the remote listener exists; read
+     * on every proxied request.
+     */
+    readonly canvasNetworkOwnHosts?: () => ReadonlyArray<string>;
   };
 
 export function wireCanvas(deps: CanvasDependencies) {
@@ -1253,9 +1261,29 @@ export function wireCanvas(deps: CanvasDependencies) {
       createCanvas: (request, context, project, blocks) =>
         canvasService.create(request, context, project, blocks),
     });
+  // A Canvas's "Allow network" switch is off until a person at this machine
+  // turns it on, and its pages then reach the network only through the proxy.
+  // The machine's own interface addresses are read on every request, since a
+  // laptop's networks change, so no Octant listener is reachable through it
+  // even where the machine holds a public address.
+  const canvasNetworkAccess = new CanvasNetworkAccessService({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString() as never,
+  });
+  const canvasNetworkProxy = new CanvasNetworkProxy({
+    reserved: () => ({
+      addresses: Object.values(networkInterfaces()).flatMap((entries) =>
+        (entries ?? []).map((entry) => entry.address),
+      ),
+      hosts: deps.canvasNetworkOwnHosts?.() ?? [],
+    }),
+  });
   const canvasRoutes = createCanvasRouteHandler({
     canvasProjection: persistence.canvasProjection,
     canvasService,
+    canvasNetwork: { access: canvasNetworkAccess, proxy: canvasNetworkProxy },
     listDesignSystems: async (projectId) => {
       const project = persistence.readProject(decodeProjectId(projectId));
       const folders = project === undefined ? undefined : designSystemFolders(project);

@@ -721,6 +721,12 @@ export function startOctantServer(
             ? {}
             : { codeConversation: routeCodeService.conversation }),
         })(windowId, request),
+      // The remote listener is wired below; a Canvas page's proxy reads its
+      // name only when a page asks for a fetch, and never fetches from it.
+      canvasNetworkOwnHosts: () => {
+        const hostname = privateListenerController.status().hostname;
+        return hostname === null ? [] : [hostname];
+      },
       // A paired device reads a thread's Canvases under the same Open check
       // its own thread routes run: Chat's read rule, Work's and Code's reads.
       threadReadAuthority: (scopeId, thread) =>
