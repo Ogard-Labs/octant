@@ -126,7 +126,8 @@ describe("AgentRunSettingsPanel", () => {
     };
     render(<AgentRunSettingsPanel client={client} />);
     await waitFor(() => expect(toggle()).toBeChecked());
-    const wait = () => screen.getByRole("spinbutton", { name: "Minutes to wait for a full provider" });
+    const wait = () =>
+      screen.getByRole("spinbutton", { name: "Minutes to wait for a full provider" });
     expect(wait()).toHaveValue(30);
 
     await user.click(

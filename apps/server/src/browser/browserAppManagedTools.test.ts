@@ -7,7 +7,7 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
-import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import { BrowserFlowRecorder, browserToolInputRecord, flowDecision } from "./browserFlows";
 import {
   BROWSER_OPERATION_EFFECT,
@@ -1528,6 +1528,30 @@ describe("octant_browser resize and device emulation", () => {
     const { act, result } = resizeWith({ preset: "phone", colorScheme: "dark" }, "plan");
     expect((await result).result).toEqual({ error: "plan-mode-read-only" });
     expect(act).not.toHaveBeenCalled();
+  });
+});
+
+describe("how long octant_browser may wait", () => {
+  const parse = (input: unknown) =>
+    parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+  const wait = (timeoutMs: number) => ({ operation: "wait", selector: "#done", timeoutMs });
+
+  it("lets one wait last up to ten minutes and refuses a longer one", () => {
+    expect(parse(wait(600_000))).toMatchObject({
+      operation: "wait",
+      waitFor: { timeoutMs: 600_000 },
+    });
+    expect(parse(wait(600_001))).toBeUndefined();
+    expect(BROWSER_TOOL_DEFINITION.inputSchema.properties.timeoutMs.maximum).toBe(600_000);
+    expect(BROWSER_TOOL_HELP[BROWSER_TOOL_DEFINITION.name]).toContain("timeoutMs up to 600000");
+  });
+
+  it("refuses a batch whose waits together would outlast ten minutes", () => {
+    const steps = (...waits: ReadonlyArray<object>) => ({ operation: "steps", steps: waits });
+    expect(parse(steps(wait(300_000), wait(300_000)))?.operation).toBe("steps");
+    expect(parse(steps(wait(300_000), wait(300_001)))).toBeUndefined();
+    // A wait that names no limit counts as its ten-second default.
+    expect(parse(steps(wait(595_000), { operation: "wait", selector: "#done" }))).toBeUndefined();
   });
 });
 

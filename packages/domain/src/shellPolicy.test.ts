@@ -231,6 +231,7 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserCapturesPerThread: 200,
       persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
@@ -243,6 +244,7 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserCapturesPerThread: 200,
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);

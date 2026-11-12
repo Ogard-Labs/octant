@@ -108,6 +108,7 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  browserCapturesPerThread: 200,
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
@@ -193,6 +194,17 @@ describe("default folder paths", () => {
 });
 
 describe("shell bootstrap contracts", () => {
+  it("keeps 200 Browser captures a thread for a store saved before the setting, and lets a person choose 1 to 500", () => {
+    const { browserCapturesPerThread: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).browserCapturesPerThread).toBe(200);
+    expect(
+      decodeShellSettings({ ...settings, browserCapturesPerThread: 500 }).browserCapturesPerThread,
+    ).toBe(500);
+    for (const value of [0, 501, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, browserCapturesPerThread: value })).toThrow();
+    }
+  });
+
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");

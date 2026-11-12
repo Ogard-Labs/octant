@@ -153,9 +153,8 @@ export function AgentRunDetail(props: {
             {latestTime.limitMs === undefined
               ? ", with no time limit"
               : ` of ${latestTime.limitMs / 60_000} minutes`}
-            . Recorded total:{" "}
-            {Math.round(recordedTotalMs / 1000)} seconds across {recordedAttempts} attempts. Earlier
-            or lost attempts may be unavailable; this is not wall time.
+            . Recorded total: {Math.round(recordedTotalMs / 1000)} seconds across {recordedAttempts}{" "}
+            attempts. Earlier or lost attempts may be unavailable; this is not wall time.
           </p>
         )}
       </header>

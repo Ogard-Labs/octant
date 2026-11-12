@@ -4404,7 +4404,9 @@ of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
 as a link card beside the drawn snapshot. A turn keeps at most 512 steps
 by default, a number the person can change (maintainer request, 2026-11-12;
-not built yet: today a constant 64), in arrival
+not built yet: today a constant 64, kept until a step is journaled and
+streamed as a change, because each tool event now restates the whole list
+and those bytes grow with the square of the limit), in arrival
 order and sets a truncated flag when it called more. Chat carries them as
 `ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
 `WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
@@ -4785,8 +4787,8 @@ flowchart LR
   `record`. The bytes live in the host's managed
   attachment store and the journal holds only a reference, the page origin, URL,
   title, content hash, and time. A thread keeps its newest 200 captures by
-  default, a number the person can change (maintainer request, 2026-11-12;
-  not built yet: today a constant 32), and they
+  default, a number the person can change from 1 to 500 in Settings ›
+  Permissions (maintainer request, 2026-11-12), and they
   are erased with the thread. Only a local window that can open the thread reads
   them, never a paired device. They never reach a Canvas share, replica sync, or
   a diagnostics export. They leave the host only in an export the local owner

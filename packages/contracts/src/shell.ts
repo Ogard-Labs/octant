@@ -6,6 +6,10 @@ import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+} from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
 import { AggregateVersion } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
@@ -874,6 +878,15 @@ export const ShellSettings = Schema.Struct({
    * decodes to off.
    */
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * How many Browser captures each thread keeps, newest first. A host
+   * setting like the switch above. A store persisted before this shipped
+   * decodes to the default.
+   */
+  browserCapturesPerThread: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_CAPTURES_PER_THREAD)),
+    { default: () => DEFAULT_BROWSER_CAPTURES_PER_THREAD },
+  ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);

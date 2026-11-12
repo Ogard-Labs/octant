@@ -1,7 +1,4 @@
-import {
-  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
-  type AgentRun,
-} from "@octant/contracts";
+import { DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES, type AgentRun } from "@octant/contracts";
 
 /**
  * The recovery reason a child carries while it waits for the provider to take

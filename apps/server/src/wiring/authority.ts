@@ -1,5 +1,6 @@
 import { notifyWindowRevocations } from "../windowRevocations";
 import { randomUUID } from "node:crypto";
+import { defaultShellSettings } from "@octant/domain";
 import {
   type AgentRun,
   decodeChatThreadId,
@@ -258,6 +259,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
+    capturesPerThread: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .browserCapturesPerThread,
   });
   const browserModelBindings = new Map<string, BrowserModelBinding>();
   // Each area that holds per-window state registers its revocation here when

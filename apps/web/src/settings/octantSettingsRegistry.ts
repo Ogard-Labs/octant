@@ -852,7 +852,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("subagent-provider-wait-minutes"),
           label: "Minutes a helper waits for a full provider",
           scope: "app",
-          keywords: "helper agents subagents provider full capacity wait minutes request slot limit",
+          keywords:
+            "helper agents subagents provider full capacity wait minutes request slot limit",
         },
         {
           id: settingId("default-model"),
@@ -1161,6 +1162,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
+          id: settingId("browser-captures-per-thread"),
+          label: "Browser captures kept per thread",
+          scope: "host",
+          keywords:
+            "browser captures screenshots recordings kept per thread limit retention storage",
         },
         {
           id: settingId("tool-approvals"),

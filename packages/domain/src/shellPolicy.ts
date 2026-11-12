@@ -40,6 +40,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTabId,
 } from "@octant/contracts/shell";
+import { DEFAULT_BROWSER_CAPTURES_PER_THREAD } from "@octant/contracts/browser-capture";
 import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/user-profile";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -199,6 +200,7 @@ export function defaultShellSettings(): ShellSettings {
     rememberedBrowserOrigins: [],
     rememberedBrowserProfileSites: [],
     agentBrowserDownloads: false,
+    browserCapturesPerThread: DEFAULT_BROWSER_CAPTURES_PER_THREAD,
     persistentBrowserOwner: false,
   };
 }

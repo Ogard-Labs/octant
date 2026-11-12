@@ -85,11 +85,26 @@ the Browser pane
 
 - A thread keeps its newest 200 captures, screenshots and recordings together.
   The count is a Settings default the person can change (maintainer request,
-  2026-11-12). Not built yet: today the window is a fixed 32.
+  2026-11-12): Settings › Permissions › Browser captures, "Captures kept per
+  thread", from 1 to 500, stored as the host shell setting
+  `browserCapturesPerThread` and read at every listing. A screenshot is at
+  most about 40 KiB, so 200 hold about 8 MiB and 500 about 20 MiB beside the
+  recordings' 16 MiB.
+- The number can grow, and the default grew from 32. A larger window reaches
+  back to journal versions whose bytes were removed under the smaller one, so
+  a capture is retained only while the store still holds its bytes: choosing
+  a larger number never brings back a capture that was dropped, and choosing a
+  smaller one drops the older captures at the next listing (their bytes go at
+  the next keep or recovery pass).
+- The thread's strip draws the newest 32 captures and offers the rest behind
+  "Show all N captures", because each tile reads its own picture. Saving the
+  proof's pictures numbers every retained capture, so the desktop saver
+  accepts as many files, and file numbers, as a thread may keep (500).
 - At most 8 of them are recordings. Keeping a ninth recording drops the
   thread's oldest recording, never a screenshot: within the window, every
   screenshot is kept and only the newest 8 recordings are.
-- Retention is a rule over the journal: the newest 200 aggregate versions
+- Retention is a rule over the journal: the newest aggregate versions, as
+  many as the setting keeps (200 by default),
   survive, of those the recordings past the newest 8 do not, and listing reads
   exactly what remains (`browserRetainedCaptures`). Reading, the export
   records, a Canvas design asset, and recovery all go through that listing, so

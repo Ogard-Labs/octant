@@ -153,7 +153,7 @@ function decodePictures(value: unknown): ReadonlyArray<PictureToSave> {
       typeof number !== "number" ||
       !Number.isInteger(number) ||
       number < 1 ||
-      number > 99 ||
+      number > MAX_FILES ||
       seen.has(number) ||
       kind === undefined ||
       encoded === undefined ||

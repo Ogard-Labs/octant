@@ -12,6 +12,7 @@ import {
   decodeEventActor,
   EventId,
   EventName,
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDING_BYTES,
@@ -94,14 +95,24 @@ export interface BrowserCaptureServiceOptions {
   readonly personActor: EventActor;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /**
+   * The person's setting for how many captures a thread keeps, read at each
+   * use. Absent, the default.
+   */
+  readonly capturesPerThread?: () => number;
 }
 
 /**
  * Thread-owned browser captures. The journal decides what exists: each kept
  * capture is one `browser.capture-kept@1` event on the thread's capture
- * aggregate, and the newest `MAX_BROWSER_CAPTURES_PER_THREAD` versions are the
- * captures that survive. Removing the bytes of an older one is cleanup that
- * can be repeated, and `recover` finishes it after a crash.
+ * aggregate, and the newest versions, as many as the person's setting keeps,
+ * are the captures that survive. Removing the bytes of an older one is
+ * cleanup that can be repeated, and `recover` finishes it after a crash.
+ *
+ * The setting can grow, and it grew from 32 to 200 by default. A larger
+ * window reaches back to versions whose bytes were already removed under the
+ * smaller one, so a capture is listed only while the store still holds its
+ * bytes: growing the number never brings back a capture that was dropped.
  */
 export class BrowserCaptureService {
   readonly #store: BrowserCaptureStore;
@@ -110,6 +121,7 @@ export class BrowserCaptureService {
   readonly #personActor: EventActor;
   readonly #uuid: () => string;
   readonly #clock: () => string;
+  readonly #capturesPerThread: () => number;
 
   constructor(options: BrowserCaptureServiceOptions) {
     this.#store = options.store;
@@ -118,6 +130,11 @@ export class BrowserCaptureService {
     this.#personActor = options.personActor;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#capturesPerThread = () =>
+      Math.min(
+        MAX_BROWSER_CAPTURES_PER_THREAD,
+        Math.max(1, options.capturesPerThread?.() ?? DEFAULT_BROWSER_CAPTURES_PER_THREAD),
+      );
   }
 
   /**
@@ -201,7 +218,11 @@ export class BrowserCaptureService {
     readonly bytes: Uint8Array;
     readonly facts: Omit<BrowserCapture, "captureId" | "threadId" | "hash" | "size" | "mime">;
   }): Promise<void> {
-    if (this.#window(input.threadId).some((capture) => capture.captureId === input.captureId)) {
+    // Asked of the journal, not of the bytes: a capture already journaled
+    // under this id is never journaled a second time.
+    if (
+      this.#journaledWindow(input.threadId).some((capture) => capture.captureId === input.captureId)
+    ) {
       return;
     }
     const { profile: _otherComputers, ...facts } = input.facts;
@@ -286,8 +307,19 @@ export class BrowserCaptureService {
     return browserRetainedCaptures(this.#window(threadId));
   }
 
-  /** Every capture in the thread's retained window, recordings past the cap included. */
+  /**
+   * Every capture in the thread's retained window whose bytes the store still
+   * holds, recordings past the cap included.
+   */
   #window(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
+    const journaled = this.#journaledWindow(threadId);
+    if (journaled.length === 0) return journaled;
+    const held = this.#store.held(threadId);
+    return journaled.filter((capture) => held.has(String(capture.captureId)));
+  }
+
+  /** The newest journaled captures, as many as the setting keeps, newest first. */
+  #journaledWindow(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
     const aggregateId = String(threadId);
     const head = readAggregateVersion(
       this.#connection,
@@ -295,13 +327,14 @@ export class BrowserCaptureService {
       aggregateId,
     );
     if (head === 0) return [];
-    const { firstRetainedVersion } = browserCaptureRetention(head);
+    const limit = this.#capturesPerThread();
+    const { firstRetainedVersion } = browserCaptureRetention(head, limit);
     return this.#journal
       .replayAggregate({
         aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
         aggregateId,
         afterVersion: firstRetainedVersion - 1,
-        limit: MAX_BROWSER_CAPTURES_PER_THREAD,
+        limit,
       })
       .map((event) => decodeBrowserCapture(event.payload))
       .reverse();
@@ -399,7 +432,8 @@ export class BrowserCaptureService {
   }
 
   async #dropOlderThan(threadId: BrowserThreadId, headVersion: number): Promise<void> {
-    const droppedVersion = browserCaptureRetention(headVersion).firstRetainedVersion - 1;
+    const droppedVersion =
+      browserCaptureRetention(headVersion, this.#capturesPerThread()).firstRetainedVersion - 1;
     if (droppedVersion < 1) return;
     const [dropped] = this.#journal.replayAggregate({
       aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,

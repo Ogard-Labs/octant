@@ -6,7 +6,6 @@ import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
   MAX_BROWSER_CAPTURE_BYTES,
-  MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDING_BYTES,
   MAX_BROWSER_RECORDINGS_PER_THREAD,
   MAX_BROWSER_STEPS_PER_THREAD,
@@ -39,8 +38,16 @@ const personActorId = "d0000000-0000-4000-8000-0000000000ff";
 const providerInstanceId = "d0000000-0000-4000-8000-0000000000aa" as ProviderInstanceId;
 const correlationId = "d0000000-0000-4000-8000-0000000000cc" as CorrelationId;
 
+/**
+ * The person's setting in these tests: small enough to pass quickly, large
+ * enough to hold the eight recordings a thread keeps beside its screenshots.
+ */
+const KEPT = 12;
+let capturesPerThread = KEPT;
+
 const directories: string[] = [];
 afterEach(() => {
+  capturesPerThread = KEPT;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -67,6 +74,7 @@ function open(dataDirectory?: string) {
     personActor: { kind: "local-user", actorId: personActorId as never },
     uuid: randomUUID,
     clock: () => new Date(Date.parse(now) + ++tick * 1_000).toISOString(),
+    capturesPerThread: () => capturesPerThread,
   });
   return { connection, directory: root, service };
 }
@@ -209,15 +217,15 @@ describe("BrowserCaptureService", () => {
     expect(await service.read(threadA, decodeBrowserCaptureId(randomUUID()))).toBeUndefined();
   });
 
-  it("lists newest first and keeps only the newest 32, removing the oldest bytes first", async () => {
+  it("lists newest first and keeps only as many as the person's setting, removing the oldest bytes first", async () => {
     const { directory, service } = open();
     const ids: string[] = [];
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 2; index += 1) {
+    for (let index = 0; index < KEPT + 2; index += 1) {
       ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
     }
 
     const listed = service.list(threadA);
-    expect(listed).toHaveLength(MAX_BROWSER_CAPTURES_PER_THREAD);
+    expect(listed).toHaveLength(KEPT);
     expect(listed[0]?.captureId).toBe(ids.at(-1));
     expect(listed.at(-1)?.captureId).toBe(ids[2]);
     expect(existsSync(captureDirectory(directory, threadA, ids[0] ?? ""))).toBe(false);
@@ -226,10 +234,75 @@ describe("BrowserCaptureService", () => {
     expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
   });
 
+  it("keeps the newest 200 captures when the person chose no number", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-browser-capture-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const service = new BrowserCaptureService({
+      store: new BrowserCaptureStore(directory),
+      journal: new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      }),
+      connection,
+      personActor: { kind: "local-user", actorId: personActorId as never },
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const ids: string[] = [];
+    for (let index = 0; index < 201; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    const listed = service.list(threadA);
+    expect(listed).toHaveLength(200);
+    expect(listed.at(-1)?.captureId).toBe(ids[1]);
+    expect(existsSync(captureDirectory(directory, threadA, ids[0] ?? ""))).toBe(false);
+  }, 60_000);
+
+  it("drops the captures past a smaller number the person chooses, at the next listing", async () => {
+    const { service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    capturesPerThread = 3;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+    expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
+  });
+
+  it("never lists a dropped capture again when the person chooses a larger number", async () => {
+    const { service } = open();
+    capturesPerThread = 3;
+    const ids: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    expect(service.list(threadA)).toHaveLength(3);
+
+    // The journal still names all six; the bytes of the first three are gone.
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+    expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
+
+    // Captures kept from here on fill the larger number.
+    for (let index = 0; index < 4; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    expect(service.list(threadA)).toHaveLength(7);
+  });
+
   it("does not let one thread's captures push out another thread's", async () => {
     const { service } = open();
     const first = kept(await service.keep(request({ threadId: threadB })));
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 1; index += 1) {
+    for (let index = 0; index < KEPT + 1; index += 1) {
       kept(await service.keep(request()));
     }
     expect(service.list(threadB).map((capture) => capture.captureId)).toEqual([first]);
@@ -238,7 +311,7 @@ describe("BrowserCaptureService", () => {
   it("finishes removing dropped bytes on recovery and keeps the retained ones", async () => {
     const { directory, service } = open();
     const ids: string[] = [];
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 1; index += 1) {
+    for (let index = 0; index < KEPT + 1; index += 1) {
       ids.push(kept(await service.keep(request())));
     }
     // A crash between the journal append and the byte removal leaves the
@@ -255,7 +328,7 @@ describe("BrowserCaptureService", () => {
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(staged, "finalized.bin"))).toBe(true);
     expect(existsSync(join(staged, "staged.bin.tmp"))).toBe(false);
-    expect(service.list(threadA)).toHaveLength(MAX_BROWSER_CAPTURES_PER_THREAD);
+    expect(service.list(threadA)).toHaveLength(KEPT);
   });
 
   it("removes bytes that no journaled capture owns on recovery", async () => {
