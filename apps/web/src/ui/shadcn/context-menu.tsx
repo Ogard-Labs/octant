@@ -86,7 +86,7 @@ export function ContextMenuCheckboxItem({
     >
       {children}
       <ContextMenuPrimitive.CheckboxItemIndicator className="ml-auto pl-2 text-foreground">
-        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Check aria-hidden="true" size={14} />
       </ContextMenuPrimitive.CheckboxItemIndicator>
     </ContextMenuPrimitive.CheckboxItem>
   );
@@ -108,7 +108,7 @@ export function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} />
     </ContextMenuPrimitive.SubmenuTrigger>
   );
 }

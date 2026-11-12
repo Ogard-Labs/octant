@@ -2502,7 +2502,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <ul className="work-thread-workspace__file-list">
                       {row.wrote.paths.map((path) => (
                         <li className="work-thread-workspace__file" key={path}>
-                          <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                          <FileText aria-hidden="true" size={14} />
                           <span>{path}</span>
                         </li>
                       ))}
@@ -2597,7 +2597,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 }
                 return (
                   <div className="approval-row approval-row--request" role="status">
-                    <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <CirclePause aria-hidden="true" size={14} />
                     <span className="approval-row__text">
                       {row.request.detail.kind === "approval"
                         ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
@@ -2809,7 +2809,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               })}
           context={
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
-              <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              <FolderOpen aria-hidden="true" size={12} />
               {projectLabel === undefined ? null : (
                 <span
                   className="work-folder-bar__project"

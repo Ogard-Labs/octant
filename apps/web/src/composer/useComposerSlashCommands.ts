@@ -121,7 +121,7 @@ export function ComposerSlashTypeahead(props: {
                   type: "button",
                   variant: index === controller.activeIndex ? "secondary" : "ghost",
                 },
-                createElement(Slash, { "aria-hidden": true, size: 12, strokeWidth: 1.8 }),
+                createElement(Slash, { "aria-hidden": true, size: 12 }),
                 createElement("span", null, command.title),
                 createElement(
                   "span",

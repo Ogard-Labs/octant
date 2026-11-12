@@ -1111,7 +1111,7 @@ function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQues
     );
   return (
     <div aria-label="Answered question" className="approval-row approval-row--request" role="group">
-      <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
+      <CircleCheck aria-hidden="true" size={14} />
       <span className="approval-row__text">
         {props.question.prompt}
         <span className="approval-row__detail">Answered: {props.question.answer}</span>

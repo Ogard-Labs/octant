@@ -295,7 +295,7 @@ export function LibraryView(props: LibraryViewProps) {
     >
       <div className="library">
         <div className="library__search">
-          <Search aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+          <Search aria-hidden="true" className="icon" size={16} />
           <OctantInput
             aria-label="Search the library"
             className="library__search-input"
@@ -402,7 +402,7 @@ export function LibraryView(props: LibraryViewProps) {
               ) : undefined
             }
             className="library__empty"
-            icon={<Search aria-hidden="true" size={20} strokeWidth={1.5} />}
+            icon={<Search aria-hidden="true" size={20} />}
             message={
               filtering
                 ? "Try another word, or clear the filters to see everything."
@@ -599,7 +599,7 @@ function LibraryRow(props: LibraryRowProps) {
           <ConnectionStatus connection={{ state: item.connection.state }} />
         ) : item.state === "on" ? (
           <span className="library__card-on">
-            <Check aria-hidden="true" size={12} strokeWidth={2} />
+            <Check aria-hidden="true" size={12} />
             On
           </span>
         ) : (
@@ -659,11 +659,11 @@ export function LibraryMark(props: { readonly item: LibraryItem; readonly large?
       </span>
     );
   } else if (item.kind === "skill") {
-    mark = <BookOpen aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <BookOpen aria-hidden="true" size={size} />;
   } else if (item.kind === "mcp-server") {
-    mark = <Server aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <Server aria-hidden="true" size={size} />;
   } else {
-    mark = <Puzzle aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <Puzzle aria-hidden="true" size={size} />;
   }
   return (
     <span
@@ -710,7 +710,7 @@ function StepLadder(props: { readonly steps: LibrarySteps }) {
       {STEP_LABEL.map(([key, label], index) => (
         <li className="library__step" data-step={props.steps[key]} key={key}>
           <span aria-hidden="true" className="library__step-mark">
-            {props.steps[key] === "done" ? <Check size={12} strokeWidth={2} /> : index + 1}
+            {props.steps[key] === "done" ? <Check size={12} /> : index + 1}
           </span>
           <span>{label}</span>
           <span className="sr-only">
@@ -793,7 +793,7 @@ function LibraryDetail(props: LibraryDetailProps) {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={16} strokeWidth={1.5} />
+          <X aria-hidden="true" size={16} />
         </OctantButton>
       </header>
       {item.summary === undefined ? null : (

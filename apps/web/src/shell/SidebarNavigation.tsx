@@ -72,7 +72,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
               type="button"
               variant="bare"
             >
-              <Folders aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+              <Folders aria-hidden="true" className="icon" size={16} />
               <span className="sidebar-label">{descriptor.label}</span>
             </OctantButton>,
           );
@@ -113,7 +113,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         type="button"
         variant="bare"
       >
-        <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        <Icon aria-hidden="true" className="icon" size={16} />
         <span className="sidebar-label">{descriptor.label}</span>
         {count > 0 ? (
           <span aria-hidden="true" className="count">

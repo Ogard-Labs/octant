@@ -81,7 +81,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
   return (
     <div className="thread-checkpoints" ref={root} role="group" aria-label="Checkpoint">
       <span className="thread-checkpoints__label">
-        <Flag aria-hidden="true" size={12} strokeWidth={1.8} />
+        <Flag aria-hidden="true" size={12} />
         {checkpoint.label}
         {checkpoint.restoreCount === 0
           ? null

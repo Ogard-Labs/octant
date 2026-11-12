@@ -333,9 +333,9 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         variant="secondary"
       >
         <span className="thread-activity-pip__pulse" />
-        <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+        <MonitorUp aria-hidden="true" size={14} />
         <span>Computer Use active</span>
-        <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
+        <Eye aria-hidden="true" size={14} />
       </OctantButton>
       <div className="thread-activity-pip__collapsed-controls">
         {currentComputerSession.pendingApproval === undefined ? null : (
@@ -410,7 +410,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
             {currentComputerSession.pendingApproval === undefined ? (
               <span className="thread-activity-pip__pulse" />
             ) : null}
-            <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+            <MonitorUp aria-hidden="true" size={14} />
             <strong>Computer Use</strong>
             {currentComputerSession.pendingApproval === undefined ? (
               <span>
@@ -472,7 +472,7 @@ function ComputerUseActivityPreview(props: {
     return (
       <div className="thread-activity-pip__permission">
         <div className="thread-activity-pip__permission-title">
-          <MonitorUp aria-hidden="true" size={16} strokeWidth={1.7} />
+          <MonitorUp aria-hidden="true" size={16} />
           <h3>Allow computer access?</h3>
         </div>
         <p>{props.session.pendingApproval.summary}</p>
@@ -500,7 +500,7 @@ function ComputerUseActivityPreview(props: {
   }
   return (
     <div className="thread-activity-pip__visual thread-activity-pip__empty">
-      <MonitorUp aria-hidden="true" size={24} strokeWidth={1.5} />
+      <MonitorUp aria-hidden="true" size={20} />
       <strong>{computerUseState(props.session.state)}</strong>
       <span>
         Native pixels stay on the authoritative host; activity and approvals remain visible.

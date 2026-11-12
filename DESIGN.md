@@ -1718,7 +1718,7 @@ and below them (about 56px). Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. A section heading's add and more controls are the exception: the
 list's view and filter controls share that row, so they keep their width while
-hidden and only fade in, and nothing beside them moves. Icon sizes are 16/19/22px for small/medium/large actions; touch
+hidden and only fade in, and nothing beside them moves. Touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
@@ -3058,10 +3058,31 @@ attached to a new draft as its Create from context.
 
 ## Iconography and provider marks
 
-Lucide is the product icon library. Use 14–16px for compact controls and
-1.5–1.8px strokes. In a Button, pass icons with the shadcn `data-icon`
-convention and let the recipe size them. Icons clarify labels and do not
-replace an essential label without an accessible name.
+Lucide is the product icon library. Every interface icon is drawn at one of
+four sizes and at one stroke.
+
+| Size | Where                                                                     |
+| ---- | ------------------------------------------------------------------------- |
+| 12   | Disclosure chevrons and status marks inside a chip                        |
+| 14   | Inside a 24px control and inline in 13px text                             |
+| 16   | The default: buttons, menu rows, navigation rows, tool buttons, tile bars |
+| 20   | An empty state and a dialog header                                        |
+
+The stroke is 1.5, set once for the whole app by `IconDefaults`
+(`apps/web/src/ui/IconDefaults.tsx`) around every rendered surface. A call site
+passes a `size` from the table and no `strokeWidth`. The exceptions are
+drawings and not icons: diagram edges, the marks a person draws on a page, a
+glyph cut into a dither mask, and provider marks, which are filled artwork.
+Nothing else departs from the stroke, including check marks, which take the
+same 1.5. Ten strokes had accumulated because nothing checked them, and one
+lighter stroke reads as one drawing hand; `iconScaleContract` now fails on a
+stroke or size outside this section.
+
+In a Button, pass icons with the shadcn `data-icon` convention and let the
+recipe size them: it takes 12, 14 or 16 from `--oct-icon-xs`, `-sm` and `-md`
+by control height (20, 24, 28px and up), in pixels, because a rem size would
+follow the interface text size and land between the steps. Icons clarify labels and do not replace an essential label
+without an accessible name.
 
 Provider identity uses locally bundled, licensed provider logos selected by
 `ProviderGlyph`. This is the explicit identity-asset exception to the

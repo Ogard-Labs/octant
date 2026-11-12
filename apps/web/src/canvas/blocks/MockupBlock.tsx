@@ -294,7 +294,7 @@ function MockupItem({
         type="button"
         variant="bare"
       >
-        <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+        <MessageSquare aria-hidden="true" size={12} />
         <span>{String(openCount)}</span>
       </OctantButton>
     );
@@ -475,7 +475,7 @@ function MockupGroup({
 function Glyph({ icon }: { readonly icon: CanvasMockupIcon | undefined }) {
   if (icon === undefined) return null;
   const Icon = ICON[icon];
-  return <Icon className="canvas-mockup__glyph" size={14} strokeWidth={1.75} />;
+  return <Icon className="canvas-mockup__glyph" size={14} />;
 }
 
 function initials(label: string): string {
@@ -529,7 +529,7 @@ function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
       return (
         <span className="canvas-mockup__field">
           <span className="canvas-mockup__label">{node.label}</span>
-          <ChevronDown className="canvas-mockup__glyph" size={14} strokeWidth={1.75} />
+          <ChevronDown className="canvas-mockup__glyph" size={14} />
         </span>
       );
     case "footer":
@@ -577,7 +577,7 @@ function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
           <span className="canvas-mockup__label">{node.label}</span>
           <span className="canvas-mockup__field-box canvas-mockup__field-box--select">
             <span className="canvas-mockup__value">{node.value ?? ""}</span>
-            <ChevronDown className="canvas-mockup__glyph" size={14} strokeWidth={1.75} />
+            <ChevronDown className="canvas-mockup__glyph" size={14} />
           </span>
         </span>
       );
@@ -601,7 +601,7 @@ function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
       return (
         <span className="canvas-mockup__check">
           <span className={`canvas-mockup__box${node.on === true ? " is-on" : ""}`}>
-            {node.on === true ? <Check size={12} strokeWidth={2.5} /> : null}
+            {node.on === true ? <Check size={12} /> : null}
           </span>
           <span className="canvas-mockup__label">{node.label}</span>
         </span>

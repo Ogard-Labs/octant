@@ -2267,6 +2267,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Local provider history and Octant records are separate sources; their totals are never added.
 - Unknown prices and missing quota measurements are unavailable, never zero. A period change cancels the previous read and cannot render a late result.
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
+- Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
 

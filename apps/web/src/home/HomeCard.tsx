@@ -31,7 +31,7 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
       }
     >
       <OctantCardHeader className="home-card__header">
-        <Icon aria-hidden="true" className="home-card__icon" size={16} strokeWidth={1.8} />
+        <Icon aria-hidden="true" className="home-card__icon" size={16} />
         <h2 className="oct-section-label home-card__title" id={titleId}>
           {definition.title}
         </h2>

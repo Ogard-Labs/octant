@@ -1535,7 +1535,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {props.controller.turnStatus === "waiting" ? (
           props.controller.turnUsageLimit === undefined ? (
             <div className="code-thread-workspace__waiting thread-column" role="status">
-              <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+              <CirclePause aria-hidden="true" size={14} />
               <span>
                 {props.controller.providerRequests.length === 0 &&
                 props.controller.turnError !== undefined &&
@@ -2510,7 +2510,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         type="button"
                         variant="bare"
                       >
-                        <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                        <X aria-hidden="true" size={12} />
                       </OctantButton>
                     </span>
                   ))}

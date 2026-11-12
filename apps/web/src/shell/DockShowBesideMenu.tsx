@@ -41,7 +41,7 @@ export function DockShowBesideMenu(props: DockShowBesideMenuProps) {
         className="shell-icon-button window-no-drag"
         title="Show another tool"
       >
-        <Columns2 aria-hidden="true" size={16} strokeWidth={1.5} />
+        <Columns2 aria-hidden="true" size={16} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner>

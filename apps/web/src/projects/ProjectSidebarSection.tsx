@@ -226,7 +226,7 @@ function CodeProjectViewGlyph(props: {
   const Icon = CODE_PROJECT_VIEW_ICON_COMPONENTS[props.icon];
   return (
     <span className="code-project-views__glyph" data-view-color={props.color}>
-      <Icon aria-hidden="true" size={props.size ?? 14} strokeWidth={1.7} />
+      <Icon aria-hidden="true" size={props.size ?? 14} />
     </span>
   );
 }
@@ -245,19 +245,19 @@ const RAIL_FULL_REASON = `The rail holds ${RAIL_PROJECT_LIMIT} Projects`;
 const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
   {
     description: "Keep your saved Project order",
-    icon: <ListTree aria-hidden="true" size={14} strokeWidth={1.8} />,
+    icon: <ListTree aria-hidden="true" size={14} />,
     label: "Manual order",
     value: "manual",
   },
   {
     description: "Most recently changed first",
-    icon: <Clock3 aria-hidden="true" size={14} strokeWidth={1.8} />,
+    icon: <Clock3 aria-hidden="true" size={14} />,
     label: "Last updated",
     value: "updated",
   },
   {
     description: "Project name",
-    icon: <Folder aria-hidden="true" size={14} strokeWidth={1.8} />,
+    icon: <Folder aria-hidden="true" size={14} />,
     label: "Alphabetical",
     value: "name",
   },
@@ -850,7 +850,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     type="button"
                     variant="bare"
                   >
-                    <Folder aria-hidden="true" size={16} strokeWidth={1.5} />
+                    <Folder aria-hidden="true" size={16} />
                     <span className="project-row__copy">{unfiledLabel}</span>
                   </OctantButton>
                   {unfiledExpanded ? null : (
@@ -1042,7 +1042,7 @@ function ProjectGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                <Plus aria-hidden="true" size={14} />
               </OctantButton>
             )}
             {props.onSortChange === undefined || props.sort === undefined ? null : (
@@ -1053,7 +1053,7 @@ function ProjectGroup(props: {
                     props.onSortChange?.(value);
                   }
                 }}
-                trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
+                trigger={<MoreHorizontal aria-hidden="true" size={16} />}
                 triggerLabel="Project organization"
                 value={props.sort}
               />
@@ -1206,7 +1206,7 @@ function ProjectGroup(props: {
                   type="button"
                   variant="ghost"
                 >
-                  <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+                  <SquarePen aria-hidden="true" size={14} />
                 </OctantButton>
               )}
             </div>
@@ -1272,7 +1272,7 @@ function ProjectStatusRollup(props: {
         data-activity={rollup.status}
       >
         {Icon === undefined ? null : (
-          <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+          <Icon aria-hidden="true" className="size-(--oct-icon-xs)" size={12} />
         )}
       </span>
       {rollup.count > 1 ? (
@@ -1326,7 +1326,7 @@ function ProjectActionsMenu(props: {
         className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
         render={<OctantButton size="icon-sm" variant="ghost" />}
       >
-        <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
+        <MoreHorizontal aria-hidden="true" size={14} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner className="z-50 outline-none window-no-drag">
@@ -1438,13 +1438,13 @@ function ThreadListViewSwitch(props: {
       value={[props.arrangement]}
     >
       <OctantToggleGroupItem aria-label="Status" title="Status" value="status">
-        <ListChecks aria-hidden="true" size={14} strokeWidth={1.8} />
+        <ListChecks aria-hidden="true" size={14} />
       </OctantToggleGroupItem>
       <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
-        <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
+        <FolderTree aria-hidden="true" size={14} />
       </OctantToggleGroupItem>
       <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
-        <History aria-hidden="true" size={14} strokeWidth={1.8} />
+        <History aria-hidden="true" size={14} />
       </OctantToggleGroupItem>
     </OctantToggleGroup>
   );
@@ -1534,7 +1534,7 @@ function ActivityThreadList(props: {
                 >
                   <span>{group.label}</span>
                   <span className="activity-nav__fold-count">{group.threads.length}</span>
-                  <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <ChevronRight aria-hidden="true" size={12} />
                 </OctantButton>
               </h2>
             ) : (
@@ -1713,7 +1713,7 @@ function CodeProjectViewSwitcher(props: {
       type="button"
       variant="bare"
     >
-      <Plus aria-hidden="true" size={14} strokeWidth={1.7} />
+      <Plus aria-hidden="true" size={14} />
     </OctantButton>
   );
   const contextItemsFor = (
@@ -1762,7 +1762,7 @@ function CodeProjectViewSwitcher(props: {
             <OctantMenu
               actions={[
                 {
-                  icon: <Plus aria-hidden="true" size={14} strokeWidth={1.7} />,
+                  icon: <Plus aria-hidden="true" size={14} />,
                   label: "New view",
                   onSelect: props.onCreate,
                 },
@@ -1952,7 +1952,7 @@ function ProjectViewFilterMenu(props: {
           className="code-project-views__filter window-no-drag"
           title={triggerLabel}
         >
-          <ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ListFilter aria-hidden="true" size={14} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner
@@ -2354,7 +2354,7 @@ function CodeProjectViewEditorDialog(props: {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={16} strokeWidth={1.8} />
+          <X aria-hidden="true" size={16} />
         </OctantButton>
       </div>
       <p id={descriptionId}>

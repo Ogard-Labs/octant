@@ -224,7 +224,7 @@ function BriefCard(props: {
   return (
     <article className="work-research__brief" data-status={brief.status}>
       <header className="work-research__brief-header">
-        <BookOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+        <BookOpen aria-hidden="true" size={14} />
         <span className="work-research__brief-status">{brief.status}</span>
         <span className="work-research__brief-meta">
           {sources.length} source{sources.length === 1 ? "" : "s"} · {evidence.length} evidence ·{" "}
@@ -244,7 +244,7 @@ function BriefCard(props: {
           <ul>
             {sources.map((source) => (
               <li key={String(source.sourceId)} data-availability={source.availability}>
-                <FileText aria-hidden="true" size={14} strokeWidth={1.8} />
+                <FileText aria-hidden="true" size={14} />
                 <span className="work-research__source-name">{source.displayName}</span>
                 <span className="work-research__source-ref">{source.sourceRef}</span>
                 <span className="work-research__source-availability">
@@ -301,9 +301,9 @@ function BriefCard(props: {
             {claims.map((claim) => (
               <li key={String(claim.claimId)} data-unsupported={claim.unsupported}>
                 {claim.unsupported ? (
-                  <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <AlertTriangle aria-hidden="true" size={14} />
                 ) : (
-                  <Quote aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <Quote aria-hidden="true" size={14} />
                 )}
                 <span className="work-research__claim-text">{claim.text}</span>
                 <span className="work-research__claim-support">

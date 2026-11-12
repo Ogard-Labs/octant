@@ -36,7 +36,7 @@ export function WorkImageAttachmentChips(props: {
             type="button"
             variant="bare"
           >
-            <X aria-hidden="true" size={12} strokeWidth={1.8} />
+            <X aria-hidden="true" size={12} />
           </OctantButton>
         </span>
       ))}

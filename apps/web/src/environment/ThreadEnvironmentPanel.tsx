@@ -101,7 +101,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
             <span aria-hidden="true" className="thread-environment-dock__meta">
               {headline.branch === undefined ? null : (
                 <span className="thread-environment-dock__branch">
-                  <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <GitBranch aria-hidden="true" size={12} />
                   <span>{headline.branch}</span>
                 </span>
               )}

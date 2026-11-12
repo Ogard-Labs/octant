@@ -608,7 +608,7 @@ function SetupSteps(
           key={step.id}
         >
           <span aria-hidden="true" className="provider-catalog__step-marker">
-            {step.progress === "done" ? <Check size={14} strokeWidth={2} /> : index + 1}
+            {step.progress === "done" ? <Check size={14} /> : index + 1}
           </span>
           <div className="provider-catalog__step-body">
             <span className="provider-catalog__step-title">
@@ -634,7 +634,7 @@ function SetupSteps(
       {props.entry.state.next.kind === "done" ? (
         <li className="provider-catalog__step" data-progress="done">
           <span aria-hidden="true" className="provider-catalog__step-marker">
-            <Check size={14} strokeWidth={2} />
+            <Check size={14} />
           </span>
           <div className="provider-catalog__step-body">
             <p className="provider-catalog__sentence" role="status">

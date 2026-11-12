@@ -228,7 +228,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       <div aria-label="Board controls" className="surface-toolbar" role="group">
         <label className="surface-toolbar__search code-board__search">
           <span className="sr-only">Search threads</span>
-          <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+          <Search aria-hidden="true" size={14} />
           <OctantInput
             onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
             placeholder="Search threads"
@@ -245,7 +245,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             title="Filters"
             trigger={
               <>
-                <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
+                <Filter aria-hidden="true" size={14} />
                 <span>Filters</span>
                 {activeAdvancedFilterCount === 0 ? null : (
                   <span aria-hidden="true" className="code-board__filter-count">
@@ -409,7 +409,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
           type="button"
           variant="ghost"
         >
-          <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+          <RefreshCw aria-hidden="true" size={14} />
           <span>{board.status === "refreshing" ? "Refreshing" : "Refresh"}</span>
         </OctantButton>
 
@@ -422,7 +422,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             trigger={
               <>
                 <span>View</span>
-                <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                <ChevronDown aria-hidden="true" size={14} />
               </>
             }
             triggerClassName="code-board__view-toggle"
@@ -562,7 +562,7 @@ function OutsideContentCardMark(props: { readonly found: boolean }) {
       role="img"
       title={label}
     >
-      <ShieldAlert aria-hidden="true" size={12} strokeWidth={1.8} />
+      <ShieldAlert aria-hidden="true" size={12} />
     </span>
   );
 }
@@ -673,7 +673,7 @@ function CodeBoardCardView(props: {
           className="board-card-coordinator fact"
           title={`Coordinator: ${props.coordinatorTitle}`}
         >
-          <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+          <Network aria-hidden="true" size={12} />
           <span className="fact__text">
             <span className="sr-only">Coordinator: </span>
             {props.coordinatorTitle}
@@ -701,7 +701,7 @@ function CodeBoardCardView(props: {
         <details className="code-board__card-details">
           <summary aria-label={`Details for ${card.title}`}>
             <span>Details</span>
-            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+            <ChevronDown aria-hidden="true" size={12} />
           </summary>
           <dl className="code-board__card-meta">
             {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
@@ -813,7 +813,7 @@ function cardFacts(
     facts.push({
       key: "branch",
       text: card.worktree.head.name,
-      icon: <GitBranch aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
+      icon: <GitBranch aria-hidden="true" className="icon" size={12} />,
     });
   }
   if (card.changedFiles.kind === "observed" && card.changedFiles.changedPathCount > 0) {
@@ -855,7 +855,7 @@ function cardFacts(
       text: `#${card.linkedPullRequest.number}${
         card.linkedPullRequest.freshness === "stale" ? " · stale" : ""
       }`,
-      icon: <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
+      icon: <GitPullRequest aria-hidden="true" className="icon" size={12} />,
     });
   }
   if (!hasPullRequestSummaries && card.checks.state !== "unknown") {

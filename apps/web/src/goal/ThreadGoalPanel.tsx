@@ -155,7 +155,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
               {budgetFromDraft(budgetDraft, budgetOpened).kind === "invalid" ? (
                 /* ui-boundary-exception: inline-field-error */
                 <p className="thread-goal__command-error" role="alert">
-                  <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <AlertTriangle aria-hidden="true" size={14} />
                   <span>Each budget must be a whole number above zero, or empty.</span>
                 </p>
               ) : null}
@@ -202,7 +202,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
           }}
         >
           <p className="thread-goal__empty" role="note">
-            <Target aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Target aria-hidden="true" size={14} />
             <span>
               {goal === null
                 ? "No Goal is set for this thread."
@@ -227,7 +227,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
       {controller.commandMessage === undefined ? null : (
         /* ui-boundary-exception: inline-field-error */
         <p className="thread-goal__command-error" role="alert">
-          <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
+          <AlertTriangle aria-hidden="true" size={14} />
           <span>{controller.commandMessage}</span>
         </p>
       )}
@@ -339,7 +339,7 @@ function StatusNote(props: { readonly status: Exclude<GoalStatus, "ready"> }) {
             : Target;
   return (
     <p className="thread-goal__status" data-status={props.status} role="status">
-      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+      <Icon aria-hidden="true" size={14} />
       <span>{STATUS_COPY[props.status]}</span>
     </p>
   );

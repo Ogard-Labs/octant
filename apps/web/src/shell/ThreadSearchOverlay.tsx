@@ -190,7 +190,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       popupId="thread-search-dialog"
     >
       <div className="thread-search__field">
-        <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Search aria-hidden="true" size={14} />
         <OctantInput
           {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
           aria-controls={RESULTS_ID}
@@ -211,19 +211,19 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       </div>
       {listing === "ready" ? null : (
         <p className="thread-search__listing" data-listing={listing} role="note">
-          <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+          <TriangleAlert aria-hidden="true" size={14} />
           <span>{LISTING_COPY[listing]}</span>
         </p>
       )}
       {hasQuery && archivedListing !== "ready" ? (
         <p className="thread-search__listing" data-listing={archivedListing} role="note">
-          <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+          <Archive aria-hidden="true" size={14} />
           <span>{ARCHIVED_LISTING_COPY[archivedListing]}</span>
         </p>
       ) : null}
       {hasQuery && props.mode === "chat" && contentListing !== "ready" ? (
         <p className="thread-search__listing" data-listing={contentListing} role="note">
-          <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+          <MessageSquare aria-hidden="true" size={14} />
           <span>{CONTENT_LISTING_COPY[contentListing]}</span>
         </p>
       ) : null}
@@ -272,9 +272,9 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   role="option"
                 >
                   {hit.archived ? (
-                    <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <Archive aria-hidden="true" size={14} />
                   ) : (
-                    <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <MessageSquare aria-hidden="true" size={14} />
                   )}
                   <span className="thread-search__result-main">
                     <span className="thread-search__result-title">{hit.title}</span>
@@ -306,7 +306,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
               type="button"
               variant="ghost"
             >
-              <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+              <SquarePen aria-hidden="true" size={14} />
               <span>{props.mode === "chat" ? "New chat" : "New task"}</span>
             </OctantButton>
           )}
@@ -317,7 +317,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
               type="button"
               variant="ghost"
             >
-              <FolderPlus aria-hidden="true" size={14} strokeWidth={1.7} />
+              <FolderPlus aria-hidden="true" size={14} />
               <span>New Project</span>
             </OctantButton>
           )}
@@ -328,7 +328,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
               type="button"
               variant="ghost"
             >
-              <Settings aria-hidden="true" size={14} strokeWidth={1.7} />
+              <Settings aria-hidden="true" size={14} />
               <span>Settings</span>
             </OctantButton>
           )}

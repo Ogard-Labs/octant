@@ -64,7 +64,7 @@ export function ProductFeedbackPanel(props: ProductFeedbackPanelProps) {
           type="button"
           variant={props.pointing ? "secondary" : "ghost"}
         >
-          <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+          <MessageSquare aria-hidden="true" size={12} />
           {props.pointing
             ? "Cancel pointing"
             : props.preview === undefined
@@ -247,7 +247,7 @@ function PendingNote(props: {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={12} strokeWidth={1.8} /> Remove note
+          <X aria-hidden="true" size={12} /> Remove note
         </OctantButton>
       </div>
       <details>

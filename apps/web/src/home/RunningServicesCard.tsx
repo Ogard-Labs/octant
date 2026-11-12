@@ -213,7 +213,7 @@ function RunningServiceRow(props: {
           </span>
         </span>
         <span className="oct-meta running-services__detail">
-          <HealthIcon aria-hidden="true" size={12} strokeWidth={1.8} />
+          <HealthIcon aria-hidden="true" size={12} />
           <span className="running-services__detail-text">{detail.join(" · ")}</span>
         </span>
         {service.stop.status === "available" ? null : (
@@ -261,7 +261,7 @@ function RunningServiceRow(props: {
               type="button"
               variant="ghost"
             >
-              <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+              <ExternalLink aria-hidden="true" size={14} />
               <span>Open</span>
             </OctantButton>
             <OctantButton
@@ -295,7 +295,7 @@ function RunningServiceRow(props: {
             type="button"
             variant="ghost"
           >
-            <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+            <ExternalLink aria-hidden="true" size={14} />
             <span>Open</span>
           </OctantButton>
         ) : null}
@@ -309,7 +309,7 @@ function RunningServiceRow(props: {
             type="button"
             variant="ghost"
           >
-            <Square aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Square aria-hidden="true" size={14} />
             <span>Stop</span>
           </OctantButton>
         ) : null}

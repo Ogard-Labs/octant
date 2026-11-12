@@ -34,14 +34,14 @@ export function WorkKindSwitch() {
       value={[choice.kind]}
     >
       <OctantToggleGroupItem title="Chat answers without touching your files" value="chat">
-        <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+        <MessageSquare aria-hidden="true" size={14} />
         Chat
       </OctantToggleGroupItem>
       <OctantToggleGroupItem
         title="Reads and edits files in one folder you choose, and nowhere else"
         value="work"
       >
-        <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+        <FolderOpen aria-hidden="true" size={14} />
         In a folder
       </OctantToggleGroupItem>
     </OctantToggleGroup>

@@ -437,7 +437,7 @@ function Tile(props: {
               className="shell-icon-button dock-tile__control window-no-drag"
               title={`Arrange ${content.label}`}
             >
-              <LayoutPanelLeft aria-hidden="true" size={14} strokeWidth={1.5} />
+              <LayoutPanelLeft aria-hidden="true" size={14} />
             </OctantMenuTrigger>
             <OctantMenuPortal>
               <OctantMenuPositioner>

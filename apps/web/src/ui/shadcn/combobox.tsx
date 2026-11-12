@@ -45,7 +45,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4",
+        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-trigger"
@@ -124,7 +124,7 @@ export function ComboboxItemIndicator({
   return (
     <ComboboxPrimitive.ItemIndicator
       className={cn(
-        "ml-auto inline-flex size-4 shrink-0 items-center justify-center text-foreground [&_svg]:size-4",
+        "ml-auto inline-flex size-4 shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-item-indicator"

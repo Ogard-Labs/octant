@@ -153,7 +153,7 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
                       type="button"
                       variant="bare"
                     >
-                      <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                      <Icon aria-hidden="true" className="icon" size={16} />
                       <span>{section.label}</span>
                     </OctantButton>
                   </li>

@@ -128,7 +128,7 @@ export function ArchiveView(props: ArchiveViewProps) {
         />
       ) : entries.length === 0 ? (
         <SurfaceEmpty
-          icon={<Archive size={20} strokeWidth={1.5} />}
+          icon={<Archive size={20} />}
           detail={
             projectFilter === ALL_PROJECTS
               ? "Archived threads will appear here."

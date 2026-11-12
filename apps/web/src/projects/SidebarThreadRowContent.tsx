@@ -64,7 +64,7 @@ export function SidebarThreadRowContent(props: {
           alike, so alignment holds there too. */}
       {props.coordinator === true ? (
         <span className="sidebar-navigation__thread-provider" title="Coordinator">
-          <Network aria-label="Coordinator" role="img" size={14} strokeWidth={1.8} />
+          <Network aria-label="Coordinator" role="img" size={14} />
         </span>
       ) : props.provider === undefined ? (
         <span aria-hidden="true" className="sidebar-navigation__thread-provider" />
@@ -86,7 +86,7 @@ export function SidebarThreadRowContent(props: {
                 className="sidebar-navigation__thread-project"
                 title={`Started by ${startedBy}`}
               >
-                <Bot aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Bot aria-hidden="true" size={12} />
                 <span className="sidebar-navigation__thread-project-label">
                   {`Started by ${startedBy}`}
                 </span>
@@ -97,7 +97,7 @@ export function SidebarThreadRowContent(props: {
                 className="sidebar-navigation__thread-project"
                 title={`Coordinator: ${props.coordinatorName}`}
               >
-                <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Network aria-hidden="true" size={12} />
                 <span className="sidebar-navigation__thread-project-label">
                   {props.coordinatorName}
                 </span>
@@ -106,10 +106,10 @@ export function SidebarThreadRowContent(props: {
             {props.projectName === undefined ? null : (
               <span className="sidebar-navigation__thread-project">
                 {props.projectId === undefined ? (
-                  <Folder aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <Folder aria-hidden="true" size={12} />
                 ) : (
                   <ProjectIcon
-                    fallback={<Folder aria-hidden="true" size={12} strokeWidth={1.8} />}
+                    fallback={<Folder aria-hidden="true" size={12} />}
                     projectId={props.projectId}
                     size={12}
                   />
@@ -127,21 +127,20 @@ export function SidebarThreadRowContent(props: {
                 role="img"
                 title={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}`}
               >
-                <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
+                <GitPullRequest aria-hidden="true" size={12} />#
                 {String(props.pullRequest.identity.number)}
                 {props.pullRequest.checks === "passing" ? (
                   <Check
                     aria-hidden="true"
                     className="sidebar-navigation__thread-pr-checks"
                     size={12}
-                    strokeWidth={2}
                   />
                 ) : null}
               </span>
             )}
             {props.checkout === undefined ? null : (
               <span className="sidebar-navigation__thread-checkout" title={props.checkout.label}>
-                <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                <GitBranch aria-hidden="true" size={12} />
                 <span className="sidebar-navigation__thread-checkout-label">
                   {props.checkout.label}
                 </span>
