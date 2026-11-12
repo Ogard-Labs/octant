@@ -1633,6 +1633,13 @@ the addendum left a choice open.
     person's Start.
 - **Limits.** One session per thread and four per host, as for a person. A
   `start` on a thread that holds a session is `thread-has-session`, unasked.
+- **After it ends.** Once the session is gone, `state` answers how the
+  thread's last session ended: its end reason and, when the program exited,
+  its exit code, and nothing the program held or printed. It answers a turn
+  at Full access, and below it only for a session the person answered for;
+  otherwise, and for every other operation, the answer is `no-session`. The
+  host remembers the last 64 endings in memory, and a new session on the
+  thread replaces the answer.
 - **Waiting.** `start`, `continue`, the steps, and `pause` answer the
   session's state once the program stops or ends, or after five seconds as
   it stands. `state` takes `waitSeconds`, at most 30.

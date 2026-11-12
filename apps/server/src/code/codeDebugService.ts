@@ -155,10 +155,18 @@ export interface CodeDebugCaller {
   readonly principal: PrincipalKind | "agent";
 }
 
+/** A session that ended: why, and the program's exit code when it exited. Never its values. */
+export interface CodeDebugEndedSession {
+  readonly sessionId: CodeDebugSessionId;
+  readonly endReason: CodeDebugSessionEndReason;
+  readonly exitCode?: number;
+}
+
 /** The thread's running session, or that it has none. */
 export type CodeDebugThreadSession =
   | { readonly status: "running"; readonly session: CodeDebugRunningSession }
-  | { readonly status: "none" }
+  /** `last` is how the thread's most recent session ended, while the host remembers it. */
+  | { readonly status: "none"; readonly last?: CodeDebugEndedSession }
   | { readonly status: "refused"; readonly reason: CodeDebugRefusalReason };
 
 export interface CodeDebugApprovals {
@@ -387,9 +395,22 @@ export class CodeDebugService {
     const authorized = this.#authorize(caller, scope.threadId, scope.checkoutId);
     if (authorized.status === "refused") return authorized;
     const running = this.#runningFor(scope.threadId);
-    return running === undefined
+    if (running !== undefined) return { status: "running", session: runningSession(running) };
+    // A session still launching or ending is neither running nor the last one.
+    if ([...this.#sessions.values()].some((record) => sameThread(record, scope.threadId))) {
+      return { status: "none" };
+    }
+    const ending = this.#endings.get(String(scope.threadId));
+    return ending === undefined
       ? { status: "none" }
-      : { status: "running", session: runningSession(running) };
+      : {
+          status: "none",
+          last: {
+            sessionId: ending.sessionId,
+            endReason: ending.endReason,
+            ...(ending.exitCode === undefined ? {} : { exitCode: ending.exitCode }),
+          },
+        };
   }
 
   /**

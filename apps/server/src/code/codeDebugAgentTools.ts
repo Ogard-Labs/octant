@@ -253,6 +253,10 @@ export function createCodeDebugAgentTools(
     const held = options.debug.threadSession(caller, scope);
     if (held.status === "refused") return serviceRefusal(held.reason);
     const running = held.status === "running" ? held.session : undefined;
+    // How the thread's last session ended, for a `state` read once it is
+    // gone: the agent tells a clean exit from a failed one without the
+    // session. Only a session the person answered for, or any at Full access.
+    const ended = held.status === "none" && call.operation === "state" ? held.last : undefined;
 
     const capabilityId = call.operation === "evaluate" ? "code-debug-evaluate" : "code-debug";
     let request: ToolActionRequest;
@@ -276,7 +280,8 @@ export function createCodeDebugAgentTools(
       call.operation === "configurations" ||
       (call.operation !== "start" &&
         running !== undefined &&
-        options.approvals.covers(options.thread.id, running.sessionId));
+        options.approvals.covers(options.thread.id, running.sessionId)) ||
+      (ended !== undefined && options.approvals.covers(options.thread.id, ended.sessionId));
     const decision = gate.authorize({
       threadId: String(options.thread.id),
       request,
@@ -350,6 +355,18 @@ export function createCodeDebugAgentTools(
       return sessionAnswer(state, { started: chosen.configuration.name });
     }
 
+    if (running === undefined && ended !== undefined && !asks) {
+      // The host's own facts about the end; nothing the program held or printed.
+      return {
+        result: {
+          session: "ended",
+          endReason: ended.endReason,
+          ...(ended.exitCode === undefined ? {} : { exitCode: ended.exitCode }),
+          output: [],
+        },
+        isError: false,
+      };
+    }
     if (running === undefined) {
       return refusedCall(
         "no-session",

@@ -1630,7 +1630,12 @@ describe("the agent's debug tool", () => {
       status: "ended",
       endReason: "stopped",
     });
+    // The agent learns the person stopped it, and can do nothing more with it.
     expect(await tools.call({ operation: "state" })).toMatchObject({
+      isError: false,
+      result: { session: "ended", endReason: "stopped" },
+    });
+    expect(await tools.call({ operation: "threads" })).toMatchObject({
       isError: true,
       result: { error: "no-session" },
     });
@@ -1819,6 +1824,46 @@ describe("the agent's debug tool", () => {
     const text = JSON.stringify(listed.result);
     expect(text).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(text).toContain("--key");
+  });
+
+  it("reads how the thread's last session ended after the program exits, until another starts", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    expect(await test.approve(test.configuration())).toMatchObject({ status: "approved" });
+    const approvals = createCodeDebugAgentSessionApprovals();
+    const tools = agentTools(test, { approvals });
+    const digest = await listedDigest(tools);
+    const start = {
+      operation: "start",
+      configuration: digest,
+      breakpoints: [{ path: "src/main.js", lines: [42] }],
+    };
+    await tools.call(start);
+    expect((await tools.call({ operation: "continue" })).result).toMatchObject({
+      session: "ended",
+    });
+    // The session is gone; a later turn still learns how it ended.
+    const later = agentTools(test, { approvals });
+    expect(await later.call({ operation: "state" })).toMatchObject({
+      isError: false,
+      result: { session: "ended", endReason: "program-exited", exitCode: 0 },
+    });
+    expect(later.asked).toEqual([]);
+    // A turn nobody answered for learns nothing of a session it never held.
+    expect(await agentTools(test).call({ operation: "state" })).toMatchObject({
+      isError: true,
+      result: { error: "no-session" },
+    });
+    // Nothing but its state is read from a session that ended.
+    expect(await later.call({ operation: "stack" })).toMatchObject({
+      isError: true,
+      result: { error: "no-session" },
+    });
+    await later.call(start);
+    expect((await later.call({ operation: "state" })).result).toMatchObject({
+      session: "stopped",
+    });
   });
 
   it("refuses input outside its closed operations before anything is read or asked", async () => {
