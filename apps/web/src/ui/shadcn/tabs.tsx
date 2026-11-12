@@ -9,7 +9,10 @@ export function Tabs(props: ComponentProps<typeof TabsPrimitive.Root>) {
 export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn("inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground", className)}
+      className={cn(
+        "inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground",
+        className,
+      )}
       data-slot="tabs-list"
       {...props}
     />

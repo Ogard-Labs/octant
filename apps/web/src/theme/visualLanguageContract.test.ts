@@ -1437,6 +1437,56 @@ describe("the public-block visual language", () => {
       }
     });
 
+    it("draws every menu as one row: 28px, a 16px icon column, one gap, the Menu option type", () => {
+      // The words stood 36px from a menu's edge in More tools, 40 in a thread's
+      // context menu and 12 in the mode menu, in 12px and 13px type, behind
+      // separators inset 0.8px and 4px, on rows of 28px and 40px.
+      expect(system).toMatch(/--oct-menu-row-h:\s*28px;/);
+      expect(system).toMatch(/--oct-menu-row-two-h:\s*44px;/);
+      expect(system).toMatch(/--oct-menu-row-gap:\s*var\(--oct-space-2\);/);
+      expect(system).toMatch(/--oct-icon-md:\s*16px;/);
+
+      const row = readFileSync(join(webRoot, "ui/shadcn/menu-row.ts"), "utf8");
+      expect(row).toContain("gap-(--oct-menu-row-gap)");
+      expect(row).toContain("has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h)");
+      expect(row).toContain("oct-menu-option");
+      expect(row).toContain("size-(--oct-icon-md)");
+      expect(row).toMatch(/menuGroupLabel =\s*"oct-nav-group /);
+      // One separator, as wide as the rows: no negative margin, no inset of its own.
+      expect(row).toMatch(/menuSeparator = "my-1 h-px bg-border"/);
+
+      for (const recipe of ["dropdown-menu", "context-menu"]) {
+        const source = readFileSync(join(webRoot, "ui/shadcn", `${recipe}.tsx`), "utf8");
+        expect(source, recipe).toContain("menuSeparator");
+        expect(source, recipe).not.toMatch(/-mx-|my-1 h-px/);
+      }
+      // A menu where any row has an icon reserves the column for all of them.
+      for (const adapter of ["OctantMenu", "OctantContextMenu"]) {
+        const source = readFileSync(join(webRoot, "ui/base", `${adapter}.tsx`), "utf8");
+        expect(source, adapter).toContain("menuIconColumn");
+        expect(source, adapter).toContain("hasIcons");
+        expect(source, adapter).toContain("oct-menu-detail");
+      }
+
+      // A feature stylesheet gives its menu's rows no size, gap or type of their own.
+      const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
+      const threadMenu = shell.slice(
+        shell.indexOf(".thread-row-context-menu {"),
+        shell.indexOf(".thread-row-context-menu__item-label {"),
+      );
+      expect(threadMenu).not.toMatch(/min-height|font-size|line-height|\[role=/);
+      expect(threadMenu).toContain("width: var(--oct-icon-md);");
+      const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+      const rule = (selector: string) =>
+        styles.match(new RegExp(`${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`))?.[1] ?? "";
+      expect(rule(".workspace-disclosure__action")).not.toContain("font-size");
+      const model = rule(".composer-model-picker__model");
+      expect(model).toContain("gap: var(--oct-menu-row-gap);");
+      expect(model).toContain("min-height: var(--oct-menu-row-h);");
+      expect(model).toContain("font-size: var(--oct-text-detail);");
+      expect(rule(".composer-model-picker__models")).toContain("padding: var(--oct-menu-inset);");
+    });
+
     it("declares the scrollbar once and lets no stylesheet draw a second one", () => {
       // A second colour stood in octant.css and lost on source order alone.
       // The treatment is the two standard properties in styles.css; a feature

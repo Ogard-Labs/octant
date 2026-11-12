@@ -235,6 +235,9 @@
      popup's edge by the menu inset. Before these, each recipe sized its own
      row and the same line of text was 24, 26, 30 or 34px tall. */
   --oct-menu-row-h: 28px;
+  /* A row with a second line (a described choice). */
+  --oct-menu-row-two-h: 44px;
+  --oct-menu-row-gap: var(--oct-space-2);
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
   --oct-disabled-opacity: 0.75;

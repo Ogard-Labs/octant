@@ -1,7 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
-import { menuGroupLabel, menuRow } from "./menu-row";
+import { menuGroupLabel, menuRow, menuSeparator } from "./menu-row";
 import { cn } from "./utils";
 
 export function ContextMenu(props: ComponentProps<typeof ContextMenuPrimitive.Root>) {
@@ -108,7 +108,7 @@ export function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight aria-hidden="true" className="ml-auto" size={14} />
+      <ChevronRight aria-hidden="true" className="ml-auto size-(--oct-icon-sm)" />
     </ContextMenuPrimitive.SubmenuTrigger>
   );
 }
@@ -142,7 +142,5 @@ export function ContextMenuSeparator({
   className,
   ...props
 }: ComponentProps<typeof ContextMenuPrimitive.Separator>) {
-  return (
-    <ContextMenuPrimitive.Separator className={cn("my-1 h-px bg-border", className)} {...props} />
-  );
+  return <ContextMenuPrimitive.Separator className={cn(menuSeparator, className)} {...props} />;
 }

@@ -2140,11 +2140,7 @@ function ProjectViewFilterMenu(props: {
         </OctantField>
         {activityRangeError === undefined ? null : (
           /* ui-boundary-exception: inline-field-error */
-          <p
-            className="px-2 pb-1 text-sm text-destructive"
-            id={activityRangeErrorId}
-            role="alert"
-          >
+          <p className="px-2 pb-1 text-sm text-destructive" id={activityRangeErrorId} role="alert">
             {activityRangeError}
           </p>
         )}

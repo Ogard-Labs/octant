@@ -151,7 +151,7 @@ nothing essential sits under 12px at the default. The roles live in
 | Body                   | 13              | 400    | 1.5     | primary     | Interface text (the interface size, `body`)                                                                                                                                                                   |
 | Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
 | Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
-| Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
+| Detail                 | 13              | 400    | 1.45    | secondary   | Row description (`oct-row-detail`); a menu's second line is Meta (`oct-menu-detail`)                                                                                                                          |
 | Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's box (`oct-meta`)                                                                                          |
 | Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
@@ -1869,6 +1869,23 @@ the half steps' meaning but spends 95 edits and leaves two spacing systems in
 one file; a larger interface size would also have padded a control that already
 grew with its text, so a control at 16px would have read as loose rather than
 larger. Pixel spacing is the same decision the icon sizes made.
+_One menu row._ Every in-page pick-list (dropdown, context menu, select and
+combobox options, the model list, the mode menu, the Add tool menu) draws the
+same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
+it carries a second line (`--oct-menu-row-two-h`, an `oct-menu-detail` span), an
+8px inset on a popup padded 4px, a 16px icon column and an 8px gap
+(`--oct-menu-row-gap`), the words in the Menu option role (13 / 500), and a
+group label in the Navigation group label role (12 / 400, muted). A row's words
+therefore stand 36px from the popup's edge when it has an icon and 12px when it
+has none, in every menu. A menu where any row has an icon reserves the column
+for every row, so it never has two text edges; a menu with no icons keeps the
+words on the popup's own inset. The separator is one hairline as wide as the
+rows (4px in from the popup's edge, the same inset the rows have), never a
+negative margin. A feature stylesheet may colour a menu's icons but gives its
+rows no height, gap, padding or font size. In the desktop app dropdown and
+context menus can be drawn by the system; that path is unchanged and the OS owns
+its spacing.
+
 The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
