@@ -9,6 +9,7 @@ import { Journal } from "./journal";
 import { JournalWriteFailed } from "./journalErrors";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { ProjectionApplicationFailed, type Projection, ProjectionRegistry } from "./projection";
+import { databaseStatus, rebuildAll } from "./recovery";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 
 const directories: Array<string> = [];
@@ -182,4 +183,119 @@ describe("AggregateHeadsProjection", () => {
       connection.close();
     },
   );
+
+  it("commits a Stop-shaped append when a derived view throws, holds that view, and a rebuild restores it", () => {
+    const connection = openConnection();
+    connection.exec("CREATE TABLE fixture_derived (global_sequence INTEGER PRIMARY KEY)");
+    let broken = true;
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: ["aggregate-heads"],
+      derived: true,
+      reset: (database) => database.exec("DELETE FROM fixture_derived"),
+      apply: (database, event) => {
+        database
+          .prepare("INSERT INTO fixture_derived (global_sequence) VALUES (?)")
+          .run(event.globalSequence);
+        if (broken) throw new Error("derived view bug");
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(derivedView);
+    const journal = createJournal(connection, projections);
+    const count = (table: string) =>
+      (connection.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number })
+        .count;
+
+    const stopped = journal.append(appendRequest());
+    expect(stopped.lastSequence).toBe(1);
+    expect(count("event_journal")).toBe(1);
+    expect(count("aggregate_heads")).toBe(1);
+    expect(count("fixture_derived")).toBe(0);
+    expect(
+      connection
+        .prepare("SELECT projection_name, global_sequence, reason FROM event_quarantine")
+        .all(),
+    ).toEqual([
+      {
+        projection_name: "fixture-derived",
+        global_sequence: 1,
+        reason: "projection-application-failed",
+      },
+    ]);
+
+    // Held: a later append skips it even once it would succeed, so the view
+    // never reports current over the event it missed.
+    broken = false;
+    journal.append({
+      ...appendRequest(),
+      expectedVersion: 1,
+      events: [{ ...appendRequest().events[0], eventId: "00000000-0000-4000-8000-000000000105" }],
+    });
+    expect(count("fixture_derived")).toBe(0);
+    const held = databaseStatus({ connection, journal, projections });
+    expect(held.state).toBe("current");
+    expect(held.heldDerivedViews).toEqual(["fixture-derived"]);
+    expect(held.projections).toContainEqual({ name: "fixture-derived", lastSequence: 0, lag: 2 });
+    expect(held.projections).toContainEqual({ name: "aggregate-heads", lastSequence: 2, lag: 0 });
+
+    expect(rebuildAll({ connection, journal, projections, clock: () => now })).toEqual({
+      rebuilt: ["aggregate-heads", "fixture-derived"],
+      journalHead: 2,
+    });
+    expect(count("fixture_derived")).toBe(2);
+    const repaired = databaseStatus({ connection, journal, projections });
+    expect(repaired.state).toBe("current");
+    expect(repaired.heldDerivedViews).toBeUndefined();
+    expect(repaired.quarantineCount).toBe(0);
+    connection.close();
+  });
+
+  it("keeps a derived view held when a rebuild still cannot apply it", () => {
+    const connection = openConnection();
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: () => {
+        throw new Error("derived view bug");
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(derivedView);
+    const journal = createJournal(connection, projections);
+    journal.append(appendRequest());
+
+    expect(rebuildAll({ connection, journal, projections, clock: () => now })).toEqual({
+      rebuilt: ["aggregate-heads"],
+      journalHead: 1,
+      held: ["fixture-derived"],
+    });
+    expect(databaseStatus({ connection, journal, projections }).heldDerivedViews).toEqual([
+      "fixture-derived",
+    ]);
+    connection.close();
+  });
+
+  it("refuses an authoritative projection that depends on a derived view", () => {
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: () => undefined,
+    };
+    const dependent: Projection = {
+      name: "fixture-dependent",
+      dependencies: ["fixture-derived"],
+      reset: () => undefined,
+      apply: () => undefined,
+    };
+    expect(() => new ProjectionRegistry().register(derivedView).register(dependent)).toThrow(
+      expect.objectContaining({ _tag: "AuthoritativeProjectionDependsOnDerived" }),
+    );
+  });
 });

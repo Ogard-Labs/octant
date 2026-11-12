@@ -1077,6 +1077,7 @@ Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.m
 Unreadable events and unsafe migrations fail closed. Octant never skips an undecodable event and reports current.
 
 - A malformed, contract-invalid, unsupported-version or unapplicable event is quarantined: its projection keeps its last valid state and readiness becomes recovery-required with a typed reason that discloses no payload. _Here only._
+- A projection is authoritative unless it declares itself a derived view that no command or authority check reads (today only diagnostics exports). An authoritative projection that fails rolls back the whole append; a derived view that fails is quarantined and held alone, its lag reported, while the append commits and readiness stays current. `db:rebuild` repairs it and reports one that still fails.
 - Only a successful explicit projection rebuild retires quarantine; startup never clears it. Ambiguous recovery state resolves to waiting or recovery-required, never done or healthy. _Here only._
 - Migrations are ordered, forward-only and checksum-verified, applied in transactions before the server reports ready, with a store backup first.
 - A changed checksum or an unknown newer migration fails closed.
