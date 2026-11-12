@@ -382,7 +382,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   thread a coordinator once its creation is confirmed, before the first
   message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
   coordinating** on a coordinator (never on a worker), the **Wake when a message
-  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
+  the **Continue after restart** checkbox, on until a person turns it off for
+  that thread ([Architecture: Persistence](../architecture.md#persistence)).
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.

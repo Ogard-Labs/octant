@@ -577,6 +577,7 @@ export function startOctantServer(
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
+      liftRestartRecovery,
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
@@ -1143,16 +1144,20 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
     });
-    yield* wireContinuation({
+    const { restartRecovery } = yield* wireContinuation({
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
       capacityScheduler,
       chatService,
+      codeBoardEventStore,
+      codeOperationRuntime,
       contextHarness,
       externalContentIngestionStore,
+      liftRestartRecovery,
       persistence,
       routeCodeService,
+      threadMessageQueue,
       workThreadProjection,
       workTurnProjection,
       workTurnService,
@@ -1799,6 +1804,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      restartRecovery,
       agentGrantRouteSlot,
       workRequestRuntime,
       workRequestService,

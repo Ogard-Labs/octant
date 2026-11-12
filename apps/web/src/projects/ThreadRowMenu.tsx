@@ -22,6 +22,7 @@ import {
   Pin,
   PinOff,
   RotateCcw,
+  RotateCw,
   type LucideIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -136,6 +137,8 @@ export interface ThreadRowActions {
   readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
   /** A worker's Wake for coordinator switch, offered only on a worker. */
   readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
+  /** The thread's Continue after restart switch. Absent outside Code. */
+  readonly onSetRestartContinuation?: (threadId: string, continueAfterRestart: boolean) => void;
 }
 
 export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boolean {
@@ -162,7 +165,8 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onMoveToProject === undefined &&
     actions.onSetCoordinator === undefined &&
     actions.onSetMessageWake === undefined &&
-    actions.onSetCoordinatorWake === undefined
+    actions.onSetCoordinatorWake === undefined &&
+    actions.onSetRestartContinuation === undefined
   );
 }
 
@@ -469,7 +473,7 @@ export function ThreadRowMenu(props: {
 
 export type ThreadCoordinatorActions = Pick<
   ThreadRowActions,
-  "onSetCoordinator" | "onSetMessageWake" | "onSetCoordinatorWake"
+  "onSetCoordinator" | "onSetMessageWake" | "onSetCoordinatorWake" | "onSetRestartContinuation"
 >;
 
 /**
@@ -489,6 +493,7 @@ function coordinatorMenuChoices(
     role: worker || thread.planner === true ? undefined : actions.onSetCoordinator,
     messageWake: actions.onSetMessageWake,
     coordinatorWake: worker ? actions.onSetCoordinatorWake : undefined,
+    restartContinuation: actions.onSetRestartContinuation,
   };
 }
 
@@ -500,7 +505,8 @@ export function threadCoordinatorMenuOffers(
   return (
     choices.role !== undefined ||
     choices.messageWake !== undefined ||
-    choices.coordinatorWake !== undefined
+    choices.coordinatorWake !== undefined ||
+    choices.restartContinuation !== undefined
   );
 }
 
@@ -509,7 +515,7 @@ export function ThreadCoordinatorMenuItems(props: {
   readonly actions: ThreadCoordinatorActions;
 }) {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
-  const { role, messageWake, coordinatorWake } = coordinatorMenuChoices(
+  const { role, messageWake, coordinatorWake, restartContinuation } = coordinatorMenuChoices(
     props.thread,
     props.actions,
   );
@@ -545,6 +551,16 @@ export function ThreadCoordinatorMenuItems(props: {
           onCheckedChange={(checked) => coordinatorWake(threadId, checked)}
         >
           <MenuContent icon={BellRing}>Wake for coordinator</MenuContent>
+        </OctantContextMenuCheckboxItem>
+      )}
+      {restartContinuation === undefined ? null : (
+        <OctantContextMenuCheckboxItem
+          checked={props.thread.restartContinuationOff !== true}
+          className="thread-row-context-menu__item"
+          label="Continue after restart"
+          onCheckedChange={(checked) => restartContinuation(threadId, checked)}
+        >
+          <MenuContent icon={RotateCw}>Continue after restart</MenuContent>
         </OctantContextMenuCheckboxItem>
       )}
     </OctantContextMenuGroup>

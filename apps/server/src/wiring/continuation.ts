@@ -1,6 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { decodeContextSubjectRef, USAGE_RESUME_SETTLED } from "@octant/contracts";
+import {
+  decodeContextSubjectRef,
+  decodeProviderSessionId,
+  USAGE_RESUME_SETTLED,
+  type HostRestartRecovery,
+} from "@octant/contracts";
 import { Effect } from "effect";
+import {
+  codeRestartResumability,
+  continueCodeTurnsCutOffByRestart,
+  createCodeRestartContinuationAttempts,
+} from "../code/codeRestartContinuation";
+import { CodeServiceError } from "../code/codeService";
+import {
+  releaseQueueBehindRestartContinuation,
+  restartContinuationId,
+} from "../harness/restartContinuation";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
 import { createUsageResumePorts } from "../usage/usageResumePorts";
@@ -29,10 +46,11 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
     "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
-  Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
-  Pick<WorkWiring, "workTurnService"> &
-  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
+  Pick<HarnessWiring, "liftRestartRecovery"> &
+  Pick<WorkWiring, "threadMessageQueue" | "workTurnService"> &
+  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection">;
 
 export function wireContinuation(deps: ContinuationDependencies) {
   const {
@@ -223,5 +241,98 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     agentRunProviderSlotScheduler.start();
+    const restartRecovery = startCodeRestartContinuation(deps);
+    return { restartRecovery };
   });
+}
+
+/**
+ * Continues, as the host, the Code turns the previous host was running when
+ * it stopped (docs/architecture.md, Code restart recovery). It runs once per
+ * start, after the queues have recovered, and answers the summary the
+ * restart notice reads.
+ */
+function startCodeRestartContinuation(
+  deps: ContinuationDependencies,
+): () => HostRestartRecovery | undefined {
+  const {
+    codeBoardEventStore,
+    codeOperationRuntime,
+    liftRestartRecovery,
+    persistence,
+    routeCodeService,
+    threadMessageQueue,
+  } = deps;
+  if (persistence.codeTurnsCutOffByRestart.length === 0) return () => undefined;
+  let summary: HostRestartRecovery | undefined;
+  const refused = (detail: string) => ({ kind: "refused" as const, detail });
+  void continueCodeTurnsCutOffByRestart({
+    cutOff: persistence.codeTurnsCutOffByRestart,
+    readThread: (threadId) => persistence.readCodeThread(threadId),
+    runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+    enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,
+    attempts: createCodeRestartContinuationAttempts(persistence.connection),
+    resumability: (thread, continuation, cutOffOperationId) =>
+      codeRestartResumability(
+        codeBoardEventStore.providerSessionForThread(thread.id, continuation),
+        thread,
+        cutOffOperationId,
+      ),
+    // What a window's first read does: the restart left every checkout
+    // waiting until someone looks at it again.
+    recoverCheckouts: async () => {
+      await routeCodeService.bootstrap(ROUTINE_HOST_SCOPE_ID);
+    },
+    liftHarnessRecovery: (threadId) => liftRestartRecovery(String(threadId)),
+    settleCutOffTurns: (threadId) => codeOperationRuntime?.settleCutOffTurns?.(String(threadId)),
+    dispatch: async (thread, continuation, prompt) => {
+      if (
+        routeCodeService.stageEvidence === undefined ||
+        routeCodeService.executeOperation === undefined
+      )
+        return refused("Code turns are unavailable on this host.");
+      try {
+        const staged = await routeCodeService.stageEvidence(
+          ROUTINE_HOST_SCOPE_ID,
+          thread.id,
+          prompt,
+        );
+        const result = await routeCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-provider-turn",
+          operationId: continuation,
+          threadId: thread.id,
+          checkoutId: thread.checkoutId,
+          sessionId: decodeProviderSessionId(restartContinuationId(`session:${continuation}`)),
+          prompt: staged,
+        });
+        return result.kind === "provider-turn-state" &&
+          (result.state === "running" || result.state === "waiting" || result.state === "completed")
+          ? { kind: "dispatched" as const }
+          : refused(
+              result.kind === "provider-turn-state" && result.failure !== undefined
+                ? result.failure.message
+                : "The continuation was not admitted.",
+            );
+      } catch (error) {
+        return refused(
+          error instanceof CodeServiceError
+            ? error.failure.message
+            : "The continuation could not start.",
+        );
+      }
+    },
+    releaseQueue: (threadId) =>
+      releaseQueueBehindRestartContinuation(threadMessageQueue, {
+        scopeId: ROUTINE_HOST_SCOPE_ID,
+        threadId: String(threadId),
+        mode: "code",
+      }),
+    clock: () => new Date().toISOString(),
+  }).then(
+    (recovered) => {
+      summary = recovered;
+    },
+    (error: unknown) => console.error("[restart-continuation] Recovery did not finish.", error),
+  );
+  return () => summary;
 }

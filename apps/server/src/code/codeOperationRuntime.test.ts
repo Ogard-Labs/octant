@@ -103,7 +103,16 @@ import {
   readCodeThreadActivity,
   readCodeReviewFinding,
   readCodeReviewFindings,
+  reconcileCodeRestart,
 } from "../persistence/codeProjection";
+import {
+  codeRestartResumability,
+  continueCodeTurnsCutOffByRestart,
+  createCodeRestartContinuationAttempts,
+  type CodeRestartContinuationPorts,
+} from "./codeRestartContinuation";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { AgentMessageService } from "../agentMessage/agentMessageService";
 import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
 import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
@@ -9624,7 +9633,12 @@ function runtimeFixture(options: {
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
-  restartOf?: { readonly directory: string; readonly evidenceValues: Map<string, string> };
+  restartOf?: {
+    readonly directory: string;
+    readonly evidenceValues: Map<string, string>;
+    /** Where this host's identities start, so a later restart mints none an earlier one did. */
+    readonly uuidStart?: number;
+  };
   /**
    * How a fork reads its source's conversation: the host's own selector over
    * this journal (the default), a stand-in, or nothing.
@@ -9727,7 +9741,7 @@ function runtimeFixture(options: {
   let gitObservationReadHook: (() => Promise<GitObservationResult>) | undefined;
   let evidenceCounter = 50;
   // A restarted host mints new event identities, never the first host's again.
-  let uuidCounter = options.restartOf === undefined ? 100 : 10_000;
+  let uuidCounter = options.restartOf === undefined ? 100 : (options.restartOf.uuidStart ?? 10_000);
   const feedbackCrop = `data:image/png;base64,${Buffer.from("captured image").toString("base64")}`;
   const feedback = new ProductFeedbackService({
     journal,
@@ -10227,6 +10241,8 @@ function runtimeFixture(options: {
     runtimeWorkFailures,
     /** The journal under the runtime, so a test can make an append fail. */
     journal,
+    /** The store under the journal, as a restarted host's reconciliation reads it. */
+    connection,
     /**
      * The store the service writes a turn's opening frame through, so a test
      * can put a prior turn on the journal the runtime reads.
@@ -14961,6 +14977,336 @@ describe("streamed reply text in a Code turn", () => {
       expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
     } finally {
       await turn.finish();
+    }
+  });
+});
+
+describe("continuing a Code turn a restart cut off", () => {
+  type Host = ReturnType<typeof runtimeFixture>;
+  const start = (id: number) =>
+    ({
+      kind: "start-provider-turn",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: evidence(40),
+    }) as const;
+  const continuationPrompt = evidence(42);
+
+  function provider(options: { readonly resumable?: boolean } = {}) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection: ProviderConnection =
+      options.resumable === false
+        ? {
+            ...providerConnection(queue),
+            start: vi.fn(() => Effect.succeed<ProviderSessionHandle>({ sessionId })),
+          }
+        : providerConnection(queue);
+    return { queue, connection };
+  }
+
+  /**
+   * A host over `previous`'s store, started after `previous` stopped without
+   * closing anything, the way a crash leaves it.
+   */
+  let restarts = 0;
+  function restartAfter(previous: Host) {
+    const next = provider();
+    restarts += 1;
+    const host = runtimeFixture({
+      provider: providerDriver(next.connection),
+      restartOf: {
+        directory: previous.directory,
+        evidenceValues: previous.evidenceValues,
+        uuidStart: restarts * 10_000,
+      },
+    });
+    host.evidenceValues.set(continuationPrompt.contentId, RESTART_CONTINUATION_PROMPT);
+    const cutOff = reconcileCodeRestart({
+      connection: host.connection,
+      journal: host.journal,
+      reconciledAt: now,
+    });
+    return { host, ...next, cutOff };
+  }
+
+  /** The recovery as the host wires it, over this host's runtime and store. */
+  function recoveryOn(
+    host: Host,
+    cutOff: CodeRestartContinuationPorts["cutOff"],
+    overrides: Partial<CodeRestartContinuationPorts> = {},
+  ) {
+    const releaseQueue = vi.fn(async (_threadId: CodeThreadId) => {});
+    const ports: CodeRestartContinuationPorts = {
+      cutOff,
+      readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
+      runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
+      enabled: () => true,
+      attempts: createCodeRestartContinuationAttempts(host.connection),
+      resumability: (current, continuation, cutOffOperationId) =>
+        codeRestartResumability(
+          host.operationEvents.providerSessionForThread(current.id, continuation),
+          current,
+          cutOffOperationId,
+        ),
+      recoverCheckouts: async () => {},
+      liftHarnessRecovery: async () => ({ kind: "none" }),
+      settleCutOffTurns: (id) => host.runtime.settleCutOffTurns?.(String(id)),
+      dispatch: async (current, continuation) => {
+        const result = await host.runtime.execute(ROUTINE_HOST_SCOPE_ID, {
+          ...start(0),
+          operationId: continuation,
+          threadId: current.id,
+          sessionId: decodeProviderSessionId(randomUUID()),
+          prompt: continuationPrompt,
+        });
+        return result.kind === "provider-turn-state" && result.state === "running"
+          ? { kind: "dispatched" }
+          : { kind: "refused", detail: "The continuation was not admitted." };
+      },
+      releaseQueue,
+      clock: () => now,
+      ...overrides,
+    };
+    return { ports, releaseQueue };
+  }
+
+  const statuses = (host: Host) =>
+    host.conversation().turns.map((turn) => [String(turn.operationId), turn.status]);
+
+  async function hostRunningTurn(options: { readonly resumable?: boolean } = {}) {
+    const first = provider(options);
+    const host = runtimeFixture({ provider: providerDriver(first.connection) });
+    await expect(host.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    await vi.waitFor(() => expect(first.connection.send).toHaveBeenCalledOnce());
+    return { host, ...first };
+  }
+
+  it("continues the cut-off turn once as the host from its provider session, and the next start continues nothing", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const second = restartAfter(first.host);
+      hosts.push(second.host);
+      expect(second.cutOff).toEqual([{ threadId, operationId: String(operationId(61)) }]);
+      const recovery = recoveryOn(second.host, second.cutOff);
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toEqual({
+        at: now,
+        continued: [{ mode: "code", threadId: String(threadId) }],
+        held: [],
+      });
+      await vi.waitFor(() => expect(second.connection.send).toHaveBeenCalledOnce());
+      expect(second.connection.start).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(second.connection.resume).mock.calls.map(([input]) => input.resumeCursor),
+      ).toEqual([{ driverKind: "codex", value: "native-code-session" }]);
+      expect(recovery.releaseQueue).toHaveBeenCalledExactlyOnceWith(threadId);
+      const [cutOffTurn, continuation] = statuses(second.host);
+      expect(cutOffTurn).toEqual([String(operationId(61)), "interrupted"]);
+      expect(continuation?.[1]).not.toBe("interrupted");
+
+      // Asked again, the thread's newest turn is the continuation, so nothing
+      // more starts.
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(second.host, second.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(second.connection.resume).toHaveBeenCalledOnce();
+      expect(second.connection.send).toHaveBeenCalledOnce();
+
+      // The continuation finishes, and the next start finds nothing cut off.
+      await Effect.runPromise(Queue.offer(second.queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(statuses(second.host).at(-1)?.[1]).toBe("completed"));
+      const third = restartAfter(second.host);
+      hosts.push(third.host);
+      expect(third.cutOff).toEqual([]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(third.host, third.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(third.connection.resume).not.toHaveBeenCalled();
+      expect(third.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose cut-off turn never reached its provider, instead of continuing the previous turn's session", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await Effect.runPromise(Queue.offer(first.queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(statuses(first.host).at(-1)?.[1]).toBe("completed"));
+      // The next turn's launch never returns, so it never records a session of
+      // its own; the thread's newest session is still the previous turn's.
+      vi.mocked(first.connection.resume).mockImplementation(() => Effect.never);
+      vi.mocked(first.connection.start).mockImplementation(() => Effect.never);
+      await first.host.runtime.execute(windowId, start(63));
+      const second = restartAfter(first.host);
+      hosts.push(second.host);
+      expect(second.cutOff).toEqual([{ threadId, operationId: String(operationId(63)) }]);
+      const recovery = recoveryOn(second.host, second.cutOff);
+      const summary = await continueCodeTurnsCutOffByRestart(recovery.ports);
+      // Continuing the old session would drop the person's unsent request.
+      expect(summary?.continued).toEqual([]);
+      expect(summary?.held).toEqual([expect.objectContaining({ threadId: String(threadId) })]);
+      expect(second.connection.resume).not.toHaveBeenCalled();
+      expect(second.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("continues a turn a clean shutdown stopped, as a reboot quits Octant", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await first.host.runtime.close();
+      expect(first.connection.stop).toHaveBeenCalledOnce();
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      expect(next.cutOff).toEqual([{ threadId, operationId: String(operationId(61)) }]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toMatchObject({ continued: [{ threadId: String(threadId) }], held: [] });
+      await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+      expect(next.connection.resume).toHaveBeenCalledOnce();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose own continuation a restart cut off twice", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      let previous = first.host;
+      for (const attempt of [1, 2]) {
+        const next = restartAfter(previous);
+        hosts.push(next.host);
+        await expect(
+          continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+        ).resolves.toMatchObject({ held: [], continued: [{ threadId: String(threadId) }] });
+        await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+        expect(
+          createCodeRestartContinuationAttempts(next.host.connection).read(String(threadId)),
+        ).toMatchObject({ attempts: attempt });
+        previous = next.host;
+      }
+      const last = restartAfter(previous);
+      hosts.push(last.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(last.host, last.cutOff).ports),
+      ).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "crash-loop" }],
+      });
+      expect(last.connection.send).not.toHaveBeenCalled();
+      expect(statuses(last.host).every(([, status]) => status !== "running")).toBe(true);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread with a push whose outcome the restart left unknown", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      first.host.appendRuntimeWork({
+        id: "90000000-0000-4000-8000-0000000007a1",
+        kind: "git",
+        state: "running",
+        remoteStep: {
+          kind: "push",
+          remote: "origin",
+          remoteRef: "refs/heads/feature/runtime",
+          commitOid: "a".repeat(40),
+        },
+      });
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff);
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "uncertain-external-action" }],
+      });
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      // The turn itself reads as ended by the restart rather than waiting forever.
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it.each([
+    {
+      reason: "turned-off",
+      overrides: { enabled: () => false } satisfies Partial<CodeRestartContinuationPorts>,
+    },
+    {
+      reason: "opted-out",
+      overrides: {
+        readThread: () => decodeCodeThread({ ...thread(), restartContinuationOff: true }),
+      } satisfies Partial<CodeRestartContinuationPorts>,
+    },
+  ])("holds the thread when Continue after restart is $reason", async ({ reason, overrides }) => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff, overrides).ports),
+      ).resolves.toMatchObject({ continued: [], held: [{ threadId: String(threadId), reason }] });
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose provider gave its session no resume cursor instead of starting over", async () => {
+    const first = await hostRunningTurn({ resumable: false });
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "cannot-resume" }],
+      });
+      expect(next.connection.start).not.toHaveBeenCalled();
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("finds nothing to continue after a turn the person stopped", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await expect(
+        first.host.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(62),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ state: "interrupted" });
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      expect(next.cutOff).toEqual([]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
     }
   });
 });

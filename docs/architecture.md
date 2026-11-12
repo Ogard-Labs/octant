@@ -5069,6 +5069,45 @@ or .zip>` write the same files, built by one host command
   provider session cursors, or earlier events. Already settled turns remain settled;
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
+  A clean shutdown, which a reboot performs, leaves a running turn exactly as a
+  crash does: its runtime-work record stays running and no outcome is journaled,
+  so the next start finds it the same way.
+
+  The host then continues, by itself, each Code turn this restart cut off
+  (maintainers decided on 2026-11-12; on by default). A turn qualifies only
+  when this start's reconciliation found its provider-turn record still
+  running: a turn the person stopped or that failed already reads settled, and
+  a turn already waiting before the restart (a usage-limit stop, or an earlier
+  restart's turn) is not this restart's. Only the thread's newest turn is
+  continued. The host settles the cut-off turn interrupted with the restart as
+  its reason, then starts one turn under the routine host scope with the same
+  message a person's Resume sends (inspect first, do not repeat what may
+  already have taken effect, ask again for approvals and answers). Turn
+  admission rechecks Project access, the harness pause, the provider policy
+  and the spend ceiling at that moment, as for any host turn, and the turn
+  resumes the provider session from the journaled `resumeCursor`. Its
+  operation id is derived from the cut-off turn's, so a repeated recovery lands
+  on the record the first one wrote. A thread waits for its person instead,
+  with the reason in the restart notice, when: Settings › Code › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff`);
+  any of its runtime work is `ambiguous` (a push or pull request step whose
+  outcome the restart left unknown); its own automatic continuation was cut
+  off by a restart twice (the crash-loop guard counts per thread in the host
+  store, keyed by the continuation it last started, and survives the restart
+  it counts); its newest provider session on the same provider and model has
+  no resume cursor, or the turn never reached its provider; its native harness
+  session's recovery is blocked; or admission refuses the turn. A held cut-off
+  turn is still settled interrupted, so the thread reads as stopped rather than
+  waiting for a caller that never comes. Messages the person queued behind the
+  cut-off turn follow the continuation: the host lifts only the queue's
+  `host-restart` hold, under its own scope, so the queue still waits for the
+  continuation to end and still holds on a failed or cancelled one; a queue the
+  person paused stays paused. The host scope reaches a queue only in Code. Each
+  start keeps what it did as `restartRecovery` on the host control status (the
+  threads continued and held, ids and reasons only), and a window shows it as
+  "Octant restarted. Continued N threads; M need you", naming and linking only
+  threads that window can open. Chat, Work, subagent runs, coordinator wakes
+  and goal loops are not continued yet.
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5402,7 +5441,10 @@ or .zip>` write the same files, built by one host command
   request, 2026-11-12). Not built yet: today any cancellation or failure
   holds it, and restart recovery holds pending work until an authenticated
   user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
-  send failed. Closing a composer cannot delete an accepted queued attachment.
+  send failed. The one exception built today is a Code thread the host continues after the
+  restart cut its turn off: the host lifts that queue's restart hold under its
+  own scope, so its messages follow the continuation through the same
+  dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
@@ -8727,11 +8769,9 @@ the model at another size.
   Turn start and settlement are recorded for every provider so a crash or host
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
   The same server admission holds a recovered session until a person resumes it,
-  unless the setting "Resume interrupted turns after a restart" is on (off by
-  default): then a turn with no uncertain side effect resumes by itself, and
-  a turn whose last effect is uncertain still waits for the person
-  (maintainer request, 2026-11-12; not built yet: today every recovered
-  session waits for a person);
+  or until the host lifts it to continue a turn a restart cut off (Code restart
+  recovery, on by default): a turn whose last effect is uncertain still waits
+  for the person (maintainer request, 2026-11-12);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -8791,7 +8831,11 @@ the model at another size.
   window's bootstrap revalidates it), and a Work Project's folder still exists
   at the path it was bound to (`not-ready` names what is missing). That resume journals the lost turn as
   `lost-in-restart` and the dead approvals and questions as expired, so the
-  next restart does not raise the recovery again. Also journaled:
+  next restart does not raise the recovery again. For a Code thread whose turn
+  the restart cut off, the host performs that resume itself, with the same
+  checks, after revalidating checkouts as a window's bootstrap would, and then
+  continues the turn (see Code restart recovery under Persistence); a blocked
+  resume holds the thread for its person. Also journaled:
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session

@@ -611,6 +611,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "diff layout unified side by side review checkout",
         },
         {
+          id: settingId("code-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery",
+        },
+        {
           id: settingId("code-language-services"),
           label: "Language services",
           scope: "mode",

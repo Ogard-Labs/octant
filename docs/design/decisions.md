@@ -42,7 +42,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
-| [Persistence](#persistence)                                                           | 11        | 7       | 4            | 0                   |
+| [Persistence](#persistence)                                                           | 12        | 7       | 5            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **249**   | **162** | **82**       | **5**               |
+| **All areas**                                                                         | **250**   | **162** | **83**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1124,7 +1124,7 @@ Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.m
 
 A restart recovers what the journal can prove and never guesses that an ambiguous outcome succeeded.
 
-- Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. Other running Code work that reaches a remote (a push or pull request step) becomes ambiguous and keeps its thread Waiting; local Code work becomes interrupted. The next look at the checkout settles an unconfirmed push from the remote branch, and the next look at the pull request settles an unconfirmed creation; an unreadable remote never settles it by guess. One setting, "Resume interrupted turns after a restart", off by default, lets a turn with no uncertain side effect resume by itself; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today no interrupted turn resumes by itself.
+- Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. Other running Code work that reaches a remote (a push or pull request step) becomes ambiguous and keeps its thread Waiting; local Code work becomes interrupted. The next look at the checkout settles an unconfirmed push from the remote branch, and the next look at the pull request settles an unconfirmed creation; an unreadable remote never settles it by guess. A turn a restart cut off continues by itself, once, as the host, on by default with a per-mode Continue after restart setting and a per-thread switch; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Built for Code ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)).
 - Outstanding approvals are recovered, but a parked provider question settles the attempt interrupted because the session that would consume the answer died.
 - Clients catch up from the authoritative snapshot, keep retrying while the host is unreachable, and renew a remote session from the device key rather than re-pairing.
 - A Machine change cursor names the host process (epoch) it came from; a cursor from an earlier process is answered with a snapshot, never resumed, and the renderer's retries are jittered.
@@ -1143,6 +1143,20 @@ After a crash or reboot the host repairs what it safely can and says what is wro
 - Not built yet: exporting a support bundle from the recovery screen; a local crash record (crash dumps kept on the device with upload off, in a support bundle only by choice, named in the next start's notice); one-click restart of terminals, dev servers and extensions a restart ended.
 
 Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Process topology](../architecture.md#process-topology) and [Persistence](../architecture.md#persistence).
+
+### Continuing a turn a restart cut off
+
+After a crash, a force quit or a reboot, the host continues each turn the restart cut off, once, as the host, so nobody has to type "continue" into each thread. Maintainers decided on 2026-11-12 that this is on by default, with a setting and a per-thread opt-out, and that a thread whose external action may have been in flight waits for its person.
+
+- Only a turn the previous host was still running qualifies: a turn its person stopped, a turn that failed and a turn already waiting before the restart do not. A clean shutdown, as a reboot performs, leaves its turns as a crash would.
+- The continuation is the same message a person's Resume sends: inspect first, do not repeat what may already have taken effect, ask again for approvals and answers.
+- The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown, when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in.
+- Each recovery identity is continued at most once, and the crash-loop count survives the restart it counts.
+- Dispatch needs no window: it runs under the host's own scope and rechecks authority, posture and the spend ceiling through ordinary turn admission at that moment. Messages queued behind the cut-off turn follow the continuation; a queue its person paused stays paused.
+- Each start reports the threads it continued and the ones that wait, with links, in a notice: "Octant restarted. Continued N threads; M need you."
+- Built for Code only. Chat, Work, subagent runs, coordinator wakes and goal loops are not built yet. A packaged-app `kill -9` smoke is a maintainer live check still owed.
+
+Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
 ### Snapshot-first thread reads
 
@@ -1208,7 +1222,7 @@ Unsent drafts stay on the client that typed them. Messages submitted while a tur
 - Drafts are not journaled, not in diagnostics and not sent to a provider until the user sends; deleting or purging the thread removes them.
 - Queue metadata and ordering are journaled; prompt bodies and attachments stay in purgeable private storage, and thread purge removes them.
 - Every dispatch rechecks the current Project, provider, model, checkout, access and context policy through ordinary turn admission.
-- Changed authority, uncertain delivery, the person's own cancel and a Work Done mark hold the queue until an authenticated user resumes it. After an ordinary provider failure or a clean restart the queue continues by itself once, with no review of the queued messages first, and a second failure in a row holds it (maintainer request, 2026-11-12). Not built yet: today any cancellation, failure or restart also holds the queue.
+- Changed authority, uncertain delivery, the person's own cancel and a Work Done mark hold the queue until an authenticated user resumes it. After an ordinary provider failure or a clean restart the queue continues by itself once, with no review of the queued messages first, and a second failure in a row holds it (maintainer request, 2026-11-12). Not built yet: today any cancellation, failure or restart also holds the queue. The one exception built today is a Code thread the host continues after a restart cut its turn off: its restart hold lifts under the host's scope, so its messages follow the continuation and still hold if that continuation fails or is cancelled ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)).
 - A paired device may queue a message (maintainer request, 2026-11-12). Not built yet: today paired remote queue commands stay unavailable until dispatch can revalidate the originating device's grants.
 
 Status: Partly built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
