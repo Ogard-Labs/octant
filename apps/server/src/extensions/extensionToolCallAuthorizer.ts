@@ -24,7 +24,7 @@ import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
  * that thread again rather than run on an answer it cannot show.
  */
 export function createExtensionToolCallAuthorizer(options: {
-  readonly grants: Pick<ExtensionToolGrantStore, "read" | "record">;
+  readonly grants: Pick<ExtensionToolGrantStore, "read" | "record" | "approvalsEnded">;
   readonly approvals: Pick<ExtensionToolApprovalService, "request">;
   /**
    * Whether the scope a turn runs under is the host acting on its own (a
@@ -107,7 +107,9 @@ export function createExtensionToolCallAuthorizer(options: {
                 ...signedBy(storedForServer),
                 revoked: storedForServer.revocationReason !== undefined,
               },
-        serverAllowedOnMarkedThread: allowedOnMarkedThread.has(markedThreadKey(call)),
+        serverAllowedOnMarkedThread: allowedOnMarkedThread.has(
+          markedThreadKey(call, options.grants),
+        ),
       }),
     };
   };
@@ -141,7 +143,7 @@ export function createExtensionToolCallAuthorizer(options: {
       // A grant the journal refuses leaves this call approved and the next asked.
       options.grants.record({ ...server, version: call.version, digest: call.digest });
     } else if (decision.answerCovers === "server-on-thread") {
-      allowedOnMarkedThread.add(markedThreadKey(call));
+      allowedOnMarkedThread.add(markedThreadKey(call, options.grants));
     }
   };
 
@@ -176,11 +178,17 @@ export function createExtensionToolCallAuthorizer(options: {
 
 /**
  * One server of one package version on one thread: an update is different
- * code under the same name, so it asks the marked thread again.
+ * code under the same name, so it asks the marked thread again. So does the
+ * same version after an uninstall, a rollback or withdrawn trust, which end
+ * every approval of the package.
  */
-function markedThreadKey(call: ExtensionToolCall): string {
+function markedThreadKey(
+  call: ExtensionToolCall,
+  grants: Pick<ExtensionToolGrantStore, "approvalsEnded">,
+): string {
   return [
     call.thread.id,
+    grants.approvalsEnded(call.extensionId),
     call.extensionId,
     call.packageId,
     call.componentId,

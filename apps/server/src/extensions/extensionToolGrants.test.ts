@@ -494,6 +494,26 @@ describe("an MCP server a person is asked about once", () => {
     expect(await host.deny()).toBe(true);
     await deniedAgain;
   });
+  it("asks a marked thread again once the package was uninstalled, rolled back or lost its trust", async () => {
+    const host = openHost(temporaryDirectory());
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+
+    host.grants.revokeForLifecycleChange({
+      kind: "set-source-trust",
+      extensionId,
+      trusted: false,
+    });
+    const afterTrustReturned = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ threadId: threadOne });
+    expect(await host.deny()).toBe(true);
+    await afterTrustReturned;
+  });
 });
 
 describe("an MCP tool a person always allows in a Project", () => {

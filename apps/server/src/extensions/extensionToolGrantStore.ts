@@ -64,6 +64,7 @@ export interface ExtensionToolGrantStoreOptions {
 export class ExtensionToolGrantStore {
   readonly #journal: Pick<Journal, "append">;
   readonly #connection: SqliteConnection;
+  readonly #approvalsEnded = new Map<string, number>();
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: EventActorValue;
@@ -145,7 +146,17 @@ export class ExtensionToolGrantStore {
     extensionId: string,
     reason: Exclude<ExtensionToolGrantRevocationReason, "person">,
   ): number {
+    this.#approvalsEnded.set(extensionId, this.approvalsEnded(extensionId) + 1);
     return this.#revoke(readActiveExtensionToolGrants(this.#connection, extensionId), reason);
+  }
+
+  /**
+   * How many times this host has ended every approval of one extension. An
+   * answer that is held in memory rather than as a grant is bound to this
+   * count, so trusting or installing the same version again cannot revive it.
+   */
+  approvalsEnded(extensionId: string): number {
+    return this.#approvalsEnded.get(extensionId) ?? 0;
   }
 
   /**
