@@ -42,6 +42,7 @@ import {
   type CanvasMockupBranch,
   type CanvasMockupFrame,
 } from "@octant/domain";
+import { MARK_TICK_STROKE_WIDTH } from "../../ui/IconDefaults";
 
 // The bundled icon set: each meaning in the contract maps to one glyph here.
 const ICON: Record<CanvasMockupIcon, LucideIcon> = {
@@ -601,7 +602,7 @@ function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
       return (
         <span className="canvas-mockup__check">
           <span className={`canvas-mockup__box${node.on === true ? " is-on" : ""}`}>
-            {node.on === true ? <Check size={12} /> : null}
+            {node.on === true ? <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} /> : null}
           </span>
           <span className="canvas-mockup__label">{node.label}</span>
         </span>

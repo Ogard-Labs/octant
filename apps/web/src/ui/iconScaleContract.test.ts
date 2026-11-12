@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Search } from "lucide-react";
 import { describe, expect, it } from "vitest";
-import { ICON_STROKE_WIDTH, IconDefaults } from "./IconDefaults";
+import { ICON_STROKE_WIDTH, IconDefaults, MARK_TICK_STROKE_WIDTH } from "./IconDefaults";
 
 const sourceRoot = resolve(process.cwd(), "src");
 
@@ -20,6 +20,16 @@ const ICON_SCALE = new Set([12, 14, 16, 20]);
  * row it sits in, not to the icon scale.
  */
 const SIZED_BY_SOMETHING_ELSE = new Set(["UserAvatar", "ProviderMark", "ProviderGlyph"]);
+
+/**
+ * What a call site may name as a stroke: the one stroke, or the named heavier
+ * stroke for a tick inside a small filled mark. Names are compared as written,
+ * so a number that happens to equal the constant is still refused.
+ */
+const ALLOWED_STROKES: ReadonlySet<string> = new Set([
+  String(ICON_STROKE_WIDTH),
+  "MARK_TICK_STROKE_WIDTH",
+]);
 
 /**
  * The files that may draw a stroke other than the icon stroke, and why. Each is
@@ -39,9 +49,13 @@ describe("icon scale contract", () => {
     const offenders: Array<string> = [];
     for (const file of collectSourceFiles(sourceRoot)) {
       const relative = file.slice(sourceRoot.length + 1);
-      for (const { element, size } of sizedElements(readFileSync(file, "utf8"))) {
+      const source = readFileSync(file, "utf8");
+      for (const { element, size } of sizedElements(source)) {
         if (SIZED_BY_SOMETHING_ELSE.has(element) || ICON_SCALE.has(size)) continue;
         offenders.push(`${relative}: <${element} size={${String(size)}}`);
+      }
+      for (const size of objectSizes(source)) {
+        if (!ICON_SCALE.has(size)) offenders.push(`${relative}: { size: ${String(size)} }`);
       }
     }
 
@@ -65,8 +79,7 @@ describe("icon scale contract", () => {
       const relative = file.slice(sourceRoot.length + 1);
       if (STROKE_EXCEPTIONS.has(relative)) continue;
       for (const width of strokeWidths(readFileSync(file, "utf8"))) {
-        if (width !== String(ICON_STROKE_WIDTH))
-          offenders.push(`${relative}: strokeWidth ${width}`);
+        if (!ALLOWED_STROKES.has(width)) offenders.push(`${relative}: strokeWidth ${width}`);
       }
     }
 
@@ -82,6 +95,33 @@ describe("icon scale contract", () => {
     );
 
     expect(markup).toContain(`stroke-width="${String(ICON_STROKE_WIDTH)}"`);
+  });
+
+  it("sees a stroke or size given in a props object and not only in JSX", () => {
+    const source = [
+      'import { Slash } from "lucide-react";',
+      "createElement(Slash, { 'aria-hidden': true, size: 13, strokeWidth: 1.8 });",
+      "const spread = <Slash {...{ size: 24 }} />;",
+      "const tick = <Check strokeWidth={MARK_TICK_STROKE_WIDTH} />;",
+    ].join("\n");
+
+    expect(strokeWidths(source)).toEqual(["MARK_TICK_STROKE_WIDTH", "1.8"]);
+    expect(objectSizes(source)).toEqual([13, 24]);
+    expect(strokeWidths(source).filter((width) => !ALLOWED_STROKES.has(width))).toEqual(["1.8"]);
+    expect(strokeWidths("const edge = { strokeWidth: 1.25 };")).toEqual([]);
+  });
+
+  it("sees the icons the composer menus build without JSX", () => {
+    for (const file of ["composer/useComposerAtMenu.ts", "composer/useComposerSlashCommands.ts"]) {
+      expect(objectSizes(readFileSync(resolve(sourceRoot, file), "utf8"))).toEqual([12]);
+    }
+  });
+
+  it("draws a tick inside a small filled mark heavier than the one stroke", () => {
+    // 1.5 in the icon's own 24-unit grid is 0.75px at 12px: too faint for a
+    // tick on an accent fill, which has to clear the 3:1 bar for graphics.
+    expect(MARK_TICK_STROKE_WIDTH).toBeGreaterThan(ICON_STROKE_WIDTH);
+    expect((MARK_TICK_STROKE_WIDTH * 12) / 24).toBeGreaterThanOrEqual(1.25);
   });
 
   it("sees a stroke named as a literal or an expression", () => {
@@ -106,11 +146,42 @@ describe("icon scale contract", () => {
   });
 });
 
-/** Every `strokeWidth` a JSX element names, as written. */
+/**
+ * Every stroke an icon is given, as written: a JSX `strokeWidth=` attribute, or
+ * a `strokeWidth:` key in a props object. The object form is only read in a file
+ * that imports from the icon library, so a chart's or a drawing's own
+ * `strokeWidth` data key is not mistaken for an icon's.
+ */
 function strokeWidths(source: string): ReadonlyArray<string> {
-  return [...source.matchAll(/\bstrokeWidth=(?:\{([^}]*)\}|"([^"]*)")/g)].map((match) =>
+  const found = [...source.matchAll(/\bstrokeWidth=(?:\{([^}]*)\}|"([^"]*)")/g)].map((match) =>
     (match[1] ?? match[2] ?? "").trim(),
   );
+  if (importsIcons(source)) {
+    for (const match of source.matchAll(/\bstrokeWidth:\s*([^,}\n]+)/g)) {
+      found.push((match[1] ?? "").trim());
+    }
+  }
+  return found;
+}
+
+function importsIcons(source: string): boolean {
+  return /from\s+"lucide-react"/.test(source);
+}
+
+/**
+ * Sizes given in a props object rather than a JSX attribute: the object handed
+ * to `createElement(Icon, { size: 13 })`, or spread into an element with
+ * `{...{ size: 13 }}`. Only read in a file that imports from the icon library.
+ */
+function objectSizes(source: string): ReadonlyArray<number> {
+  if (!importsIcons(source)) return [];
+  const found: Array<number> = [];
+  for (const match of source.matchAll(/(?:createElement\([^,()]+,\s*|\.\.\.)\{([^{}]*)\}/g)) {
+    for (const size of (match[1] ?? "").matchAll(/\bsize:\s*(\d+)\b/g)) {
+      found.push(Number(size[1]));
+    }
+  }
+  return found;
 }
 
 /** Every `size={N}` in the source, paired with the JSX element carrying it. */
@@ -150,7 +221,7 @@ function collectSourceFiles(root: string): ReadonlyArray<string> {
       continue;
     }
     if (entry.name.includes(".test.")) continue;
-    if (extname(entry.name) !== ".tsx") continue;
+    if (extname(entry.name) !== ".tsx" && extname(entry.name) !== ".ts") continue;
     files.push(path);
   }
   return files;

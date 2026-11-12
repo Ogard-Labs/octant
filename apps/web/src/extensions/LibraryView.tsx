@@ -49,6 +49,7 @@ import {
   type LibraryKind,
   type LibrarySteps,
 } from "./libraryModel";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 const KINDS: ReadonlyArray<LibraryKind> = ["connector", "plugin", "skill", "mcp-server"];
 const STATE_FILTERS = [
@@ -710,7 +711,11 @@ function StepLadder(props: { readonly steps: LibrarySteps }) {
       {STEP_LABEL.map(([key, label], index) => (
         <li className="library__step" data-step={props.steps[key]} key={key}>
           <span aria-hidden="true" className="library__step-mark">
-            {props.steps[key] === "done" ? <Check size={12} /> : index + 1}
+            {props.steps[key] === "done" ? (
+              <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+            ) : (
+              index + 1
+            )}
           </span>
           <span>{label}</span>
           <span className="sr-only">

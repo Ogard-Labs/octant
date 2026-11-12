@@ -1383,7 +1383,7 @@ function ProjectActionsMenu(props: {
                       <OctantMenuRadioItem closeOnClick key={item.value} value={item.value}>
                         <span
                           aria-hidden="true"
-                          className="flex size-4 items-center justify-center"
+                          className="flex size-(--oct-icon-md) items-center justify-center"
                         >
                           {item.icon}
                         </span>

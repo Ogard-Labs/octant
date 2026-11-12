@@ -124,7 +124,7 @@ export function ComboboxItemIndicator({
   return (
     <ComboboxPrimitive.ItemIndicator
       className={cn(
-        "ml-auto inline-flex size-4 shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
+        "ml-auto inline-flex size-(--oct-icon-md) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-item-indicator"

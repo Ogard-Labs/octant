@@ -15,6 +15,7 @@ import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 /** The host's shared background image library, read through the window's authority. */
 export interface BackgroundImageLibrary {
@@ -325,7 +326,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                       </span>
                       {selectedPresetId === preset.id ? (
                         <span aria-hidden="true" className="settings-app-background__preset-mark">
-                          <Check size={12} />
+                          <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                         </span>
                       ) : null}
                     </OctantButton>

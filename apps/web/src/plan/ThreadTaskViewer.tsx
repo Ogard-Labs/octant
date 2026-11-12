@@ -5,6 +5,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { useThreadPlan } from "./ThreadPlanContext";
 import type { PlanController } from "./usePlanController";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 export interface ThreadTaskViewerProps {
   /** Injected in tests; ordinary thread surfaces use their shared controller. */
@@ -99,7 +100,9 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
           {plan.steps.map((step) => (
             <li data-step-status={step.status} key={step.stepId}>
               <span aria-hidden="true" className="thread-task-viewer__mark">
-                {step.status === "done" ? <Check size={12} /> : null}
+                {step.status === "done" ? (
+                  <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+                ) : null}
               </span>
               <span className="thread-task-viewer__body">
                 <span className="thread-task-viewer__title">{step.title}</span>

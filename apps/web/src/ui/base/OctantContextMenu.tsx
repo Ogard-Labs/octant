@@ -76,7 +76,10 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
               }}
             >
               {item.icon === undefined ? null : (
-                <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className="flex size-(--oct-icon-md) items-center justify-center"
+                >
                   {item.icon}
                 </span>
               )}

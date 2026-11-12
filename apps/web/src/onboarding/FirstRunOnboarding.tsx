@@ -38,6 +38,7 @@ import type { FirstRunOnboardingController } from "./useFirstRunOnboardingContro
 // nothing else pays for the import.
 import "../styles/settings.css";
 import "./first-run.css";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 export interface FirstRunModelChoice {
   readonly providerInstanceId: ProviderInstanceId;
@@ -362,7 +363,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 >
                   <span className="first-run__rail-marker" aria-hidden>
                     {descriptor.configured && !descriptor.current ? (
-                      <Check size={14} />
+                      <Check size={14} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                     ) : (
                       String(index + 1)
                     )}

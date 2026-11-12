@@ -3073,8 +3073,12 @@ The stroke is 1.5, set once for the whole app by `IconDefaults`
 passes a `size` from the table and no `strokeWidth`. The exceptions are
 drawings and not icons: diagram edges, the marks a person draws on a page, a
 glyph cut into a dither mask, and provider marks, which are filled artwork.
-Nothing else departs from the stroke, including check marks, which take the
-same 1.5. Ten strokes had accumulated because nothing checked them, and one
+The stroke is in the icon's own 24-unit grid, so it renders 0.75 to 1.25px
+across the four sizes. One more exception: a tick or dot of 16px or less drawn
+inside a filled or bordered mark (a step marker, a done mark, a mock-up
+checkbox) takes `MARK_TICK_STROKE_WIDTH` (2.5), because 0.75px on an accent
+fill falls under the 3:1 bar for graphics. A check beside text or in a menu row
+is plain and takes the same 1.5. Ten strokes had accumulated because nothing checked them, and one
 lighter stroke reads as one drawing hand; `iconScaleContract` now fails on a
 stroke or size outside this section.
 
