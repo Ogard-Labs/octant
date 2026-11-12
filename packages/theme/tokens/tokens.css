@@ -248,6 +248,7 @@
   --oct-icon-mark: 32px;
   --oct-icon-md: 16px;
   --oct-icon-sm: 14px;
+  --oct-icon-xs: 12px;
   /* ── Elevation: the shadow recipes for a control, a card, a well and a floating surface ── */
   --oct-elev-flat: none;
   --oct-elev-raised: var(--octant-shadow-overlay);
