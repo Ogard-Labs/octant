@@ -1,4 +1,5 @@
 import {
+  createAgentGrantClient,
   createAgentProfileClient,
   createBenchmarksClient,
   createAutomationClient,
@@ -19,6 +20,10 @@ import {
   createArchivedWorktreesClient,
   type ArchivedWorktreesClient,
 } from "@octant/client-runtime/archived-worktrees-client";
+import {
+  createDiskCleanupClient,
+  type DiskCleanupClient,
+} from "@octant/client-runtime/disk-cleanup-client";
 import {
   createPersonMemoryClient,
   type PersonMemoryClient,
@@ -228,8 +233,10 @@ export interface LaunchedShellClients {
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
+  readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
+  readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
@@ -398,8 +405,10 @@ export function createLaunchedShellClients(
     benchmarksClient: createBenchmarksClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
+    agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
+    diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),

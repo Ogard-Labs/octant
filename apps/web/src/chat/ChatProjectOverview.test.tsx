@@ -103,7 +103,8 @@ describe("ChatProjectOverview", () => {
   it("keeps creation unavailable when the Project cannot create a thread", () => {
     render(<ChatProjectOverview model={model} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
+    // A note that stays is a card above the box.
+    expect(document.querySelector(".composer-notices")).toHaveTextContent(
       "Chat thread creation is unavailable for this Project.",
     );
     expect(screen.getByRole("textbox", { name: "Start a new Chat thread" })).toBeDisabled();

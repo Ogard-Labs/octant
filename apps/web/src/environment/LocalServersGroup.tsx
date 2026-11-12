@@ -18,6 +18,7 @@ import {
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   OctantMenuRoot,
   OctantMenuTrigger,
@@ -101,7 +102,7 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
     <div aria-label="Local servers" className="local-servers">
       {props.controller.failure === undefined ? null : (
         <OctantAlert className="local-servers__error" tone="danger">
-          <ShieldAlert aria-hidden="true" size={16} strokeWidth={1.8} />
+          <ShieldAlert aria-hidden="true" size={16} />
           {props.controller.failure.message}
         </OctantAlert>
       )}
@@ -241,7 +242,7 @@ function LocalServerRow(props: {
           {urls.length > 1 ? ` · ${String(urls.length)} addresses` : ""}
         </span>
         <span className="local-servers__meta">
-          <HealthIcon aria-hidden="true" size={14} strokeWidth={1.8} />
+          <HealthIcon aria-hidden="true" size={14} />
           {health.label}
         </span>
       </div>
@@ -267,7 +268,7 @@ function LocalServerRow(props: {
             type="button"
             variant="ghost"
           >
-            <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+            <ExternalLink aria-hidden="true" size={14} />
             <span>Open</span>
           </OctantButton>
         ) : null}
@@ -277,7 +278,7 @@ function LocalServerRow(props: {
             className="local-servers__more"
             aria-label={`More actions for ${name} on port ${String(listener.port)}`}
           >
-            <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Ellipsis aria-hidden="true" size={14} />
             <span>More</span>
           </OctantMenuTrigger>
           <OctantMenuPortal>
@@ -304,13 +305,13 @@ function LocalServerRow(props: {
                           })()
                         }
                       >
-                        <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
+                        <Copy aria-hidden="true" size={14} />
                         <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
                       </OctantMenuItem>
                     ))}
                 <OctantMenuGroup>
                   <OctantMenuGroupLabel className="local-servers__details">
-                    <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <Radio aria-hidden="true" size={14} />
                     {bindScopeLabel(props.group.listeners)}
                   </OctantMenuGroupLabel>
                   <OctantMenuGroupLabel className="local-servers__details">
@@ -350,31 +351,33 @@ function LocalServerRow(props: {
             type="button"
             variant="ghost"
           >
-            <Square aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Square aria-hidden="true" size={14} />
             <span>Stop</span>
           </OctantButton>
         ) : (
           <span className="local-servers__stop-unavailable">
-            <ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+            <ShieldAlert aria-hidden="true" size={14} />
             {listener.stop.reason}
           </span>
         )}
       </div>
 
-      {props.confirming && needsConfirmation ? (
-        <OctantConfirmDialog
-          cancelLabel="Keep it running"
-          confirmLabel="Stop this server"
-          destructive
-          onCancel={props.onCancelConfirm}
-          onConfirm={() => void props.onStop()}
-          title="Confirm stop"
-        >
-          Stop {listener.processName} on port {listener.port}
-          {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
-          Octant cannot verify that it still owns this server.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {props.confirming && needsConfirmation ? (
+          <OctantConfirmDialog
+            cancelLabel="Keep it running"
+            confirmLabel="Stop this server"
+            destructive
+            onCancel={props.onCancelConfirm}
+            onConfirm={() => void props.onStop()}
+            title="Confirm stop"
+          >
+            Stop {listener.processName} on port {listener.port}
+            {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
+            Octant cannot verify that it still owns this server.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

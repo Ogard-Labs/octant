@@ -11,7 +11,7 @@ export function WhatsNewAfterUpdate(props: { readonly controller: WhatsNewContro
   return (
     <>
       <WhatsNewAnnouncementDialog
-        announcement={controller.announcement}
+        announcements={controller.announcements}
         onNotNow={controller.dismiss}
         onOpenNotes={controller.openNotes}
         restoreFocus={controller.restoreFocus}

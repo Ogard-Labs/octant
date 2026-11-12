@@ -101,7 +101,7 @@ export function ParallelRunComparisonPanel(props: ParallelRunComparisonPanelProp
                 type="button"
                 variant="ghost"
               >
-                <GitMerge aria-hidden="true" size={12} strokeWidth={1.8} />
+                <GitMerge aria-hidden="true" size={12} />
                 Bring it home
               </OctantButton>
             )}

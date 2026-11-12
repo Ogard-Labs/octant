@@ -1,3 +1,4 @@
+import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
@@ -548,6 +549,9 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.waitingThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
+  const startedBy = useAgentThreadName(
+    "threadId" in surface && surface.threadId !== undefined ? String(surface.threadId) : undefined,
+  );
   const activateUnlessClosing = (target: EventTarget | null) => {
     // Activating can open another dock and resize the pane between pointer
     // down and click, moving its close button away from the pointer.
@@ -604,7 +608,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   // Tabs carry the titles, so a surface with no environment
                   // would leave this handle empty and the pane with nothing
                   // to drag it by.
-                  <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <GripVertical aria-hidden="true" size={14} />
                 ) : null}
                 {pullRequest === undefined ? null : (
                   <PullRequestChip
@@ -635,16 +639,24 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                       </span>
                     )}
                     <span
-                      className="workspace-pane__title"
+                      className="oct-nav-name workspace-pane__title"
                       title={projectName === undefined ? title : `${projectName} / ${title}`}
                     >
                       {title}
                     </span>
+                    {startedBy === undefined ? null : (
+                      <span
+                        className="workspace-pane__started-by"
+                        title={`Started by ${startedBy}`}
+                      >
+                        {`Started by ${startedBy}`}
+                      </span>
+                    )}
                   </>
                 )}
                 {showTabs ? null : running ? (
                   // The host reports that a turn is executing, not when it
-                  // began, so the pill names the state and no elapsed time.
+                  // began, so the chip names the state and no elapsed time.
                   // With tabs open, each tab carries its own thread's state.
                   <span className="workspace-pane__status">
                     <span aria-hidden="true" className="spinner spinner-sm" />
@@ -778,7 +790,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   onClick={() => props.onClosePane(pane.paneId)}
                   type="button"
                 >
-                  <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={14} />
                 </OctantIconButton>
               )}
             </OctantContextMenuTrigger>

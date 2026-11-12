@@ -1834,6 +1834,55 @@ deletes from its disk; a paired device is refused both. The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
+The host reads a worktree's changes outside any sandbox, so it runs nothing a
+repository configured: Git starts with `core.fsmonitor=false`,
+`GIT_OPTIONAL_LOCKS=0`, no global or system config, and
+`--ignore-submodules=dirty`, and a repository whose local or worktree config
+gives a filter a clean or process command is not read at all (its worktree is
+never found clean). Checked with a fixture whose fsmonitor and clean filter
+write a marker file: plain `git status` runs both, the host's read runs
+neither.
+
+Settings › Code › Worktrees on this computer lists the Git worktrees other
+tools and agents made, found without an index: a bounded walk of the home
+folder (400,000 entries, 20 seconds, depth 10) reads names only and follows
+each linked worktree's `.git` file to its repository's common folder, and
+each Code Project's repository is added whatever the walk finds; each
+repository is then asked once with `git worktree list`, so a worktree is
+found wherever it lives. The walk skips package and toolchain caches,
+`node_modules`, the Trash, and the platform's per-user application data
+(`Library` on macOS, `AppData` on Windows, `.local` on Linux), does not enter
+a repository's working tree once found, and asks a clone with no
+`worktrees` folder nothing. Spotlight is not used: it does not index `.git`
+files. A scan runs only when the person asks, one at a time, and its result
+is kept in memory until the host restarts; worktrees Octant owns are left
+out. Each row says whether its folder is gone, Git locked it, its commit is
+pushed or merged, when Git last recorded using it, and a bounded size.
+Removing one works everything out again from Git: it refuses the
+repository's own checkout, a bare repository, a locked worktree, one Octant
+owns, a folder now linked to another repository or whose link is broken,
+uncommitted or untracked changes, and a repository that sets a filter
+command. Commits only this worktree's branch reaches are listed and must be
+confirmed as the same set (up to 200), a detached HEAD's are refused, and
+Git's own records changing in the last 15 minutes ask once more, since
+another program may be working there. Then `git worktree remove`, never
+forced, removes it and the branch stays. A worktree whose folder is gone has
+only its own `worktrees/<name>` record removed, not the repository's other
+prunable entries, and is refused when it was on a detached HEAD whose commits
+no branch, tag or remote-tracking ref keeps: that record's HEAD and reflog may
+be all that keeps them from collection. Removing several at once asks once
+first, as removing one does. Paths are compared as the host compares them:
+on Windows without regard to letter case or slash direction, because Git for
+Windows records a worktree as `c:/Users/…` beside the `C:\Users\…` the
+person or another tool used, and an exact comparison would report a present
+worktree as not found or list one Octant owns. Settings › Code › Xcode builds, on a Mac, lists the build
+folders in `~/Library/Developer/Xcode/DerivedData` whose `info.plist`
+workspace is gone (orphaned) or that Xcode has not opened for 30 days
+(unused); a workspace on an unmounted volume is neither. Removing one reads
+it again and keeps a folder Xcode has opened since. Both lists and every
+removal are a local window's only; nothing is journaled, because none of
+these folders is Octant's.
+
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
 resolves itself: the client names the source thread and a finished turn, and
 the host picks the files from its own record — the checkpoint the next writing
@@ -3439,8 +3488,13 @@ the thread it came from.
   saying paused or scheduled and opening the routine in Automation Center
   where the host can (the phone shows the card without Open). The desktop and
   web thread's Environment lists the routine in its Routines row, paused or
-  not, as it lists any routine made from the thread; the phone has no
-  Environment, and a paired device cannot read routines.
+  not, as it lists any routine made from the thread. The phone has no
+  Environment, so its Work and Code thread screen shows a read-only
+  **Scheduled** list of the routines the thread set up (name, schedule, and
+  whether it is paused). A paired device may read routines, because the remote
+  route policy classifies an Automation list as a Project overview read and
+  forwards it for the device's own host; it may not resume or edit one from the
+  phone, so a paused routine says to resume it at a window on this computer.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
@@ -4388,14 +4442,31 @@ flowchart LR
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
   the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
-  a Chat reply's streamed deltas batch into one journal commit per short burst,
-  so the authoritative journal fsyncs a bounded number of times per second
-  instead of once per token, and a power loss loses at most the burst that was
-  still open — never a committed one.
+  a Chat reply's and a Code turn's streamed deltas batch into one journal commit
+  per short burst (a Code burst also flushes before any other event of its turn
+  and when the turn ends), so the authoritative journal fsyncs a bounded number
+  of times per second instead of once per token, and a power loss loses at most
+  the burst that was still open — never a committed one.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Startup check.** Startup decodes journal rows to prove the journal is
+  readable, then records a disposable watermark: the sequence it verified
+  through plus a fingerprint of the exact server build (a hash of every chunk of
+  the bundled server plus the `effect` version beside it, the only external
+  dependency that runs the journal's schemas), the registry's event names and
+  versions, and the schema head. A source run (no bundle) or an unreadable build
+  has no identity: it neither reads nor writes a watermark and scans
+  everything, and a start that migrated computes nothing. The first start of
+  every new build therefore runs one full scan; hashing the bundle costs about
+  10 ms. The next start of the same build decodes only rows after the watermark. A different fingerprint, a
+  migration in the same start, a missing, malformed or too-high watermark, or
+  any rewrite or delete of a journal row (a trigger clears it in the same
+  transaction, so purge, compaction and host-identity rewrites are covered)
+  means a full scan. An incompatible row is quarantined wherever it sits, and a
+  diagnostics call with `fresh` always scans everything. Deleting the watermark
+  only makes the next start slower.
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.
@@ -4626,7 +4697,8 @@ flowchart LR
     they ask: neither the MCP tool approval view nor the harness approval
     carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
-  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  tool, or the person takes with the Browser pane's Screenshot control (or
+  Draw on page, which takes the same capture to draw on), is kept
   with the thread that owns the Browser, and so is a short recording (an
   animated PNG) of the agent's page during one call that asked for it with
   `record`. The bytes live in the host's managed
@@ -5096,9 +5168,10 @@ or .zip>` write the same files, built by one host command
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
   place of a prompt read as noise to someone who already knew the feature and
-  said nothing to someone who did not. When the latest reply suggested a next
-  message for this thread, the empty composer shows it instead and Tab takes
-  it. A start screen's composer asks "Ask anything…" in every mode, because a
+  said nothing to someone who did not. When the latest reply predicted the
+  person's next message, or suggested a next message for this thread, the
+  empty composer shows it instead and Tab takes it; the prediction leads,
+  and it is gone once the person sends anything. A start screen's composer asks "Ask anything…" in every mode, because a
   first-time person has not started a conversation to reply to. Neither
   changes while a response runs, and accessible input labels remain stable.
 
@@ -7645,7 +7718,9 @@ or a history the read could not complete. Nothing is journaled and no
 session starts.
 
 **Chat branch.** A branch (`branch-chat-thread`, also behind a Chat
-checkpoint's restore) copies message text and never the source's session, so
+checkpoint's restore) copies message text, each copied turn keeping its
+submission id so the record of who sent it still applies, and never the
+source's session, so
 on a provider that keeps its conversation in a session of its own the branch
 has no session to resume. It is created, and its first turn starts a new
 session with the carried conversation as a `branch` handoff (framed as the
@@ -8715,10 +8790,18 @@ the model at another size.
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
 provider, carries one fixed instructions block that lets the model end a reply
-with up to three suggestions in an `octant-follow-ups` fenced block.
-`ThreadFollowUpSuggestionStore` journals the latest reply's set per thread
-(`thread-follow-up-suggestions`), retires it when a later reply suggests
-nothing, and replays sets a harness session journaled earlier. The shared
+with an `octant-follow-ups` fenced block: up to three suggestions, and `next`,
+its prediction of the message the person will send next, in their words on
+one line (at most 280 characters; a longer or multi-line one is dropped
+whole). Every reply may carry a prediction, where most carry no suggestion, so
+the empty composer usually has something to offer at no extra request; an
+unreadable suggestion list leaves the prediction standing.
+`ThreadFollowUpSuggestionStore` journals the latest reply's set and prediction
+per thread (`thread-follow-up-suggestions`), retires them when a later reply
+suggests nothing, and replays sets a harness session journaled earlier. A turn
+starting on the thread spends the prediction
+(`thread-follow-up-next-message-spent@1`), so no surface offers the message
+just sent again while the next turn runs. The shared
 message parser leaves the block out of the reply a person reads.
 `/api/follow-up-suggestions/:threadId` reads the set, previews what one
 suggestion would create — a new thread in the same mode and Project, or a
@@ -13318,7 +13401,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
-  ([Hub and spokes](design/hub-and-spokes.md), built). The listener, pairing tickets, pairing
+  ([Hub and spokes](design/hub-and-spokes.md), built). An outside agent on
+  another machine on the person's own network is a third such principal, held
+  to an agent grant the person creates over the loopback administration
+  channel (`/api/desktop/agent-access`, `octant agent-access`): named Projects,
+  modes, a highest level below Full access, tools, models, limits, and expiry.
+  It reaches only `POST /api/agent-access/claim` and `POST
+/api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
+  Tailscale sources only, authenticated by a signed bridge proof or a bearer
+  agent key; each tool runs in process as a paired-device principal whose
+  device id is the grant's own scope id, after a guard that admits only the
+  routes the tools use inside the grant, so every device clamp applies too.
+  It never answers approvals or adds Projects, its threads are journaled as its
+  own and marked as outside content, and revoking the grant ends its sessions.
+  Settings › Remote access › Agent access administers grants from a local
+  window; a paired device may list them and revoke one through
+  `/api/agent-grants`, never make or widen one
+  ([Agent access from other machines](design/agent-access.md)). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the
@@ -15759,7 +15858,10 @@ update source. Octant Nightly builds no disk image.
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and
 Windows Work and Code only after an explicitly approved Windows confinement
-design is documented. Everything on the work board is in scope for the first
+design is documented. Finding and removing worktrees on this computer is
+authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
+host-side Git and file operations a person confirms, starts no agent, and so
+does not lift that confinement gate. Everything on the work board is in scope for the first
 proper preview release (maintainer decision, 2026-11-06, which replaces the
 2026-10-26 post-preview track): mobile maturity (Android internal builds,
 redacted push, capture and voice, public store distribution), a full LSP /
@@ -16146,7 +16248,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
-  bundled file read from disk (with an optional bundled announcement and picture read the same way), so What's New never adds a request.
+  bundled file read from disk (with optional bundled announcements, one to five, and their pictures read the same way), so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
   relaunch they start, and install waits while agents are active (a thread
   parked on an approval or question is still an active agent) or while the

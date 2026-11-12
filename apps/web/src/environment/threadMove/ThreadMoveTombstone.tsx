@@ -4,6 +4,7 @@ import { useId, useRef, useState } from "react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
 
@@ -91,7 +92,7 @@ export function ThreadMoveTombstone(props: {
             <EnvironmentTile icon={Laptop} />
             {props.hostName}
           </span>
-          <ArrowRight aria-label="to" size={14} strokeWidth={1.8} />
+          <ArrowRight aria-label="to" size={14} />
           <span className="thread-move-tombstone__host">
             <EnvironmentTile icon={Laptop} />
             {departed.destinationName}
@@ -199,20 +200,22 @@ function KeptWorktree(props: {
       >
         Remove worktree
       </OctantButton>
-      {asking ? (
-        <OctantConfirmDialog
-          confirmLabel="Remove worktree"
-          destructive
-          onCancel={() => setAsking(false)}
-          onConfirm={remove}
-          pending={removing}
-          restoreFocus={trigger}
-          title="Remove this worktree?"
-        >
-          This removes the folder and everything in it from this computer, including the files the
-          move didn't carry. They have no other copy. The branch and its remote stay as they are.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {asking ? (
+          <OctantConfirmDialog
+            confirmLabel="Remove worktree"
+            destructive
+            onCancel={() => setAsking(false)}
+            onConfirm={remove}
+            pending={removing}
+            restoreFocus={trigger}
+            title="Remove this worktree?"
+          >
+            This removes the folder and everything in it from this computer, including the files the
+            move didn't carry. They have no other copy. The branch and its remote stay as they are.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

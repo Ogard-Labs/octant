@@ -27,6 +27,7 @@ import {
   SYSTEM_INCREASED_CONTRAST,
 } from "./increasedContrastAttribute";
 import { rememberThemeMode } from "./firstPaintTheme";
+import { upgradeLegacyAccent } from "./accentSwatches";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -87,8 +88,15 @@ function readSystemPrefersDark(): boolean {
 
 export function ThemeSettingsProvider(props: {
   readonly settings?: ThemeSettings;
+  /**
+   * Whether the mode is written to the app's first-paint storage key. On by
+   * default; a page that is not the app (the component gallery) turns it off so
+   * it cannot change what the next app window paints first.
+   */
+  readonly rememberMode?: boolean;
   readonly children: ReactNode;
 }) {
+  const rememberMode = props.rememberMode ?? true;
   const followsSystem = props.settings?.mode === "system";
   // Only a theme that follows the system listens, so a live light/dark switch
   // repaints without a reload while a fixed mode ignores the system entirely.
@@ -127,7 +135,12 @@ export function ThemeSettingsProvider(props: {
 
   const applied = useMemo(() => {
     if (props.settings === undefined) return undefined;
-    const accessible = enforceSidebarBackgroundAccessibility(props.settings);
+    // The one place stored overrides enter the renderer's painting: an accent
+    // saved before the light fills were deepened is read as the same swatch.
+    const accessible = enforceSidebarBackgroundAccessibility({
+      ...props.settings,
+      semanticOverrides: upgradeLegacyAccent(props.settings.semanticOverrides),
+    });
     // The grey roles follow the combined value, so an OS that asks for
     // increased contrast gets them even while the in-app setting is off.
     return {
@@ -182,7 +195,7 @@ export function ThemeSettingsProvider(props: {
         }
       }
       root.dataset.octantThemeMode = resolved.mode;
-      rememberThemeMode(accessible.mode);
+      if (rememberMode) rememberThemeMode(accessible.mode);
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
       // Increased contrast keeps the monochrome chrome: colour as decoration is
@@ -222,7 +235,7 @@ export function ThemeSettingsProvider(props: {
       leave(mountedPaints, paint);
       mountedPaints.at(-1)?.();
     };
-  }, [applied, increasedContrast]);
+  }, [applied, increasedContrast, rememberMode]);
   const resolved = applied?.resolved;
   const editorColors = useMemo(
     () =>

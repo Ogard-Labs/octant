@@ -46,7 +46,7 @@ export function HomeCustomize(props: HomeCustomizeProps) {
       titledBy={headingId}
       trigger={
         <>
-          <SlidersHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
+          <SlidersHorizontal aria-hidden="true" size={14} />
           Customize
         </>
       }
@@ -89,14 +89,9 @@ export function HomeCustomize(props: HomeCustomizeProps) {
               }}
             >
               <span aria-hidden="true" className="home-customize__grip" title="Drag to reorder">
-                <GripVertical size={16} strokeWidth={1.8} />
+                <GripVertical size={16} />
               </span>
-              <Icon
-                aria-hidden="true"
-                className="home-customize__icon"
-                size={16}
-                strokeWidth={1.8}
-              />
+              <Icon aria-hidden="true" className="home-customize__icon" size={16} />
               <span className="oct-row-label home-customize__name">{definition.title}</span>
               <span className="home-customize__move">
                 <IconButton

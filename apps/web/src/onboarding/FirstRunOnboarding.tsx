@@ -38,6 +38,7 @@ import type { FirstRunOnboardingController } from "./useFirstRunOnboardingContro
 // nothing else pays for the import.
 import "../styles/settings.css";
 import "./first-run.css";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 export interface FirstRunModelChoice {
   readonly providerInstanceId: ProviderInstanceId;
@@ -183,8 +184,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   useEffect(() => {
     panel.current?.scrollTo?.({ top: 0 });
   }, [step, handoffOpen]);
-
-  if (!controller.visible) return null;
 
   const steps = buildFirstRunSteps({
     current: step,
@@ -341,7 +340,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       label="Welcome to Octant"
       labelledBy={titleId}
       onClose={skip}
-      open
+      open={controller.visible}
     >
       <div className="first-run__body">
         <nav aria-label="Setup steps" className="first-run__rail">
@@ -364,7 +363,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 >
                   <span className="first-run__rail-marker" aria-hidden>
                     {descriptor.configured && !descriptor.current ? (
-                      <Check size={14} />
+                      <Check size={14} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                     ) : (
                       String(index + 1)
                     )}

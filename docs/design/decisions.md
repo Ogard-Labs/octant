@@ -50,10 +50,10 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 7       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
+| [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **234**   | **198** | **32**       | **4**               |
+| **All areas**                                                                         | **235**   | **199** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -132,6 +132,7 @@ The server decides every authority question, the event journal is the record, an
 
 - Every authority check (mode, Project, thread, provider, approval, remote principal, spend ceiling) runs in the server before a side effect; renderers only show what the server allows.
 - Commands append versioned events; read models are idempotent projections rebuildable from the journal.
+- Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the first start of a new build, a source run, a migration, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
 - The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
 
@@ -718,6 +719,8 @@ A repository is identified by an opaque digest of its canonical Git common direc
 
 - Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
 - Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
+- The host reads a worktree's changes without running anything the repository configured: fsmonitor off, no optional locks, submodules compared by commit, and a repository whose own config sets a filter command is not read. _Here only._
+- Settings › Code › Worktrees on this computer finds other tools' and agents' worktrees by a bounded walk of the home folder plus the Code Projects' repositories, then `git worktree list` per repository, on macOS, Linux and Windows; Spotlight does not index `.git` files. Remove refuses the main checkout, locked, Octant-owned, relinked, dirty and filter-setting worktrees, asks to confirm commits only its branch has and use in the last 15 minutes, refuses a detached HEAD's own commits, keeps the branch, and for a gone folder removes only that worktree's record, refusing a detached one whose commits only that record keeps. Bulk removal asks once first. Settings › Code › Xcode builds lists DerivedData folders whose workspace is gone or unused for 30 days. Local window only; nothing is journaled (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
@@ -986,7 +989,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine. A paired phone reads this thread's routines through the remote Automation list (a Project overview read, forwarded for the device's own host) and shows them read-only as a Scheduled list on the thread screen; resuming or editing one stays with a window.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -1067,7 +1070,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 
 - A command targets one aggregate and carries the expected aggregate version; a stale version returns a typed concurrency conflict and writes nothing. _Here only._
 - Every event carries a versioned envelope. A projection checkpoint may trail the journal head but never lead it. _Here only._
-- The store runs in WAL mode with full sync, and streamed deltas batch into one commit per short burst, so a power loss loses at most the open burst.
+- The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
 
@@ -1454,6 +1457,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Follow-up suggestions and offered side tasks are journaled offers that grant nothing. Both come from every provider, not only the harness.
 
 - A confirmed follow-up is created through the mode's ordinary creation command, and the prompt is never sent on the person's behalf.
+- A reply may also predict the person's next message, one line in their words. The empty follow-up composer shows it as its placeholder and Tab puts it in the draft; it is never sent for them, and a turn starting on the thread spends it. It comes from the same in-reply block on every provider, so it costs no extra request.
 - A side task is offered for out-of-scope work, for a split the person asked for, or for a real next step the reply recommends. It appears inline in the transcript after the offering turn, as a card asking whether to start it in a new thread or do it here.
 - Every answer is the person's click: a new thread (fresh, or forked from the conversation through the offering turn), do it here (the prompt goes to this thread now, or queued behind the running turn), or dismiss. The prompt is sent only on that click, and a Code thread still starts approval-gated.
 - A fork waits for the offering turn to finish. Chat, Code and Work each fork through their own command; a Work fork carries the conversation as a text handoff.
@@ -1861,6 +1865,7 @@ A Code thread terminal's output reaches a window by two paths so latency and dur
 - The record path writes to the evidence store and operation journal, coalesced to one write per 50 ms per terminal; the journal stays authoritative for reload and export.
 - The live path is a read-only stream fed from the in-memory transcript, never journaled, with the same redaction and credential-prefix hold-back.
 - The stream is authorized like a state read, re-proven every second, and ended when the window's capability is revoked or the shell stops.
+- A minimised Terminal card is a second reader of the thread's one shell: it reads the shell's state and follows this stream within its limits, never attaches (a journaled operation), starts, writes to or resizes it, and stops the stream when the card goes away. A stream that ends or is refused is read again with a bounded back-off and a "Preview ended" when it gives up.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Terminal output paths](../architecture.md#security-and-authority).
 
@@ -2038,6 +2043,19 @@ A paired device may ask for a grant to open one dev server from its own computer
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Proxy sessions and server grants](../architecture.md#security-and-authority) and [Local servers and Running services](../architecture.md#security-and-authority).
 
+### Agents on other machines reach Octant through an agent grant
+
+An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
+
+- A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
+- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
+- Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
+- Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
+
+Status: Built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
+
 ## Credentials and sign-in
 
 ### Provider keys on a host without the desktop app
@@ -2121,7 +2139,7 @@ Release notes show once after an update the person chose finishes applying, and 
 
 - Settings > General > Updates links the notes for the running build. _Here only._
 - First-run setup never shows release notes, and opening What's New is never counted or reported. _Here only._
-- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one announcement (`whats-new-announcement.json`, strict and size-bounded, with an optional picture beside it whose name cannot leave the folder); it shows once as a dialog instead of the card. Dismissing the card, answering the announcement, or opening the notes acknowledges the update. An invalid announcement is treated as absent. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
+- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one to five announcements (`whats-new-announcement.json`: version 2 is `{ schemaVersion, announcements: [...] }`, version 1 is one entry and stays valid; strict, at most 16,384 characters, each entry within its own field limits, with optional pictures beside it whose names cannot leave the folder); they show in a row, one at a time with Back, Next and an "n of m" position, as one dialog instead of the card. A file invalid as a whole shows nothing; an invalid entry in a valid version 2 file is skipped and the first five valid ones show. Dismissing the card, closing the dialog at any step or finishing it, or opening the notes acknowledges the update once, for the whole set. Pictures are read only for entries that will be shown and cross to the renderer together. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -2154,9 +2172,9 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
-- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below.
-- Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
-- Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open arrives this way and leaves at once.
+- Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below. Names in navigation are the interface size at regular weight, a group label is a quiet 12px caption, and a thread's activity line is the text's size in the muted ink.
+- Depth is one material in five levels, each a step lighter than the one under it, and every surface takes a fill, a rim that is brighter along its top edge and a shadow that seats it: the ground (the window frame, with the sidebar's rows on it and no panel), a pane (the thread stage, each dock tool tile, the bottom panel and the dock's overview: square, touching each other and the window's edges, with one 1px line between two neighbours and none of the rim or seat shadow), a card on a pane (a tool card, an approval card, a user bubble, a Settings group), a control (a filled button, a chip, the selected row, a switch's thumb and the composer's box, raised; a well cut in for a switch's track or a command block) and a floating surface (a menu, popover, hover card, toast, dialog and the Settings sheet, frosted over page content). The window is a frame and a grid of panes rather than one sheet or loose panels: panes in a grid that is dragged, aligned and resized share edges, and a corner and a gap on each made the grid read as loose cards. A divider's hit area is 8px, centred on the shared line, and a window of 680px or less keeps its rounded tile panels. Glass tints the panes instead of blurring the desktop, which a packaged window's native material does not allow. Increased contrast drops the gradients and sheens and keeps the rims; ghost buttons and plain rows stay flat until pointed at. What sits on a floating surface takes its fills from that surface (maintainer request, 2026-11-12).
+- Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open is held through its exit with the last content it showed (`OctantDialogPresence`): every confirmation, the command palette, the Code file search, the Navigator, the narrow dock, first run and the other dialogs mounted on demand. A dialog or Settings' sheet that is leaving takes no press and no key, focus returns to the opener as the exit starts, and focus the person has moved since is left alone. A dialog with an `open` of its own keeps that apart from its words; one whose words come from the state closing clears is rendered only while that state exists. A dialog removed together with its owner still leaves at once, and so does one closed in a window nobody can see.
 - A list a person picks from draws one row from shared tokens: 28px for one line, its words 8px in, the rows 4px in from the popup's edge. Menus, context menus, selects, comboboxes, the command palette, typeaheads and picker rows all take it; a described row grows to two lines.
 - There is one scrollbar, declared once: a thin thumb and no painted track, in a pane, a menu, a popup and a sheet alike. A feature may reserve its strip or hide it on a named sideways strip, and never recolours or widens it.
 - The code editor and the terminal draw their own scrollbars to the measure of every other pane's: a thin thumb with round ends in the same theme role, no painted track, no shadow at the scroll edge, and no strip beside a comparison. Their thumb cannot widen under the pointer and changes colour there instead, and the terminal's hides at rest even where the system keeps scrollbars on screen.
@@ -2176,8 +2194,19 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - There is one interaction primitive backend. A recipe style's own palette is never adopted; the `--octant-*` roles stay the theme source. A style variant for a primitive state is checked against the attribute the primitive actually writes. _Here only._
 - Desktop context and dropdown menus use native OS menus through one shared adapter. Browser clients keep accessible renderer menus.
 - Removing an existing repaint is a separate batch per pull request with before and after screenshots, and the maintainer approves the visual change (burn-down still in progress).
+- A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
-Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+
+### Portable design tokens
+
+The design system can be reused outside the app from one generated token set, never from values copied by hand.
+
+- `packages/theme/tokens/tokens.css` and `tokens.json` are generated from the renderer's stylesheets and checked against the theme package's colour defaults; they keep the app's own names, and are never edited.
+- A repository check fails when the generated files are stale and names the command that regenerates them.
+- The minimum recipes (`recipes.css`) are built from the tokens only: no colour literal, a few tints mixed from exported colour tokens, and a test refuses a raw colour or an undefined token there.
+
+Status: Built. Since: 2026-11-12. Detail: [Design tokens and the app feel](design-tokens.md).
 
 ### Page shell and Settings organisation
 
@@ -2254,6 +2283,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Local provider history and Octant records are separate sources; their totals are never added.
 - Unknown prices and missing quota measurements are unavailable, never zero. A period change cancels the previous read and cannot render a late result.
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
+- Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
 
@@ -2362,6 +2392,12 @@ Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-
 The dock is contextual: it follows the active pane's thread and Project, and never shows another pane's content.
 
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
+- The dock may show several open tools together as tiles, each live, beside a thread: at most two columns of three tiles, one Browser tile whose page is the chosen Browser tab, the focused tile's tab always selected, a tile that cannot be described for the active pane saying so in its tile, and the narrow modal drawing only the focused tile. A layout is window-local presentation, never reaches the bottom panel, and moves nothing about what an agent may do. Tile changes apply to the tools on screen, a column is never narrower than 280px while there is room, and two columns let the dock take what the thread's own minimum leaves. A tile clips its tool, and the Browser returns to the page last shown.
+- With two or more tiles each has one bar, the tool's own header (the Browser's bar is its row of pages), 32px high everywhere; the dock has no strip: a tool that is open but not shown is marked on its button in the title band's tool row. A tile's bar ends with an Arrange menu (Move left, Move right, Move up, Move down where the caps allow, Show alone, Hide from view) and Close, which closes the tool as pressing its button again does. A move keeps every tool mounted. A divider is a hairline, in the quiet strong-divider role while hovered or held, with no accent line after a click. A page stacked four bars and named the tool three times.
+- A tool's button in the title band shows its tool with the focused tile when pressed, offers Show below, Show alone, Hide from view, the possible moves, New Terminal or New Browser page, and Close on its context menu (right click, menu key, Shift+F10), and is the drag source for the dock's drop zones. The dock's own tab strip, Add tool, Show another tool and quick tools are gone; the bottom panel keeps its strip and Add tool.
+- A row of tool buttons in the title band, before the bottom-panel and dock toggles (961px and wider), opens each tool as a tile beside the focused one and closes it on the next press; More tools lists the rest and the pull requests the thread is about. At 960px and under the same row stands in the drawer's header and a press replaces the tool shown. Detail: [Workspace](workspace.md).
+- A thread's Browser and Terminal can be minimised into small live cards on a shelf at the foot of the dock, replacing the floating Browser preview, which covered the thread's text and could not show a shell. A tool is minimised whole (one Browser card, one Terminal card), a minimised tab is open but in no tile and never selected, and the state is window-local presentation that never reaches the bottom panel. A card reads only what the tool itself could show this window, never starts a process, writes to the journal or sends input, and is never what "the Browser is in sight" means. Minimising is the tile's Arrange menu item **Minimise to card** or the same item on the Browser and Terminal buttons' context menus in the title band's tool row, or pressing a pressed Browser or Terminal button, never a tile-bar button; a minimised tool's button is not pressed, shows the open dot and reads "Minimised to a card", and pressing it shows the tool. Show on a card returns the tool as a tile of its own, to its remembered place while that place exists and else as the last tile, never over a shown tool's tile. Its X hides the card and closes or stops nothing, and the tool's button then reads open but not shown; closing a tool stays the tile bar's close and **Close** on its button's menu. A new live session leaves a Browser the person minimised minimised. The agent's live Browser is a card while out of sight, and the closed dock's toggle carries one quiet dot saying so.
+- Opening a dock tool leaves the bottom panel open; a tool the panel already shows is the only one that leaves it. A tool is on screen in one region at a time.
 - A new Code task's pane starts with the dock closed until the person opens it there; that choice belongs to the draft and is never saved as the window's.
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
 - Git History stays read-only in every posture, Plan included. Browsing or refreshing it never fetches, checks out, stages, reverts or resets. _Here only._
@@ -2373,7 +2409,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 - Code Review turns a person-selected captured diff line into a local finding without execution approval, and selected findings into an editable unsent draft in the owning thread. Checkout/revision/side identity and outside-content references survive ordinary send and queue; missing provenance refuses, and only the person resolves a finding. Receipt links never infer a missing checkout or retarget after rebind. [Workspace](workspace.md) owns the detailed rule.
 - Running Code turns expose bounded versioned comparisons from their recorded starting tree after typed edit activity. Captured Review stays on an exact immutable version while newer/final captures are announced, preserves view preferences, and keeps original note anchors. Passive reads never capture; current authority, cancellation, unavailable source and final-capture failure remain explicit. [Workspace](workspace.md) owns the lifecycle and view-only whitespace rule.
 
-Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles).
+Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout).
 
 ### Canvas in the thread
 
@@ -2427,12 +2463,12 @@ A thread or Project can start from a forge issue, a tracker issue or a cloned re
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 
-### Thread usage line
+### Thread usage figures
 
-Every thread shows what it used, worded by one shared module.
+Every thread shows what it used, worded by one shared module, in its Thread info panel and not under the composer.
 
 - An unreported figure is absent. A cost says "est." unless the provider reported it, and a cache hit is never rounded up.
-- The line is on by default and one shared preference hides it. In a split workspace only the active pane shows it.
+- The figures are one compact block at the top of the Thread info panel, with a Turn details link, and have no hide control and no setting; the stored `showThreadStats` value stays in the schema so saved settings decode, and nothing reads it. Under the composer, with the row and a card, they read as four stacked layers. In a split workspace only the active pane shows them.
 
 Status: Built. Since: —. Detail: [Workspace: Context and usage](workspace.md#context-and-usage).
 
@@ -2454,7 +2490,8 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A composer's pill holds only attach, the prompt, the microphone and send, on a start screen and under a thread alike, and is one line tall until the person types more. How the thread runs (access, the model, the context ring) is one row under the pill. Where a new thread runs is one row of chips above it. Both rows stand on the page with no frame, so the pill is the composer's one raised surface; it is the glass surface over a ground, and takes the control tint under Window glass. The working folder is one of the chips above the pill, and opens its fields over the page.
+- A composer's box holds only attach, the prompt, the microphone and send, on a start screen and under a thread alike, and is one line tall until the person types more. How the thread runs (access, the model, the context ring) is one row under the box. Where a new thread runs is one row of chips above it. Both rows stand on the page with no frame, so the box is the composer's one raised surface; it is the glass surface over a ground, and takes the control tint under Window glass. The working folder is one of the chips above the box, and opens its fields over the page. The composer is the box and one quiet row under it, and with nothing pending nothing else stands there. That a thread has read outside content is a standing fact about access, so it is a chip in the row directly after the access control (a globe and "Outside content" in the warning ink, no fill or edge at rest, shown for as long as it applies), whose popover holds the full sentence and the Review action; in a narrow row it keeps the globe and drops the words. The turn figures live in the Thread info panel, not under the composer. A card above the box is only for something the person must read or act on that stays until resolved (a refusal, a failure, an offer with an action, the Project offer, a failed dictation): the callout's compact form (12px meta step, tight padding, its tone tint, its own 12px corner), the box's width, 8px above it, the most severe first, and the same glass as the box over a ground or under Window glass. Only what a surface marks as passing by itself (sending, a response streaming, a provider check, compacting, a first turn being prepared, a keyboard hint) is one quiet meta-ink line above the group that takes no layout room, never a card, so the transcript never jumps; a plain note that stays until the person acts (a saved-draft sentence, a locked task, an access or handoff note, what a newly picked provider will not carry over, a receipt) is a wrapping card of its own, never cut to a line. One always-mounted polite status region is the prompt's description and receives the words of every line; refusal and offer cards are alerts and are part of the prompt's description while pending. A tinted bar inside the box fought its corners, and a card as heavy as the box plus two rows under it read as four stacked layers.
+- Radius is two numbers and a round exception: a control's outline (a button of any size or variant, a field, a tab, a menu row, a chip, a capsule that only groups controls, the composer's attach and send) is `--oct-radius-sm`, 4px; a container (a card, a menu, a popover, a dialog, the Settings sheet, the composer) is `--oct-radius-md`, 12px; only what is inherently round (a switch, an avatar, a dot, a count, a meter, a slider thumb) takes the pill token. A part inside a control takes the control radius less the padding between them, never below 2px. The recipes' `rounded-md` and `rounded-lg` resolve to the control token and `rounded-xl` to the container token, so no recipe class is rewritten. A contract test fails when a control rule reaches for the pill token.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
@@ -2666,9 +2703,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
 - At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the 32 (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
+- The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
+Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
 
 ### Browser for agents
 

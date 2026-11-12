@@ -50,6 +50,15 @@ import {
 } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import { AGENT_MCP_HELP, runAgentMcpServer } from "./agentMcpServer";
+import { runAgentMcpBridge } from "./agentAccessBridge";
+import {
+  AGENT_ACCESS_SWITCHES,
+  resolveAgentAccessCliCommand,
+  runAgentAccessCliCommand,
+  runAgentAccessJoin,
+} from "./agentAccessCommand";
+import { decodeAgentConnectionFile } from "@octant/contracts";
+import { readFile } from "node:fs/promises";
 import {
   readAllStdin,
   readHiddenLineFromTerminal,
@@ -87,7 +96,8 @@ interface ParsedArgs {
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs | undefined {
   const [command, ...rest] = argv;
   if (command === undefined) return undefined;
-  const switches = command === "agent" ? AGENT_SWITCHES : [];
+  const switches =
+    command === "agent" ? AGENT_SWITCHES : command === "agent-access" ? AGENT_ACCESS_SWITCHES : [];
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];
   for (let i = 0; i < rest.length; i += 1) {
@@ -363,6 +373,27 @@ export async function runCli(
       process.stdout.write(AGENT_MCP_HELP);
       return 0;
     }
+    if (Object.keys(args.flags).length === 1 && typeof args.flags.connection === "string") {
+      // An outside agent's machine: no host here, only the connection file
+      // `octant agent-access join` wrote.
+      let connection;
+      try {
+        connection = decodeAgentConnectionFile(
+          JSON.parse(await readFile(args.flags.connection, "utf8")),
+        );
+      } catch {
+        process.stderr.write(
+          `${args.flags.connection} is not an Octant connection file. Make one with \`${context.identity.commandName} agent-access join <code>\`.\n`,
+        );
+        return 1;
+      }
+      return await runAgentMcpBridge({
+        connection,
+        input: process.stdin,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      });
+    }
     if (Object.keys(args.flags).length > 0) {
       // stdout carries protocol frames only.
       process.stderr.write(
@@ -377,6 +408,28 @@ export async function runCli(
       stderr: process.stderr,
       version: context.version,
     });
+  }
+  if (args.command === "agent-access") {
+    const command = resolveAgentAccessCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    if (command.action === "join") {
+      return await runAgentAccessJoin({
+        command,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      });
+    }
+    return await withLocalControlSession(context, (session) =>
+      runAgentAccessCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
   }
   if (args.command === "agent" || args.command === "harness") {
     const command = resolveAgentCliCommand(args.command, args.positional, args.flags);
@@ -801,6 +854,16 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
       "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--detach] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
   { octant: "agent status <thread-id> [--json]" },
+  { octant: "agent mcp --connection <file>  (on another machine, after agent-access join)" },
+  {
+    octant:
+      "agent-access create <name> --project <name>[,<name>] [--mode chat,work,code] [--access ask-first|accept-edits|auto|plan] [--threads own|project] [--allow-answers] [--models <id>,…] [--days <n>] [--direct] [--turns-per-day <n>] [--running-turns <n>] [--requests-per-minute <n>] [--json]",
+  },
+  { octant: "agent-access list|show <grant> [--json]" },
+  { octant: "agent-access code|rotate-key <grant>" },
+  { octant: "agent-access confirm|remove-key <grant> <fingerprint>" },
+  { octant: "agent-access revoke <grant> [--stop-turns]" },
+  { octant: "agent-access join <code> [--out <file>] [--label <label>]" },
   { octant: "agent mcp  (an MCP server that lets other agents start and follow work here)" },
   { octant: "harness slots [--json]" },
   { octant: "harness session <thread-id> [--json]" },

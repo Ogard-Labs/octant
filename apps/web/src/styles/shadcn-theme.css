@@ -7,10 +7,9 @@
 :root,
 .dark {
   color-scheme: dark;
-  /* The recipes round their large corners at radius + 2px; anchoring the base
-     on the product's small radius makes a ghost button and the row it sits in
-     share one corner instead of 10px beside 10.75px. */
-  --radius: calc(var(--oct-radius-sm) - 2px);
+  /* The recipes' control radius is the product's control token, so a ghost
+     button and the row it sits in share one corner. */
+  --radius: var(--oct-radius-sm);
   --background: var(--octant-workspace);
   --foreground: var(--octant-text-primary);
   --card: var(--octant-card);

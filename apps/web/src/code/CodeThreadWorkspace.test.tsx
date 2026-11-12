@@ -1,3 +1,4 @@
+import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
@@ -688,9 +689,8 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    // Idle, the status line says nothing and takes no height; the live
-    // region stays mounted so its first announcement is never dropped.
-    expect(container.querySelector(".composer-status")).toBeEmptyDOMElement();
+    // Idle, the notice cards say nothing and take no room.
+    expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
   });
 
   it("offers earlier messages above a transcript that opened on its newest turns", () => {
@@ -1496,9 +1496,11 @@ describe("CodeThreadWorkspace", () => {
       ),
     );
     expect(screen.getByText("The restore was undone.")).toBeVisible();
-    // The message and the button are one live region; without a space between
-    // them a screen reader announces "undone.Undo restore" as a single word.
-    expect(screen.getByRole("status")).toHaveTextContent("The restore was undone. Undo restore");
+    // The message and its action are one card above the box: the words, then
+    // the button at the trailing edge.
+    const card = screen.getByText("The restore was undone.").closest(".callout");
+    expect(card?.closest(".composer-notices")).not.toBeNull();
+    expect(within(card as HTMLElement).getByRole("button", { name: "Undo restore" })).toBeVisible();
   });
 
   it("keeps the Undo restore button when the host refuses an undo because another thread is writing", async () => {
@@ -1922,6 +1924,53 @@ describe("CodeThreadWorkspace", () => {
     expect(discardAttachment).not.toHaveBeenCalled();
   });
 
+  it("attaches a picture marked up in this thread's Browser through the composer's own upload", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000002",
+      displayName: "browser-markup.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    // Offered before the composer is open: it waits for the thread's composer.
+    threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({})}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByAltText("browser-markup.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+    // A later offer to the open composer is taken at once and focuses its prompt.
+    const live = await threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    expect(live).toEqual({ status: "added" });
+    expect(putAttachment).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Follow-up message")).toHaveFocus();
+  });
+
+  it("answers an offered picture with the composer's refusal when the host takes no attachments", async () => {
+    render(<CodeThreadWorkspace controller={controller({})} threadId={threadId} />);
+    const result = await threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    expect(result).toEqual({
+      status: "refused",
+      reason: "Image attachments are unavailable on this host.",
+    });
+  });
+
   it("uploads an image chosen from the composer before the turn and sends it by the host's own reference", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
@@ -2024,10 +2073,10 @@ describe("CodeThreadWorkspace", () => {
 
     pasteImage(screen.getByLabelText("Follow-up message"));
 
-    const attached = await screen.findByLabelText("Attached images");
-    expect(within(attached).getByRole("status")).toHaveTextContent(
+    const refusal = await screen.findByText(
       "Local OpenCode — Model One does not support images. Choose a vision model to attach one.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
     // Nothing is uploaded for a turn the host would refuse anyway.
     expect(putAttachment).not.toHaveBeenCalled();
   });
@@ -2873,9 +2922,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
-      "hidden reasoning and the",
-    );
+    const disclosure = screen.getByText(/Your next message starts a new session on/);
+    expect(disclosure).toHaveTextContent("hidden reasoning and the");
+    // It stays until the next message, so it is a card that wraps, not the
+    // one-line passing message.
+    expect(disclosure.closest(".composer-notice")).not.toBeNull();
+    expect(disclosure.closest(".composer-progress")).toBeNull();
   });
 
   it("warns before sending that a thread switched to a model its provider cannot carry the session onto starts a new session", () => {

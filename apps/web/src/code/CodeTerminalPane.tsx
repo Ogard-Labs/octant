@@ -16,6 +16,7 @@ import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { waitForReconnect } from "../lib/waitForReconnect";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
@@ -610,7 +611,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             items={actions}
             onValueChange={selectAction}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
             triggerClassName="code-terminal-pane__actions-trigger"
             triggerLabel="More terminal actions"
             value={actions[0]?.value ?? ""}
@@ -687,57 +688,61 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       >
         {pane}
       </OctantContextMenu>
-      {confirmingFolder === undefined ? null : (
-        <OctantConfirmDialog
-          title="Restart terminal in another folder?"
-          confirmLabel="Stop and restart here"
-          onCancel={() => setConfirmingFolder(undefined)}
-          onConfirm={() => {
-            const folder = confirmingFolder;
-            setConfirmingFolder(undefined);
-            void restartInFolder(folder);
-          }}
-          details={
-            <>
+      <OctantDialogPresence>
+        {confirmingFolder === undefined ? null : (
+          <OctantConfirmDialog
+            title="Restart terminal in another folder?"
+            confirmLabel="Stop and restart here"
+            onCancel={() => setConfirmingFolder(undefined)}
+            onConfirm={() => {
+              const folder = confirmingFolder;
+              setConfirmingFolder(undefined);
+              void restartInFolder(folder);
+            }}
+            details={
+              <>
+                <p>
+                  Destination: <code>{confirmingFolder}</code>
+                </p>
+                {props.onOpenAnotherTerminal === undefined ? null : (
+                  <OctantButton
+                    type="button"
+                    onClick={() => {
+                      setConfirmingFolder(undefined);
+                      props.onOpenAnotherTerminal?.();
+                    }}
+                  >
+                    Open another terminal instead
+                  </OctantButton>
+                )}
+              </>
+            }
+          >
+            Restarting stops this shell and any command running in it. Its current process state
+            does not transfer. The task's working folder does not change.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {confirmingBrowser ? (
+          <OctantConfirmDialog
+            confirmLabel="Restart with the Browser"
+            details={
               <p>
-                Destination: <code>{confirmingFolder}</code>
+                The CLI reaches it through the octant mcp command. The Octant app for macOS adds
+                octant to this terminal's PATH; with a headless install, use the install's own.
               </p>
-              {props.onOpenAnotherTerminal === undefined ? null : (
-                <OctantButton
-                  type="button"
-                  onClick={() => {
-                    setConfirmingFolder(undefined);
-                    props.onOpenAnotherTerminal?.();
-                  }}
-                >
-                  Open another terminal instead
-                </OctantButton>
-              )}
-            </>
-          }
-        >
-          Restarting stops this shell and any command running in it. Its current process state does
-          not transfer. The task's working folder does not change.
-        </OctantConfirmDialog>
-      )}
-      {confirmingBrowser ? (
-        <OctantConfirmDialog
-          confirmLabel="Restart with the Browser"
-          details={
-            <p>
-              The CLI reaches it through the octant mcp command. The Octant app for macOS adds
-              octant to this terminal's PATH; with a headless install, use the install's own.
-            </p>
-          }
-          onCancel={() => setConfirmingBrowser(false)}
-          onConfirm={() => void switchBrowserOn()}
-          pending={browserPending}
-          title="Let this terminal use the Browser?"
-        >
-          The terminal restarts, so anything running in it stops. A CLI you then start in it can use
-          this thread's Browser, and the first visit to each new site asks you in the thread.
-        </OctantConfirmDialog>
-      ) : null}
+            }
+            onCancel={() => setConfirmingBrowser(false)}
+            onConfirm={() => void switchBrowserOn()}
+            pending={browserPending}
+            title="Let this terminal use the Browser?"
+          >
+            The terminal restarts, so anything running in it stops. A CLI you then start in it can
+            use this thread's Browser, and the first visit to each new site asks you in the thread.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </>
   );
 }

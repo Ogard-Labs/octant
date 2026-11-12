@@ -134,9 +134,16 @@
   --oct-fs-h2: clamp(30px, 3.6vw, 44px);
 
   --oct-leading-body: 1.5;
+  /* Running text in a reply: a line more air than the interface's body. */
+  --oct-leading-reading: 1.6;
   --oct-leading-tight: 1.1;
   --oct-leading-heading: 1.14;
   --oct-leading-snug: 1.3;
+  /* The role leadings of the type table in DESIGN.md: a label, a fact, a line
+     of description. */
+  --oct-leading-label: 1.35;
+  --oct-leading-meta: 1.4;
+  --oct-leading-detail: 1.45;
   --oct-leading-code: 1.7;
 
   --oct-weight-regular: 400;
@@ -172,18 +179,18 @@
   --oct-section-y-desktop: 80px;
   --oct-section-y-tablet: 48px;
   --oct-section-y-phone: 32px;
-  /* A tighter scale than the first desktop one (10/16/20), which read as
-     soft and toy-like next to the dense text it framed. */
-  --oct-radius-sm: 8px;
+  /* Two numbers and the round exception. A control's outline (a button, a
+     field, a tab, a menu row, a chip, a track that groups controls) is the
+     small token; a container (a card, a menu, a dialog, the composer) is the
+     medium one. Any two neighbours therefore agree. A part inside a control
+     takes the small radius less the padding between them, never below 2px. */
+  --oct-radius-sm: 4px;
   --oct-radius-md: 12px;
   /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
-  --oct-radius-lg: 14px;
-  /* The composer's pill: half the height of its one-line prompt, so the
-     empty composer has half-circle ends and a longer message keeps the same
-     corner. */
-  --oct-radius-composer: 22px;
+  /* Only what is inherently round: a switch, an avatar, a dot, a count, a
+     meter, a slider thumb. A control never takes it. */
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
@@ -230,8 +237,9 @@
   --oct-menu-row-h: 28px;
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
-  --oct-disabled-opacity: 0.45;
+  --oct-disabled-opacity: 0.75;
 
+  --oct-icon-xs: 12px;
   --oct-icon-sm: 14px;
   --oct-icon-md: 16px;
   --oct-icon-lg: 20px;
@@ -314,8 +322,15 @@
   --oct-z-base: 1;
   --oct-z-sticky: 20;
   --oct-z-overlay: 40;
-  --oct-z-modal: 60;
-  --oct-z-toast: 80;
+  /* Dialogs and sheets stand on the floating layer, a notice above them so
+     that one raised while a dialog is open can still be read and dismissed,
+     and everything a person opens to aim at (menu, popover, select,
+     combobox, tooltip, hover card) above the notice, so a notice that lands
+     on it never takes its clicks. The shadcn recipes spell `--oct-z-popup`
+     as a class; the contract test keeps the order. */
+  --oct-z-floating: 50;
+  --oct-z-toast: 55;
+  --oct-z-popup: 60;
 
   /* Media queries cannot read custom properties, so the literals below
      are repeated by hand in @media rules. These exist so JS and future
@@ -447,8 +462,14 @@ h4 {
    control they were on from the one under the pointer (WCAG 2.4.7). The edge
    is an outline, so it moves no layout and follows the control's own radius;
    it is inset, so a dense row or a scrolling container cannot clip it; and a
-   pointer press does not match :focus-visible, so clicking paints nothing. */
+   pointer press does not match :focus-visible, so clicking paints nothing. A
+   pane split's focusable element is an invisible range input inside its
+   visible handle, so the handle takes the edge when the input has it. */
 :focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: -2px;
+}
+.workspace-split__resize:has(:focus-visible) {
   outline: 2px solid var(--oct-focus-edge);
   outline-offset: -2px;
 }
@@ -859,7 +880,7 @@ h4 {
   margin-bottom: -28px;
 }
 
-/* ─── pill / tag / badge ────────────────────────────────────────────── */
+/* ─── chip / tag / badge ────────────────────────────────────────────── */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -867,7 +888,7 @@ h4 {
   padding: 4px var(--oct-space-3);
   background: var(--oct-accent-soft);
   color: var(--oct-accent-fg);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   letter-spacing: 0;
@@ -1211,11 +1232,12 @@ input.switch:checked::after {
 .octant-switch[data-slot="switch"] {
   width: 38px;
   height: 22px;
-  /* The off edge is a border, not an inset shadow: the track keeps no
-     box-shadow so a focus halo cannot creep back in (visual language
-     contract). Both states keep the 1px border so the knob's travel is the
-     same; on paints it the fill colour. */
-  border: 1px solid var(--octant-border-strong);
+  /* The off edge is the strong divider: the strong border measured 1.65:1 on
+     a card in light, too faint to find an off switch. It is a border, not an
+     inset shadow: the track keeps no box-shadow so a focus halo cannot creep
+     back in (visual language contract). Both states keep the 1px border so
+     the knob's travel is the same; on paints it the fill colour. */
+  border: 1px solid var(--octant-divider-strong);
   border-radius: var(--oct-radius-pill);
   background: var(--octant-control);
   box-shadow: none;
@@ -1236,7 +1258,7 @@ input.switch:checked::after {
   height: 16px;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-bg);
-  box-shadow: 0 0 0 1px var(--octant-border-strong);
+  box-shadow: 0 0 0 1px var(--octant-divider-strong);
   translate: 2px 0;
   transition: translate var(--oct-motion-base) var(--oct-ease-standard);
 }
@@ -1457,7 +1479,7 @@ input.switch:checked::after {
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -1607,7 +1629,9 @@ input.switch:checked::after {
   min-height: 26px;
   padding-inline: var(--oct-space-3);
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  /* A segment sits inside the track's 5px of padding and border, so it takes
+     the control corner less that gap, never below 2px. */
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
@@ -1642,7 +1666,7 @@ input.switch:checked::after {
 .runpanel {
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   overflow: hidden;
 }
 .runpanel-bar {
@@ -1780,7 +1804,7 @@ input.switch:checked::after {
 .ph-img {
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   aspect-ratio: 16 / 10;
   display: grid;
   place-items: center;
@@ -1968,7 +1992,7 @@ input.switch:checked::after {
 }
 .skeleton-block {
   height: 96px;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 @keyframes oct-sheen {
   to {
@@ -1983,7 +2007,7 @@ input.switch:checked::after {
   gap: var(--oct-space-3);
   padding: var(--oct-space-12) var(--oct-space-6);
   border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   text-align: center;
 }
 .empty h3 {
@@ -2091,7 +2115,7 @@ input.switch:checked::after {
 }
 
 .octant-tooltip__positioner {
-  z-index: var(--oct-z-toast);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-tooltip {
@@ -2101,7 +2125,11 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
+  /* No inset bevel: the raised elevation's white top line drew on the dark
+     tooltip in light. */
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--octant-scrim) 20%, transparent),
+    0 8px 20px -10px color-mix(in srgb, var(--octant-scrim) 40%, transparent);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
 }
@@ -2122,7 +2150,7 @@ input.switch:checked::after {
    at the tooltip's layer so a card opened from a menu-adjacent row is never
    buried under the dock. */
 .octant-preview-card__positioner {
-  z-index: var(--oct-z-toast);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-preview-card {
@@ -2146,7 +2174,7 @@ input.switch:checked::after {
   width: min(520px, calc(100vw - 2 * var(--oct-space-6)));
   padding: 0;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   color: var(--oct-fg);
   box-shadow: var(--oct-elev-raised);
@@ -2177,7 +2205,7 @@ input.switch:checked::after {
   padding: var(--oct-space-4) var(--oct-space-6);
   border-top: 1px solid var(--oct-border);
   background: var(--oct-surface-warm);
-  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
+  border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
 }
 /* a scrim for anything that is not a <dialog> */
 .overlay {
@@ -2227,8 +2255,13 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   z-index: var(--oct-z-toast);
   width: min(380px, calc(100vw - 32px));
+  /* The stack is a column at the window's corner: only a notice takes a
+     press, so the gap between two and any margin around them stay the
+     window's. */
+  pointer-events: none;
 }
 .toast {
+  pointer-events: auto;
   display: flex;
   align-items: flex-start;
   gap: var(--oct-space-2);
@@ -2425,7 +2458,7 @@ input.switch:checked::after {
 .palette {
   width: min(560px, calc(100vw - 2 * var(--oct-space-6)));
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
   overflow: hidden;
@@ -2565,6 +2598,17 @@ input.switch:checked::after {
   padding: 12px 0 32px;
   overflow: auto;
   overscroll-behavior: contain;
+  /* Text scrolling under the frame's top edge, which is the sheet's hairline
+     below the title band, or into the composer at its foot, fades out over
+     the frame's own padding instead of ending in half a line cut flat by the
+     edge. At rest the first line sits below the fade. */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    var(--oct-fg) var(--oct-space-3),
+    var(--oct-fg) calc(100% - var(--oct-space-3)),
+    transparent
+  );
 }
 .turn-user {
   display: grid;
@@ -2621,14 +2665,11 @@ input.switch:checked::after {
   overflow: hidden;
 }
 /* When a turn changed, at the right edge: under a person's bubble and at the
-   end of the turn header, in the detail size and the interface face. */
+   end of the turn header, as a thread activity line in the interface face. */
 .turn-time {
   margin: 0;
-  color: var(--oct-meta);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
   font-variant-numeric: tabular-nums;
-  line-height: 1.35;
   text-align: end;
 }
 
@@ -3278,7 +3319,7 @@ input.switch:checked::after {
    The same facts, one row per thread, for scanning rather than triaging. */
 .issuelist {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -3389,7 +3430,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   min-height: 24px;
   padding-inline: var(--oct-space-3);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   text-transform: none;
@@ -3798,7 +3839,7 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: var(--oct-split, minmax(0, 1fr)) 1px minmax(0, 1.6fr);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -3827,10 +3868,10 @@ input.switch:checked::after {
   inset-inline: -12px;
 }
 .split-handle:hover {
-  background: var(--oct-accent-fg);
+  background: var(--octant-border-strong);
 }
-.split-handle:focus-visible {
-  background: var(--oct-accent-fg);
+.split-handle:active {
+  background: var(--oct-meta);
 }
 /* while dragging, stop the pointer selecting text in the panes it crosses */
 .is-dragging,
@@ -3942,9 +3983,12 @@ input.switch:checked::after {
      between them, or the label reads as one more row. */
   margin-top: var(--oct-space-5);
   padding: 0 var(--oct-nav-inset);
+  /* Every section label in the sidebar is a navigation group label: the
+     role's size and weight, so a Project section and an activity group read
+     as the same kind of caption. */
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: 0;
   color: var(--oct-meta);
   text-transform: none;
@@ -4156,8 +4200,8 @@ input.switch:checked::after {
 }
 /* Work and Code: two compact icon buttons in a faint tray. The labels stay
    clipped for the accessible name; a tooltip names the mode on hover and
-   focus. The active button keeps the same fill and hairline .mode already
-   uses, so "you are here" does not depend on hue. */
+   focus. The active button takes a stronger tint than the tray and the
+   hairline .mode already uses, so "you are here" does not depend on hue. */
 .modeswitch__tray {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4165,6 +4209,18 @@ input.switch:checked::after {
   padding: 2px;
   border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+/* A button in the tray sits 2px inside it: the control corner less the gap,
+   never below 2px, so the tray's outline is the control's and the button is
+   concentric with it. */
+.modeswitch .modeswitch__tray > .mode {
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
+}
+/* The selection role is the tray's own tint, so the chosen segment drew as
+   the tray (1.01:1 in light). A 12% tint of the ink reads one step stronger
+   than the tray, in either mode, and stays translucent under Glass. */
+.modeswitch__tray > .mode[aria-current="page"] {
+  background: color-mix(in srgb, var(--oct-fg) 12%, transparent);
 }
 .mode-switcher__solo {
   display: flex;
@@ -4451,13 +4507,13 @@ input.switch:checked::after {
    so the ring never joins layout or escapes the rounded corners. */
 .composer {
   border: 0;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   /* The card role is white on the light well and the floating step in
      dark, so the composer is the one raised object in both modes. */
   background: var(--octant-card);
-  box-shadow:
-    var(--octant-shadow-md),
-    inset 0 0 0 1px var(--oct-border);
+  /* The box's own rim is part of the shadow token, so a second ring here
+     would draw two lines on one edge. */
+  box-shadow: var(--octant-shadow-md);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] .thread-composer__surface {
@@ -4476,8 +4532,8 @@ input.switch:checked::after {
   color: var(--octant-text-primary);
   background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-card));
   border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
-  /* The pill's corner less the cue's 8px inset. */
-  border-radius: var(--oct-radius-lg);
+  /* The composer's corner less the cue's 8px inset. */
+  border-radius: calc(var(--oct-radius-md) - 8px);
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -4503,7 +4559,7 @@ input.switch:checked::after {
    Code, has this one prompt: the same insets and the transcript's own type,
    so a message reads the same in the box as in the bubble it becomes. The
    empty prompt is one line everywhere and grows as the person types: one line
-   and 12px above and under it is the 44px pill. At two lines a start screen's
+   and 12px above and under it is the 44px box. At two lines a start screen's
    box was a card with a field's worth of empty room, and under a thread the
    50px box held 6px more above the words than under them. */
 .composer-input {
@@ -4535,7 +4591,7 @@ input.switch:checked::after {
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
-/* The pill's one line: attach, the prompt, the microphone, send. The
+/* The box's one line: attach, the prompt, the microphone, send. The
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */
 .composer-field {
@@ -4565,10 +4621,9 @@ input.switch:checked::after {
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
   margin-bottom: calc((1lh - 4px) / 2);
 }
-/* The microphone says a failure beside itself. In the pill that line gives
-   way before the prompt does: in a 300px pane a 28-character failure took
-   the cell at full width and left the prompt some 30px. The buttons keep
-   their size; only the words are cut. */
+/* The microphone's failure is said in the notice card above the box, where it
+   wraps; beside the control it was cut to fit, and a cut failure is not read.
+   The buttons keep their size and the cell gives way before the prompt does. */
 .composer-field__actions {
   flex: 0 1 auto;
   min-width: 0;
@@ -4581,16 +4636,6 @@ input.switch:checked::after {
   flex: 0 1 auto;
   min-width: 0;
 }
-.composer-field__actions .composer-voice__error {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-/* While a failure is said, the prompt keeps room for a few words. The floor
-   holds only then: as a standing rule it pushed send out of a narrow pill
-   when Stop and Force stop stood beside it. */
-.composer-field:has(.composer-voice__error) > .composer-field__prompt {
-  min-width: 96px;
-}
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
 .composer-field__attach + .composer-field__prompt .composer-input {
@@ -4599,15 +4644,14 @@ input.switch:checked::after {
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
 }
-/* The pill's controls are round: its ends are half circles, and a 28px
-   circle 8px in from one is concentric with it. A square tile in a round end
-   left a wedge of the pill between the tile's corner and the curve. */
+/* The composer's attach and send are controls like any other: a 28px tile
+   with the control corner, 8px in from the 12px corner of the box. */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
   min-height: 28px;
   height: 28px;
   border-color: transparent;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   box-shadow: none;
 }
 .composer-field__attach button[data-size="icon"],
@@ -4616,7 +4660,7 @@ input.switch:checked::after {
   min-width: 28px;
   padding: 0;
 }
-/* The thread's facts stand under the pill, as one quiet line with no fill or
+/* The thread's facts stand under the box, as one quiet line with no fill or
    edge of its own: where the thread runs, the surface's row of controls, the
    plan's windows, and the thread's info. */
 .composer-under {
@@ -4641,15 +4685,24 @@ input.switch:checked::after {
   .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
     order: 1;
   }
-  /* A thread with no place to name leads with the row. At this width the row
+  /* A thread with no place to name (its context wrapper empty, which still stands first in the DOM) leads with the row. At this width the row
      is two lines, and the info fell to a third of its own. The row leaves the
      info room beside it, and the info stands at the end of the row's last
      line. */
-  .composer-under > .composer-row:first-child {
+  .composer-under
+    > :is(
+      .composer-row:first-child,
+      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
+    ) {
     flex: 1 1 0;
     max-width: calc(100% - var(--oct-space-2) - 28px);
   }
-  .composer-under > .composer-row:first-child ~ .thread-info {
+  .composer-under
+    > :is(
+      .composer-row:first-child,
+      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
+    )
+    ~ .thread-info {
     align-self: flex-end;
   }
 }
@@ -4717,7 +4770,7 @@ input.switch:checked::after {
   box-shadow: none;
 }
 /* An icon control in the row is a square tile with the control corner, as
-   controls on the page are. Only the pill's own controls are round. */
+   controls on the page are. */
 .composer-row button[data-size="icon"],
 .thread-info > button[data-size="icon"] {
   width: 28px;
@@ -4753,7 +4806,7 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
 }
 /* A bordered box inside the composer's own box read as a form field nested in
-   a form field. The trigger is a quiet pill that only gains a ground when
+   a form field. The trigger is a quiet chip that only gains a ground when
    pointed at, so the typed message stays the loudest thing in the frame. */
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
@@ -4771,6 +4824,19 @@ input.switch:checked::after {
 
 .composer-row .composer-model-picker__trigger {
   border-radius: var(--oct-radius-sm);
+}
+
+/* A thread whose model cannot change (a completed one) is still a fact the
+   person reads, so its name keeps the ordinary meta ink (the blanket disabled
+   opacity left it at 2.11:1 on the page). It does not look pressable: the
+   button ignores the pointer, shows the default cursor and takes no hover
+   fill, and only the chevron is dimmed. Every other disabled picker keeps the
+   ordinary disabled look. */
+.composer-model-picker__trigger--locked:disabled {
+  opacity: 1;
+}
+.composer-model-picker__trigger--locked:disabled .composer-model-picker__chevron {
+  opacity: 0.4;
 }
 
 /* An unavailable provider is still a toolbar item, not a second outlined
@@ -4833,37 +4899,121 @@ input.switch:checked::after {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
-  border-radius: var(--oct-radius-composer);
+  border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
-/* The frame groups the start row, the pill and the line under it, and
-   draws nothing: the pill is the one raised thing, and the rows are quiet
+/* The frame groups the start row, the box and the line under it, and
+   draws nothing: the box is the one raised thing, and the rows are quiet
    lines beside it, as the figures of the last turn are. Drawn as a tray
-   around all three, the composer was a block three rows tall with the pill a
+   around all three, the composer was a block three rows tall with the box a
    box inside a box. */
 .composer-frame {
   display: grid;
   gap: var(--oct-space-1);
   min-width: 0;
 }
-/* A held thread has no pill to frame; its line stands where it stood. */
+/* A held thread has no box to frame; its line stands where it stood. */
 .composer-frame--held {
   display: contents;
 }
-/* A row starts where the pill's first control does. */
+/* A row starts where the box's first control does. */
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-space-2);
 }
-/* The pill: the composer's one raised surface. Its corner is half its
-   one-line height, so the empty composer has half-circle ends. */
+/* The composer's one raised surface: a container, so its corner is the
+   container token at one line and at four. */
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
   border: 0;
-  border-radius: var(--oct-radius-composer);
+  border-radius: var(--oct-radius-md);
   box-shadow:
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);
+}
+/* The notice card: what the composer has to say about its thread or about
+   sending, as the system's callout directly above the box, in the box's
+   width. A tinted bar inside the box fought its corner (a rounded bar in a
+   rounded box, with thin uneven gaps), made the box a tall lopsided shape and
+   read as part of what was being typed. The card has the callout's own corner,
+   a step down from the box's, and each notice is a card of its own, most
+   severe first, so three notices stay three short rows. The frame's gap and
+   this margin make the 8px between the last card and the box. */
+/* Passing progress (sending, a response streaming, a provider check) is one
+   quiet line of meta ink, never a card. It is placed in the transcript's
+   bottom padding directly above the notice group and takes no layout room, so
+   nothing moves when it appears or goes. The region itself stays mounted: it
+   is the prompt's description and where status is announced. */
+.composer-frame {
+  position: relative;
+}
+.composer-progress {
+  position: absolute;
+  inset-inline: var(--oct-space-2);
+  bottom: 100%;
+  min-width: 0;
+  pointer-events: none;
+}
+.composer-progress__line {
+  display: block;
+  overflow: hidden;
+  padding-bottom: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The subagents tray stands directly above the frame; the line would sit on
+   it, so it is announced only. It is clipped, not removed: `display: none`
+   took it out of the accessibility tree, and "Compacting session" was then
+   never said while the tray was shown. */
+.composer:has(> .composer-subagents) .composer-progress__line {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.composer-notices {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  margin-bottom: var(--oct-space-1);
+}
+.composer-notices:empty {
+  display: none;
+}
+/* The words wrap and the action takes the trailing edge; in a narrow
+   composer it drops under the words instead of crowding them. */
+.callout.composer-notice {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+/* The mark sits on the first line's axis, however many lines follow. */
+.callout.composer-notice > svg {
+  margin-top: calc((1lh - 16px) / 2);
+}
+/* A note that only states a fact (a saved draft, a locked task) draws its
+   mark in meta ink. The callout's default mark is the warning ink, which made
+   "nothing has been sent" read as a warning. */
+.callout.composer-notice[data-tone="neutral"] > svg {
+  color: var(--oct-meta);
+}
+.callout.composer-notice > .callout__body {
+  flex: 1 1 200px;
+}
+.callout.composer-notice > .callout__actions {
+  display: flex;
+  align-self: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
 }
 /* While the empty composer shows the reply's suggested next message, a quiet
    key cap at its top-right says that Tab takes it. The prompt keeps clear of
@@ -4877,10 +5027,10 @@ input.switch:checked::after {
 .thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
   position: absolute;
   top: 12px;
-  /* Clear of send at the pill's trailing edge. */
+  /* Clear of send at the box's trailing edge. */
   right: calc(var(--oct-space-2) * 2 + 28px);
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   box-shadow: inset 0 0 0 1px var(--oct-border);
   color: var(--oct-meta);
   content: "Tab";
@@ -4888,39 +5038,11 @@ input.switch:checked::after {
   line-height: 18px;
   pointer-events: none;
 }
-.thread-composer__feedback {
-  position: relative;
-  display: flex;
-  align-items: center;
-  min-height: 0;
-  min-width: 0;
-  /* Room under the line: without it a notice's descenders sat on the pill's
-     bottom edge. The inset is the prompt's, clear of the pill's round corner. */
-  padding: 0 var(--oct-composer-gutter) var(--oct-space-2);
-  overflow: auto;
-}
 /* With the microphone beside send, the Tab cap keeps clear of both. */
 .thread-composer__surface:has(.composer-voice):has(
   .composer-input[data-suggested="true"]:placeholder-shown
 )::after {
   right: calc(var(--oct-space-2) * 2 + var(--oct-space-1) + 56px);
-}
-.thread-composer__feedback:empty,
-.thread-composer__feedback:has(> .composer-status:empty):not(:has(> .thread-composer__compacting)) {
-  display: none;
-}
-.thread-composer__compacting {
-  flex: none;
-  margin: 0 12px 0 0;
-  white-space: nowrap;
-}
-.thread-composer__feedback > .composer-status {
-  flex: 1 0 auto;
-  flex-wrap: nowrap;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  white-space: nowrap;
 }
 .thread-composer__context {
   display: flex;
@@ -5140,49 +5262,6 @@ input.switch:checked::after {
 .thread-info__panel > .guardrail-level {
   margin: 0;
 }
-/* The quiet line under the composer's toolbar: the keyboard hint or a
-   receipt on the left, spend and limits on the right. One recipe replaces
-   the three footers Chat, Work, and Code drew under the same frame (and, in
-   Work, outside it). */
-.composer-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 2px 12px;
-  min-height: 18px;
-  margin: 0;
-  padding: 0 var(--oct-composer-gutter) var(--oct-space-3);
-  color: var(--oct-meta);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-}
-/* Idle, the line holds nothing, so its box collapses and an idle Work or
-   Code frame is the height of Chat's. The live region stays mounted and
-   displayed: toggling `display` on a live region drops its first
-   announcement in some readers. */
-.composer-status:empty {
-  min-height: 0;
-  padding-bottom: 0;
-}
-.composer-status__hint {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-/* The status strip is one scrolling line, but a notice is an instruction the
-   person must read in full before acting (a paused thread says what to do
-   next), so it wraps. In a half-width pane the unwrapped line ran past the
-   frame and its last half, the next step, was off screen. */
-.thread-composer__feedback > .composer-status:has(> .composer-status__notice) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.composer-status__notice {
-  min-width: 0;
-  color: var(--oct-danger-fg);
-  white-space: normal;
-}
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
   display: inline-flex;
@@ -5191,7 +5270,7 @@ input.switch:checked::after {
   min-height: 24px;
   padding-inline: var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface-warm);
   color: var(--oct-fg-2);
   font-family: var(--oct-font-mono);
@@ -5206,7 +5285,7 @@ input.switch:checked::after {
   width: 14px;
   height: 14px;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: none;
   color: var(--oct-meta);
   padding: 0;
@@ -5323,7 +5402,7 @@ input.switch:checked::after {
   place-items: center;
   gap: var(--oct-space-2);
   border: 1px dashed var(--oct-accent-fg);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: color-mix(in oklab, var(--oct-bg) 82%, transparent);
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
@@ -5457,7 +5536,7 @@ input.switch:checked::after {
 
 .chart {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
 }
@@ -5796,8 +5875,8 @@ input.switch:checked::after {
   color: var(--oct-meta);
 }
 .canvas-prov .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .canvas-body {
   display: flex;
@@ -5960,8 +6039,8 @@ input.switch:checked::after {
   color: var(--oct-meta);
 }
 .cmetric-delta .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 /* key-value — a fact table, aligned on the colon */
@@ -6191,7 +6270,7 @@ input.switch:checked::after {
    here and the whole panel sits at meta weight. */
 .provenance {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
 }
@@ -6205,8 +6284,8 @@ input.switch:checked::after {
   color: var(--oct-fg);
 }
 .provenance-title .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--oct-accent-fg);
 }
 .provenance .kv dd {
@@ -6251,7 +6330,7 @@ input.switch:checked::after {
   position: relative;
   min-height: 420px;
   overflow: hidden;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
 }
 /* the ground. Faint enough to read as texture rather than as a grid the
@@ -6328,8 +6407,8 @@ input.switch:checked::after {
   white-space: nowrap;
 }
 .zen-el-head .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .zen-el-head .zen-el-gap {
   flex: 1;
@@ -6471,7 +6550,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-2);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
 }
@@ -6481,7 +6560,7 @@ input.switch:checked::after {
   margin-inline: var(--oct-space-1);
   background: var(--oct-glass-stroke-strong);
 }
-/* collapsed to a pill — the bar's own minimised state */
+/* collapsed to a small bar — the bar's own minimised state */
 .zen-pill {
   position: absolute;
   left: 50%;
@@ -6493,7 +6572,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   padding: var(--oct-space-1);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
 }
@@ -6648,13 +6727,11 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
       .composer:not(.composer--carded) {
-      box-shadow:
-        inset 0 0 0 1px var(--oct-glass-stroke),
-        var(--octant-shadow-md);
+      box-shadow: var(--octant-shadow-md);
     }
-    /* Over a ground or under Glass the pill is the glass surface: floor,
+    /* Over a ground or under Glass the box is the glass surface: floor,
        thick tint, blur, and the glass stroke as its ring. The opaque border
-       is near black there and drew a dark outline around the pill. */
+       is near black there and drew a dark outline around the box. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
       .thread-composer__surface {
@@ -6662,14 +6739,38 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-      box-shadow:
-        var(--octant-shadow-md),
-        inset 0 0 0 1px var(--oct-glass-stroke);
+      box-shadow: var(--octant-shadow-md);
     }
-    /* Under Window glass the pill takes the control tint in place of the
+    /* The notice card above the box is the same glass: an opaque callout
+       ground beside a translucent box read as a block. A tone is its tint
+       laid over the thick glass, so the card keeps the callout's colours. */
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice {
+      border-color: var(--oct-glass-stroke);
+      background-color: var(--oct-glass-floor);
+      background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+      backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    }
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice[data-tone="warning"] {
+      background-image:
+        linear-gradient(var(--oct-warn-soft), var(--oct-warn-soft)),
+        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    }
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice[data-tone="danger"] {
+      background-image:
+        linear-gradient(var(--oct-danger-soft), var(--oct-danger-soft)),
+        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    }
+    /* Under Window glass the box takes the control tint in place of the
        floor, and keeps the blur and the stroke. The floor is the page colour
        at part strength, there to hold text over a picture in an opaque
-       window; on a see-through window it made the pill darker than the glass
+       window; on a see-through window it made the box darker than the glass
        around it, a well where a raised surface should be. */
     html:not([data-octant-reduced-transparency="true"])
       .shell--material-translucent
@@ -6695,7 +6796,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 .runtree {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -6808,7 +6909,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   align-items: center;
   gap: var(--oct-space-1);
   padding: 2px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-warn-soft);
   color: var(--oct-warn-fg);
   font-family: var(--oct-font-mono);
@@ -6855,8 +6956,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   color: var(--oct-fg);
 }
 .receipt-head .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--oct-success-fg);
 }
 .receipt-list {
@@ -6883,7 +6984,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    are indented under it, so the fan-out is visible as a shape. */
 .linkmap {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -6970,7 +7071,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   margin-inline: auto;
   padding: var(--oct-space-6);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   text-align: center;
 }
@@ -7021,7 +7122,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    session connects and the real dimensions arrive. */
 .screen {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7129,7 +7230,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 .envpanel {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7204,8 +7305,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   gap: var(--oct-space-1);
 }
 .gitgroup .gitgroup-item .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .gitgroup .is-dirty {
   color: var(--oct-warn-fg);
@@ -7351,7 +7452,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    since "allow" alone does not say for how long. */
 .approval {
   border: 1px solid var(--oct-warn-fg);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7675,8 +7776,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 }
 .subagent > .icon {
   grid-row: span 2;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   margin-top: 1px;
   color: var(--oct-accent-fg);
 }
@@ -7877,11 +7978,6 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 .setnav-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: normal;
-  color: var(--oct-meta);
   white-space: nowrap;
 }
 .setnav-section:first-child {
@@ -8139,8 +8235,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 /* Same state language as the Code home rows and sidebar threads: a small dot
    carries the tone, the word stays readable for anyone who cannot read the
-   colour. Ready gets a filled pill; the quieter states keep the dot only so a
-   wall of amber pills does not shout over the list. */
+   colour. Ready gets a filled chip; the quieter states keep the dot only so a
+   wall of amber chips does not shout over the list. */
 .prov-state {
   display: inline-flex;
   align-items: center;
@@ -8314,7 +8410,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 /* full weight, not meta: this is the fact the row is about */
 .mem-scope {
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg-soft);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -8816,7 +8912,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    conflating them is what broke this: as `.phone .glass` the rule carried two
    classes and quietly outranked every one-class component that also wears
    the material, so .bsheet lost its position, its top-only corners and its
-   open bottom edge, and .tabbar lost its pill. The sheet still looked right
+   open bottom edge, and .tabbar lost its chip. The sheet still looked right
    in the styleguide purely because the markup happened to nest it in a flex
    column — which is exactly the kind of accident that survives review.
    At zero specificity the material sets the defaults and any component
@@ -8877,7 +8973,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   flex: 0 0 auto;
   margin: 0 var(--oct-space-3) var(--oct-space-3);
   padding: var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
 }
 .tabitem {
   display: flex;
@@ -8888,7 +8984,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   min-height: var(--oct-touch-min);
   padding: 4px;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
@@ -8936,8 +9032,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   color: inherit;
 }
 .statuscard > .icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: var(--oct-fg);
 }
 .statuscard-label {
@@ -9169,7 +9265,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   align-items: center;
   gap: var(--oct-space-1);
   padding: var(--oct-space-1) var(--oct-space-3);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-fg);
@@ -9233,7 +9329,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   min-height: 32px;
   padding: 0 var(--oct-space-3);
   border: 1px solid var(--oct-glass-stroke);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-glass-thin);
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
@@ -9247,7 +9343,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   height: var(--oct-touch-min);
   flex: 0 0 auto;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-accent);
   color: var(--oct-accent-on);
 }
@@ -9478,7 +9574,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   width: 100%;
   min-height: var(--oct-touch-min);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-display);

@@ -29,7 +29,7 @@ export function ComboboxInput({
   return (
     <ComboboxPrimitive.Input
       className={cn(
-        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-default disabled:opacity-50",
+        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)",
         className,
       )}
       data-slot="combobox-input"
@@ -45,7 +45,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4",
+        "mr-1 inline-flex size-[round(1.75rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-trigger"
@@ -60,7 +60,10 @@ export function ComboboxPositioner({
 }: ComponentProps<typeof ComboboxPrimitive.Positioner>) {
   return (
     <ComboboxPrimitive.Positioner
-      className={cn("z-50 w-[var(--anchor-width)] outline-none window-no-drag", className)}
+      className={cn(
+        "z-[var(--oct-z-popup)] w-[var(--anchor-width)] outline-none window-no-drag",
+        className,
+      )}
       data-slot="combobox-positioner"
       {...props}
     />
@@ -121,7 +124,7 @@ export function ComboboxItemIndicator({
   return (
     <ComboboxPrimitive.ItemIndicator
       className={cn(
-        "ml-auto inline-flex size-4 shrink-0 items-center justify-center text-foreground [&_svg]:size-4",
+        "ml-auto inline-flex size-(--oct-icon-md) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-item-indicator"

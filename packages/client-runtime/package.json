@@ -88,9 +88,11 @@
     "./provider-usage-history-client": "./src/providerUsageHistoryClient.ts",
     "./terminal-session-client": "./src/terminalSessionClient.ts",
     "./spend-ceiling-client": "./src/spendCeilingClient.ts",
+    "./agent-grant-client": "./src/agentGrantClient.ts",
     "./person-memory-client": "./src/personMemoryClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",
     "./archived-worktrees-client": "./src/archivedWorktreesClient.ts",
+    "./disk-cleanup-client": "./src/diskCleanupClient.ts",
     "./provider-federation": "./src/providerFederation.ts",
     "./shell-client": "./src/shellClient.ts",
     "./remote-pairing-client": "./src/remotePairingClient.ts",
@@ -113,6 +115,8 @@
     "./conversation-input-client": "./src/conversationInputClient.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

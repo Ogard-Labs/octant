@@ -185,7 +185,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   width: 100%;
   margin: 0;
   padding-inline: 8px;
-  font-size: var(--octant-ui-font-size);
 }
 
 .settings-view__workspace {
@@ -263,10 +262,10 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* Plain text links to the page's own sections. Providers & Models has ten:
-   as pills they took two tall rows before the first control, and a row that
+   as chips they took two tall rows before the first control, and a row that
    scrolled sideways with no scrollbar cut "Model endpoints" off at the edge
    with no sign more followed. Short text links wrap onto a second line
-   instead, which costs one text line, not a row of pills. */
+   instead, which costs one text line, not a row of chips. */
 .settings-view__outline ul {
   display: flex;
   flex-wrap: wrap;
@@ -330,9 +329,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.2;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: var(--oct-leading-snug);
 }
 
 /* flex: none, because the sidebar is a scrolling flex column: when the nav
@@ -529,11 +528,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-section {
   margin-top: 0;
   padding: 4px 8px;
-  color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
-  letter-spacing: normal;
   text-transform: none;
 }
 
@@ -551,11 +546,17 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item,
 .settings-view__back {
   min-height: 28px;
-  font-family: var(--oct-font-display);
-  font-size: var(--octant-ui-font-size);
-  font-weight: var(--oct-weight-medium);
-  line-height: 1.2;
   justify-content: flex-start;
+}
+
+/* A page's name is a navigation name (`oct-nav-name`) in the muted ink until
+   it is hovered, focused or open. */
+:is(.settings-navigation .setnav-item, .settings-view__back):not(
+  :hover,
+  :focus-visible,
+  [aria-current="page"]
+) {
+  color: var(--oct-muted);
 }
 
 .settings-navigation .setnav-item > .icon,
@@ -1392,7 +1393,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: 1.3;
+  line-height: var(--oct-leading-label);
 }
 
 .setrow-hint {
@@ -1400,7 +1401,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  line-height: 1.4;
+  line-height: var(--oct-leading-detail);
 }
 
 /* The app's own primitives reach the same column. A switch is not a value
@@ -1767,7 +1768,14 @@ textarea.settings-view__text-input {
 .settings-view .profile-editor__hint,
 .settings-view .profile-editor__notice {
   font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  line-height: var(--oct-leading-meta);
+}
+
+/* A hint is Meta: regular weight in the muted ink, full strength. */
+.settings-view .profile-editor__hint {
+  color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
+  opacity: 1;
 }
 
 .settings-theme-editor .setgroup > .settings-view__field:first-child {
@@ -2847,7 +2855,7 @@ html[data-octant-increased-contrast="true"]
 
 /* Provider card details moved from styles.css. */
 .provider-card {
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   transition:
     border-color var(--oct-motion-fast) ease,
     background-color var(--oct-motion-fast) ease;
@@ -3114,7 +3122,7 @@ html[data-octant-increased-contrast="true"]
      colours drop every shadow and would leave the card with no edge. */
   border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-xs);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 html[data-octant-increased-contrast="true"]
@@ -3741,6 +3749,13 @@ html[data-octant-increased-contrast="true"]
 .protected-files__paths {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.host-worktrees__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  justify-content: flex-end;
 }
 
 .archived-worktrees__mono {

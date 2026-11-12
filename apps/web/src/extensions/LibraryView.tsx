@@ -22,6 +22,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -48,6 +49,7 @@ import {
   type LibraryKind,
   type LibrarySteps,
 } from "./libraryModel";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 const KINDS: ReadonlyArray<LibraryKind> = ["connector", "plugin", "skill", "mcp-server"];
 const STATE_FILTERS = [
@@ -294,7 +296,7 @@ export function LibraryView(props: LibraryViewProps) {
     >
       <div className="library">
         <div className="library__search">
-          <Search aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+          <Search aria-hidden="true" className="icon" size={16} />
           <OctantInput
             aria-label="Search the library"
             className="library__search-input"
@@ -401,7 +403,7 @@ export function LibraryView(props: LibraryViewProps) {
               ) : undefined
             }
             className="library__empty"
-            icon={<Search aria-hidden="true" size={20} strokeWidth={1.5} />}
+            icon={<Search aria-hidden="true" size={20} />}
             message={
               filtering
                 ? "Try another word, or clear the filters to see everything."
@@ -448,41 +450,43 @@ export function LibraryView(props: LibraryViewProps) {
           </>
         )}
       </div>
-      {open === undefined ? null : (
-        <LibraryDetail
-          busy={
-            props.busyExtensionId !== undefined &&
-            props.busyExtensionId === open.packageRef?.extensionId
-          }
-          canConnect={canConnect}
-          connecting={connectingId !== undefined}
-          connectClient={props.connectClient}
-          connectFailure={failure}
-          disabled={props.disabled}
-          fresh={open.connectorId === undefined ? undefined : fresh[open.connectorId]}
-          inspection={props.inspection?.itemId === open.id ? props.inspection : undefined}
-          installing={props.installing === true}
-          item={open}
-          localHost={props.localHost === true}
-          marketplaceFetchesEnabled={props.marketplaceFetchesEnabled}
-          onClose={() => {
-            setOpenId(undefined);
-            setFailure(undefined);
-            // A sign-in starts on its own only right after the person pressed Connect.
-            setFresh({});
-          }}
-          onConnect={(secret) => connect(open, secret)}
-          onInspect={() => props.onInspect?.(open)}
-          onInstall={() => props.onInstall?.(open)}
-          onOpen={(target) => {
-            setOpenId(undefined);
-            props.onOpen(target, open);
-          }}
-          onPluginDesired={(desired) => props.onPluginDesired(open, desired)}
-          onTrust={(trusted) => props.onTrust(open, trusted)}
-          restoreFocus={opener}
-        />
-      )}
+      <OctantDialogPresence>
+        {open === undefined ? null : (
+          <LibraryDetail
+            busy={
+              props.busyExtensionId !== undefined &&
+              props.busyExtensionId === open.packageRef?.extensionId
+            }
+            canConnect={canConnect}
+            connecting={connectingId !== undefined}
+            connectClient={props.connectClient}
+            connectFailure={failure}
+            disabled={props.disabled}
+            fresh={open.connectorId === undefined ? undefined : fresh[open.connectorId]}
+            inspection={props.inspection?.itemId === open.id ? props.inspection : undefined}
+            installing={props.installing === true}
+            item={open}
+            localHost={props.localHost === true}
+            marketplaceFetchesEnabled={props.marketplaceFetchesEnabled}
+            onClose={() => {
+              setOpenId(undefined);
+              setFailure(undefined);
+              // A sign-in starts on its own only right after the person pressed Connect.
+              setFresh({});
+            }}
+            onConnect={(secret) => connect(open, secret)}
+            onInspect={() => props.onInspect?.(open)}
+            onInstall={() => props.onInstall?.(open)}
+            onOpen={(target) => {
+              setOpenId(undefined);
+              props.onOpen(target, open);
+            }}
+            onPluginDesired={(desired) => props.onPluginDesired(open, desired)}
+            onTrust={(trusted) => props.onTrust(open, trusted)}
+            restoreFocus={opener}
+          />
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }
@@ -596,7 +600,7 @@ function LibraryRow(props: LibraryRowProps) {
           <ConnectionStatus connection={{ state: item.connection.state }} />
         ) : item.state === "on" ? (
           <span className="library__card-on">
-            <Check aria-hidden="true" size={12} strokeWidth={2} />
+            <Check aria-hidden="true" size={12} />
             On
           </span>
         ) : (
@@ -656,11 +660,11 @@ export function LibraryMark(props: { readonly item: LibraryItem; readonly large?
       </span>
     );
   } else if (item.kind === "skill") {
-    mark = <BookOpen aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <BookOpen aria-hidden="true" size={size} />;
   } else if (item.kind === "mcp-server") {
-    mark = <Server aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <Server aria-hidden="true" size={size} />;
   } else {
-    mark = <Puzzle aria-hidden="true" size={size} strokeWidth={1.5} />;
+    mark = <Puzzle aria-hidden="true" size={size} />;
   }
   return (
     <span
@@ -707,7 +711,11 @@ function StepLadder(props: { readonly steps: LibrarySteps }) {
       {STEP_LABEL.map(([key, label], index) => (
         <li className="library__step" data-step={props.steps[key]} key={key}>
           <span aria-hidden="true" className="library__step-mark">
-            {props.steps[key] === "done" ? <Check size={12} strokeWidth={2} /> : index + 1}
+            {props.steps[key] === "done" ? (
+              <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+            ) : (
+              index + 1
+            )}
           </span>
           <span>{label}</span>
           <span className="sr-only">
@@ -790,7 +798,7 @@ function LibraryDetail(props: LibraryDetailProps) {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={16} strokeWidth={1.5} />
+          <X aria-hidden="true" size={16} />
         </OctantButton>
       </header>
       {item.summary === undefined ? null : (

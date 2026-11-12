@@ -51,6 +51,9 @@ jobs:
       # recipe change is most likely to break, so they belong on the PR and
       # not only in a local `bun run verify`.
       - run: bun run ui:check
+      # The portable tokens are generated from the stylesheets; a stylesheet
+      # edit that leaves them stale fails here with the regenerate command.
+      - run: bun run tokens:check
       - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run style:check
       - run: bun run decisions:check

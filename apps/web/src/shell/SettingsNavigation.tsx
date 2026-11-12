@@ -139,7 +139,7 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
         if (groupedSections.length === 0) return null;
         return (
           <div className="settings-navigation__group" key={group}>
-            <p className="setnav-section">{group}</p>
+            <p className="oct-nav-group setnav-section">{group}</p>
             <ul>
               {groupedSections.map((section) => {
                 const isActive = section.id === activeSection;
@@ -148,12 +148,12 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
                   <li key={section.id}>
                     <OctantButton
                       aria-current={isActive ? "page" : undefined}
-                      className="setnav-item window-no-drag justify-start rounded-lg"
+                      className="oct-nav-name setnav-item window-no-drag justify-start rounded-lg"
                       onClick={() => onSelect(section.id)}
                       type="button"
                       variant="bare"
                     >
-                      <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                      <Icon aria-hidden="true" className="icon" size={16} />
                       <span>{section.label}</span>
                     </OctantButton>
                   </li>

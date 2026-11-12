@@ -118,7 +118,7 @@ import {
   useServerCodeProjects,
 } from "../projects/serverProjectEntries";
 import { WorkKindSwitch } from "./WorkKindSwitch";
-import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   createTerminalSessionClient,
   type TerminalSessionClient,
@@ -768,35 +768,38 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         )}
       </>
     ) : null;
-  const addFolderDialog =
-    addFolderOpen && props.onCreateProject !== undefined ? (
-      <ProjectCreateDialog
-        {...(props.folderBrowseClient === undefined
-          ? {}
-          : { folderBrowseClient: props.folderBrowseClient })}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-        {...(props.mode === "code" &&
-        props.githubClient !== undefined &&
-        props.githubCloneClient !== undefined &&
-        props.githubPluginEnabled !== false
-          ? {
-              github: {
-                client: props.githubClient,
-                cloneClient: props.githubCloneClient,
-                hostName: githubHostName,
-              },
-            }
-          : {})}
-        mode={props.mode}
-        onClose={() => setAddFolderOpen(false)}
-        onCreate={props.onCreateProject}
-        onCreated={(projectId, _mode, name) => {
-          selectProject(projectId);
-          setSelectedProjectLabel(name);
-        }}
-      />
-    ) : null;
+  const addFolderDialog = (
+    <OctantDialogPresence>
+      {addFolderOpen && props.onCreateProject !== undefined ? (
+        <ProjectCreateDialog
+          {...(props.folderBrowseClient === undefined
+            ? {}
+            : { folderBrowseClient: props.folderBrowseClient })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+          {...(props.mode === "code" &&
+          props.githubClient !== undefined &&
+          props.githubCloneClient !== undefined &&
+          props.githubPluginEnabled !== false
+            ? {
+                github: {
+                  client: props.githubClient,
+                  cloneClient: props.githubCloneClient,
+                  hostName: githubHostName,
+                },
+              }
+            : {})}
+          mode={props.mode}
+          onClose={() => setAddFolderOpen(false)}
+          onCreate={props.onCreateProject}
+          onCreated={(projectId, _mode, name) => {
+            selectProject(projectId);
+            setSelectedProjectLabel(name);
+          }}
+        />
+      ) : null}
+    </OctantDialogPresence>
+  );
 
   if (props.mode === "code") {
     const githubHomeClient =
@@ -1245,6 +1248,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <ThreadComposer
+            notices={
+              props.errorMessage === undefined
+                ? []
+                : [{ key: "error", tone: "danger", role: "alert", text: props.errorMessage }]
+            }
             planUsage={{
               providerInstanceId:
                 props.selectedProviderInstanceId === undefined
@@ -1388,11 +1396,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               },
             }}
           />
-          {props.errorMessage === undefined ? null : (
-            <OctantAlert className="draft-thread__error" tone="danger">
-              {props.errorMessage}
-            </OctantAlert>
-          )}
           <p className="draft-thread__hint">
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>
@@ -1588,7 +1591,7 @@ function CreateFromIssueControl(props: {
 function CoordinatorDraftHeading(props: { readonly onCancel: () => void }) {
   return (
     <>
-      <Network aria-hidden="true" className="welcome__mark" size={24} strokeWidth={1.6} />
+      <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
         Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
@@ -1630,19 +1633,19 @@ function DraftContextStrip(props: {
       />
       {props.mode !== "chat" && props.projectName !== undefined ? (
         <span className="draft-thread__context-item" title={props.projectRoot}>
-          <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+          <FolderOpen aria-hidden="true" size={12} />
           <span>{props.projectName}</span>
         </span>
       ) : null}
       {props.mode === "code" && props.branchName !== undefined ? (
         <span className="draft-thread__context-item">
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
           <span>{props.branchName}</span>
         </span>
       ) : null}
       {props.approvalLabel !== undefined ? (
         <span className="draft-thread__context-item">
-          <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+          <ShieldCheck aria-hidden="true" size={12} />
           <span>{props.approvalLabel}</span>
         </span>
       ) : null}

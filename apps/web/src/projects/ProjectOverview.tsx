@@ -43,6 +43,7 @@ import {
 } from "./ProjectTile";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface ProjectOverviewProps {
   readonly allowRootRelink?: boolean;
@@ -310,7 +311,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             </p>
             {props.onNewThread === undefined || archived || connectionStale ? null : (
               <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
-                <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+                <SquarePen aria-hidden="true" size={14} />
                 {props.project.type === "chat" ? "New chat" : "New thread"}
               </OctantButton>
             )}
@@ -378,20 +379,22 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
           </section>
         ) : null}
-        {picking &&
-        props.folderBrowseClient !== undefined &&
-        props.hostId !== undefined &&
-        props.project.type !== "chat" ? (
-          <FolderPicker
-            client={props.folderBrowseClient}
-            hostId={props.hostId}
-            mode={boundMode}
-            onCancel={() => setPicking(false)}
-            onSelect={(receiptId) => {
-              void applyReceipt(receiptId);
-            }}
-          />
-        ) : null}
+        <OctantDialogPresence>
+          {picking &&
+          props.folderBrowseClient !== undefined &&
+          props.hostId !== undefined &&
+          props.project.type !== "chat" ? (
+            <FolderPicker
+              client={props.folderBrowseClient}
+              hostId={props.hostId}
+              mode={boundMode}
+              onCancel={() => setPicking(false)}
+              onSelect={(receiptId) => {
+                void applyReceipt(receiptId);
+              }}
+            />
+          ) : null}
+        </OctantDialogPresence>
         {/*
         Chat and Code Projects already get a threads list from their own
         overview: Chat's can also create a thread and expand the full list in

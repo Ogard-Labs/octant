@@ -1,3 +1,4 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -9,7 +10,7 @@ import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
-import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -68,6 +69,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -101,6 +103,11 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments } from "./useCodeAttachments";
+import {
+  threadImageOfferKey,
+  useThreadImageOffers,
+  type ThreadImageVerdict,
+} from "../composer/threadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
@@ -368,6 +375,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       .catch(() => undefined);
   }, [codeClient, draft, props.threadId]);
   const compacting = useComposerCompacting();
+  // A Code turn keeps the operation id its sender chose, which is how a turn
+  // an outside agent sent is named for that agent. A fork's inherited turns,
+  // however many forks back, are named under the thread that ran them.
+  const agentTurnSender = useAgentTurnSenders();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
@@ -690,6 +701,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       else void attachments.attach(files);
     },
   });
+  // A picture marked up in this thread's Browser arrives here as a file and
+  // meets the same checks as one dropped on the composer.
+  useThreadImageOffers(
+    threadImageOfferKey("code", String(props.threadId)),
+    async (file, arrival): Promise<ThreadImageVerdict> => {
+      let reason: string | undefined;
+      if (props.attachmentClient === undefined) {
+        reason = "Image attachments are unavailable on this host.";
+        attachments.refuse(reason);
+      } else if (boundModelReadsImages(providerGroups, thread) === false) {
+        reason = "Choose a vision model to attach images.";
+        attachments.refuse(reason);
+      } else {
+        reason = await attachments.attach([file]);
+      }
+      if (reason !== undefined) return { status: "refused", reason };
+      if (arrival === "live") textareaRef.current?.focus();
+      return { status: "accepted" };
+    },
+  );
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1478,6 +1509,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
+  const sideChatNotice = sideChatDraftNotice({
+    count: props.controller.draftSideChatReturns?.length ?? 0,
+    invalid: props.controller.draftSideChatReturnsInvalid === true,
+    onClear: () => {
+      setDraft("");
+      props.controller.setPendingDraft?.("");
+    },
+  });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "code", threadId: String(props.threadId) }}>
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1500,7 +1540,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {props.controller.turnStatus === "waiting" ? (
           props.controller.turnUsageLimit === undefined ? (
             <div className="code-thread-workspace__waiting thread-column" role="status">
-              <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+              <CirclePause aria-hidden="true" size={14} />
               <span>
                 {props.controller.providerRequests.length === 0 &&
                 props.controller.turnError !== undefined &&
@@ -1768,6 +1808,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 // host's own delivery wording is what says this is a subagent's
                 // result and not something the person typed.
                 const delivered = message.role === "user" && isChildResultDelivery(message.text);
+                const sentBy =
+                  message.role !== "user" || delivered || message.operationId === undefined
+                    ? undefined
+                    : agentTurnSender(
+                        String(message.sourceThreadId ?? props.threadId),
+                        String(message.operationId),
+                      );
                 // A follow-up's turn is marked the same way, by the host's heading.
                 const followUpPrompt =
                   message.role === "user"
@@ -1849,7 +1896,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           : followUpPrompt !== undefined
                             ? "Scheduled follow-up"
                             : message.role === "user"
-                              ? "Your message"
+                              ? sentBy === undefined
+                                ? "Your message"
+                                : `Message from ${sentBy}`
                               : "Assistant message"
                       }
                       className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
@@ -1939,6 +1988,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             {message.at === undefined ? null : (
                               <TurnTime at={message.at} copyValue={message.text} />
                             )}
+                            <AgentTurnSender agentName={sentBy} />
                           </>
                         ) : (
                           <>
@@ -2178,18 +2228,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </SelectionThreadScope>
         )}
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={rewind?.files ?? { kind: "loading" }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={(scope) => void runRewind(scope)}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-          {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={rewind?.files ?? { kind: "loading" }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={(scope) => void runRewind(scope)}
+              open
+              removedTurns={rewind?.removedTurns}
+              {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined || view === undefined ? null : (
           <div className="thread-column">
@@ -2307,7 +2361,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
           turnActive={busy}
         />
-        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2449,7 +2502,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 }
               />
               <TrackerReferenceComposerHints draft={draft} />
-              {attachments.staged.length === 0 && attachments.message === undefined ? null : (
+              {attachments.staged.length === 0 ? null : (
                 <div className="code-thread-workspace__attachments" aria-label="Attached images">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
@@ -2472,59 +2525,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         type="button"
                         variant="bare"
                       >
-                        <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                        <X aria-hidden="true" size={12} />
                       </OctantButton>
                     </span>
                   ))}
-                  {attachments.message === undefined ? null : (
-                    <span className="code-thread-workspace__hint" role="status">
-                      {attachments.message}
-                    </span>
-                  )}
                 </div>
-              )}
-              {props.controller.draftReviewFindingReferencesInvalid ||
-              (props.controller.draftReviewFindingReferences?.length ?? 0) > 0 ? (
-                <OctantAlert
-                  tone={
-                    props.controller.draftReviewFindingReferencesInvalid ? "warning" : "neutral"
-                  }
-                >
-                  {props.controller.draftReviewFindingReferencesInvalid
-                    ? "A saved review reference is unavailable. Clear the draft and select the findings again in Review."
-                    : `This editable draft includes ${props.controller.draftReviewFindingReferences?.length ?? 0} local review finding references. Nothing is sent or approved until you send it.`}
-                  {props.controller.draftReviewFindingReferencesInvalid ? (
-                    <OctantButton
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setDraft("");
-                        props.controller.setPendingDraft?.("");
-                      }}
-                    >
-                      Clear draft
-                    </OctantButton>
-                  ) : null}
-                </OctantAlert>
-              ) : null}
-              <SideChatDraftNotice
-                count={props.controller.draftSideChatReturns?.length ?? 0}
-                invalid={props.controller.draftSideChatReturnsInvalid === true}
-                onClear={() => {
-                  setDraft("");
-                  props.controller.setPendingDraft?.("");
-                }}
-              />
-              {props.controller.draftStagedDropped === true ? (
-                <p className="code-thread-workspace__hint" role="status">
-                  {COMPOSER_STAGED_DROPPED_NOTE}
-                </p>
-              ) : null}
-              {props.controller.draftPersistError === undefined ? null : (
-                <p className="code-thread-workspace__hint" role="status">
-                  {props.controller.draftPersistError}
-                </p>
               )}
             </>
           }
@@ -2671,13 +2676,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {plan == null || plan.status === "withdrawn" ? (
                   <ThreadPlanProposal key={String(thread.id)} />
                 ) : null}
-                {confirmArtifacts ? (
-                  <ThreadArtifactsConfirm
-                    onCancel={() => setConfirmArtifacts(false)}
-                    onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-                    pending={deliveryChanging}
-                  />
-                ) : null}
+                <OctantDialogPresence>
+                  {confirmArtifacts ? (
+                    <ThreadArtifactsConfirm
+                      onCancel={() => setConfirmArtifacts(false)}
+                      onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+                      pending={deliveryChanging}
+                    />
+                  ) : null}
+                </OctantDialogPresence>
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}
@@ -2758,84 +2765,143 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               },
             },
           }}
-          footer={
-            <div aria-live="polite" className="composer-status">
-              {providerChanging ? (
-                <span className="composer-status__hint code-thread-workspace__hint">
-                  Checking the selected provider…
-                </span>
-              ) : null}
-              {pendingSwitchNotice === undefined || providerChanging ? null : (
-                <span
-                  className="composer-status__hint code-thread-workspace__hint code-thread-workspace__switch-notice"
-                  role="status"
-                >
-                  {pendingSwitchNotice}
-                </span>
-              )}
-              {props.controller.accessNotice === undefined ? null : (
-                <span
-                  className="code-thread-workspace__hint"
-                  role="status"
-                  title={props.controller.accessNotice}
-                >
-                  {props.controller.accessNotice}
-                </span>
-              )}
-              {/*
-              A restore point outlives the message that announced it, so the
-              offer stands on the undo point alone. Returning to the thread
-              after a tab switch finds the way back still here, described
-              plainly rather than as the sentence the last restore printed.
-            */}
-              {restoreMessage === undefined && restoreUndo === undefined ? null : (
-                <span className="code-thread-workspace__hint" role="status">
-                  {restoreMessage ?? "Files were restored to an earlier point."}
-                  {restoreUndo === undefined ? null : " "}
-                  {restoreUndo === undefined ? null : (
-                    <OctantButton
-                      disabled={restoring}
-                      onClick={() => {
-                        void undoRestore();
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Undo restore
-                    </OctantButton>
-                  )}
-                </span>
-              )}
-              {forkMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
-                  {forkMessage}
-                </span>
-              )}
-              {mergeMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="status" title={mergeMessage}>
-                  {mergeMessage}
-                </span>
-              )}
-              {imageSaveMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span
-                  className="code-thread-workspace__hint"
-                  role="status"
-                  title={imageSaveMessage}
-                >
-                  {imageSaveMessage}
-                </span>
-              )}
-              {sendNotice === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
-                  {sendNotice}
-                </span>
-              )}
-            </div>
+          progress={
+            // A provider check passes by itself, so it is the quiet line.
+            providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
+          notices={[
+            ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(attachments.message === undefined
+              ? []
+              : [{ key: "attachment", tone: "warning" as const, text: attachments.message }]),
+            ...(props.controller.draftReviewFindingReferencesInvalid ||
+            (props.controller.draftReviewFindingReferences?.length ?? 0) > 0
+              ? [
+                  {
+                    key: "review-findings",
+                    tone: props.controller.draftReviewFindingReferencesInvalid
+                      ? ("warning" as const)
+                      : ("neutral" as const),
+                    text: props.controller.draftReviewFindingReferencesInvalid
+                      ? "A saved review reference is unavailable. Clear the draft and select the findings again in Review."
+                      : `This editable draft includes ${props.controller.draftReviewFindingReferences?.length ?? 0} local review finding references. Nothing is sent or approved until you send it.`,
+                    ...(props.controller.draftReviewFindingReferencesInvalid
+                      ? {
+                          action: (
+                            <OctantButton
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setDraft("");
+                                props.controller.setPendingDraft?.("");
+                              }}
+                            >
+                              Clear draft
+                            </OctantButton>
+                          ),
+                        }
+                      : {}),
+                  },
+                ]
+              : []),
+            ...(sideChatNotice === undefined ? [] : [sideChatNotice]),
+            ...(props.controller.draftStagedDropped === true
+              ? [
+                  {
+                    key: "staged-dropped",
+                    tone: "neutral" as const,
+                    text: COMPOSER_STAGED_DROPPED_NOTE,
+                  },
+                ]
+              : []),
+            ...(props.controller.draftPersistError === undefined
+              ? []
+              : [
+                  {
+                    key: "persist-error",
+                    tone: "warning" as const,
+                    text: props.controller.draftPersistError,
+                  },
+                ]),
+            ...(props.controller.accessNotice === undefined
+              ? []
+              : [
+                  {
+                    key: "access",
+                    tone: "neutral" as const,
+                    text: props.controller.accessNotice,
+                  },
+                ]),
+            // What a picked provider will not carry over stays true until the
+            // next message starts the new session, so it is a card that wraps:
+            // as a one-line passing message it was cut in a narrow pane before
+            // the part about hidden reasoning.
+            ...(pendingSwitchNotice === undefined || providerChanging
+              ? []
+              : [
+                  {
+                    key: "pending-switch",
+                    tone: "neutral" as const,
+                    text: pendingSwitchNotice,
+                  },
+                ]),
+            // A restore point outlives the message that announced it, so the
+            // offer stands on the undo point alone. Returning to the thread
+            // after a tab switch finds the way back still here, described
+            // plainly rather than as the sentence the last restore printed.
+            ...(restoreMessage === undefined && restoreUndo === undefined
+              ? []
+              : [
+                  {
+                    key: "restore",
+                    tone: "neutral" as const,
+                    text: restoreMessage ?? "Files were restored to an earlier point.",
+                    ...(restoreUndo === undefined
+                      ? {}
+                      : {
+                          action: (
+                            <OctantButton
+                              disabled={restoring}
+                              onClick={() => {
+                                void undoRestore();
+                              }}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              Undo restore
+                            </OctantButton>
+                          ),
+                        }),
+                  },
+                ]),
+            ...(forkMessage === undefined
+              ? []
+              : [
+                  {
+                    key: "fork",
+                    tone: "warning" as const,
+                    role: "alert" as const,
+                    text: forkMessage,
+                  },
+                ]),
+            ...(mergeMessage === undefined
+              ? []
+              : [{ key: "merge", tone: "neutral" as const, text: mergeMessage }]),
+            ...(imageSaveMessage === undefined
+              ? []
+              : [{ key: "image-save", tone: "neutral" as const, text: imageSaveMessage }]),
+            ...(sendNotice === undefined
+              ? []
+              : [
+                  {
+                    key: "send",
+                    tone: "danger" as const,
+                    role: "alert" as const,
+                    text: sendNotice,
+                  },
+                ]),
+          ]}
         />
       </section>
     </ThreadReplyDetailScope>

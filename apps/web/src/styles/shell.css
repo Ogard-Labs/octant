@@ -23,13 +23,12 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  /* The window is a frame and one sheet. The rail and the title band are the
-     frame, painted here once; the sidebar, the stage, and the dock sit inside
-     it as one sheet (see "The frame and the sheet" below). When the host
-     resolved glass, both are the tint over the window's native material, so
-     the frost reaches the whole window and not the sidebar alone: with the
-     old floating cards the glass showed only in a sidebar strip, and an
-     opaque card covered everything a person worked in. */
+  /* The window is a frame and a grid of panes. The rail, the title band, and
+     the sidebar's area are the frame (the ground), painted here once; the
+     stage, the dock's tiles, and the bottom panel are panes on it (see "The
+     frame and its panes" below). When the host resolved glass, the ground and
+     the panes are the tint over the window's native material, so the frost
+     reaches the whole window and not the sidebar alone. */
   background: var(--octant-window-surface);
   border: 0;
   border-radius: 0;
@@ -40,9 +39,28 @@
    included, so Settings wears the same frame and sheet as the window it
    replaces rather than a material of its own. */
 .shell {
-  --octant-window-surface: var(--octant-sidebar-opaque);
+  /* The ground panels sit on. In light the sidebar colour is a hair off the
+     panels' white, and a panel needs a ground it can be lighter than. */
+  --octant-ground-opaque: var(--octant-sidebar-opaque);
+  --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
+  /* Level 1, a pane: the fill is the sheet colour a step toward the ink, so
+     a pane is lighter than the ground even where the theme's workspace and
+     sidebar are one colour (an OLED page). */
+  --octant-panel-opaque: color-mix(
+    in srgb,
+    var(--octant-sheet-surface) var(--octant-panel-keep, 98%),
+    var(--octant-text-primary)
+  );
+  --octant-panel-surface: var(--octant-panel-opaque);
+  /* Every pane (the thread, a tool tile, the bottom panel, the dock's
+     overview) is the pane fill, so the glass reads as one material. A narrow
+     window's tile panel keeps the edge band over it. */
+  --octant-pane-fill:
+    var(--octant-panel-sheen),
+    linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
+  --octant-panel-fill: var(--octant-panel-band), var(--octant-pane-fill);
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -50,10 +68,25 @@
    section, and a board card each sat as a near-black slab on the grey glass
    of an OLED preset. Menus, popovers, and dialogs render outside the shell,
    so they keep the opaque floating surface. */
+html[data-octant-theme-mode="light"] .shell {
+  --octant-ground-opaque: color-mix(
+    in srgb,
+    var(--octant-sidebar-opaque) 93%,
+    var(--octant-text-primary)
+  );
+  --octant-panel-keep: 99.5%;
+}
+
 .shell.shell--material-translucent {
   --octant-window-surface: var(--octant-sidebar-translucent);
   --octant-sheet-surface: var(--octant-workspace-translucent);
   --octant-stage-surface: var(--octant-workspace-translucent);
+  /* Panels are a tint of the theme colour over the window's native material,
+     not a blur of it: the packaged window's material is not re-blurred by a
+     backdrop filter. Every panel (the thread, a tile, the bottom panel) is
+     this one tint, over a ground that is itself a tint, so text reads on a
+     saturated desktop. */
+  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
@@ -84,9 +117,10 @@
    levels; matching only the shell, it lost to them and left the glass on.
    The card colour inherits the theme's opaque one again. */
 html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
-  --octant-window-surface: var(--octant-sidebar-opaque);
+  --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
+  --octant-panel-surface: var(--octant-panel-opaque);
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -106,9 +140,10 @@ html[data-octant-increased-contrast="true"] .shell {
 
 @media (prefers-reduced-transparency: reduce) {
   :is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy]) {
-    --octant-window-surface: var(--octant-sidebar-opaque);
+    --octant-window-surface: var(--octant-ground-opaque);
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
+    --octant-panel-surface: var(--octant-panel-opaque);
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
@@ -193,6 +228,23 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
   right: max(
     var(--octant-window-chrome-reserved-width, 148px),
     min(var(--octant-context-sidebar-width, 0px), 50%)
+  );
+}
+
+/* With two columns of tools the dock may be wider than half, so the strip ends
+   where the dock's own width rule does, not at half the window. */
+html[data-octant-native-host="true"]
+  .shell--wide-context-open[data-dock-tile-columns="2"]
+  .shell-frame__native-drag-strip {
+  right: max(
+    var(--octant-window-chrome-reserved-width, 148px),
+    min(
+      var(--octant-context-sidebar-width, 0px),
+      calc(
+        100% - var(--octant-rendered-sidebar-width, 0px) -
+          var(--octant-tiled-primary-min, var(--octant-wide-primary-min))
+      )
+    )
   );
 }
 
@@ -337,17 +389,48 @@ html[data-octant-native-host="true"]
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  padding: 0 0 var(--oct-space-3);
+  overflow: hidden;
+}
+
+/* The destinations scroll above a foot (usage, Settings) that stays put. One
+   column scrolled as a whole, so in a short window the foot was out of reach
+   and the last destination was cut through its icon by the window's bottom
+   edge. Now the list ends in a short fade rather than a half icon, and the
+   foot is always on screen. The rail is as wide as the title band around 32px
+   faces: a classic scrollbar took 10px of that once the list overflowed and
+   clipped every face, so it scrolls without drawing one. */
+.sidebar-rail__scroll {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   padding: var(--oct-space-2) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
-  /* The rail is as wide as the title band around 32px faces. A classic scrollbar took 10px of that
-     once the rail overflowed and clipped every face, so the rail scrolls
-     without drawing one. */
   scrollbar-width: none;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    var(--oct-fg) var(--oct-space-2),
+    var(--oct-fg) calc(100% - var(--oct-space-3)),
+    transparent
+  );
 }
 
-.sidebar-rail__column::-webkit-scrollbar {
+.sidebar-rail__scroll::-webkit-scrollbar {
   display: none;
+}
+
+.sidebar-rail__foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .sidebar-rail__group {
@@ -455,11 +538,6 @@ html[data-octant-native-host="true"]
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
 }
 
-.sidebar-rail__spacer {
-  display: block;
-  flex: 1 1 auto;
-}
-
 .window-chrome__leading {
   display: flex;
   flex: 0 0 auto;
@@ -511,7 +589,7 @@ html[data-octant-native-host="true"]
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -550,6 +628,14 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
 }
 
+/* The Project actions are title-band controls: the rail button's 28px height
+   and control radius, as the window buttons beside them, not the recipe's
+   compact 24px step. */
+.project-action-buttons [data-slot="button"] {
+  height: var(--oct-rail-button-h);
+  border-radius: var(--oct-radius-sm);
+}
+
 .open-in-menu {
   display: inline-flex;
 }
@@ -561,7 +647,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-sm);
   /* Outlined, not filled. The fill named here was a token nothing defined, so
      this control has always drawn clear; the rule now says what is rendered. */
   background: transparent;
@@ -607,15 +693,72 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
 }
 
-.window-chrome__button:hover,
-.window-chrome__button[aria-expanded="true"] {
+.window-chrome__button:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border-color: transparent;
 }
 
-.window-chrome__button:active {
+/* "On" (a panel is open, a menu is open, a tool is on screen, the dock's
+   toggle is on) is one look: a control pressed into the band, a filled tile
+   with the sunk shadow. It was the pointed-at wash, so a toggle that was on
+   looked like one being hovered; and a tool button had a second, flat look of
+   its own. Pressing sinks it further. The dot under a tool marks one that is
+   open in the dock but not on screen. */
+.window-chrome__button[aria-expanded="true"],
+.window-chrome__button[aria-pressed="true"],
+.window-chrome__button[data-dock-tools-shown="true"] {
+  color: var(--oct-fg);
+  background: var(--octant-control);
+  border-color: transparent;
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
+.window-chrome__button[aria-expanded="true"]:hover,
+.window-chrome__button[aria-pressed="true"]:hover,
+.window-chrome__button[data-dock-tools-shown="true"]:hover {
+  background: var(--octant-control-hover);
+}
+
+.window-chrome__button:active,
+.window-chrome__button[aria-expanded="true"]:active,
+.window-chrome__button[aria-pressed="true"]:active,
+.window-chrome__button[data-dock-tools-shown="true"]:active {
   background: var(--octant-control-pressed);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
+.window-chrome__button[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
+.dock-tool-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tool-buttons__button {
+  position: relative;
+}
+
+/* The context-menu wrapper takes no box of its own, so the buttons keep their
+   spacing in the row. */
+.dock-tool-buttons__item {
+  display: contents;
+}
+
+.dock-tool-buttons__button[data-dock-open="true"]::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  content: "";
+  background: var(--oct-muted);
+  border-radius: 50%;
 }
 
 .window-chrome__overflow {
@@ -632,7 +775,7 @@ html[data-octant-native-host="true"]
   padding: var(--oct-space-1);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--oct-elev-raised);
 }
 
@@ -784,12 +927,17 @@ html[data-octant-native-host="true"]
   content: "";
 }
 
-/* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
-   which is what tells it apart from the pointer. */
-.shell-frame__sidebar-resize:hover::before,
-.shell-frame__sidebar-resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
+.shell-frame__sidebar-resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.shell-frame__sidebar-resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
 }
 
 /* Frost sidebar background art behind a mode-aware glass wash so preset and
@@ -827,6 +975,10 @@ html[data-octant-native-host="true"]
    the window controls' centreline across the sidebar's edge. */
 .sidebar__chrome {
   display: flex;
+  /* The content column scrolls, so a long thread list would otherwise shrink
+     the row to its min-height while a wrapped second row of actions
+     overflowed it and sat under the list. */
+  flex: 0 0 auto;
   min-height: var(--oct-title-rail-h);
   flex-wrap: wrap;
   align-items: center;
@@ -1273,7 +1425,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: 1.3;
+  line-height: var(--oct-leading-meta);
 }
 
 .sidebar-navigation__thread-project,
@@ -1285,7 +1437,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: 1.3;
+  line-height: var(--oct-leading-meta);
 }
 
 .sidebar-navigation__thread-project > svg,
@@ -1365,11 +1517,8 @@ html[data-octant-native-host="true"]
   opacity: 0.78;
 }
 
-/* Names in navigation are medium weight: the weight, not a bigger size, is
-   what separates a name from the facts under it. */
+/* A name in navigation (`oct-nav-name`); this rule only truncates it. */
 .sidebar-navigation__thread-title {
-  color: var(--octant-text-primary);
-  font-weight: var(--oct-weight-medium);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1426,7 +1575,6 @@ html[data-octant-native-host="true"]
   padding: 0 var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  opacity: 0.78;
 }
 
 .project-threads__more:hover,
@@ -1735,7 +1883,7 @@ html[data-octant-native-host="true"]
   padding: 2px var(--oct-space-2);
   color: var(--oct-muted);
   background: var(--oct-fg-soft);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   line-height: 1.4;
@@ -1949,85 +2097,58 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* The frame and the sheet. The rail and the title band are one L-shaped
-   frame in the window surface, with no line where they meet. Inside it the
-   sidebar, the stage, and the dock form one sheet: it starts under the title
-   band, stops 8px short of the window's right and bottom edges, rounds the
-   corners where the frame turns and along the bottom, and divides its parts
-   with hairlines. The sidebar's side is a step lighter than the stage so the
-   turn of the frame reads. (They used to be separate rounded cards floating
-   8px apart on a back, which the glass could not reach.) Each part paints its
-   piece of the sheet below the title band from a pseudo-element, so headers
-   and dock tabs keep sitting in the band. The ground lies over the stage's
-   paint and under everything else. A narrow window keeps its overlay
-   drawer. */
+/* The frame and its panes. The title band and the sidebar are the frame: the
+   window's ground, painted once, with the sidebar's rows sitting on it. The
+   thread stage, each tool tile in the dock, and the bottom panel are square
+   panes (level 1 of the material) that share their edges: no gap, no corner,
+   and one 1px line between two neighbours, drawn by whichever pane lies below
+   or to the right of the edge. The first row of panes starts under the title
+   band with that line along its top, and the panes reach the window's right
+   and bottom edges. Each pane paints below the title band from a
+   pseudo-element or its own box, so headers and dock tabs keep sitting in the
+   band. The ground lies over the stage's paint and under everything else. A
+   narrow window keeps its overlay drawer. */
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
      over it; the shell has to hold that level itself; without a ground the
      piece otherwise dropped below the shell's own background and the stage
-     showed the frame colour. */
+     showed the frame colour. The pane line is the one colour every divider
+     takes. It is a tenth of the ink, not the theme's border: on a near-black
+     preset the border is a shade off the page and the panes ran together,
+     and under Window glass it is lost on the tint. A share of the ink shows
+     on any fill, in dark, in light and on glass. */
   .shell.shell-frame {
-    --octant-sheet-inset: var(--oct-space-2);
+    --octant-pane-line: color-mix(in srgb, var(--octant-text-primary) 10%, transparent);
     isolation: isolate;
   }
 
-  /* The sheet piece below draws the sidebar's edge. The recipe's border ran
-     the window's full height one pixel outside it: a stronger line through
-     the title band and the bottom inset, and a double line beside the
-     piece's own hairline, so the edge stepped where the band's rule crossed
-     it. */
+  html[data-octant-increased-contrast="true"] .shell.shell-frame {
+    --octant-pane-line: var(--octant-border-strong);
+  }
+
+  /* The sidebar sits on the ground with no panel of its own. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
-    padding-bottom: var(--octant-sheet-inset);
+    padding-bottom: var(--oct-space-2);
     border-right: 0;
   }
 
-  .shell-frame > .sidebar::before {
-    --octant-sheet-lift: color-mix(in srgb, var(--oct-fg) 3%, transparent);
-    position: absolute;
-    z-index: -1;
-    inset: var(--oct-title-rail-h) 0 var(--octant-sheet-inset) 0;
-    border-radius: var(--oct-radius-md) 0 0 var(--oct-radius-md);
-    background-color: var(--octant-sheet-surface);
-    background-image: linear-gradient(var(--octant-sheet-lift), var(--octant-sheet-lift));
-    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
-    content: "";
-    pointer-events: none;
-  }
-
-  /* Under a ground that covers the sidebar too, the sidebar's piece of the
-     sheet lets a trace of it through. At 84% the ground's letters read as
-     text behind the Project and thread names; the list needs a quieter
-     surface than the stage. */
-  .shell--app-backdrop-sidebar.shell-frame > .sidebar::before {
-    background-color: color-mix(in srgb, var(--octant-sheet-surface) 94%, transparent);
-  }
-
-  /* Positioned for its sheet piece, but with no stacking context of its own:
-     the piece sits under the ground, which sits under the panes. */
   .shell-frame > .workspace-layer {
     position: relative;
-    padding: 0 var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
   }
 
+  /* The thread's pane. It is a grid item rather than an absolute piece, so it
+     follows the thread's column when the dock opens and stops where the bottom
+     panel starts, and sits at a negative level so the ground can lie over it. */
   .shell-frame > .workspace-layer::before {
-    position: absolute;
     z-index: -2;
-    inset: var(--oct-title-rail-h) var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
-    background: var(--octant-stage-surface);
-    box-shadow:
-      inset 0 1px 0 var(--octant-border-soft),
-      inset 0 -1px 0 var(--octant-border-soft),
-      inset -1px 0 0 var(--octant-border-soft);
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: var(--oct-title-rail-h);
+    background: var(--octant-pane-fill);
     content: "";
     pointer-events: none;
-  }
-
-  .shell--sidebar-collapsed.shell-frame > .workspace-layer::before {
-    border-radius: var(--oct-radius-md);
-    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
   }
 
   .shell-frame .right-utility-dock {
@@ -2035,45 +2156,123 @@ html[data-octant-native-host="true"]
     background: transparent;
   }
 
-  .shell-frame .right-utility-dock::before {
+  /* The dock's resize edge is the line between the thread and the first
+     tile: the dock has no column for it, and the handle straddles the line. */
+  .shell-frame .right-utility-dock {
+    grid-template-columns: 0 minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .shell-frame .right-utility-dock__resize {
+    z-index: 5;
+    width: 8px;
+    margin-left: -4px;
+  }
+
+  /* Tool tiles are panes of their own (see dock.css). Before any tool is
+     open the dock shows its overview cards, and those sit on one pane. */
+  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::before {
     position: absolute;
     z-index: -1;
-    inset: var(--oct-title-rail-h) 0 0 0;
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
-    background: var(--octant-sheet-surface);
-    box-shadow:
-      inset 0 1px 0 var(--octant-border-soft),
-      inset 0 -1px 0 var(--octant-border-soft),
-      inset -1px 0 0 var(--octant-border-soft);
+    inset: var(--oct-title-rail-h) 0 0;
+    background: var(--octant-pane-fill);
     content: "";
     pointer-events: none;
   }
 
-  /* The dock's surface inside its frame painted the opaque workspace colour
-     over the sheet piece, so the dock stayed solid under Glass. */
+  /* A pane's content paints over its own background, so the line is drawn
+     again above the content by a pseudo-element, on the pane's top and left
+     edges only: the edge it shares with the pane above or beside it is that
+     pane's bottom or right, which draws nothing. A border rather than a
+     shadow, so forced colours keeps it. */
+  .shell-frame > .workspace-layer::after {
+    z-index: 4;
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: var(--oct-title-rail-h);
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::after {
+    position: absolute;
+    z-index: 4;
+    inset: var(--oct-title-rail-h) 0 0;
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* With the sidebar collapsed and no rail beside it, the stage starts at the
+     window's own left edge, and an edge of the window is not a line between
+     two panes. */
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) > .workspace-layer::after,
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) .bottom-utility-panel::after {
+    border-left: 0;
+  }
+
   .shell-frame .right-utility-dock__surface {
     background: transparent;
   }
 
-  /* The sidebar's sheet piece already draws the edge between it and the
+  /* The thread's left line already draws the edge between the sidebar and the
      stage. The resize hairline ran the window's full height beside it, so it
      cut through the title band and doubled the edge; it now shows only while
-     grabbed, and only along the sheet. */
+     grabbed, and only along the panes. */
   .shell-frame__sidebar-resize::before {
     top: var(--oct-title-rail-h);
-    bottom: var(--octant-sheet-inset);
     background: transparent;
   }
 
-  /* The dock's hairline divides the sheet, not the title band. */
+  /* The edge between the thread and the dock is the handle: no line of its own
+     at rest (the first tile draws it), the strong border under the pointer and
+     the meta ink while grabbed, with no accent. */
   .shell-frame .right-utility-dock__resize::before {
     top: var(--oct-title-rail-h);
+    left: 4px;
+    background: transparent;
   }
 
+  .shell-frame .right-utility-dock__resize:hover::before {
+    background: var(--octant-border-strong);
+  }
+
+  .shell-frame .right-utility-dock__resize:active::before {
+    width: 2px;
+    background: var(--oct-meta);
+  }
+
+  /* The bottom panel's handle straddles its top line, so the panel lets it
+     reach 4px above its box. */
   .shell-frame .bottom-utility-panel {
-    border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
-    background: var(--octant-sheet-surface);
-    box-shadow: inset 0 1px 0 var(--octant-border-soft);
+    overflow: visible;
+    background: var(--octant-pane-fill);
+  }
+
+  .shell-frame .bottom-utility-panel::after {
+    position: absolute;
+    z-index: 4;
+    inset: 0;
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell-frame .bottom-utility-panel__resize::before {
+    background: transparent;
+  }
+
+  .shell-frame .bottom-utility-panel__resize:hover::before {
+    background: var(--octant-border-strong);
+  }
+
+  .shell-frame .bottom-utility-panel__resize:active::before {
+    height: 2px;
+    background: var(--oct-meta);
   }
 
   /* The window controls float over the workspace's first rail. A reader
@@ -2082,24 +2281,6 @@ html[data-octant-native-host="true"]
   .shell-frame .primary-workspace-layer :is(.surface__inner, .linear-issues) {
     --oct-surface-header-top: var(--oct-title-rail-h);
     padding-top: var(--oct-title-rail-h);
-  }
-
-  /* The panel's scroller clips the start-screen ground to the sheet's exposed
-     corners; otherwise its opaque picture squares off the sheet underneath. */
-  .shell-frame:not(.shell--wide-context-open)
-    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
-      :has(> .workspace-pane__header)
-    )
-    > .workspace-pane__panel {
-    border-top-right-radius: var(--oct-radius-md);
-  }
-
-  .shell--sidebar-collapsed.shell-frame
-    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
-      :has(> .workspace-pane__header)
-    )
-    > .workspace-pane__panel {
-    border-top-left-radius: var(--oct-radius-md);
   }
 
   /* A start screen has no pane heading to hold the title band open. Without
@@ -2132,26 +2313,11 @@ html[data-octant-native-host="true"]
 
   /* The pane header does not share the traffic lights' compact centreline,
      so it takes the title rail the dock head already uses and the two heads
-     close on one line. The line is drawn by the pane, not the header: the
-     header stops short of the window controls by a margin, and a border on
-     it would stop there too. It is the sheet's soft hairline, the same line
-     the sidebar's piece draws at this height: in the stronger border the rule
-     under the band changed shade exactly at the sidebar's edge. */
+     close on one line. The panes start at the rail's bottom edge, which is
+     the line between the band and them; no hairline is drawn there, since the
+     pane's own top line is that edge and a second line doubled it. */
   .shell-frame .workspace-pane__header {
     min-height: var(--oct-title-rail-h);
-  }
-
-  .shell-frame .workspace-pane:not([data-header="false"])::after,
-  .shell-frame .right-utility-dock:has(.right-utility-dock__toolbar)::after {
-    position: absolute;
-    z-index: 3;
-    top: var(--oct-title-rail-h);
-    right: 0;
-    left: 0;
-    height: 1px;
-    background: var(--octant-border-soft);
-    content: "";
-    pointer-events: none;
   }
 
   .shell-frame .right-utility-dock {
@@ -2162,6 +2328,12 @@ html[data-octant-native-host="true"]
 @media (min-width: 1100px) {
   .shell.shell-frame.shell--wide-context-open {
     --octant-wide-primary-min: 560px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .shell.shell-frame.shell--wide-context-open[data-dock-tile-columns="2"] {
+    --octant-tiled-primary-min: 440px;
   }
 }
 
@@ -2761,8 +2933,7 @@ form > .work-composer-adapter__attachments {
   background: transparent;
 }
 
-.draft-thread__error,
-.work-composer-adapter__error {
+.draft-thread__error {
   margin: 0;
   color: var(--octant-destructive);
   font-size: var(--oct-text-detail);
@@ -2774,7 +2945,6 @@ form > .work-composer-adapter__attachments {
   padding: 0 2px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-  opacity: 0.7;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3130,20 +3300,6 @@ form > .work-composer-adapter__attachments {
   margin-inline-start: 0;
 }
 
-.code-composer-adapter__error {
-  margin: 0;
-  color: var(--oct-danger-fg);
-  font-size: var(--oct-text-sm);
-}
-
-/* Why a thread in a server Project cannot start with this model: a fact, not a failure. */
-.code-composer-adapter__notice {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
-  text-align: center;
-}
-
 /* Quiet worktree-source status line below the context strip. */
 .code-worktree-source {
   display: grid;
@@ -3212,9 +3368,12 @@ form > .work-composer-adapter__attachments {
   font-size: var(--oct-text-xs);
 }
 
+/* The toolbar adapts to the width it is given, which in a dock tile can be as
+   little as 280px, so the workspace is the container the queries below ask. */
 .browser-workspace {
+  container: browser-workspace / inline-size;
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -3223,7 +3382,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-workspace--message {
-  grid-template-rows: 40px auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .browser-workspace--state {
@@ -3232,14 +3391,47 @@ form > .work-composer-adapter__attachments {
   text-align: center;
 }
 
+/*
+ * The toolbar is two groups that share a row when there is room and stack when
+ * there is not: navigation and the address first, the tools and the page's
+ * status second. Nothing is clipped at any dock width; the status labels
+ * shorten with an ellipsis before a control would have to wrap.
+ */
 .browser-workspace__chrome {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-1) 8px;
   min-width: 0;
-  padding: 0 8px;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: var(--oct-space-1) 8px;
   border-bottom: 1px solid var(--oct-border-soft);
   background: var(--oct-surface);
+}
+
+.browser-workspace__nav,
+.browser-workspace__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) 8px;
+  min-width: 0;
+}
+
+.browser-workspace__nav {
+  flex: 1 1 360px;
+}
+
+.browser-workspace__tools {
+  flex: 1 1 280px;
+  justify-content: flex-end;
+  column-gap: var(--oct-space-1);
+}
+
+.browser-workspace__tools > .browser-workspace__close,
+.browser-workspace__tools > .browser-workspace__take-over {
+  flex: 0 0 auto;
 }
 
 .browser-workspace h2,
@@ -3249,19 +3441,19 @@ form > .work-composer-adapter__attachments {
 }
 
 /* Back, forward, and reload sit in one rounded capsule and the address in a
-   pill beside it, the way a browser's own toolbar groups them; as loose icons
+   chip beside it, the way a browser's own toolbar groups them; as loose icons
    beside a boxed field the row read as a form. */
 .browser-workspace__history {
   display: flex;
   align-items: center;
   gap: 0;
   padding: 2px;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
 
 .browser-workspace__history button {
-  border-radius: var(--oct-radius-pill);
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
 }
 
 .browser-workspace__history button,
@@ -3287,7 +3479,7 @@ form > .work-composer-adapter__attachments {
   height: 30px;
   padding: 0 var(--oct-space-3);
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
   font-size: var(--oct-text-xs);
@@ -3307,16 +3499,20 @@ form > .work-composer-adapter__attachments {
   flex: 0 0 auto;
 }
 
+.browser-workspace__control-glyph {
+  display: none;
+}
+
 .browser-workspace__omnibox {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 160px;
   align-items: center;
   gap: var(--oct-space-2);
-  min-width: 0;
+  min-width: 120px;
   height: 30px;
   padding: 0 var(--oct-space-3);
   border: 1px solid transparent;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
@@ -3385,7 +3581,7 @@ form > .work-composer-adapter__attachments {
 }
 
 /* The field's frame is the omnibox itself. The input recipe ships its own
-   border, radius and shadow, which drew a second rounded box inside the pill —
+   border, radius and shadow, which drew a second rounded box inside the chip —
    `border: 0` alone left the recipe's shadow painting that inner edge. */
 .browser-workspace__omnibox input {
   flex: 1;
@@ -3400,20 +3596,36 @@ form > .work-composer-adapter__attachments {
   background: transparent;
   box-shadow: none;
   font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
 }
 
 .browser-workspace__control-state {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: var(--oct-space-1);
+  min-width: 0;
+  overflow: hidden;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.browser-workspace__control-state svg {
+.browser-workspace__control-state > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browser-workspace__control-spinner {
   animation: browser-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* A confirmation keeps the callout's own tone; only the warning paints amber. */
+.browser-workspace__notice {
+  padding: var(--oct-space-2) var(--oct-space-3);
+  font-size: var(--oct-text-xs);
 }
 
 .browser-workspace__message {
@@ -3436,18 +3648,21 @@ form > .work-composer-adapter__attachments {
   text-align: center;
 }
 
+/* An empty state's title is a row label and its sentence is a detail. */
 .browser-workspace__empty h2 {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
+  letter-spacing: normal;
+  line-height: var(--oct-leading-label);
 }
 
 .browser-workspace__empty p,
 .browser-workspace__remote-empty p {
-  max-width: 360px;
+  max-width: 420px;
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.5;
+  font-size: var(--oct-text-detail);
+  line-height: var(--oct-leading-detail);
 }
 
 .browser-workspace__local {
@@ -3572,6 +3787,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .browser-workspace__start > .browser-workspace__local {
   overflow: visible;
   padding: 0;
+}
+
+/* The rows keep their content's height. In a short tile they were squeezed
+   below it and the note printed over the server cards. */
+.browser-workspace__start:not(:has(> .browser-workspace__empty)) {
+  grid-auto-rows: max-content;
 }
 
 /* With nothing to suggest, the invitation fills the page as before. */
@@ -3884,7 +4105,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* The attribute in the selector outranks the card badges' tone fills, which
-   come later in this file; rows use colored text and dots without a pill. */
+   come later in this file; rows use colored text and dots without a chip. */
 .code-home__row .code-home__badge[data-tone] {
   grid-column: 2;
   grid-row: 1;
@@ -4009,7 +4230,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg-2);
   background: var(--octant-control);
   font-size: var(--oct-text-xs);
@@ -4141,7 +4362,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   gap: 4px;
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg-2);
   background: var(--octant-control);
   font-size: var(--oct-text-xs);
@@ -4418,8 +4639,16 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   line-height: 1.45;
 }
 
+.whats-new-announcement__position {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+}
+
 .whats-new-announcement__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: var(--oct-space-2);
   margin-top: var(--oct-space-2);
@@ -4490,6 +4719,13 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   overflow: auto;
 }
 
+/* The composer adapter paints the app ground for a full pane; inside the
+   dialog that drew a square slab over the popup, clipping the composer's
+   corners and stopping short of the note under it. */
+.code-project-planner__review .code-composer-adapter {
+  background: transparent;
+}
+
 /* The review reuses the start screen's composer, but it is a decision inside a
    dialog: the composer fills the dialog's measure, and the decision heading
    sits at its top edge, aligned with the text under it, instead of floating
@@ -4522,9 +4758,14 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   font-size: var(--oct-text-xs);
 }
 .browser-workspace__agent-availability {
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  overflow: hidden;
 }
+/* Each link of the chain has to be allowed to shrink for the label's ellipsis
+   to work; with only the label allowed, it drew past a 3px box over the next
+   control's words. */
+.browser-workspace__agent-availability > span,
 .browser-workspace__agent-availability > button {
   min-width: 0;
 }
@@ -4536,5 +4777,214 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 @media (max-width: 720px) {
   .browser-workspace__availability-label {
     display: none;
+  }
+}
+
+/* A live agent Browser the dock would show as a card while the dock is closed:
+   one quiet dot on the dock toggle, the same mark the dock's cards use. */
+.window-chrome__button[data-activity="browser"] {
+  position: relative;
+}
+
+.window-chrome__button[data-activity="browser"]::after {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  content: "";
+}
+
+/* The Browser's toolbar at narrow widths. These are container-width rules, so
+   they apply wherever the Browser is that narrow, in a dock tile or in a full
+   pane, and the same control at the same width looks the same.
+
+   Widths measured at 1x: history 88 (76 at the smallest), profile 30 bare and
+   157 with words ("Task default: Private") or 81 ("Private") when there is no
+   page, availability 12 bare and 173 with its sentence, the holder 24 as a
+   glyph and 97 with words ("Preview · 5m idle") or 44 ("Preview") when there is
+   no page, Take over 25 and 86 with words, and four 28px icon buttons
+   (Screenshot, Draw on page, Stop, and the desktop app's "Open in default
+   browser", which the web render lacks; the budget includes it). Gaps are 8px,
+   4px under 460px; side padding 12px, 4px under 347px. The dock sets the
+   rail's gap and padding on a rule of its own, so the rules that change them
+   name `.browser-workspace` as well.
+
+   The toolbar holds two groups, navigation and tools. From 992px they share
+   one row, which takes 1100px. Below it their controls are items of the one toolbar row (the
+   groups are `display: contents`), so the rules below place each control
+   separately and the address takes a row of its own. */
+
+@container browser-workspace (max-width: 1099px) {
+  .browser-workspace__nav,
+  .browser-workspace__tools {
+    display: contents;
+  }
+}
+
+/* No page open. The row is the history capsule, the profile, the address, who
+   may use the page, and who holds it: 442px without the address, which keeps
+   160px. */
+
+/* The availability sentence is 173px: its words go below 602px instead of
+   being cut to "Agent can use t…". */
+@container browser-workspace (max-width: 601px) {
+  .browser-workspace__availability-label {
+    display: none;
+  }
+  .browser-workspace__agent-availability {
+    flex: none;
+  }
+  /* With its words gone the recovery action is a bare glyph: keep it a target. */
+  .browser-workspace__agent-availability > button {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+/* The profile's words (51px) go below 441px, and the holder ends in an
+   ellipsis rather than running over its neighbour. */
+@container browser-workspace (max-width: 440px) {
+  .browser-profile-control {
+    padding: 0 var(--oct-space-2);
+  }
+  .browser-profile-control span {
+    display: none;
+  }
+}
+
+@container browser-workspace (max-width: 519px) {
+  .browser-workspace__control-state {
+    flex: none;
+    max-width: 40cqw;
+    min-width: 0;
+    overflow: hidden;
+  }
+}
+
+/* Below 390px the address would be a sliver beside the controls, so it takes a
+   second row at the full width. */
+@container browser-workspace (max-width: 389px) {
+  .browser-workspace .browser-workspace__chrome {
+    flex-wrap: wrap;
+    row-gap: var(--oct-space-1);
+  }
+  .browser-workspace__omnibox {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .browser-workspace__control-state {
+    max-width: 32cqw;
+  }
+}
+
+/* A page open (data-page="open"). The row also holds Take over, Screenshot,
+   Draw on page and Stop. Words go in this order as the width falls: the
+   availability sentence, the profile's words, Reclaim's, Take over's, the
+   holder's. Each threshold is the width at which the row with those words
+   (and the words before them already gone) no longer fits on one line, with
+   the budget for the desktop app's extra button. Each control keeps its name
+   and tooltip when its words are hidden. */
+
+/* The address fits beside every control and every word from 1100px: the
+   address keeps 267px there, and 1094px, the widest measured width at which
+   the groups still wrapped to three rows, is not enough. Below it the address
+   takes its own row. */
+@container browser-workspace (max-width: 1099px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    flex-wrap: wrap;
+    row-gap: var(--oct-space-1);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__omnibox {
+    order: 1;
+    flex-basis: 100%;
+  }
+}
+
+/* With every word shown, row one is 801px: the availability sentence (161px
+   more than its glyph) goes first, below 801px. */
+@container browser-workspace (max-width: 800px) {
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__availability-label {
+    display: none;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability {
+    flex: none;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability > button {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+/* The profile's words (127px more than its glyph) go next, below 640px. */
+@container browser-workspace (max-width: 639px) {
+  .browser-workspace__chrome[data-page="open"] .browser-profile-control span {
+    display: none;
+  }
+}
+
+/* "Reclaim locally" is the longest button label (86px more than its glyph);
+   with Take over beside it, its words go below 610px (Take over's own
+   threshold and the 89px that Reclaim's words and gap add). */
+@container browser-workspace (max-width: 609px) {
+  .browser-workspace__reclaim-label {
+    display: none;
+  }
+}
+
+/* Take over's and Hand back's words (61px more) go below 521px, and the bare
+   button stays a 24px target. */
+@container browser-workspace (max-width: 520px) {
+  .browser-workspace__take-over {
+    min-width: 24px;
+    min-height: 24px;
+  }
+  .browser-workspace__take-over-label {
+    display: none;
+  }
+}
+
+/* Under 460px the gaps tighten to 4px: at 8px the row is 460px, 40px more than
+   the 420px it takes at 4px. */
+@container browser-workspace (max-width: 459px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    column-gap: var(--oct-space-1);
+  }
+}
+
+/* The holder's words (73px more than its glyph) go last, below 420px. It keeps
+   a 24px glyph; its words stay for assistive technology and in its title. */
+@container browser-workspace (max-width: 419px) {
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state {
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-glyph {
+    display: block;
+    flex: none;
+  }
+}
+
+/* With the holder a glyph the row is 347px. The history and icon buttons shrink
+   to 24px (the smallest target) and the side padding to 4px, which makes it
+   302px: it fits from 302px. */
+@container browser-workspace (max-width: 346px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    padding-inline: var(--oct-space-1);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__history button,
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__close {
+    width: 24px;
+    height: 24px;
   }
 }

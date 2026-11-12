@@ -161,6 +161,31 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
+  it("marks the dock toggle with one quiet dot, described in words, while the agent's Browser is active", () => {
+    const { rerender, props } = renderChrome({ dockAvailable: true });
+    const toggle = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(toggle).not.toHaveAttribute("aria-description");
+    expect(toggle).not.toHaveAttribute("data-activity");
+
+    rerender(<WindowChrome {...props} dockBrowserActive />);
+    const marked = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(marked).toHaveAccessibleDescription("Browser is active");
+    expect(marked).toHaveAttribute("data-activity", "browser");
+    // A dot, not a count: nothing is added to the button's text.
+    expect(marked).toHaveTextContent("");
+    expect(shellStyles).toMatch(
+      /\.window-chrome__button\[data-activity="browser"\]::after\s*\{[^}]*width:\s*6px/,
+    );
+  });
+
+  it("never marks the narrow window's overflow button: the modal dock draws no card for the dot to promise", () => {
+    const { rerender, props } = renderChrome({ dockAvailable: true, isNarrow: true });
+    rerender(<WindowChrome {...props} dockBrowserActive />);
+    expect(screen.getByRole("button", { name: "More window actions" })).not.toHaveAttribute(
+      "data-activity",
+    );
+  });
+
   it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
     const user = userEvent.setup();
     const history = {
@@ -305,8 +330,15 @@ describe("WindowChrome", () => {
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
     // the same feedback .shell-icon-button gives, still no accent.
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
-    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--oct-fg-soft);",
+    // "On" is a control pressed into the band, not the pointed-at wash: a
+    // toggle that was on looked like one being hovered.
+    // A tool button that is pressed and the dock toggle that is on share the
+    // one rule, so the two cannot drift into two looks.
+    const pressed = cssRule('.window-chrome__button[data-dock-tools-shown="true"]');
+    expect(pressed).toContain("background: var(--octant-control);");
+    expect(pressed).toContain("box-shadow: var(--octant-shadow-control-pressed);");
+    expect(shellStyles).toMatch(
+      /\.window-chrome__button\[aria-expanded="true"\],\s*\.window-chrome__button\[aria-pressed="true"\],\s*\.window-chrome__button\[data-dock-tools-shown="true"\] \{/,
     );
   });
 
@@ -388,7 +420,7 @@ describe("WindowChrome", () => {
     expect(activeMode).toContain("box-shadow: var(--octant-shadow-selected);");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
-    // carried by ink alone rather than a filled pill.
+    // carried by ink alone rather than a filled chip.
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
@@ -497,7 +529,9 @@ describe("WindowChrome", () => {
     const more = cssRule(".project-threads__more");
     expect(more).toContain("min-height: var(--oct-space-6);");
     expect(more).toContain("font-size: var(--oct-text-xs);");
-    expect(more).toContain("opacity: 0.78;");
+    // It recedes by its role colour alone: a dimmed meta ink fell under 4.5:1.
+    expect(more).toContain("color: var(--oct-meta);");
+    expect(more).not.toContain("opacity");
 
     // Project actions are available on hover/focus, not as permanent noise
     // beside every folder.
@@ -556,7 +590,7 @@ describe("WindowChrome", () => {
     expect(reducedTransparency).toContain(
       ":is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy])",
     );
-    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-ground-opaque);");
     expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
@@ -599,8 +633,8 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    // 12px now arrives as the system radius token (--oct-radius-lg: 12px).
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-lg)");
+    // 12px now arrives as the system radius token (--oct-radius-md: 12px).
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-md)");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
     // The wash behind a modal is the system scrim token rather than a literal.
@@ -611,17 +645,17 @@ describe("WindowChrome", () => {
   });
 
   it("gives every popup one lit edge and the floating fill", () => {
-    // The overlay shadow carries the popup's whole edge in both themes: light
-    // along its top, then one thin line outside it. A popup that also set a
-    // border showed two edges, and the strong border made a menu's heavier
-    // than a dialog's.
+    // The overlay shadow carries the popup's whole edge in both themes: the
+    // brightest rim along its top, then one hairline outside it. A popup that
+    // also set a border showed two edges, and the strong border made a menu's
+    // heavier than a dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("inset 0 1px 0 var(--octant-bevel-strong)");
-      expect(overlay).toMatch(/(^|,)\s*0 0 0 1px rgb\(/);
+      expect(overlay).toContain("inset 0 1px 0 var(--octant-rim-float)");
+      expect(overlay).toMatch(/(^|,)\s*0 0 0 0\.5px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
     expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
@@ -845,7 +879,7 @@ describe("WindowChrome", () => {
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's pill is the glass surface, with the glass stroke as its
+    // The composer's box is the glass surface, with the glass stroke as its
     // ring; the frame around it and its rows draws nothing.
     const surface =
       systemStyles.match(
@@ -853,9 +887,10 @@ describe("WindowChrome", () => {
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
+    expect(surface).toContain("box-shadow: var(--octant-shadow-md);");
+    expect(surface).not.toContain("--oct-glass-stroke");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
-    // Under Window glass the pill is a step lighter than the glass around
+    // Under Window glass the box is a step lighter than the glass around
     // it: the floor made it the darker of the two.
     expect(systemStyles).toMatch(
       /\.shell--material-translucent \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
@@ -904,7 +939,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      "--octant-window-surface: var(--octant-sidebar-opaque);",
+      "--octant-window-surface: var(--octant-ground-opaque);",
     );
   });
 
@@ -930,6 +965,36 @@ describe("WindowChrome", () => {
 
     rerender(<WindowChrome {...props} dockAvailable={false} />);
     expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
+  });
+
+  it("draws the tool buttons before the bottom panel and dock toggles, and not at narrow widths", () => {
+    const dockTools = {
+      buttons: [
+        {
+          id: "files" as const,
+          label: "Files",
+          pressed: true,
+          open: false,
+          press: { kind: "close" as const, tabIds: ["files"] },
+          tabIds: ["files"],
+          menu: [],
+        },
+      ],
+      more: [],
+    };
+    const { props, rerender } = renderChrome({
+      dockAvailable: true,
+      dockTools,
+      onToggleDockTool: vi.fn(),
+    });
+    const tools = screen.getByRole("toolbar", { name: "Tools" });
+    const bottom = screen.getByRole("button", { name: "Open bottom panel" });
+    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(tools.compareDocumentPosition(bottom) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bottom.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(<WindowChrome {...props} isNarrow />);
+    expect(screen.queryByRole("toolbar", { name: "Tools" })).not.toBeInTheDocument();
   });
 
   it("moves the single utility dock action into narrow disclosure", async () => {

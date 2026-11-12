@@ -1,13 +1,14 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
-import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { TOOL_CATALOG_CONTINUATION_COPY } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { ConversationInputs } from "../continuity/ConversationInputs";
-import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -91,6 +92,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
@@ -130,6 +132,11 @@ import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import {
+  threadImageOfferKey,
+  useThreadImageOffers,
+  type ThreadImageVerdict,
+} from "../composer/threadImageOffers";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 import {
@@ -773,6 +780,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
+  // A Work turn keeps the turn id its sender chose, which is how a turn an
+  // outside agent sent is named for that agent.
+  const agentTurnSender = useAgentTurnSenders();
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -2078,6 +2088,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       else images.attach(files);
     },
   });
+  // A picture marked up in this thread's Browser arrives here as a file and
+  // meets the same checks as one dropped on the composer.
+  useThreadImageOffers(
+    threadImageOfferKey("work", String(props.threadId)),
+    (file, arrival): ThreadImageVerdict => {
+      let reason: string | undefined;
+      if (imageSupport === false) {
+        reason = "Choose an image-capable model to attach images.";
+        images.refuse(reason);
+      } else {
+        reason = images.attach([file]);
+      }
+      if (reason !== undefined) return { status: "refused", reason };
+      if (arrival === "live") textareaRef.current?.focus();
+      return { status: "accepted" };
+    },
+  );
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
@@ -2226,30 +2253,40 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     canvasesByRow: canvasPlacement.byRow,
   });
 
+  const sideChatNotice = sideChatDraftNotice({
+    count: composerDraft.sideChatReturns.length,
+    invalid: composerDraft.sideChatReturnsInvalid,
+    onClear: composerDraft.clear,
+  });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
-        {confirmArtifacts ? (
-          <ThreadArtifactsConfirm
-            onCancel={() => setConfirmArtifacts(false)}
-            onConfirm={() => void changeDocumentDelivery("native-artifacts")}
-            pending={deliveryChanging}
-          />
-        ) : null}
+        <OctantDialogPresence>
+          {confirmArtifacts ? (
+            <ThreadArtifactsConfirm
+              onCancel={() => setConfirmArtifacts(false)}
+              onConfirm={() => void changeDocumentDelivery("native-artifacts")}
+              pending={deliveryChanging}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
-        {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-          <OctantConfirmDialog
-            confirmLabel="Mark done"
-            onCancel={() => setCompletionFormOpen(false)}
-            onConfirm={() => void confirmCompletion()}
-            pending={completing}
-            title="Mark this task Done?"
-          >
-            {thread.title} moves to Done on the board. Its composer and provider lock until you
-            archive and reactivate it.
-          </OctantConfirmDialog>
-        ) : null}
+        <OctantDialogPresence>
+          {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
+            <OctantConfirmDialog
+              confirmLabel="Mark done"
+              onCancel={() => setCompletionFormOpen(false)}
+              onConfirm={() => void confirmCompletion()}
+              pending={completing}
+              title="Mark this task Done?"
+            >
+              {thread.title} moves to Done on the board. Its composer and provider lock until you
+              archive and reactivate it.
+            </OctantConfirmDialog>
+          ) : null}
+        </OctantDialogPresence>
 
         <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
           <TranscriptWindow
@@ -2349,8 +2386,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </article>
                     );
                   }
+                  const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
                   return (
-                    <article aria-label="Your message" className="turn-user">
+                    <article
+                      aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}
+                      className="turn-user"
+                    >
                       <TurnActionMenu
                         actions={turnActionsFor("user", row.turn).actions}
                         onAction={(value) => onTurnAction(value, "user", row.turn)}
@@ -2361,6 +2402,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={row.entry.text} />
                         )}
+                        <AgentTurnSender agentName={sentBy} />
                       </TurnActionMenu>
                     </article>
                   );
@@ -2469,7 +2511,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <ul className="work-thread-workspace__file-list">
                       {row.wrote.paths.map((path) => (
                         <li className="work-thread-workspace__file" key={path}>
-                          <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                          <FileText aria-hidden="true" size={14} />
                           <span>{path}</span>
                         </li>
                       ))}
@@ -2564,7 +2606,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 }
                 return (
                   <div className="approval-row approval-row--request" role="status">
-                    <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <CirclePause aria-hidden="true" size={14} />
                     <span className="approval-row__text">
                       {row.request.detail.kind === "approval"
                         ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
@@ -2613,21 +2655,25 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             }
           />
         </SelectionThreadScope>
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={{
-            kind: "unavailable",
-            reason:
-              "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
-          }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={() => void runRewind()}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={{
+                kind: "unavailable",
+                reason:
+                  "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+              }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={() => void runRewind()}
+              open
+              removedTurns={rewind?.removedTurns}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined ? null : (
           <div className="thread-column">
@@ -2726,7 +2772,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
-        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2773,7 +2818,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               })}
           context={
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
-              <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+              <FolderOpen aria-hidden="true" size={12} />
               {projectLabel === undefined ? null : (
                 <span
                   className="work-folder-bar__project"
@@ -2820,27 +2865,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 }
               />
               <TrackerReferenceComposerHints draft={prompt} />
-              <WorkImageAttachmentChips images={images} />
-              {turnActionMessage === undefined ? null : (
-                <p className="work-thread-workspace__hint" role="status">
-                  {turnActionMessage}
-                </p>
-              )}
-              <SideChatDraftNotice
-                count={composerDraft.sideChatReturns.length}
-                invalid={composerDraft.sideChatReturnsInvalid}
-                onClear={composerDraft.clear}
-              />
-              {composerDraft.stagedDropped === true ? (
-                <p className="work-thread-workspace__hint" role="status">
-                  {COMPOSER_STAGED_DROPPED_NOTE}
-                </p>
-              ) : null}
-              {composerDraft.persistError === undefined ? null : (
-                <p className="work-thread-workspace__hint" role="status">
-                  {composerDraft.persistError}
-                </p>
-              )}
+              <WorkImageAttachmentChips images={images} withMessage={false} />
             </>
           }
           input={
@@ -3031,7 +3056,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <ComposerModelPicker
                       threadId={String(thread.id)}
                       ariaLabel="Provider and model"
-                      disabled={providerChanging || creating || completionLocked}
+                      disabled={providerChanging || creating}
+                      locked={completionLocked}
                       // Once any turn ran, the host checks the latest one
                       // whatever its status, so the thread's history lives with
                       // its provider kind; offering a move the host refuses led
@@ -3101,36 +3127,88 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               },
             },
           }}
-          footer={
-            <div aria-live="polite" className="composer-status">
-              {errorMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="composer-status__notice" role="alert" title={errorMessage}>
-                  {errorMessage}
-                </span>
-              )}
-              {toolCatalogHandoffRequired ? (
-                <ToolCatalogContinuation
-                  disabled={!canSubmit || queueFollowUp || creating}
-                  onContinue={() => void sendWorkTurn(false, true)}
-                />
-              ) : null}
-              {handoffNotice === undefined || completionLocked || turnRunning ? null : (
-                <span className="composer-status__hint" role="status">
-                  {handoffNotice}
-                </span>
-              )}
-              {completionLocked || turnRunning || props.turnClient === undefined ? (
-                <span className="composer-status__hint" role="status">
-                  {completionLocked
-                    ? "Reactivate this task before creating another file or changing its provider."
-                    : turnRunning
-                      ? "Submit adds this message to the host queue"
-                      : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
-                </span>
-              ) : null}
-            </div>
+          progress={
+            // A keyboard hint, or what Submit does while a turn runs: said in
+            // the quiet line, never in a card.
+            completionLocked
+              ? undefined
+              : turnRunning
+                ? { text: "Submit adds this message to the host queue" }
+                : props.turnClient === undefined
+                  ? { text: "Enter saves a Markdown artifact · Shift+Enter for a new line" }
+                  : undefined
           }
+          notices={[
+            ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(images.message === undefined
+              ? []
+              : [{ key: "image", tone: "warning" as const, text: images.message }]),
+            ...(turnActionMessage === undefined
+              ? []
+              : [{ key: "turn-action", tone: "neutral" as const, text: turnActionMessage }]),
+            ...(sideChatNotice === undefined ? [] : [sideChatNotice]),
+            ...(composerDraft.stagedDropped === true
+              ? [
+                  {
+                    key: "staged-dropped",
+                    tone: "neutral" as const,
+                    text: COMPOSER_STAGED_DROPPED_NOTE,
+                  },
+                ]
+              : []),
+            ...(composerDraft.persistError === undefined
+              ? []
+              : [
+                  {
+                    key: "persist-error",
+                    tone: "warning" as const,
+                    text: composerDraft.persistError,
+                  },
+                ]),
+            ...(errorMessage === undefined
+              ? []
+              : [
+                  {
+                    key: "error",
+                    tone: "danger" as const,
+                    role: "alert" as const,
+                    text: errorMessage,
+                  },
+                ]),
+            ...(toolCatalogHandoffRequired
+              ? [
+                  {
+                    key: "tool-catalog",
+                    tone: "warning" as const,
+                    text: TOOL_CATALOG_CONTINUATION_COPY,
+                    action: (
+                      <OctantButton
+                        disabled={!canSubmit || queueFollowUp || creating}
+                        onClick={() => void sendWorkTurn(false, true)}
+                        size="sm"
+                        type="button"
+                      >
+                        Continue with updated tools
+                      </OctantButton>
+                    ),
+                  },
+                ]
+              : []),
+            ...(handoffNotice === undefined || completionLocked || turnRunning
+              ? []
+              : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
+            // A locked task is a fact the person acts on: it stays until
+            // they reactivate it.
+            ...(completionLocked
+              ? [
+                  {
+                    key: "locked",
+                    tone: "neutral" as const,
+                    text: "Reactivate this task before creating another file or changing its provider.",
+                  },
+                ]
+              : []),
+          ]}
         />
       </section>
     </ThreadReplyDetailScope>

@@ -42,6 +42,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { CanvasCommentsPanel, canvasCommentAnchorChoices } from "./CanvasCommentsPanel";
 import { CanvasToolRail } from "./CanvasToolRail";
 import { CanvasToolSurface } from "./CanvasToolSurface";
@@ -181,10 +182,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // earlier pick's neighbour against the version that then arrived.
   const [loading, setLoading] = useState(false);
   const commentsReturnFocus = useRef<HTMLElement | null>(null);
-  // Counts this tab's confirmed choice sends, so a retry of an unconfirmed
-  // send names the same queued message while a deliberate second send names
-  // a new one.
-  const choiceSends = useRef(0);
+  // The identities of choice sends the host has not confirmed yet, by answer. A
+  // retry of the same answer reuses its identity, so the queue recognises the
+  // duplicate, whatever was sent from other choices meanwhile; any other send,
+  // including the same answer after the tab reopens, takes a fresh one, since
+  // the queue keeps identities it has seen and would refuse a reused one.
+  const unconfirmedChoiceSends = useRef(new Map<string, string>());
   const closeCommentsButton = useRef<HTMLButtonElement | null>(null);
 
   const loadCanvas = useCallback(
@@ -833,12 +836,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               kind: "can-send",
               threadLabel: `the ${CHOICE_MODE_NAMES[reviseBase.mode]} thread`,
               onSend: async (block, response) => {
-                const attemptKey = [
+                const answer = [
                   String(props.tab.canvasId),
                   String(block.blockId),
-                  String(choiceSends.current),
                   JSON.stringify(response),
                 ].join(":");
+                const id = unconfirmedChoiceSends.current.get(answer) ?? crypto.randomUUID();
+                unconfirmedChoiceSends.current.set(answer, id);
+                const attemptKey = `${answer}:${id}`;
                 const sent = await enqueueCanvasCommentTurn(queueClient, {
                   mode: reviseBase.mode,
                   threadId: String(reviseBase.originThreadId),
@@ -857,7 +862,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                     scope: "whole-canvas",
                   },
                 });
-                if (sent.status === "sent") choiceSends.current += 1;
+                if (sent.status === "sent") unconfirmedChoiceSends.current.delete(answer);
                 return sent;
               },
             };
@@ -1089,7 +1094,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               {String(selectedVersionId) === tipVersionId ? null : (
                 <span className="canvas-workspace-tab__older">older</span>
               )}
-              <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+              <ChevronDown aria-hidden="true" size={12} />
             </>
           }
           triggerLabel={`Version history, v${String(expectedSequence)}`}
@@ -1146,7 +1151,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             type="button"
             variant={commentsOpen ? "secondary" : "ghost"}
           >
-            <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+            <MessageSquare aria-hidden="true" size={14} />
             Comments
             {openThreads.length === 0 ? null : (
               <span className="canvas-workspace-tab__count">{openThreads.length}</span>
@@ -1171,7 +1176,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               setDialog(chosen);
             }}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
             triggerClassName="canvas-workspace-tab__overflow"
             triggerLabel="More Canvas actions"
             value=""
@@ -1248,7 +1253,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                 type="button"
                 variant="ghost"
               >
-                <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                <X aria-hidden="true" size={14} />
               </OctantButton>
             </div>
             <CanvasCommentsPanel
@@ -1383,17 +1388,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           />
         ) : null}
       </OctantDialog>
-      <OctantDialog
-        label="Compare versions"
-        onClose={() => setCompare(undefined)}
-        open={compare !== undefined}
-      >
-        {compare?.kind === "ready" ? (
-          <CanvasVersionCompare earlier={compare.earlier} later={compare.later} />
-        ) : compare?.kind === "unavailable" ? (
-          <p className="canvas-compare__note">The earlier version is unavailable.</p>
+      <OctantDialogPresence>
+        {compare !== undefined ? (
+          <OctantDialog label="Compare versions" onClose={() => setCompare(undefined)} open>
+            {compare?.kind === "ready" ? (
+              <CanvasVersionCompare earlier={compare.earlier} later={compare.later} />
+            ) : compare?.kind === "unavailable" ? (
+              <p className="canvas-compare__note">The earlier version is unavailable.</p>
+            ) : null}
+          </OctantDialog>
         ) : null}
-      </OctantDialog>
+      </OctantDialogPresence>
     </div>
   );
 }

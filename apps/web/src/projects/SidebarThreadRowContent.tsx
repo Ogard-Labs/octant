@@ -1,7 +1,8 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
-import { Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
+import { Bot, Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProjectIcon } from "./ProjectIcon";
+import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
 
@@ -23,6 +24,8 @@ type ThreadRowPullRequest = ThreadBoardPullRequestSummaries["items"][number];
  */
 export function SidebarThreadRowContent(props: {
   readonly title: string;
+  /** Names the outside agent that started the thread, when one did. */
+  readonly threadId?: string;
   readonly provider?: ThreadProviderIdentity;
   /**
    * A coordinator wears the coordinator mark in the icon column instead of
@@ -40,7 +43,9 @@ export function SidebarThreadRowContent(props: {
   readonly age?: { readonly label: string; readonly title?: string };
   readonly status?: ReactNode;
 }) {
+  const startedBy = useAgentThreadName(props.threadId);
   const hasFacts =
+    startedBy !== undefined ||
     props.coordinatorName !== undefined ||
     props.projectName !== undefined ||
     props.pullRequest !== undefined ||
@@ -59,7 +64,7 @@ export function SidebarThreadRowContent(props: {
           alike, so alignment holds there too. */}
       {props.coordinator === true ? (
         <span className="sidebar-navigation__thread-provider" title="Coordinator">
-          <Network aria-label="Coordinator" role="img" size={14} strokeWidth={1.8} />
+          <Network aria-label="Coordinator" role="img" size={14} />
         </span>
       ) : props.provider === undefined ? (
         <span aria-hidden="true" className="sidebar-navigation__thread-provider" />
@@ -73,15 +78,26 @@ export function SidebarThreadRowContent(props: {
         </span>
       )}
       <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.title}</span>
+        <span className="oct-nav-name sidebar-navigation__thread-title">{props.title}</span>
         {hasFacts ? (
           <span className="sidebar-navigation__thread-facts">
+            {startedBy === undefined ? null : (
+              <span
+                className="sidebar-navigation__thread-project"
+                title={`Started by ${startedBy}`}
+              >
+                <Bot aria-hidden="true" size={12} />
+                <span className="sidebar-navigation__thread-project-label">
+                  {`Started by ${startedBy}`}
+                </span>
+              </span>
+            )}
             {props.coordinatorName === undefined ? null : (
               <span
                 className="sidebar-navigation__thread-project"
                 title={`Coordinator: ${props.coordinatorName}`}
               >
-                <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Network aria-hidden="true" size={12} />
                 <span className="sidebar-navigation__thread-project-label">
                   {props.coordinatorName}
                 </span>
@@ -90,10 +106,10 @@ export function SidebarThreadRowContent(props: {
             {props.projectName === undefined ? null : (
               <span className="sidebar-navigation__thread-project">
                 {props.projectId === undefined ? (
-                  <Folder aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <Folder aria-hidden="true" size={12} />
                 ) : (
                   <ProjectIcon
-                    fallback={<Folder aria-hidden="true" size={12} strokeWidth={1.8} />}
+                    fallback={<Folder aria-hidden="true" size={12} />}
                     projectId={props.projectId}
                     size={12}
                   />
@@ -111,21 +127,20 @@ export function SidebarThreadRowContent(props: {
                 role="img"
                 title={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}`}
               >
-                <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
+                <GitPullRequest aria-hidden="true" size={12} />#
                 {String(props.pullRequest.identity.number)}
                 {props.pullRequest.checks === "passing" ? (
                   <Check
                     aria-hidden="true"
                     className="sidebar-navigation__thread-pr-checks"
                     size={12}
-                    strokeWidth={2}
                   />
                 ) : null}
               </span>
             )}
             {props.checkout === undefined ? null : (
               <span className="sidebar-navigation__thread-checkout" title={props.checkout.label}>
-                <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+                <GitBranch aria-hidden="true" size={12} />
                 <span className="sidebar-navigation__thread-checkout-label">
                   {props.checkout.label}
                 </span>

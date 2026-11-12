@@ -267,6 +267,8 @@ describe("octantSettingsRegistry", () => {
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",
+      "host-worktrees",
+      "xcode-build-data",
       "open-in-applications",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
@@ -397,6 +399,8 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "agent-access-code",
+  "agent-access-edit",
   "browser-hub-claim",
   "browser-hub-joined",
   "first-run-task-mode",
@@ -450,6 +454,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "open-in-*": "open-in-applications",
   "managed-tool-*": "managed-tools-automatic-updates",
   "paired-computer-*": "paired-computers-code",
+  "agent-grant-*": "agent-access",
   "hub-auto-apply-*": "hub-auto-apply",
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",
@@ -472,9 +477,13 @@ const TYPOGRAPHY_ROWS = [
 
 describe("Settings search coverage", () => {
   const sourceRoot = join(import.meta.dirname, "..");
+  // The component gallery draws sample Settings rows to show the row's shape;
+  // they are not rows of any Settings page, so search has nothing to index.
   const sources = readdirSync(sourceRoot, { recursive: true })
     .map(String)
-    .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
+    .filter(
+      (name) => name.endsWith(".tsx") && !name.includes(".test.") && !/^gallery[\\/]/.test(name),
+    )
     .map((name) => readFileSync(join(sourceRoot, name), "utf8"));
   const registered = new Set(
     octantSettingsRegistry.sections.flatMap((section) =>

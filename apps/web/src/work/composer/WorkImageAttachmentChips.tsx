@@ -8,9 +8,17 @@ import { OctantButton } from "../../ui/base/OctantButton";
  * same chip row twice; one definition keeps the thumbnails, removal, and the
  * refusal notice identical wherever Work accepts images.
  */
-export function WorkImageAttachmentChips(props: { readonly images: WorkComposerImages }) {
+export function WorkImageAttachmentChips(props: {
+  readonly images: WorkComposerImages;
+  /**
+   * A thread composer says the refusal in its notice card above the box and
+   * passes false; the overview's quick start has no card and keeps it here.
+   */
+  readonly withMessage?: boolean;
+}) {
   const images = props.images;
-  if (images.staged.length === 0 && images.message === undefined) return null;
+  const message = props.withMessage === false ? undefined : images.message;
+  if (images.staged.length === 0 && message === undefined) return null;
   return (
     <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached images">
       {images.staged.map((attachment) => (
@@ -28,13 +36,13 @@ export function WorkImageAttachmentChips(props: { readonly images: WorkComposerI
             type="button"
             variant="bare"
           >
-            <X aria-hidden="true" size={12} strokeWidth={1.8} />
+            <X aria-hidden="true" size={12} />
           </OctantButton>
         </span>
       ))}
-      {images.message === undefined ? null : (
+      {message === undefined ? null : (
         <span className="work-composer-adapter__hint" role="status">
-          {images.message}
+          {message}
         </span>
       )}
     </div>

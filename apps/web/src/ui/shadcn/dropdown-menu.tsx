@@ -104,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-50 min-w-48 rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] min-w-48 max-w-(--available-width) rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"
@@ -126,7 +126,7 @@ export function DropdownMenuPositioner({
   return (
     <MenuPrimitive.Positioner
       align="start"
-      className={cn("z-50 outline-none window-no-drag", className)}
+      className={cn("z-[var(--oct-z-popup)] outline-none window-no-drag", className)}
       side="bottom"
       sideOffset={4}
       {...props}
@@ -184,7 +184,7 @@ export function DropdownMenuCheckboxItem({
     >
       {children}
       <MenuPrimitive.CheckboxItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Check aria-hidden="true" size={14} />
       </MenuPrimitive.CheckboxItemIndicator>
     </MenuPrimitive.CheckboxItem>
   );
@@ -207,7 +207,7 @@ export function DropdownMenuRadioItem({
     >
       {children}
       <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Check aria-hidden="true" size={14} />
       </MenuPrimitive.RadioItemIndicator>
     </MenuPrimitive.RadioItem>
   );
@@ -229,7 +229,7 @@ export function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} />
     </MenuPrimitive.SubmenuTrigger>
   );
 }
@@ -242,7 +242,7 @@ export function DropdownMenuSubPopup({
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
         align="start"
-        className="z-50 outline-none window-no-drag"
+        className="z-[var(--oct-z-popup)] outline-none window-no-drag"
         side="right"
         sideOffset={0}
       >

@@ -18,6 +18,7 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
@@ -67,9 +68,12 @@ export function ThreadMoveComputerCard(props: ThreadMoveComputerCardProps) {
         <div className="environment-move__row environment-move__row--static">
           <EnvironmentTile icon={Laptop} />
           <span className="environment-move__name">{props.hostName}</span>
-          <OctantBadge variant="secondary">
-            {props.isThisComputer ? "This computer" : props.hostName}
-          </OctantBadge>
+          {/* This computer's own name is "This computer": the badge would say it twice. */}
+          {!props.isThisComputer || props.hostName !== "This computer" ? (
+            <OctantBadge variant="secondary">
+              {props.isThisComputer ? "This computer" : props.hostName}
+            </OctantBadge>
+          ) : null}
         </div>
       </EnvironmentCard>
     );
@@ -128,13 +132,10 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
           >
             <EnvironmentTile icon={Laptop} />
             <span className="environment-move__name">{props.hostName}</span>
-            <OctantBadge variant={pill.tone}>{pill.label}</OctantBadge>
-            <ChevronRight
-              aria-hidden="true"
-              className="environment-group__chevron"
-              size={14}
-              strokeWidth={1.8}
-            />
+            {pill.label === props.hostName ? null : (
+              <OctantBadge variant={pill.tone}>{pill.label}</OctantBadge>
+            )}
+            <ChevronRight aria-hidden="true" className="environment-group__chevron" size={14} />
           </OctantButton>
           {open ? (
             <div className="environment-move__content" id={contentId}>
@@ -228,50 +229,54 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
           }
         />
       )}
-      {handoverOpen ? (
-        <HandoverSheet
-          {...(member === undefined || !eligible(member)
-            ? {}
-            : { destination: { memberId: String(member.memberId), name: member.name } })}
-          client={props.client}
-          onClose={() => setHandoverOpen(false)}
-          onHandedOver={() => {
-            setHandoverOpen(false);
-            move.refresh();
-          }}
-          thread={props.thread}
-          threadTitle={props.threadTitle}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {handoverOpen ? (
+          <HandoverSheet
+            {...(member === undefined || !eligible(member)
+              ? {}
+              : { destination: { memberId: String(member.memberId), name: member.name } })}
+            client={props.client}
+            onClose={() => setHandoverOpen(false)}
+            onHandedOver={() => {
+              setHandoverOpen(false);
+              move.refresh();
+            }}
+            thread={props.thread}
+            threadTitle={props.threadTitle}
+          />
+        ) : null}
+      </OctantDialogPresence>
       <p aria-live="polite" className="visually-hidden">
         {live}
       </p>
-      {member === undefined || !sheetOpen ? null : (
-        <ThreadMoveSheet
-          busy={move.destinations?.busy === true}
-          client={props.client}
-          hostName={props.hostName}
-          member={member}
-          onClose={() => setSheetOpen(false)}
-          onStarted={() => {
-            setSheetOpen(false);
-            move.refresh();
-          }}
-          {...(canHandOver
-            ? {
-                onHandOver: () => {
-                  setSheetOpen(false);
-                  setHandoverOpen(true);
-                },
-              }
-            : {})}
-          projectTitle={projectChoices.find((choice) => choice.id === project)?.label}
-          projectId={project === NO_PROJECT ? undefined : project}
-          thread={props.thread}
-          threadTitle={props.threadTitle}
-          unlock={props.unlock}
-        />
-      )}
+      <OctantDialogPresence>
+        {member === undefined || !sheetOpen ? null : (
+          <ThreadMoveSheet
+            busy={move.destinations?.busy === true}
+            client={props.client}
+            hostName={props.hostName}
+            member={member}
+            onClose={() => setSheetOpen(false)}
+            onStarted={() => {
+              setSheetOpen(false);
+              move.refresh();
+            }}
+            {...(canHandOver
+              ? {
+                  onHandOver: () => {
+                    setSheetOpen(false);
+                    setHandoverOpen(true);
+                  },
+                }
+              : {})}
+            projectTitle={projectChoices.find((choice) => choice.id === project)?.label}
+            projectId={project === NO_PROJECT ? undefined : project}
+            thread={props.thread}
+            threadTitle={props.threadTitle}
+            unlock={props.unlock}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }
@@ -295,7 +300,7 @@ function projectOptions(
 /**
  * One word for a member's state. A member that refuses answers every reason
  * (Move in off, Owners off, this computer no longer in its roster) in the same
- * words, so the pill cannot say which; whether this Mac is an owner there is
+ * words, so the badge cannot say which; whether this Mac is an owner there is
  * learned at the unlock, and said then.
  */
 function memberPill(entry: ThreadMoveDestination, mode: MovedThreadReference["mode"]): string {
@@ -742,7 +747,7 @@ function ThreadMoveSheet(props: {
           <EnvironmentTile icon={Laptop} />
           {props.hostName}
         </span>
-        <ArrowRight aria-label="to" size={14} strokeWidth={1.8} />
+        <ArrowRight aria-label="to" size={14} />
         <span className="thread-move-sheet__host">
           <EnvironmentTile icon={member.role === "hub" ? Server : Laptop} />
           {member.name}

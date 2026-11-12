@@ -30,12 +30,17 @@
   content: "";
 }
 
-/* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
-   which is what tells it apart from the pointer. */
-.right-utility-dock__resize:hover::before,
-.right-utility-dock__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
+.right-utility-dock__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.right-utility-dock__resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
 }
 
 .right-utility-dock__surface {
@@ -61,35 +66,6 @@
   font-family: var(--oct-font-display);
   letter-spacing: normal;
   text-transform: none;
-}
-
-/* Before any tool opens, the band offers the tools a thread reaches for most:
-   Environment by name, the rest as icons, the same faces the strip uses. At
-   the dock's narrowest the band has room for fewer than all of them, and a
-   button pushed past the window controls was clipped half-visible; the row
-   wraps instead, and the band shows only its first line, so a tool that does
-   not fit leaves whole. Every tool is also under Add tool. */
-.dock-quick-tools {
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  min-width: 0;
-  height: var(--oct-rail-button-h);
-  overflow: hidden;
-  align-items: center;
-  gap: 2px;
-}
-
-.dock-quick-tools__tool > svg {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
-}
-
-/* A tool waiting for the task's thread explains itself on hover. The shared
-   button recipe drops pointer events when disabled, which also dropped the
-   title that says when the tool opens. */
-.dock-quick-tools__tool:disabled {
-  pointer-events: auto;
 }
 
 .right-utility-dock__tabs {
@@ -132,6 +108,11 @@
 
 .dock-tool-strip > .dock-tool-strip__tab > .content-tab__select {
   flex: 0 1 auto;
+}
+
+/* A tool shown in a tile reads in the full ink without being the selected tab. */
+.dock-tool-strip__tab:has([data-shown="true"]) {
+  color: var(--oct-fg);
 }
 
 .dock-tool-strip__select > span {
@@ -244,6 +225,7 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .dock-card__chevron {
@@ -291,12 +273,23 @@
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A diff figure in a card row is the mono figure it is everywhere else, not a
+   name: it keeps the regular weight and the row's own line height. */
+.dock-card__label.diffstat {
+  font-weight: var(--oct-weight-regular);
+  line-height: inherit;
+}
+
+/* The fold row's own words are a hint, not a name: they keep the regular weight. */
 .dock-card__label--meta {
   color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 
 .dock-card__meta {
@@ -535,17 +528,91 @@
   white-space: nowrap;
 }
 
+/* A delivery head's status line is the one part that can outgrow a narrow dock
+   (280px is the dock's minimum). It drops to a row of its own and wraps there,
+   instead of holding its one-line width and pushing the title's label over
+   itself: measured at 280px, "Local only · GitHub review mutation unavailable"
+   ran 14px past the edge and the "Review" label overlapped it. Wide docks fit
+   both on one line, so nothing moves there. */
+.right-utility-dock__tool .code-delivery-pane__toolbar {
+  flex-wrap: wrap;
+  row-gap: var(--oct-space-1);
+}
+
+.right-utility-dock__tool .code-delivery-pane__toolbar > p {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
   flex: none;
   padding: 0;
 }
 
+/* A narrow tile cannot hold the delivery head's title and its one-line note
+   side by side: the note ran under the title and out of the tile. The head
+   wraps and the note takes the line below. The pane measures itself because a
+   tile's width is not the viewport's. */
+.right-utility-dock__tool .code-delivery-pane {
+  container: delivery-pane / inline-size;
+}
+
+@container delivery-pane (max-width: 419px) {
+  .right-utility-dock__tool .code-delivery-pane__toolbar {
+    flex-wrap: wrap;
+    gap: var(--oct-space-1) var(--oct-space-3);
+  }
+
+  .right-utility-dock__tool .code-delivery-pane__toolbar p {
+    flex: 1 1 auto;
+    white-space: normal;
+  }
+}
+
+/* The working-tree view's lines and cards were children of a list with no
+   padding of their own, while its segmented control and findings head were
+   inset, so half the lines sat on the tile's edge. The list owns one gutter
+   and the delivery pane inside it stops adding its own. */
+.right-utility-dock__tool .git-history__list--changes {
+  padding-inline: var(--oct-space-3);
+}
+
+.right-utility-dock__tool
+  .git-history__list--changes
+  :is(
+    .code-delivery-pane__toolbar,
+    .code-delivery-pane__notice,
+    .code-delivery-pane > [role="alert"],
+    .code-delivery-pane > [role="status"]
+  ) {
+  padding-inline: 0;
+}
+
+/* Review's three views are one segmented control. At a tile's narrowest its
+   segments share the width instead of running past the tile's edge. */
+.right-utility-dock__tool .git-history {
+  container: git-history / inline-size;
+}
+
+@container git-history (max-width: 359px) {
+  .right-utility-dock__tool .git-history__toolbar [data-slot="toggle-group"] {
+    max-width: 100%;
+  }
+
+  .right-utility-dock__tool .git-history__toolbar [data-slot="toggle-group-item"] {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-inline: var(--oct-space-2);
+  }
+}
+
 .right-utility-dock__tool .browser-workspace {
-  grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+  grid-template-rows: minmax(var(--oct-title-rail-h), auto) minmax(0, 1fr);
 }
 
 .right-utility-dock__tool .browser-workspace--message {
-  grid-template-rows: var(--oct-title-rail-h) auto minmax(0, 1fr);
+  grid-template-rows: minmax(var(--oct-title-rail-h), auto) auto minmax(0, 1fr);
 }
 
 /* The notice is body copy about what the tool cannot do; a title rail holds
@@ -639,9 +706,13 @@
   content: "";
 }
 
-.bottom-utility-panel__resize:hover::before,
-.bottom-utility-panel__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+.bottom-utility-panel__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.bottom-utility-panel__resize:active::before {
+  height: 2px;
+  background: var(--oct-meta);
 }
 
 .bottom-utility-panel__toolbar {
@@ -681,8 +752,300 @@
 /* Tools with their own headers and scrolling meet the dock rail directly.
    Prose panels opt into an inset without shifting Files or Environment. */
 .right-utility-dock__content {
+  position: relative;
   padding: 0;
   overflow: hidden;
+}
+
+/* Tool tiles: several open tools drawn together beside a thread, each one
+   live. In a narrow window each is a panel of its own (level 1 of the
+   material): a rounded fill with a sheen, a rim brighter along its top edge,
+   and a seat shadow, with a gap between neighbours. From 681px up the window
+   is a grid of panes, so a tile is square and shares its edges with its
+   neighbours: it draws the one line on its top and left, and the divider's hit
+   area straddles that line. A tile is told apart by its name, not by an
+   outline: the focused one reads in the full ink and the rest a step back. */
+.dock-tiles {
+  /* Half the gap between two narrow-window tiles: each shared edge is pulled
+     in by it (see DockTiles). Panes share their edges, so there it is 0. */
+  --octant-tile-inset: 4px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden auto;
+}
+
+/* Taller than the dock only when the tiles cannot all keep their floor inside
+   it; the area then scrolls instead of squeezing a tile under its floor. */
+.dock-tiles__surface {
+  position: relative;
+  min-height: 100%;
+}
+
+/* Every tile is a child of this one element, placed by percentages from its
+   shares, so no tool is ever moved to a new parent when its neighbours change.
+   A single tool is a tile with no caption that fills it. */
+.dock-tile {
+  position: absolute;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  /* The tile clips: anything a tool paints past its box would show in the
+     next tile (a Files tree drawn over Vitals). */
+  overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-panel-fill);
+  box-shadow: var(--octant-shadow-panel-seat);
+}
+
+/* The rim is drawn above the tool: an inset shadow on the tile itself is
+   painted over by anything the tool fills. */
+.dock-tile::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--octant-shadow-panel-rim);
+  content: "";
+  pointer-events: none;
+}
+
+@media (min-width: 681px) {
+  .dock-tiles {
+    --octant-tile-inset: 0px;
+  }
+
+  /* Square, flat, and on the one pane fill; the line below is the only edge. */
+  .dock-tile {
+    border-radius: 0;
+    background: var(--octant-pane-fill);
+    box-shadow: none;
+  }
+
+  /* The line is drawn above the tool, on the tile's top and left edges: the
+     edge it shares with the tile above or beside it is that tile's bottom or
+     right, which draws nothing, so two tiles never show two lines. A border,
+     so forced colours keeps it. */
+  .dock-tile::after {
+    border-top: 1px solid var(--octant-pane-line);
+    border-left: 1px solid var(--octant-pane-line);
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/* The tool gets a definite height to scroll within: the tile's body flexes to
+   what the caption leaves, and the tool's own root flexes to the body, so a
+   percentage height anywhere below cannot resolve to its content. */
+.dock-tile > .right-utility-dock__tool {
+  display: flex;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > * {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* A tool that does not scroll itself (an unavailable state, the agents card)
+   ran past a short tile and was cut with no way to reach the rest. The tile
+   scrolls it, down only: a tool that fits, or scrolls inside itself, shows no
+   bar. */
+.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) {
+  overflow: hidden auto;
+}
+
+.dock-tile > .right-utility-dock__tool[data-dock-inset="true"] {
+  overflow: auto;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages {
+  flex: none;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages__page-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-tile > .right-utility-dock__tool--pages > .dock-browser-pages__page-body > * {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* One bar per tile: the tool's own header. Every bar is the same height, so
+   neighbouring tiles line up, and the tile's controls trail it. */
+.dock-tile__bar {
+  display: flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  border-bottom: 1px solid var(--octant-border-soft);
+}
+
+.dock-tile[data-focused="true"] > .dock-tile__bar {
+  color: var(--oct-fg);
+}
+
+.dock-tile__lead {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  overflow: hidden;
+}
+
+.dock-tile__lead > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+  flex: none;
+}
+
+.dock-tile__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Browser's pages are the bar: no row of their own and no second name. */
+.dock-tile__lead > .dock-browser-pages {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+}
+
+/* A tile's menu is open: the control is pressed into the bar, as the band's
+   toggles are, and not the pointed-at wash. */
+.dock-tile__control[aria-expanded="true"] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control-pressed);
+}
+
+/* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
+   stays whole and clear of the next tab and the New page button. The select
+   was shrink-0, so the tab's box shrank around it and the close mark ran under
+   the button beside it. */
+.dock-tile__lead > .dock-browser-pages {
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__close {
+  flex: none;
+}
+
+.dock-tile__control {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  padding: 0;
+}
+
+/* The hit area is 8px wide, centred on the edge between two tiles; the line
+   inside it is a hairline. */
+.dock-tiles__divider {
+  position: absolute;
+  z-index: 1;
+  background: transparent;
+}
+
+.dock-tiles__divider[data-orientation="vertical"] {
+  cursor: col-resize;
+}
+
+.dock-tiles__divider[data-orientation="horizontal"] {
+  cursor: row-resize;
+}
+
+.dock-tiles__divider::before {
+  position: absolute;
+  background: transparent;
+  content: "";
+}
+
+.dock-tiles__divider[data-orientation="vertical"]::before {
+  top: 0;
+  bottom: 0;
+  left: 3.5px;
+  width: 1px;
+}
+
+.dock-tiles__divider[data-orientation="horizontal"]::before {
+  top: 3.5px;
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+/* At rest the divider draws nothing: the tile below or beside it draws the
+   line. The line takes the quiet strong-divider role while hovered or held,
+   and nothing stays after a click. Keyboard focus is marked by the
+   app's own outline recipe, not by a line drawn here. */
+.dock-tiles__divider:hover::before,
+.dock-tiles__divider:active::before {
+  background: var(--octant-border-strong);
+}
+
+/* The panes' line is the tile's own first pixel, so the divider's line lies
+   on it, and takes the meta ink while grabbed. */
+@media (min-width: 681px) {
+  .dock-tiles__divider[data-orientation="vertical"]::before {
+    left: 4px;
+  }
+
+  .dock-tiles__divider[data-orientation="horizontal"]::before {
+    top: 4px;
+  }
+
+  .dock-tiles__divider:active::before {
+    background: var(--oct-meta);
+  }
+}
+
+/* Covers the dock body while a divider or a tab is being dragged: it keeps a
+   native page from taking the pointer, and it is where a dropped tab lands. */
+.dock-tiles__drag-shield {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+}
+
+/* A tab dropped on the right third or the lower third becomes a tile there. */
+.workspace-drop-overlay.dock-tiles__drop[data-drop-edge="right"] {
+  left: 66.667%;
+}
+
+.workspace-drop-overlay.dock-tiles__drop[data-drop-edge="bottom"] {
+  top: 66.667%;
 }
 
 .right-utility-dock__tool[data-dock-inset="true"] {
@@ -707,20 +1070,20 @@
   border-radius: var(--oct-radius-md);
 }
 
-/* A dialog shares the layer menus, popovers and pickers float on (`z-50`),
-   so whichever opened last paints on top. At 51 the dialog outranked every
-   popup opened from inside it: in the narrow dock sheet the Canvas version
-   history and More menu opened behind the sheet, out of reach. */
+/* A dialog stands on the floating layer and every popup stands above it, so
+   a popup opened from inside a dialog is never behind it: in the narrow dock
+   sheet the Canvas version history and More menu once opened behind the sheet,
+   out of reach. A notice sits between the two. */
 .octant-dialog__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -748,7 +1111,7 @@
   color: var(--oct-fg);
   background: var(--oct-bg);
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
   outline: 0;
   pointer-events: auto;
@@ -761,14 +1124,14 @@
    its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
 .octant-sheet__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -787,7 +1150,7 @@
   color: var(--oct-fg);
   background: var(--octant-float);
   border: 1px solid var(--octant-bevel);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-pop);
   outline: 0;
   pointer-events: auto;
@@ -947,10 +1310,18 @@
   overflow-wrap: anywhere;
 }
 
-/* With a Canvas open, the narrow dock sheet stands at its full height, as the
-   docked column does, so the document scrolls inside itself. Sized to its
-   content instead, the sheet scrolled as a whole: the comments drawer
-   scrolled away with the document and its Comment button with it. */
+/* The narrow dock sheet stands at its full height, as the docked column does,
+   so the tool scrolls inside itself. Tiles are positioned by percentages of
+   the tile area, and a sheet sized to its content gave them no height at all
+   (a 78px dialog holding only the tab strip). A Canvas had the same need, so
+   the document scrolls inside itself and its comments drawer stays put. */
+.octant-dialog__popup:has(> .right-utility-dock__surface) {
+  height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
+}
+
+/* A Canvas pins its own rule: the general one above gives every sheet this
+   height, and a Canvas depends on it so its sticky table header stays inside
+   the document, under the comments drawer. */
 .octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab) {
   height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
 }
@@ -1004,7 +1375,7 @@ html[data-octant-increased-contrast="true"] .octant-dialog__popup {
   justify-items: start;
   padding: var(--oct-space-3) 12px;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 .navigator-panel__notice p,
@@ -1029,7 +1400,7 @@ html[data-octant-increased-contrast="true"] .octant-dialog__popup {
   display: grid;
   gap: 4px;
   padding: var(--oct-space-3) 12px;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
 }
 
@@ -1104,4 +1475,189 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 .dock-browser-pages__page-body {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* The shelf: minimised tools as small live cards at the foot of the dock body,
+   under the overview or the tiles. It takes its natural height and never more
+   than two fifths of the dock, scrolling inside past that; the area above
+   measures what is left and keeps its own floors. */
+.right-utility-dock__content[data-shelf="true"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.right-utility-dock__content[data-shelf="true"]:has(> .dock-start) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-start {
+  min-height: 0;
+  flex: 1 1 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+  overflow-y: auto;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-tiles {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* Two cards stand side by side once each can have 160px (a dock about 352px and
+   wider) and stack below that; one card takes the whole width. A card is a 28px
+   bar over a 104px preview, 152px in all, so two side by side need 168px and
+   stay under the cap in any dock 420px or taller; the cap and the inner scroll
+   are the fallback for a very short dock and for two stacked cards. */
+.dock-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  max-height: 40%;
+  flex: none;
+  gap: var(--oct-space-2);
+  /* Inline padding matches the tiles' own inset, so a card's edge is the edge of the tile above it. */
+  padding: var(--oct-space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dock-shelf__slot {
+  min-width: 0;
+}
+
+/* A card is one of the dock's cards: its own wash over the dock's ground. The
+   picture and the terminal bring their own content fill, which is opaque on
+   purpose and sits inside the card, never under it. */
+.dock-mini-card {
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
+  container-type: inline-size;
+}
+
+/* A narrow card that has a word to say (Exited, Preview ended) gives that word
+   the room the icon and the name had; the name still labels the card for
+   assistive technology, and the buttons stay where they are. */
+@container (max-width: 200px) {
+  .dock-mini-card[data-detail="true"] .dock-card__icon,
+  .dock-mini-card[data-detail="true"] .dock-mini-card__title {
+    display: none;
+  }
+
+  .dock-mini-card[data-detail="true"] .dock-mini-card__head {
+    gap: 2px;
+  }
+}
+
+.dock-mini-card__head {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-mini-card__title {
+  min-width: 0;
+  /* The name gives way first, with an ellipsis, before a word beside it or a button. */
+  flex: 1 10 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-mini-card__detail {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* New output: a quiet mark, the same dot the dock toggle carries, named for
+   assistive technology and gone as soon as the card has been looked at. */
+.dock-mini-card__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+}
+
+.dock-mini-card__action {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  padding: 0;
+}
+
+.dock-mini-card__preview {
+  position: relative;
+  height: 104px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--octant-surface-inset);
+  /* Concentric with the card: its 12px corner minus the card's 8px inset. */
+  border-radius: 4px;
+}
+
+.dock-mini-card__picture,
+.dock-mini-card__skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The page's top left, cropped to the preview and never stretched. */
+.dock-mini-card__picture {
+  object-fit: cover;
+  object-position: top left;
+  user-select: none;
+}
+
+.dock-mini-card__skeleton {
+  border-radius: 0;
+}
+
+/* The shell's last lines, in the smallest terminal type, fill the preview. */
+.dock-mini-card__terminal,
+.dock-mini-card__skeleton--terminal,
+.dock-mini-card__note {
+  display: block;
+  height: 100%;
+}
+
+.dock-mini-card__terminal {
+  overflow: hidden;
+}
+
+.dock-mini-card__terminal > section {
+  height: 100%;
+}
+
+.dock-mini-card__terminal .terminal-leave-hint {
+  display: none;
+}
+
+.dock-mini-card__note {
+  display: grid;
+  margin: 0;
+  padding: var(--oct-space-2);
+  place-items: center;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The whole preview is the expand control; it sits over the inert picture. */
+.dock-mini-card__expand {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: inherit;
 }

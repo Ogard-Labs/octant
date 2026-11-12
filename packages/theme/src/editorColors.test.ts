@@ -72,7 +72,7 @@ describe("editor color projection", () => {
     });
     expect(resolveEditorColorProjection(dark)).toMatchObject({
       scrollbarThumb: "#4d4d4d",
-      scrollbarThumbHover: "#808080",
+      scrollbarThumbHover: "#8a8a8a",
     });
     expect(
       resolveEditorColorProjection(

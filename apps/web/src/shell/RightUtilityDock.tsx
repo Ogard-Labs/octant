@@ -1,8 +1,13 @@
 import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
-import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
+import {
+  RightUtilityDockSurface,
+  type DockTileControls,
+  type RightUtilityDockSurfaceProps,
+} from "./RightUtilityDockSurface";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import {
   dockWidthCeiling,
@@ -27,8 +32,6 @@ export interface RightUtilityDockProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly isNarrow: boolean;
-  readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
@@ -41,12 +44,16 @@ export interface RightUtilityDockProps {
   readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  readonly shelf?: RightUtilityDockSurfaceProps["shelf"];
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly sideChat?: ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
+  readonly tiles?: DockTileControls;
+  /** The row of tool buttons the drawer's header carries; absent when docked. */
+  readonly toolRow?: DockToolButtonsProps;
   readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
@@ -55,7 +62,13 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState<number>();
-  const ceiling = dockWidthCeiling(workspaceWidth);
+  // What is drawn, not what is stored: the stylesheet clamps the stored width
+  // to the room the thread leaves, and the separator announced the stored one.
+  const [drawnWidth, setDrawnWidth] = useState<number>();
+  const ceiling = dockWidthCeiling(workspaceWidth, {
+    tileColumns: props.isNarrow ? 1 : (props.tiles?.layout?.columns.length ?? 1),
+    viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+  });
 
   useLayoutEffect(() => {
     const workspace = dock.current?.parentElement;
@@ -67,15 +80,18 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
         (Number.parseFloat(style.paddingInlineStart) || 0) -
         (Number.parseFloat(style.paddingInlineEnd) || 0);
       setWorkspaceWidth(width > 0 ? width : undefined);
+      const drawn = dock.current?.getBoundingClientRect().width ?? 0;
+      setDrawnWidth(drawn > 0 ? Math.round(drawn) : undefined);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(workspace);
+    if (dock.current !== null) observer.observe(dock.current);
     return () => observer.disconnect();
   }, [props.isNarrow, props.open]);
 
-  if (!props.open) return null;
+  if (!props.open && !props.isNarrow) return null;
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second
@@ -96,10 +112,6 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.desktop === undefined ? {} : { desktop: props.desktop })}
       {...(props.debug === undefined ? {} : { debug: props.debug })}
       {...(props.vitals === undefined ? {} : { vitals: props.vitals })}
-      launchableSurfaces={props.launchableSurfaces}
-      {...(props.launchableReferences === undefined
-        ? {}
-        : { launchableReferences: props.launchableReferences })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
@@ -107,10 +119,13 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.plan === undefined ? {} : { plan: props.plan })}
       resolution={props.resolution}
       {...(props.renderTab === undefined ? {} : { renderTab: props.renderTab })}
+      {...(props.shelf === undefined ? {} : { shelf: props.shelf })}
       {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
+      {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
+      {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
         : { toolsAwaitingThread: props.toolsAwaitingThread })}
@@ -120,18 +135,22 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
 
   if (props.isNarrow) {
     return (
-      <OctantDialog
-        initialFocus={closeButton}
-        label={
-          props.resolution.kind === "closed" ? "Right sidebar" : props.resolution.surface.label
-        }
-        onClose={props.onClose}
-        open
-        popupId="right-utility-dock"
-        {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
-      >
-        {surface}
-      </OctantDialog>
+      <OctantDialogPresence>
+        {props.open ? (
+          <OctantDialog
+            initialFocus={closeButton}
+            label={
+              props.resolution.kind === "closed" ? "Right sidebar" : props.resolution.surface.label
+            }
+            onClose={props.onClose}
+            open
+            popupId="right-utility-dock"
+            {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
+          >
+            {surface}
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     );
   }
 
@@ -153,7 +172,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
           : { onCancel: props.onCancelWidthPreview })}
         onCommit={props.onCommitWidth}
         onPreview={props.onPreviewWidth}
-        value={Math.min(props.width, ceiling)}
+        value={Math.min(drawnWidth ?? props.width, ceiling)}
       />
       {surface}
     </aside>

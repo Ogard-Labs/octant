@@ -37,6 +37,7 @@ export default function BrowserModule(props: Props) {
   };
   return (
     <BrowserWorkspace
+      canDrawOnPage
       client={props.browserAutomationClient}
       {...(props.onAgentBrowserRecovery === undefined
         ? {}

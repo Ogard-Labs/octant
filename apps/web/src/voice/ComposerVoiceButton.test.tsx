@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import { SpeechCapabilityProvider } from "./SpeechCapabilityContext";
 import {
   fakeSpeechClient,
@@ -94,5 +95,45 @@ describe("ComposerVoiceButton", () => {
     renderButton({ client: fakeSpeechClient().client });
     await user.click(screen.getAllByRole("button", { name: "Dictate message" })[1]!);
     expect(await screen.findByText("Microphone access was not allowed.")).toBeVisible();
+  });
+
+  it("says a failed dictation in the composer's notice card, in full, and not beside the microphone in the box", async () => {
+    const user = userEvent.setup();
+    installFakeMicrophone();
+    const failure =
+      "The transcription provider could not be reached, so nothing was written into the prompt this time.";
+    const { client } = fakeSpeechClient({
+      transcribeFailure: new SpeechClientFailure({
+        message: failure,
+        status: 502,
+        category: "unavailable",
+      }),
+    });
+    const { container } = render(
+      <SpeechCapabilityProvider
+        client={client}
+        instances={speechTestInstances()}
+        settings={speechTestSettings()}
+      >
+        <ThreadComposer
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{
+            dictate: <ComposerVoiceButton onTranscript={vi.fn()} />,
+            actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+          }}
+        />
+      </SpeechCapabilityProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dictate message" }));
+    await user.click(await screen.findByRole("button", { name: "Stop dictating" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(failure);
+    expect(alert.closest(".composer-notices")).not.toBeNull();
+    expect(container.querySelector(".thread-composer__surface")).not.toContainElement(alert);
+    expect(container.querySelector(".composer-voice__error")).toBeNull();
+    // Dictating again clears it.
+    await user.click(screen.getByRole("button", { name: "Dictate message" }));
+    await waitFor(() => expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement());
   });
 });

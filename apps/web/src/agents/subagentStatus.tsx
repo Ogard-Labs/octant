@@ -85,7 +85,6 @@ export function SubagentStatusIcon(props: { readonly lifecycleStatus: string }) 
           : "subagent-status-icon"
       }
       size={14}
-      strokeWidth={1.8}
     />
   );
 }

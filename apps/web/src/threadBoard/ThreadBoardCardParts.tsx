@@ -21,9 +21,9 @@ export function ThreadBoardStatusMark(props: {
       data-status={props.status}
     >
       {turning ? (
-        <LoaderCircle className="board-status-mark__spin" size={12} strokeWidth={2} />
+        <LoaderCircle className="board-status-mark__spin" size={12} />
       ) : props.status === "done" ? (
-        <Check size={12} strokeWidth={2} />
+        <Check size={12} />
       ) : (
         <span
           className="board-status-mark__dot"
@@ -70,7 +70,7 @@ export function ThreadBoardCardMeta(props: ThreadBoardCardMetaProps) {
       )}
       {props.branch === undefined ? null : (
         <span className="board-card-meta__branch" title={props.branch}>
-          <GitBranch aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" className="icon" size={12} />
           <span className="board-card-meta__branch-name">{props.branch}</span>
         </span>
       )}
@@ -102,12 +102,7 @@ export function ThreadBoardCardMeta(props: ThreadBoardCardMetaProps) {
 export function ThreadBoardCardLive(props: { readonly summary: string | undefined }) {
   return (
     <span className="board-card-live">
-      <LoaderCircle
-        aria-hidden="true"
-        className="board-card-live__spin"
-        size={12}
-        strokeWidth={2}
-      />
+      <LoaderCircle aria-hidden="true" className="board-card-live__spin" size={12} />
       <span className="board-card-live__text" title={props.summary}>
         {props.summary ?? "Working…"}
       </span>

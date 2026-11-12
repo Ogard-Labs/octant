@@ -62,32 +62,148 @@ describe("the public-block visual language", () => {
     // corner also shrinks with the interface font size while a token does not.
     const corner =
       /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
+    // A part inside a control or a container is that radius less the gap
+    // between them, written as one calc(), never below 2px for a control.
+    const derived = /(?:max\(2px,\s*)?calc\(var\(--oct-radius-(?:sm|md)\) - \d+px\)\)?/g;
     const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
     const strays = cssFiles(webRoot).flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(declaration)]
         .map((match) => (match[1] ?? "").trim())
-        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .filter(
+          (value) =>
+            !value
+              .replace(derived, "0")
+              .split(/[\s/]+/)
+              .every((part) => corner.test(part)),
+        )
         .map((value) => `${relative(webRoot, path)}: ${value}`),
     );
 
     expect(strays).toEqual([]);
   });
 
-  it("gives a card, a menu, and a popover the same corner", () => {
-    // The recipes round cards, menus, and popovers at their `xl` step and the
-    // stylesheets round panels at the medium token. They were 14px and 16px, so
-    // a menu sat beside a popover with a different corner.
-    // The recipes' scale keeps its one root, so the two numbers are
-    // read and compared rather than one aliased to the other.
+  it("leaves no sheet inset or concentric sheet corner in the wide window, where panes are square", () => {
+    // Panes reach the window's right and bottom edges and are square, so the
+    // window's curve is the native window's and there is no inset to carry it by.
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    for (const sheet of [shell, surface]) {
+      expect(sheet).not.toMatch(
+        /octant-sheet-inset|octant-sheet-corner-outer|octant-window-radius/,
+      );
+    }
+    expect(shell).not.toMatch(/border-radius: 0 var\(--oct-radius-md\) var\(--oct-radius-md\) 0;/);
+  });
+
+  it("keeps the find bar and the Open in trigger on their own radii", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    // The find bar sits below the transcript's edge fade so it is never dimmed.
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    expect(chat).toMatch(/\.transcript-find \{[^}]*top: var\(--oct-space-3\);/);
+    // The Open in trigger is a band control: the control radius, not the card's.
+    expect(shell).toMatch(/\.open-in-menu__trigger \{[^}]*border-radius: var\(--oct-radius-sm\);/);
+  });
+
+  it("gives every divider a rest, hover, grabbed and keyboard state without accent", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    for (const [source, handle] of [
+      [dock, ".right-utility-dock__resize"],
+      [dock, ".bottom-utility-panel__resize"],
+      [shell, ".shell-frame__sidebar-resize"],
+    ] as const) {
+      expect(source).toContain(
+        `${handle}:hover::before {\n  background: var(--octant-border-strong);`,
+      );
+      expect(source).toMatch(
+        new RegExp(
+          `${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:active::before \\{\\s*(?:width|height): 2px;\\s*background: var\\(--oct-meta\\);`,
+        ),
+      );
+    }
+    expect(styles).toMatch(
+      /\.workspace-split\[data-orientation="horizontal"\] > \.workspace-split__resize:active::before \{\s*width: 2px;\s*background: var\(--oct-meta\);/,
+    );
+    expect(styles).toMatch(
+      /\.workspace-split\[data-orientation="vertical"\] > \.workspace-split__resize:active::before \{\s*height: 2px;\s*background: var\(--oct-meta\);/,
+    );
+    // A pane split's focusable element is an invisible range input; the
+    // visible handle takes the one shared focus edge when it has the keyboard.
+    expect(system).toMatch(
+      /\n\.workspace-split__resize:has\(:focus-visible\) \{\s*outline: 2px solid var\(--oct-focus-edge\);\s*outline-offset: -2px;/,
+    );
+  });
+
+  it("fades the transcript at its edges and keeps the rail's foot on screen", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rail = readFileSync(join(webRoot, "shell/SidebarRail.tsx"), "utf8");
+    // Chat, Work, and Code share one frame, so one fade: text under the title
+    // band's edge or above the composer ends in a fade, not a cut line.
+    expect(system).toMatch(
+      /\.transcript-scroll \{[^}]*mask-image: linear-gradient\(\s*to bottom,\s*transparent,\s*var\(--oct-fg\) var\(--oct-space-3\),\s*var\(--oct-fg\) calc\(100% - var\(--oct-space-3\)\),\s*transparent\s*\);/,
+    );
+    expect(code).not.toMatch(/\.code-thread-workspace__conversation \{[^}]*mask-image/);
+    // Only the destinations scroll; Settings and usage stay put, so a short
+    // window never cuts the last item through its icon or hides the foot.
+    expect(shell).toMatch(/\.sidebar-rail__scroll \{[^}]*overflow-y: auto;[^}]*mask-image:/);
+    expect(shell).toMatch(/\.sidebar-rail__column \{[^}]*overflow: hidden;/);
+    expect(shell).toMatch(/\.sidebar-rail__foot \{[^}]*flex: none;/);
+    expect(rail).toContain('className="sidebar-rail__scroll"');
+    expect(rail).toContain('className="sidebar-rail__foot"');
+  });
+
+  it("gives title-band controls one shape and no accent on a pressed divider", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    // A label, a chip with a chevron, and a square icon sat in the band as
+    // three shapes at 24px and 28px: they are the 28px rail button's shape.
+    expect(shell).toMatch(
+      /\.project-action-buttons \[data-slot="button"\] \{\s*height: var\(--oct-rail-button-h\);\s*border-radius: var\(--oct-radius-sm\);/,
+    );
+    // The dock's own quick tools are gone; a tool's button in the band is the
+    // window button itself, so it cannot be a fourth shape.
+    expect(readFileSync(join(webRoot, "shell/DockToolButtons.tsx"), "utf8")).toContain(
+      'className="window-chrome__button dock-tool-buttons__button"',
+    );
+    // A divider the pointer rests on after a click kept a bright accent line.
+    // Hover is the strong border, grabbed the meta ink; keyboard focus is the one
+    // shared focus edge.
+    const strays: string[] = [];
+    for (const path of cssFiles(webRoot)) {
+      const css = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = (match[1] ?? "").trim();
+        if (!/(?:resize|split-handle)/.test(selector)) continue;
+        if (!/:(?:hover|focus-visible|active)/.test(selector)) continue;
+        if (/accent|focus-ring/.test(match[2] ?? ""))
+          strays.push(`${relative(webRoot, path)}: ${selector}`);
+      }
+    }
+    expect(strays).toEqual([]);
+  });
+
+  it("gives every control one outline and every container another", () => {
+    // Two numbers: a control's outline is the small token and a container's the
+    // medium one. The recipes' control steps (`rounded-md`, `rounded-lg`) both
+    // land on the control token and their `rounded-xl` on the container token,
+    // so a menu and a popover share a corner and no recipe class is rewritten.
     const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
     const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
-    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
-    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
-    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
-    expect(control - rootStep + cardStep).toBe(card);
+    expect(px(system, /--oct-radius-sm:\s*(\d+)px;/)).toBe(4);
+    expect(px(system, /--oct-radius-md:\s*(\d+)px;/)).toBe(12);
+    expect(theme).toMatch(/--radius:\s*var\(--oct-radius-sm\);/);
+    expect(tailwind).toMatch(/--radius-md:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-lg:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-xl:\s*var\(--oct-radius-md\);/);
+    // The dialog and the composer are containers; the third and fourth
+    // container radii (14px and 22px) are gone with their tokens.
+    expect(system).not.toMatch(/--oct-radius-(?:lg|composer):/);
     // The radius scale has one definition; the second, unread set is gone.
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
     expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
@@ -148,6 +264,157 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("draws the thread, each tool tile and the bottom panel as square panes that share one line, with the sidebar on the ground", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8").replace(/\s+/g, " ");
+    const panel = (selector: string) => {
+      const start = shell.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return shell.slice(start, shell.indexOf("}", start));
+    };
+    // The thread's pane follows its grid column and stops where the bottom
+    // panel starts; every pane draws the shared fill, never a literal colour.
+    const thread = panel(".shell-frame > .workspace-layer::before");
+    expect(thread).toMatch(/grid-column:\s*1/);
+    expect(thread).toMatch(/background:\s*var\(--octant-pane-fill\)/);
+    expect(thread).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
+    expect(panel(".shell-frame .bottom-utility-panel")).toMatch(
+      /background:\s*var\(--octant-pane-fill\)/,
+    );
+    // A pane is square and flat: no corner, no seat shadow, no rim, and no gap
+    // between it and the window's edges or its neighbours.
+    const framed = shell.indexOf("The frame and its panes.");
+    expect(framed).toBeGreaterThanOrEqual(0);
+    const frame = shell.slice(framed);
+    const inFrame = (selector: string) => {
+      const start = frame.indexOf(`${selector} {`);
+      expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
+      return frame.slice(start, frame.indexOf("}", start));
+    };
+    const panes = frame.slice(0, frame.indexOf("The window controls float"));
+    expect(panes).not.toMatch(/border-radius/);
+    expect(panes).not.toMatch(/box-shadow/);
+    expect(panes).not.toMatch(/row-gap|sheet-inset/);
+    // The one line is drawn above the content on a pane's top and left edges
+    // only, so two neighbours never show two lines.
+    for (const selector of [
+      ".shell-frame > .workspace-layer::after",
+      ".shell-frame .bottom-utility-panel::after",
+      ".shell-frame .right-utility-dock:not(:has(.dock-tiles))::after",
+    ]) {
+      const rule = panel(selector);
+      expect(rule, selector).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
+      expect(rule, selector).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
+      expect(rule, selector).not.toMatch(/border-(right|bottom)/);
+    }
+    // The line is a share of the ink, so it shows on a near-black preset and
+    // on a glass tint alike, and the strong border under increased contrast.
+    expect(inFrame(".shell.shell-frame")).toMatch(
+      /--octant-pane-line:\s*color-mix\(in srgb, var\(--octant-text-primary\) \d+%, transparent\)/,
+    );
+    expect(inFrame('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
+      /--octant-pane-line:\s*var\(--octant-border-strong\)/,
+    );
+    // The edge between the thread and the dock has an 8px hit area centred on
+    // the line, and the dock has no column of its own for it.
+    expect(shell).toMatch(
+      /\.shell-frame \.right-utility-dock \{ grid-template-columns: 0 [^}]*overflow: visible/,
+    );
+    expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/width:\s*8px/);
+    expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/margin-left:\s*-4px/);
+    // With the sidebar collapsed and no rail, the stage's left edge is the
+    // window's, which takes no line.
+    expect(shell).toMatch(
+      /\.shell--sidebar-collapsed\.shell-frame:not\(\.shell--sidebar-rail\) > \.workspace-layer::after,[^{]*\.bottom-utility-panel::after \{ border-left: 0/,
+    );
+    // The sidebar's rows sit on the ground: it draws no panel of its own.
+    expect(shell).not.toContain(".shell-frame > .sidebar::before {");
+  });
+
+  it("keeps every edge a surface needs when forced colours drop the shadows, and the strong border under increased contrast", () => {
+    const components = readFileSync(join(webRoot, "styles/components.css"), "utf8");
+    const forced =
+      components.match(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}\n/)?.[1] ?? "";
+    // The rim is a shadow, so each surface that lost its border to the rim gets
+    // one back here, and a chip that is pressed is told by the system highlight.
+    for (const selector of [
+      ".octant-menu__popup",
+      ".octant-dialog__popup",
+      ".palette",
+      ".toast",
+      ".turn-user .bubble",
+      ".approval-row",
+      ".provider-question-card",
+      ".octant-chip",
+    ]) {
+      expect(forced, `${selector} keeps an edge in forced colours`).toContain(selector);
+    }
+    expect(forced).toMatch(/border:\s*1px solid CanvasText/);
+    expect(forced).toMatch(/\.octant-chip\[aria-pressed="true"\][\s\S]*background:\s*Highlight/);
+    const increased = components.match(
+      /html\[data-octant-increased-contrast="true"\]\s+:is\([\s\S]*?\) \{\s*border: 1px solid var\(--octant-border-strong\)/,
+    );
+    expect(increased).not.toBeNull();
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const contrast =
+      runtime.match(/:root\[data-octant-increased-contrast="true"\] \{([^}]*)\}/)?.[1] ?? "";
+    expect(contrast).toMatch(/--octant-rim:\s*var\(--octant-border-strong\)/);
+    expect(contrast).toMatch(/--octant-rim-float:\s*var\(--octant-border-strong\)/);
+  });
+
+  it("moves the primary button's fill away from its label for any accent, and never lowers the label's legibility", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The direction comes from the label the theme publishes, not from the mode.
+    expect(runtime).toMatch(
+      /--octant-accent-away:\s*oklch\(from var\(--octant-primary-foreground\)/,
+    );
+    expect(runtime).toMatch(
+      /--octant-accent-sheen:\s*linear-gradient\([^;]*var\(--octant-accent-away\)/,
+    );
+    const light =
+      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(light).not.toContain("--octant-accent-sheen");
+  });
+
+  it("keeps a floating surface's sheen above its first line of text and a narrow window's panel seat shadow inside its gap", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    for (const match of runtime.matchAll(
+      /--octant-float-sheen:\s*linear-gradient\([^;]*transparent (\d+)px\)/g,
+    )) {
+      expect(Number(match[1])).toBeLessThanOrEqual(10);
+    }
+    const seats = [...runtime.matchAll(/--octant-shadow-panel-seat:([^;]*);/g)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(seats.length).toBe(2);
+    for (const seat of seats) {
+      // The longest shadow: how far past the box its blurred edge ends is its
+      // offset plus its blur, less what its negative spread pulled in.
+      const long = [...seat.matchAll(/0 (\d+)px (\d+)px (-?\d+)px/g)].map(
+        (m) => Number(m[1]) + Number(m[2]) + Number(m[3]),
+      );
+      expect(Math.max(...long)).toBeLessThanOrEqual(8);
+    }
+    // The bottom panel's row has nothing of the frame's to subtract any more.
+    expect(runtime).toMatch(/max\(0px, calc\(100% - 320px\)\)/);
+    expect(runtime).not.toContain("sheet-inset");
+  });
+
+  it("ends a panel's bright edge band above its first line of text, and dims what shows through a dark menu", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The band is a fill under the panel's content: a tile's name starts 8px
+    // down, and a band that reached it lowered the meta ink there to 4.17:1.
+    const band = runtime.match(
+      /--octant-panel-band:\s*linear-gradient\(180deg, var\(--octant-edge-light\), transparent (\d+)px\)/,
+    );
+    expect(Number(band?.[1])).toBeLessThanOrEqual(8);
+    // A clearer fill is only legible because the blur dims the page behind it.
+    const dark = runtime.match(/--octant-float-blur:\s*([^;]*);/)?.[1] ?? "";
+    expect(Number(dark.match(/brightness\(([\d.]+)\)/)?.[1])).toBeLessThan(0.5);
+    const light =
+      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(light).toMatch(/--octant-float-blur:[^;]*contrast\(0\.5\)/);
+  });
+
   it("does not flatten the Code composer into two hairline boxes", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
@@ -172,9 +439,9 @@ describe("the public-block visual language", () => {
     expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     // A raised step is light on its top edge, then the shadow that lifts it.
-    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-bevel\)/);
-    expect(darkShadow).toMatch(/0 12px 24px -8px/);
-    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 12px 24px -8px/s);
+    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-control-top\)/);
+    expect(darkShadow).toMatch(/0 14px 30px -14px/);
+    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 14px 28px -16px/s);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
@@ -187,7 +454,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    // One line and 12px above and under it: the 44px pill.
+    // One line and 12px above and under it: the 44px box.
     expect(input).toMatch(/padding:\s*12px var\(--oct-composer-gutter\);/);
   });
 
@@ -205,16 +472,53 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it("wraps a composer notice so a narrow pane still shows the whole instruction", () => {
+  it("draws a composer's notices as callout cards above the box, with the callout's corner, not inside it", () => {
     const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const notice = /\.composer-status__notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const strip =
-      /\.thread-composer__feedback > \.composer-status:has\(> \.composer-status__notice\)\s*\{([^}]*)\}/.exec(
-        css,
-      )?.[1] ?? "";
-    expect(notice).toMatch(/white-space:\s*normal/);
-    expect(strip).toMatch(/flex:\s*1 1 auto/);
-    expect(strip).toMatch(/min-width:\s*0/);
+    const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const card = /\.callout\.composer-notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const body = /\.callout\.composer-notice > \.callout__body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const actions =
+      /\.callout\.composer-notice > \.callout__actions\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+
+    // One group of cards, with a gap from the box on the spacing scale and no
+    // room when there is nothing to say.
+    expect(group).toMatch(/display:\s*grid/);
+    expect(group).toMatch(/margin-bottom:\s*var\(--oct-space-1\)/);
+    expect(css).toMatch(/\.composer-notices:empty\s*\{\s*display:\s*none/);
+    // The words wrap, and the action wraps under them in a narrow composer.
+    expect(card).toMatch(/flex-wrap:\s*wrap/);
+    // The compact form: the 12px meta step and tight padding, so the card is
+    // visibly lighter than the box.
+    expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
+    expect(body).toMatch(/flex:\s*1 1 200px/);
+    expect(actions).toMatch(/margin-inline-start:\s*auto/);
+    // The corner is the callout's own (12px), the same as the composer's: no
+    // radius is set on the card here, so a second corner cannot come back.
+    expect(card).not.toMatch(/border-radius/);
+    expect(css).toMatch(/--oct-radius-md:\s*12px/);
+    expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
+      /border-radius:\s*var\(--oct-radius-md\)/,
+    );
+    // Over a ground or under Window glass the card is the glass the box is.
+    expect(css).toMatch(
+      /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
+    );
+    // Nothing the box held for a notice survives: no feedback strip in it.
+    expect(css).not.toMatch(/\.thread-composer__feedback/);
+    expect(css).not.toMatch(/\.composer-status\b/);
+  });
+
+  it("keeps the outside-content chip in the row, and drops its words but not its globe in a narrow row", () => {
+    const css = readFileSync(join(webRoot, "composer/outside-content-notice.css"), "utf8");
+    const trigger =
+      /\.composer-row \.outside-content-chip__trigger\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(trigger).toMatch(/color:\s*var\(--oct-warn-fg\)/);
+    // No fill or edge at rest: the row's quiet treatment supplies none.
+    expect(trigger).not.toMatch(/background|border/);
+    expect(css).toMatch(
+      /@container composer-under \(max-width: 560px\)\s*\{\s*\.outside-content-chip__label\s*\{\s*display:\s*none/,
+    );
   });
 
   it("lets a Project overview's actions drop below the name so a half-width pane never draws the name field over its kind chip", () => {
@@ -379,8 +683,10 @@ describe("the public-block visual language", () => {
     }
     for (const source of composers) {
       expect(source).toContain("thread-composer");
-      // Chat composes its status class with its live/quiet modifiers.
-      expect(source).toMatch(/className=\{?[`"]composer-status\b/);
+      // What the surface says about its thread or about sending goes to the
+      // composer's notice cards, never into a strip inside the box.
+      expect(source).toMatch(/\bnotices=\{/);
+      expect(source).not.toMatch(/\bfooter=\{/);
     }
   });
 
@@ -405,6 +711,57 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(
       /\.octant-switch\[data-slot="switch"\]:focus-visible:not\(\[data-checked\]\)/,
     );
+  });
+
+  it("keeps the light theme's faint controls and dimmed text readable", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      css.match(new RegExp(`${selector}\\s*\\{[^}]+\\}`))?.[0] ?? "";
+
+    // The chosen segment is a stronger tint than its tray, not the tray itself.
+    expect(rule(system, '\\.modeswitch__tray > \\.mode\\[aria-current="page"\\]')).toMatch(
+      /background:\s*color-mix\(in srgb, var\(--oct-fg\) 12%, transparent\)/,
+    );
+    // Dimming a muted role with opacity fell under 4.5:1 on the page.
+    for (const selector of [
+      "\\.project-threads__more",
+      "\\.draft-thread__hint,\\s*\\.work-composer-adapter__hint",
+    ]) {
+      expect(rule(shell, selector)).not.toMatch(/opacity/);
+    }
+    // An off switch's edge and an unchecked checkbox are found at a glance.
+    expect(rule(system, '\\.octant-switch\\[data-slot="switch"\\]')).toMatch(
+      /border:\s*1px solid var\(--octant-divider-strong\)/,
+    );
+    expect(readFileSync(join(webRoot, "ui/shadcn/checkbox.tsx"), "utf8")).toContain(
+      "border-(--octant-divider-strong)",
+    );
+    // The inverse tooltip takes no inset bevel: its white line drew on the dark tooltip.
+    expect(rule(system, "\\.octant-tooltip").match(/box-shadow:[^;]+;/)?.[0]).not.toContain(
+      "inset",
+    );
+    // Only a locked model's picker keeps full ink.
+    expect(system).toMatch(
+      /\.composer-model-picker__trigger--locked:disabled\s*\{\s*opacity:\s*1;/,
+    );
+    expect(system).not.toMatch(/\.composer-model-picker__trigger:disabled\s*\{/);
+  });
+
+  it("dims a disabled control by one shared opacity that keeps its label readable", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    // 0.75 keeps the muted ink at 3:1 or more on the light page and the dark card.
+    expect(system).toMatch(/--oct-disabled-opacity:\s*0\.75;/);
+    const recipes = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").map((path) => ({
+      path: relative(webRoot, path),
+      source: readFileSync(path, "utf8"),
+    }));
+    for (const { path, source } of recipes) {
+      expect(source, path).not.toMatch(/(?:disabled|data-disabled):opacity-\d/);
+    }
+    // A select's chevron is not dimmed while the select is enabled.
+    const select = readFileSync(join(webRoot, "ui/shadcn/select.tsx"), "utf8");
+    expect(select).not.toMatch(/text-muted-foreground opacity-/);
   });
 
   it("does not add a wrapper focus halo around the Issues search", () => {
@@ -490,6 +847,9 @@ describe("the public-block visual language", () => {
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
+    // An item inside the padded track takes the control corner less the
+    // padding, never below 2px.
+    expect(toggles).toContain("gap-1 rounded-sm border");
     expect(activePane).toMatch(/background:\s*transparent/);
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });
@@ -598,14 +958,25 @@ describe("the public-block visual language", () => {
 
   it("keeps Settings navigation and explanatory text readable without shouting", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
+    // A rail group label is the Navigation group label role: its type is
+    // defined once, in `oct-nav-group`, and neither rule here sets any.
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    const groupRole = surface.match(/(?:^|\n)\.oct-nav-group\s*\{[^}]+\}/)?.[0] ?? "";
+    const sectionLabel = system.match(/(?:^|\n)\.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(navigation).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
-    expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(groupRole).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(groupRole).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(groupRole).toMatch(/letter-spacing:\s*0/);
+    expect(sectionLabel).not.toMatch(/font-size|font-weight|letter-spacing/);
+    expect(readFileSync(join(webRoot, "shell/SettingsNavigation.tsx"), "utf8")).toContain(
+      "oct-nav-group setnav-section",
+    );
+    expect(navigation).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(navigation).toMatch(/text-transform:\s*none/);
-    expect(navigation).toMatch(/letter-spacing:\s*normal/);
     // The desktop rail shows its group labels; a quiet label is what separates
     // one group of pages from the next, not a hairline and not a hidden name.
     // Any way of hiding them counts: the sr-only recipe, display, visibility.
@@ -848,6 +1219,30 @@ describe("the public-block visual language", () => {
     const tray = rule("\\.sidebar__chrome \\.modeswitch");
     expect(tray).toMatch(/flex:\s*1 0 auto/);
     expect(tray).toMatch(/min-width:\s*min-content/);
+    // The row sits in a scrolling column: a long thread list shrank it to its
+    // min-height and left the wrapped second row of buttons under the list.
+    expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("lets the Review tool's heads wrap instead of overlapping or clipping at the dock's 280px minimum", () => {
+    // jsdom has no layout, so the rules are pinned in the CSS. At 280px the
+    // findings head kept its nowrap status line at full width, ran 14px past
+    // the edge, and drew the "Review" label over it; the view switch's last
+    // item was cut off. Both now wrap to a second row.
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const history = readFileSync(join(webRoot, "gitHistory/git-history.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      css.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+    expect(rule(dock, "\\.right-utility-dock__tool \\.code-delivery-pane__toolbar")).toMatch(
+      /flex-wrap:\s*wrap/,
+    );
+    const status = rule(dock, "\\.right-utility-dock__tool \\.code-delivery-pane__toolbar > p");
+    expect(status).toMatch(/white-space:\s*normal/);
+    expect(status).toMatch(/max-width:\s*100%/);
+    const views = rule(history, '\\.git-history__toolbar \\[data-slot="toggle-group"\\]');
+    expect(views).toMatch(/flex-wrap:\s*wrap/);
+    expect(views).toMatch(/max-width:\s*100%/);
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {
@@ -1039,7 +1434,7 @@ describe("the public-block visual language", () => {
         ".dock-browser-pages",
         ".phone-scroll",
         ".setnav",
-        ".sidebar-rail__column",
+        ".sidebar-rail__scroll",
       ];
       const strays: string[] = [];
       for (const path of cssFiles(webRoot)) {
@@ -1083,6 +1478,149 @@ describe("the public-block visual language", () => {
       expect(system).toMatch(
         /html\[data-octant-reduced-motion="true"\] \.skeleton::after \{\s*display: none;\s*\}/,
       );
+    });
+  });
+
+  describe("dock tool tiles", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const body = (selector: string) => {
+      const start = dock.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return dock.slice(start, dock.indexOf("}", start));
+    };
+
+    it("clips every tile to its box and gives its tool a definite height to scroll within", () => {
+      expect(body(".dock-tile")).toMatch(/overflow:\s*hidden/);
+      const tool = body(".dock-tile > .right-utility-dock__tool");
+      expect(tool).toMatch(/overflow:\s*hidden/);
+      expect(tool).toMatch(/min-height:\s*0/);
+      expect(tool).toMatch(/flex:\s*1 1 0/);
+      expect(
+        body('.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > *'),
+      ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
+    });
+
+    it("stands the narrow dock sheet at a definite height, so the tool fills it and scrolls inside", () => {
+      const sheet = body(".octant-dialog__popup:has(> .right-utility-dock__surface)");
+      expect(sheet).toMatch(
+        /height:\s*min\(var\(--octant-dialog-height, 640px\), calc\(100vh - 48px\)\)/,
+      );
+    });
+
+    it("leaves the divider empty at rest, since the tile beside it draws the line, and never keeps an accent line after a click", () => {
+      const rule = (selector: string) => body(selector);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*transparent/);
+      const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
+      expect(held).toMatch(/--octant-border-strong/);
+      const dividerRules = dock.slice(
+        dock.indexOf(".dock-tiles__divider {"),
+        dock.indexOf(".dock-tiles__drag-shield"),
+      );
+      // Keyboard focus is the app's own outline, not a line of this rule's.
+      expect(dividerRules).not.toMatch(/focus-visible/);
+      // From 681px up the grabbed line takes the meta ink and lies on the tile's
+      // own line (the hit area is 8px, so the line sits 4px in).
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles__divider"));
+      expect(wide).toMatch(/\[data-orientation="vertical"\]::before \{\s*left: 4px/);
+      expect(wide).toMatch(/\[data-orientation="horizontal"\]::before \{\s*top: 4px/);
+      expect(wide).toMatch(/:active::before \{\s*background: var\(--oct-meta\)/);
+    });
+
+    it("gives every tile bar one height, so neighbouring tiles line up", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+      expect(dock).not.toContain("dock-tile__caption");
+    });
+
+    it("draws a tile square and flat from the shared tokens from 681px up, with one line on its top and left", () => {
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles {"));
+      const inWide = (selector: string) => {
+        const start = wide.indexOf(`${selector} {`);
+        expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
+        return wide.slice(start, wide.indexOf("}", start));
+      };
+      expect(inWide(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
+      const tile = inWide(".dock-tile");
+      expect(tile).toMatch(/border-radius:\s*0/);
+      expect(tile).toMatch(/background:\s*var\(--octant-pane-fill\)/);
+      expect(tile).toMatch(/box-shadow:\s*none/);
+      const line = inWide(".dock-tile::after");
+      expect(line).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
+      expect(line).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
+      expect(line).not.toMatch(/border-(right|bottom)/);
+      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
+    });
+
+    it("keeps a narrow window's tile a rounded panel with a seat shadow and a rim", () => {
+      const tile = body(".dock-tile");
+      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
+      expect(tile).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
+      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
+      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
+    });
+  });
+
+  describe("the layer a notice sits on", () => {
+    // A notice that said the app had stopped unexpectedly landed on an open
+    // menu in the right dock's header and took the clicks meant for its
+    // items. jsdom does not stack, so this pins the numbers that decide it;
+    // the order was measured in a browser with `elementFromPoint`.
+    const system = readFileSync(join(webRoot, "styles", "octant.css"), "utf8");
+    const dock = readFileSync(join(webRoot, "styles", "dock.css"), "utf8");
+    const base = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const layer = (name: string) =>
+      Number(new RegExp(`--oct-z-${name}:\\s*(\\d+);`).exec(system)?.[1]);
+    const ruleBody = (css: string, selector: string) =>
+      new RegExp(
+        `(?:^|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
+        "m",
+      ).exec(css)?.[1] ?? "";
+
+    it("stands a notice above dialogs and sheets and below everything a person aims at", () => {
+      // Under a dialog's backdrop a notice could be neither read nor dismissed;
+      // under a menu's items it took their clicks.
+      expect(layer("toast")).toBeGreaterThan(layer("overlay"));
+      expect(layer("floating")).toBeGreaterThan(layer("overlay"));
+      expect(layer("toast")).toBeGreaterThan(layer("floating"));
+      expect(layer("toast")).toBeLessThan(layer("popup"));
+    });
+
+    it("keeps every popup recipe on the popup layer and never on a number of its own", () => {
+      for (const recipe of ["dropdown-menu", "context-menu", "popover", "select", "combobox"]) {
+        const source = readFileSync(join(webRoot, "ui", "shadcn", `${recipe}.tsx`), "utf8");
+        expect(source).toContain('"z-[var(--oct-z-popup)] ');
+        expect(source).not.toMatch(/\bz-\d+\b/);
+      }
+      for (const file of ["OctantPopover.tsx", "OctantSelect.tsx"]) {
+        const source = readFileSync(join(webRoot, "ui", "base", file), "utf8");
+        expect(source).toContain("z-[var(--oct-z-popup)]");
+        expect(source).not.toMatch(/\bz-\d+\b/);
+      }
+      expect(ruleBody(base, ".octant-menu__positioner")).toContain("z-index: var(--oct-z-popup);");
+    });
+
+    it("draws dialogs and sheets on the floating layer", () => {
+      for (const part of [
+        ".octant-dialog__backdrop",
+        ".octant-dialog__viewport",
+        ".octant-sheet__backdrop",
+        ".octant-sheet__viewport",
+      ]) {
+        expect(ruleBody(dock, part)).toContain("z-index: var(--oct-z-floating);");
+      }
+    });
+
+    it("puts a tooltip and a hover card on the popup layer", () => {
+      for (const part of [".octant-tooltip__positioner", ".octant-preview-card__positioner"]) {
+        expect(ruleBody(system, part)).toContain("z-index: var(--oct-z-popup);");
+      }
+    });
+
+    it("stacks every notice on the toast layer and lets only a notice take a press", () => {
+      expect(ruleBody(system, ".toast-stack")).toContain("z-index: var(--oct-z-toast);");
+      expect(ruleBody(system, ".toast-stack")).toContain("pointer-events: none;");
+      expect(ruleBody(system, ".toast")).toContain("pointer-events: auto;");
+      expect(ruleBody(base, ".computer-use-activity")).toContain("z-index: var(--oct-z-toast);");
     });
   });
 });

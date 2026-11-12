@@ -59,7 +59,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
   if (!bound) {
     return (
       <p className="code-file-explorer__status" role="status">
-        <FolderTree aria-hidden="true" size={16} strokeWidth={1.8} />
+        <FolderTree aria-hidden="true" size={16} />
         This Code thread is not bound to a checkout, so there are no repository files to list.
       </p>
     );
@@ -81,7 +81,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
             type="button"
             variant="secondary"
           >
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+            <RefreshCw aria-hidden="true" size={14} />
             <span>Try again</span>
           </OctantButton>
         </div>
@@ -152,7 +152,7 @@ function ExtraFolderExplorer(
   return (
     <section aria-label={`${name} (extra folder)`} className="code-file-explorer-panel__folder">
       <h3 className="code-file-explorer-panel__folder-name">
-        <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
+        <FolderTree aria-hidden="true" size={14} />
         {name}
       </h3>
       {directory === undefined || controller.status === "error" ? (

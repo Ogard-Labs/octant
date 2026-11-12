@@ -32,7 +32,7 @@ export function CanvasWorkspaceTabActions(props: CanvasWorkspaceTabActionsProps)
           type="button"
           variant="ghost"
         >
-          <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.8} />
+          <LayoutGrid aria-hidden="true" size={14} />
           Pin in Zen
         </OctantButton>
       )}
@@ -52,7 +52,7 @@ export function CanvasWorkspaceTabActions(props: CanvasWorkspaceTabActionsProps)
         type="button"
         variant="ghost"
       >
-        <Paperclip aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Paperclip aria-hidden="true" size={14} />
         Attach context
       </OctantButton>
     </div>

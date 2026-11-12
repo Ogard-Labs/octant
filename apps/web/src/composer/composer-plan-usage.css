@@ -1,4 +1,4 @@
-/* The start screen's context row, just above the pill: where the
+/* The start screen's context row, just above the box: where the
    thread runs on the left, how much of the plan is left on the right. It has
    no fill or edge of its own, like a thread's strip, and the meters drop to
    their own right-aligned line when the chips leave no room. */
@@ -28,12 +28,4 @@
 .composer-start > .composer-usage-warning {
   flex: 1 1 100%;
   margin: 0 0 var(--oct-space-2);
-}
-
-/* A start screen's notice is anchored above the tray. The banner hangs
-   8px below its anchor to tuck under a card's edge; the anchor's own margin
-   takes that overlap so it never covers the row's chips. */
-.composer-start-notice {
-  height: 0;
-  margin-bottom: var(--oct-space-2);
 }

@@ -1,5 +1,5 @@
-import { threadStats, threadStatsInputOf, type ThreadStat } from "@octant/domain";
-import { EyeOff } from "lucide-react";
+import { threadStats, threadStatsInputOf } from "@octant/domain";
+import { ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 import { useComposerContextMeterScope } from "../context/composerContextMeterScope";
 import { composerLimitWindows, type ComposerLimitWindow } from "../context/composerLimitWindows";
@@ -10,39 +10,68 @@ import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";
 
 /**
- * The thread's quiet stats line under the composer. It reads the host's
- * recorded turns, so every provider and mode shows the same figures worded by
- * one shared module. Where the provider's account windows have a place of
- * their own ({@link ThreadPlanWindows} in the strip above a thread's box),
- * `windows={false}` leaves them out; elsewhere they lead the line, so a person
- * sees how much of the 5-hour or weekly limit is left without opening the
- * meter. It is the first thing to go when there is nothing honest to say: a
- * provider that reported neither usage nor limits shows no line, and the
- * per-turn detail is still reachable from the context meter.
+ * The thread's turn figures, as one compact block at the top of the Thread info
+ * panel. They read the host's recorded turns, so every provider and mode shows
+ * the same figures worded by one shared module. They are not drawn under the
+ * composer: with the row of controls and a card, that made four layers under
+ * a chip. It shows nothing when there is nothing honest to say (a provider
+ * that reported neither usage nor timing), and the per-turn detail opens from
+ * the block's own link and from the context meter. Active pane only: the
+ * figures come from one shell-wide scope, so an inactive split pane would
+ * otherwise show another thread's figures.
  */
-export function ThreadStats(props: { readonly windows?: boolean }) {
+export function ThreadStatsBlock() {
   const scope = useThreadStatsScope();
   const meter = useComposerContextMeterScope();
   const stats = useMemo(
     () => (scope.summary === undefined ? [] : threadStats(threadStatsInputOf(scope.summary))),
     [scope.summary],
   );
-  // The line belongs to the active pane only. The turn figures and the meter's
-  // limits come from one shell-wide scope, so an inactive split pane would
-  // otherwise show another thread's figures and provider capacity.
-  if (!meter.visible) return null;
-  const limits = props.windows === false ? [] : currentLimitWindows(meter);
-  const showLine = scope.lineVisible && (stats.length > 0 || limits.length > 0);
-  return showLine ? (
-    <ThreadStatsLine limits={limits} onHide={() => scope.setLineVisible(false)} stats={stats} />
-  ) : null;
+  if (!meter.visible || stats.length === 0) return null;
+  return (
+    <div
+      aria-label={`Thread stats: ${stats.map((stat) => stat.label).join(", ")}`}
+      className="thread-stats"
+      data-testid="thread-stats-block"
+      role="group"
+    >
+      <span className="thread-stats__figures">
+        <span className="thread-stats__figures-row">
+          {stats.map((stat) =>
+            stat.hint === undefined ? (
+              <span className="thread-stats__item" key={stat.key}>
+                {stat.text}
+              </span>
+            ) : (
+              <OctantTooltip key={stat.key} label={stat.hint} side="top">
+                <span className="thread-stats__item" data-hinted="true">
+                  {stat.text}
+                </span>
+              </OctantTooltip>
+            ),
+          )}
+        </span>
+      </span>
+      {scope.summary === undefined ? null : (
+        <OctantButton
+          className="thread-stats__details"
+          onClick={scope.openDetail}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <span>Turn details</span>
+          <ChevronRight aria-hidden="true" size={14} />
+        </OctantButton>
+      )}
+    </div>
+  );
 }
 
 /**
  * The provider's remaining plan usage for a thread, right-aligned in the strip
  * above its box, as the start screen shows it beside where a new thread runs.
- * The stats line's switch hides the figures under the box, not these meters:
- * the start screen offers no way to hide them either. Active pane only, for the
+ * The start screen offers no way to hide them either. Active pane only, for the
  * same reason as the line.
  */
 export function ThreadPlanWindows() {
@@ -69,84 +98,4 @@ function currentLimitWindows(
     snapshot: meter.snapshot,
     fallback: meter.fallback,
   });
-}
-
-function ThreadStatsLine(props: {
-  readonly limits: ReadonlyArray<ComposerLimitWindow>;
-  readonly onHide: () => void;
-  readonly stats: ReadonlyArray<ThreadStat>;
-}) {
-  const scope = useThreadStatsScope();
-  const described = [
-    ...props.limits.map((limit) => `${limit.name} ${String(limit.percent)}% left`),
-    ...props.stats.map((stat) => stat.label),
-  ];
-  const content = (
-    <>
-      <PlanUsageMeters windows={props.limits} />
-      {props.limits.length > 0 && props.stats.length > 0 ? (
-        <span aria-hidden="true" className="thread-stats__separator">
-          {" · "}
-        </span>
-      ) : null}
-      {props.stats.length === 0 ? null : (
-        // Each figure draws its own leading dot, and this box clips whatever
-        // sits at its left edge, so a wrapped line never opens on a lone
-        // separator (seen with the dock open beside a thread).
-        <span className="thread-stats__figures">
-          <span className="thread-stats__figures-row">
-            {props.stats.map((stat) =>
-              stat.hint === undefined ? (
-                <span className="thread-stats__item" key={stat.key}>
-                  {stat.text}
-                </span>
-              ) : (
-                <OctantTooltip key={stat.key} label={stat.hint} side="top">
-                  <span className="thread-stats__item" data-hinted="true">
-                    {stat.text}
-                  </span>
-                </OctantTooltip>
-              ),
-            )}
-          </span>
-        </span>
-      )}
-    </>
-  );
-  return (
-    <div className="thread-stats" data-testid="thread-stats-line">
-      {/* Without a recorded turn there is no turn detail to open, so the line is a
-          plain group rather than a button that does nothing when pressed. */}
-      {scope.summary === undefined ? (
-        <div
-          aria-label={`Thread stats: ${described.join(", ")}`}
-          className="thread-stats__line"
-          role="group"
-        >
-          {content}
-        </div>
-      ) : (
-        <OctantButton
-          aria-label={`Thread stats: ${described.join(", ")}. Open turn details`}
-          className="thread-stats__line"
-          onClick={scope.openDetail}
-          type="button"
-          variant="bare"
-        >
-          {content}
-        </OctantButton>
-      )}
-      <OctantButton
-        aria-label="Hide stats line"
-        className="thread-stats__hide"
-        onClick={props.onHide}
-        size="icon-xs"
-        title="Hide stats line"
-        type="button"
-        variant="ghost"
-      >
-        <EyeOff aria-hidden="true" size={12} />
-      </OctantButton>
-    </div>
-  );
 }

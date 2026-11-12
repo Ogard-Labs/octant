@@ -59,7 +59,7 @@ export function CanvasToolRail(props: {
               className="canvas-tool-rail__tool"
               value={tool.id}
             >
-              <tool.icon aria-hidden="true" size={16} strokeWidth={1.8} />
+              <tool.icon aria-hidden="true" size={16} />
             </OctantToggleGroupItem>
           </OctantTooltip>
         </Fragment>

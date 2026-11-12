@@ -68,7 +68,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
       type="button"
       variant={leadsWithTask ? "ghost" : "default"}
     >
-      <FolderPlus aria-hidden="true" size={16} strokeWidth={1.8} />
+      <FolderPlus aria-hidden="true" size={16} />
       {leadsWithTask ? "Add another folder" : "Choose a folder…"}
     </OctantButton>
   );
@@ -81,7 +81,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
         type="button"
         variant={leadsWithTask ? "default" : "ghost"}
       >
-        {leadsWithTask ? <SquarePen aria-hidden="true" size={16} strokeWidth={1.8} /> : null}
+        {leadsWithTask ? <SquarePen aria-hidden="true" size={16} /> : null}
         {presentation.newTask}
       </OctantButton>
     );
@@ -92,7 +92,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
     >
       <div className="agent-mode-welcome__panel">
         <span aria-hidden="true" className="agent-mode-welcome__mark">
-          <FolderOpen size={20} strokeWidth={1.6} />
+          <FolderOpen size={20} />
         </span>
         {leadsWithTask ? (
           // The question alone: this screen has buttons, not a composer, so the

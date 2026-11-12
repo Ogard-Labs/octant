@@ -22,6 +22,7 @@ import { ChevronLeft, Play, RotateCcw, X } from "lucide-react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
@@ -349,7 +350,7 @@ export function FlowBoard(props: FlowBoardProps) {
           type="button"
           variant="secondary"
         >
-          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          <Play aria-hidden="true" size={12} />
           Play
         </OctantButton>
       </div>
@@ -485,18 +486,20 @@ export function FlowBoard(props: FlowBoardProps) {
           {message}
         </OctantAlert>
       )}
-      {playing === undefined ? null : (
-        <FlowPlayer
-          block={props.block}
-          blocks={props.blocks}
-          {...(props.designAssetRuntime === undefined
-            ? {}
-            : { designAssetRuntime: props.designAssetRuntime })}
-          onClose={() => setPlaying(undefined)}
-          restoreFocus={playButton}
-          startScreenId={playing}
-        />
-      )}
+      <OctantDialogPresence>
+        {playing === undefined ? null : (
+          <FlowPlayer
+            block={props.block}
+            blocks={props.blocks}
+            {...(props.designAssetRuntime === undefined
+              ? {}
+              : { designAssetRuntime: props.designAssetRuntime })}
+            onClose={() => setPlaying(undefined)}
+            restoreFocus={playButton}
+            startScreenId={playing}
+          />
+        )}
+      </OctantDialogPresence>
     </div>
   );
 }
@@ -649,7 +652,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronLeft aria-hidden="true" size={16} />
             </OctantButton>
             <OctantButton
               onClick={() => {
@@ -660,7 +663,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <RotateCcw aria-hidden="true" size={12} strokeWidth={2} />
+              <RotateCcw aria-hidden="true" size={12} />
               Restart
             </OctantButton>
             <FullscreenButton fullscreen={fullscreen} />
@@ -671,7 +674,7 @@ function FlowPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={16} strokeWidth={1.8} />
+              <X aria-hidden="true" size={16} />
             </OctantButton>
           </div>
         </header>

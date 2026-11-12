@@ -14,19 +14,20 @@ import { cn } from "./utils";
  *
  * An outline button rests on the page colour, unless the shell names another
  * rest fill: under Glass the page colour is opaque while the page around the
- * button is not, and every outline button drew a black pill on the grey
+ * button is not, and every outline button drew a black chip on the grey
  * glass of an OLED preset.
  */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow] outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow] outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md)",
   {
     variants: {
       variant: {
         // A filled button is a raised tile: the control shadow puts light on
-        // its top edge and a short shadow under it, and pressing sinks it.
+        // its top edge and a short shadow under it, and pressing sinks it. The
+        // primary one is the accent as a gradient with a soft glow under it.
         // Ghost, link, bare and chip draw no tile, so they stay flat.
         default:
-          "bg-primary text-primary-foreground shadow-(--octant-shadow-control) hover:bg-primary/80 active:bg-primary/70 active:shadow-(--octant-shadow-control-pressed)",
+          "bg-primary bg-(image:--octant-accent-sheen) text-primary-foreground shadow-(--octant-shadow-primary) hover:bg-primary/90 active:bg-primary/80 active:shadow-(--octant-shadow-control-pressed)",
         // The primary text colour as a fill, with the page colour on it: the
         // one action a surface is for, where the accent would compete with
         // the content beside it (a composer's send, next to the prompt).
@@ -46,10 +47,10 @@ const buttonVariants = cva(
         // focus handling, and disabled state and draws nothing of its own, so
         // the feature never fights a ghost hover fill or a fixed height.
         bare: "h-auto rounded-none p-0 text-inherit",
-        // A small outlined pill that suggests something to type or pick: a
+        // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
-        chip: "rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground",
+        chip: "border-border bg-transparent text-muted-foreground hover:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between
@@ -59,13 +60,14 @@ const buttonVariants = cva(
       size: {
         default:
           "h-[round(2.154rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
         lg: "h-[round(2.462rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
         icon: "size-[round(2.154rem,2px)]",
         "icon-xs":
-          "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3.5",
+          "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        "icon-sm":
+          "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
     },
     // A chip sizes itself, so its height and padding follow the label rather

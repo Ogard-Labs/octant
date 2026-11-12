@@ -1,3 +1,4 @@
+import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { resolveSnoozePresets } from "@octant/domain";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
@@ -83,6 +84,7 @@ const NO_REVIEW_REASON = {
  */
 export function PendingRequestRow(props: PendingRequestRowProps) {
   const { request } = props;
+  const agentName = useAgentThreadName(String(request.threadId));
   const deferred =
     props.onDefer !== undefined &&
     request.deferredUntil !== undefined &&
@@ -161,6 +163,10 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   }
 
   const embedded = props.embedded === true;
+  // A thread an outside agent started is named with that agent, so what it
+  // waits on is not mistaken for something the person asked for.
+  const threadLabel =
+    agentName === undefined ? request.threadTitle : `${agentName} · ${request.threadTitle}`;
   const decision = request.kind === "decision" ? request : undefined;
   const noun = decision === undefined ? "question" : "decision";
   const ModeIcon = modeIcons[request.mode];
@@ -174,14 +180,14 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     <div
       aria-label={
         child !== undefined
-          ? `${request.threadTitle} has a subagent waiting for you`
+          ? `${threadLabel} has a subagent waiting for you`
           : lead !== undefined
-            ? `${request.threadTitle} needs your approval`
+            ? `${threadLabel} needs your approval`
             : isLeadQuestionPendingRequest(request)
-              ? `${request.threadTitle} is waiting for your answer`
+              ? `${threadLabel} is waiting for your answer`
               : request.kind === "decision"
-                ? `${request.threadTitle} asks you to decide`
-                : `${request.threadTitle} is waiting for you`
+                ? `${threadLabel} asks you to decide`
+                : `${threadLabel} is waiting for you`
       }
       className="pending-request"
       data-embedded={embedded ? "true" : "false"}
@@ -205,11 +211,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             <OctantButton
               className="oct-row-label pending-request__title window-no-drag"
               onClick={() => props.onOpenThread(request)}
-              title={request.threadTitle}
+              title={threadLabel}
               type="button"
               variant="bare"
             >
-              {request.threadTitle}
+              {threadLabel}
             </OctantButton>
             {props.coordinatorTitle === undefined ? null : (
               <span className="oct-meta pending-request__via" title={props.coordinatorTitle}>
@@ -225,7 +231,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           <span className="oct-meta pending-request__differs">Second opinion differs</span>
         ) : null}
         <span className="oct-meta pending-request__wait">
-          <CirclePause aria-hidden="true" size={12} strokeWidth={1.8} />
+          <CirclePause aria-hidden="true" size={12} />
           {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
         </span>
       </div>

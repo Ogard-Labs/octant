@@ -1,13 +1,28 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
-import { useComposerNotice } from "./ComposerNotice";
+import {
+  ComposerNoticeSinkProvider,
+  noticeRole,
+  useComposerNotice,
+  type ComposerNoticeItem,
+  type ComposerProgress,
+} from "./ComposerNotice";
+import { ComposerNoticeCard, noticeCardId } from "./ComposerNoticeCard";
 import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
-import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
-import { useId, type ReactNode } from "react";
+import { ComposerOutsideContentChip } from "./OutsideContentNotice";
+import {
+  Fragment,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ThreadPlanWindows, ThreadStats } from "../threadStats/ThreadStats";
+import { ThreadPlanWindows } from "../threadStats/ThreadStats";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
@@ -96,9 +111,9 @@ export interface ThreadComposerRow {
    */
   readonly trailing?: ReactNode;
   /**
-   * The microphone, in the pill just before send: it writes into the prompt,
+   * The microphone, in the box just before send: it writes into the prompt,
    * so it stands with the two other controls that act on the message. In the
-   * row under the pill it read as a fact about the thread.
+   * row under the box it read as a fact about the thread.
    */
   readonly dictate?: ReactNode;
   readonly actions: ThreadComposerActions;
@@ -106,11 +121,11 @@ export interface ThreadComposerRow {
 
 /**
  * The one composer frame Chat, Work, and Code share. It owns the anatomy —
- * the `.composer` frame, and inside it the card (chips, then attach, the
- * block message label and send/stop on one line) with the `.composer-row` of
- * the surface's controls on the page under it — while every capability (chips,
- * typeaheads, pickers, status) is passed in by the surface and rendered only
- * when given. State, wiring, and the message control itself stay with the
+ * the `.composer` frame, and inside it the notice cards, the box (chips, then
+ * attach, the block message label and send/stop on one line) and the
+ * `.composer-row` of the surface's controls on the page under it — while every
+ * capability (chips, typeaheads, pickers, notices) is passed in by the surface
+ * and rendered only when given. State, wiring, and the message control itself stay with the
  * surface: the component takes over markup, not behavior.
  */
 export interface ThreadComposerProps {
@@ -162,8 +177,25 @@ export interface ThreadComposerProps {
   /** Mention/command typeahead popovers anchored between input and row. */
   readonly typeahead?: ReactNode;
   readonly row: ThreadComposerRow;
-  /** Status line, context strip, or panels the surface shows under the row. */
-  readonly footer?: ReactNode;
+  /**
+   * What the surface has to say about its thread or about sending: a refusal,
+   * a failure, a status, a hint. They are drawn as cards directly above the
+   * box, most severe first, never inside it.
+   */
+  readonly notices?: ReadonlyArray<ComposerNoticeItem>;
+  /**
+   * The one passing message (sending, a response streaming, a provider
+   * check): a quiet line above the notice group that takes no layout room,
+   * never a card. The newest wins; the surface picks it.
+   */
+  readonly progress?: ComposerProgress | undefined;
+  /**
+   * Text for the persistent status region that is the prompt's description
+   * (why Send is held). Visually hidden and never in the box's height.
+   */
+  readonly description?: ReactNode;
+  /** The region's element id, when the surface's prompt already names it. */
+  readonly statusId?: string | undefined;
   /**
    * When set, a sidebar thread dropped on this frame attaches a mention
    * instead of opening a pane. The key matches the registered composer.
@@ -194,21 +226,32 @@ export function ThreadComposer(props: ThreadComposerProps) {
 
 function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }) {
   const notice = useComposerNotice();
+  // A control inside the box (the microphone) says its failure in the card
+  // too, where it wraps, instead of beside itself where it was cut to fit.
+  const [published, setPublished] = useState<ReadonlyMap<string, ComposerNoticeItem>>(new Map());
+  const publish = useCallback((item: ComposerNoticeItem | undefined, key: string) => {
+    setPublished((current) => {
+      if (item === undefined && !current.has(key)) return current;
+      const next = new Map(current);
+      if (item === undefined) next.delete(key);
+      else next.set(key, item);
+      return next;
+    });
+  }, []);
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.
   const compacting = useComposerCompacting();
   const compactingNoteId = useId();
-  const compactingNote = compacting ? (
-    <p className="oct-meta thread-composer__compacting" data-compacting="" id={compactingNoteId}>
-      Compacting session
-    </p>
-  ) : null;
+  const regionFallbackId = useId();
+  const regionId = props.statusId ?? regionFallbackId;
+  const noticeIdPrefix = useId();
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const activeDropKey = useActiveComposerThreadDropKey();
   const dropKey = props.threadDropKey;
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
+  const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}`;
   // Where a new thread runs and how much of the plan is left stand in the
   // tray above the card, so the card holds only the prompt. Inside the card
   // the row sat between the person and the prompt, and a control with more
@@ -231,11 +274,61 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
       </div>
     );
-  // The pill holds what acts on the message being written and nothing else:
+  // One group of cards directly above the box, under the start row: what the
+  // thread did or what sending refused, then the Project offer and the
+  // outside-content mark.
+  const all = [...(props.notices ?? []), ...published.values()];
+  // A card is for something the person must read or act on, or a fact that
+  // stays until they do. Only a state a surface marks as passing by itself
+  // (and with text it can draw on one line) is the quiet line.
+  const isLine = (card: ComposerNoticeItem) =>
+    card.transient === true && card.action === undefined && typeof card.text === "string";
+  const cards = all.filter((card) => !isLine(card));
+  const noted = all.filter(isLine);
+  // A session that compacts holds Send; that is progress, and it outranks the
+  // surface's own passing message.
+  const lastNote = noted.at(-1);
+  const progress: ComposerProgress | undefined = compacting
+    ? { text: "Compacting session" }
+    : (props.progress ??
+      (lastNote === undefined || typeof lastNote.text !== "string"
+        ? undefined
+        : {
+            text: lastNote.text,
+            ...(lastNote.label === undefined ? {} : { label: lastNote.label }),
+          }));
+  // The region says every passing note even when only the newest is drawn.
+  // A card that stays is read where it stands and is not repeated here.
+  const spoken = noted.filter(
+    (card) => card !== lastNote || props.progress !== undefined || compacting,
+  );
+  const alertIds = cards
+    .filter((card) => noticeRole(card) === "alert")
+    .map((card) => noticeCardId(noticeIdPrefix, card));
+  // The prompt is described by the status region and by every refusal card
+  // that is showing, so a pending refusal is heard again when it takes focus.
+  // The prompt belongs to the surface, so the ids are merged into its own.
+  useLayoutEffect(() => {
+    const prompt = surfaceRef.current?.querySelector<HTMLElement>(".composer-input");
+    if (prompt === null || prompt === undefined) return;
+    const managed = new Set((prompt.dataset["composerDescribed"] ?? "").split(" "));
+    const own = (prompt.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .filter((token) => token !== "" && !managed.has(token));
+    const added = [regionId, ...alertIds].filter((id) => !own.includes(id));
+    prompt.setAttribute("aria-describedby", [...own, ...added].join(" "));
+    prompt.dataset["composerDescribed"] = added.join(" ");
+  });
+  const noticeCard = (
+    <ComposerNoticeCard idPrefix={noticeIdPrefix} notices={cards}>
+      {notice}
+    </ComposerNoticeCard>
+  );
+  // The box holds what acts on the message being written and nothing else:
   // attach, the prompt, the microphone and send. With the model, the access
   // level and the context ring in a toolbar inside it, it was a third taller
   // than its prompt and read as a form; those describe the thread, so they
-  // stand on the page under the pill with the thread's other facts.
+  // stand on the page under the box with the thread's other facts.
   const message = (
     <>
       {props.queue}
@@ -273,7 +366,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One line under the pill, in reading order: where the thread runs, the
+  // One line under the box, in reading order: where the thread runs, the
   // surface's own row (what the thread may do leading, the model and then the
   // context ring trailing), the plan's windows, and the thread's info. The
   // ring ends the run: it is the one figure there, and at the end it does not
@@ -297,6 +390,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
         >
           {props.row.leading}
+          {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
             {props.row.trailing}
             <ComposerContextMeter />
@@ -312,9 +406,9 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   // The stats line stands under the composer, where a person reads the last
   // turn's figures after sending.
   //
-  // The frame groups the start row, the pill and the line under it, and
-  // draws nothing: the pill is the one raised thing and the rows are quiet
-  // lines on the page. A held thread has no pill; the frame stays in the tree
+  // The frame groups the start row, the box and the line under it, and
+  // draws nothing: the box is the one raised thing and the rows are quiet
+  // lines on the page. A held thread has no box; the frame stays in the tree
   // so the info panel in the line is never remounted.
   const body = (
     <>
@@ -322,19 +416,39 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       <div className={held ? "composer-frame composer-frame--held" : "composer-frame"}>
         {held ? null : startRow}
         {held ? null : (
-          <div className="thread-composer__surface">
-            {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
+          <div
+            aria-live="polite"
+            className="composer-progress"
+            id={regionId}
+            role="status"
+            {...(progress?.label === undefined ? {} : { "aria-label": progress.label })}
+          >
+            {progress === undefined ? null : (
+              <span
+                className={progress.quiet === true ? "sr-only" : "composer-progress__line"}
+                {...(compacting ? { id: compactingNoteId } : {})}
+                title={progress.text}
+              >
+                {progress.text}
+              </span>
+            )}
+            <span className="sr-only">
+              {props.description}
+              {spoken.map((card) => (
+                <Fragment key={card.key}> {card.text}</Fragment>
+              ))}
+            </span>
+          </div>
+        )}
+        {held ? null : noticeCard}
+        {held ? null : (
+          <div className="thread-composer__surface" ref={surfaceRef}>
             {dropActive ? <ComposerThreadDropCue /> : null}
             {message}
-            <div className="thread-composer__feedback">
-              {compactingNote}
-              {props.footer}
-            </div>
           </div>
         )}
         {under}
       </div>
-      {held ? null : followUp ? <ThreadStats windows={false} /> : <ThreadStats />}
     </>
   );
   const frame =
@@ -347,7 +461,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held || startRow !== null ? null : notice}
         {held ? null : <ComposerSubagents />}
         {body}
       </div>
@@ -361,23 +474,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held || startRow !== null ? null : notice}
         {held ? null : <ComposerSubagents />}
         {body}
       </section>
     );
-  return startRow === null ? (
-    frame
-  ) : (
-    <>
-      {/* The notice rises from the card's top edge, where the row now stands,
-          so on a start screen it is anchored above the tray instead. */}
-      {notice == null ? null : (
-        <div className="composer-start-notice composer--has-notice">{notice}</div>
-      )}
-      {frame}
-    </>
-  );
+  return <ComposerNoticeSinkProvider set={publish}>{frame}</ComposerNoticeSinkProvider>;
 }
 
 function ComposerThreadDropCue() {
@@ -389,13 +490,21 @@ function ComposerThreadDropCue() {
 }
 
 /**
- * Send is a quiet tile until there is something to send, then the card's one
- * solid control. Filled with the accent at every moment, it was the loudest
- * thing on the page under an empty prompt.
+ * Send is a quiet raised tile until there is something to send, then the
+ * primary action: the accent as a gradient with a glow under it. Filled with
+ * the accent at every moment, it was the loudest thing on the page under an
+ * empty prompt.
  */
-function sendVariant(refused: boolean): "secondary" | "solid" {
-  return refused ? "secondary" : "solid";
+function sendVariant(refused: boolean): "secondary" | "default" {
+  return refused ? "secondary" : "default";
 }
+
+/**
+ * A refused send keeps its quiet fill at full strength and dims only the
+ * arrow: the blanket disabled opacity left the circle at 1.07:1 on the page,
+ * so the box no longer showed where send is.
+ */
+const SEND_REFUSED_PAINT = "disabled:opacity-100 disabled:[&_svg]:opacity-50";
 
 function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
   return (
@@ -404,7 +513,7 @@ function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefi
 }
 
 /**
- * The pill's trailing edge: the microphone, then Send, and Stop while a
+ * The box's trailing edge: the microphone, then Send, and Stop while a
  * response streams.
  */
 function ComposerSendCell(props: {
@@ -422,13 +531,14 @@ function ComposerSendCell(props: {
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
+          className={SEND_REFUSED_PAINT}
           disabled={refused}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
           variant={sendVariant(refused)}
         >
-          <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+          <ArrowUp aria-hidden="true" size={16} />
         </OctantButton>
       </div>
     );
@@ -457,19 +567,20 @@ function ComposerSendCell(props: {
           type="button"
           variant="secondary"
         >
-          <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
+          <Square aria-hidden="true" fill="currentColor" size={12} />
         </OctantButton>
       ) : null}
       <OctantButton
         aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
+        className={SEND_REFUSED_PAINT}
         disabled={refused}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"
         variant={sendVariant(refused)}
       >
-        <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+        <ArrowUp aria-hidden="true" size={16} />
       </OctantButton>
     </div>
   );

@@ -10,6 +10,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { FolderPicker } from "./FolderPicker";
@@ -381,7 +382,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           type="button"
           variant="outline"
         >
-          <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+          <FolderOpen aria-hidden="true" size={16} />
           <span className="project-dialog__folder-name">
             {folder?.displayName ??
               (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
@@ -429,7 +430,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             type="button"
             variant="outline"
           >
-            <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+            <FolderOpen aria-hidden="true" size={16} />
             <span className="project-dialog__folder-name">
               {browsing === "create" ? "Waiting for the folder browser…" : "Choose a folder"}
             </span>
@@ -569,11 +570,11 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             value={[source]}
           >
             <OctantToggleGroupItem className="segment" value="folder">
-              <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+              <FolderOpen aria-hidden="true" size={14} />
               Folder
             </OctantToggleGroupItem>
             <OctantToggleGroupItem className="segment" value="github">
-              <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+              <FolderGit2 aria-hidden="true" size={14} />
               GitHub
             </OctantToggleGroupItem>
           </OctantToggleGroup>
@@ -607,27 +608,29 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           {status}
         </p>
       </OctantDialog>
-      {browsing !== undefined &&
-      props.folderBrowseClient !== undefined &&
-      props.hostId !== undefined ? (
-        <FolderPicker
-          client={props.folderBrowseClient}
-          {...(browsing === "destination"
-            ? {
-                hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
-                title: "Choose clone destination",
-              }
-            : {})}
-          hostId={props.hostId}
-          mode="code"
-          onCancel={() => {
-            if (browsing === "destination") settleDestinationChoice(undefined);
-            else setBrowsing(undefined);
-          }}
-          onSelect={onFolderBrowserSelection}
-          showGitInit={browsing === "create"}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {browsing !== undefined &&
+        props.folderBrowseClient !== undefined &&
+        props.hostId !== undefined ? (
+          <FolderPicker
+            client={props.folderBrowseClient}
+            {...(browsing === "destination"
+              ? {
+                  hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
+                  title: "Choose clone destination",
+                }
+              : {})}
+            hostId={props.hostId}
+            mode="code"
+            onCancel={() => {
+              if (browsing === "destination") settleDestinationChoice(undefined);
+              else setBrowsing(undefined);
+            }}
+            onSelect={onFolderBrowserSelection}
+            showGitInit={browsing === "create"}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </>
   );
 }

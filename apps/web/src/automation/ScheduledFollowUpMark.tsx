@@ -9,7 +9,7 @@ import { AlarmClock } from "lucide-react";
 export function ScheduledFollowUpMark() {
   return (
     <p className="turn-scheduled-mark">
-      <AlarmClock aria-hidden="true" size={12} strokeWidth={1.8} />
+      <AlarmClock aria-hidden="true" size={12} />
       <span>Scheduled follow-up</span>
     </p>
   );

@@ -12,6 +12,7 @@ import {
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { ThreadStatsBlock } from "../threadStats/ThreadStats";
 
 interface ThreadInfoPanel {
   /** Opens the panel, for a control elsewhere that leads to one of its rows. */
@@ -115,7 +116,7 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
             type="button"
             variant="ghost"
           >
-            <Info aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Info aria-hidden="true" size={14} />
             {flags.size === 0 ? null : (
               <span className="thread-info__attention">Review required</span>
             )}
@@ -127,6 +128,7 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
           hidden={!open}
           id={panelId}
         >
+          <ThreadStatsBlock />
           {props.children}
         </section>
       </div>

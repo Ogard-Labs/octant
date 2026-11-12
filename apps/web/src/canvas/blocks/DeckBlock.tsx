@@ -19,6 +19,7 @@ import {
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import { MockupFrame } from "./MockupBlock";
@@ -65,7 +66,7 @@ export function DeckBlock(props: {
           type="button"
           variant="secondary"
         >
-          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          <Play aria-hidden="true" size={12} />
           Present
         </OctantButton>
       </header>
@@ -95,21 +96,23 @@ export function DeckBlock(props: {
           </li>
         ))}
       </ol>
-      {presenting && slides.length > 0 ? (
-        <DeckPlayer
-          block={props.block}
-          slides={slides}
-          {...(props.designAssetRuntime === undefined
-            ? {}
-            : { designAssetRuntime: props.designAssetRuntime })}
-          hasNotes={notes}
-          {...(props.designSystemStyle === undefined
-            ? {}
-            : { designSystemStyle: props.designSystemStyle })}
-          onClose={() => setPresenting(false)}
-          restoreFocus={presentButton}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {presenting && slides.length > 0 ? (
+          <DeckPlayer
+            block={props.block}
+            slides={slides}
+            {...(props.designAssetRuntime === undefined
+              ? {}
+              : { designAssetRuntime: props.designAssetRuntime })}
+            hasNotes={notes}
+            {...(props.designSystemStyle === undefined
+              ? {}
+              : { designSystemStyle: props.designSystemStyle })}
+            onClose={() => setPresenting(false)}
+            restoreFocus={presentButton}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }
@@ -218,7 +221,7 @@ function DeckPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronLeft aria-hidden="true" size={16} />
             </OctantButton>
             <OctantButton
               aria-label="Next slide"
@@ -228,7 +231,7 @@ function DeckPlayer(props: {
               type="button"
               variant="ghost"
             >
-              <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} />
+              <ChevronRight aria-hidden="true" size={16} />
             </OctantButton>
             <FullscreenButton fullscreen={fullscreen} />
           </div>

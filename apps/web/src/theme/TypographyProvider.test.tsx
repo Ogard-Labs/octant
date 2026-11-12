@@ -12,6 +12,7 @@ const typographyBridge = readFileSync(
 );
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
+const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 const appStyles = [
   readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"),
@@ -83,8 +84,14 @@ describe("ThemeTypographyProvider", () => {
     expect(systemStyles).toMatch(
       /\.setnav-item\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
-    expect(settingsStyles).toMatch(
-      /\.settings-navigation \.setnav-item,[\s\S]*font-size:\s*var\(--octant-ui-font-size\);/s,
+    // The rail's rows are navigation names: the role's size token scales with
+    // the interface size through `--oct-text-step`, and the rail sets no size
+    // of its own.
+    expect(surfaceStyles).toMatch(
+      /\.oct-nav-name\s*\{[^}]*font-size:\s*var\(--oct-text-detail\);/s,
+    );
+    expect(settingsStyles).not.toMatch(
+      /\.settings-navigation \.setnav-item,[^{]*\{[^}]*font-size/s,
     );
     expect(shellStyles).toMatch(
       /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
@@ -101,10 +108,10 @@ describe("ThemeTypographyProvider", () => {
     expect(systemStyles).toMatch(
       /\.board-card-title\s*\{[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
-    // Section labels sit on the 12px detail step of the same scale since the
-    // shell frame pass; the step still follows the selected interface size.
+    // A sidebar section label is a navigation group label: the 12px step of
+    // the same scale, which still follows the selected interface size.
     expect(appStyles).toMatch(
-      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*var\(--oct-text-detail\);/s,
+      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*var\(--oct-text-xs\);/s,
     );
     expect(appStyles).toMatch(
       /\.workspace-pane__grip\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--oct-text-xs\);/s,

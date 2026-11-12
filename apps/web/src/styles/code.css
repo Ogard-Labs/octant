@@ -386,7 +386,7 @@ html:not([data-octant-reduced-transparency="true"])
 .code-file-explorer__search input {
   height: 30px;
   padding: 0 32px 0 var(--oct-space-8);
-  border-color: var(--oct-border);
+  border-color: var(--input);
   background: var(--oct-surface);
 }
 
@@ -1233,6 +1233,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   justify-content: flex-end;
 }
 
+.work-files-panel__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
 .work-files-panel__status,
 .work-files-panel__error {
   display: flex;
@@ -1719,7 +1727,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-display);
 }
@@ -2123,17 +2131,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   width: 100%;
 }
 
-/* The scroll frame and its padding are the system's `.transcript-scroll`.
-   Text scrolling under the frame's top edge fades out over the frame's own
-   top padding: cut off sharp right under the waiting row, half a line of the
-   answer read as printed over that row. At rest the first line sits below
-   the fade. */
+/* The scroll frame, its padding, and the fade at its edges are the system's
+   `.transcript-scroll`. (Code alone faded the top: cut off sharp right under
+   the waiting row, half a line of the answer read as printed over that row.) */
 .code-thread-workspace__conversation {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  mask-image: linear-gradient(to bottom, transparent, var(--oct-fg) var(--oct-space-3));
 }
 
 /* The frame is a flex column, and a windowed list holds only absolutely
@@ -2243,7 +2248,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 /* The composer's frame, placement, input, chips, bottom row,
    controls, and status line are the system's (`.composer`,
-   `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
+   `.thread-composer`, `.composer-row`, `.composer-notices`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
 
 /* Chips and attachments are frameless rows of the frame, so they take the
@@ -2307,23 +2312,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-thread-workspace__row {
   display: grid;
   min-width: 0;
-}
-
-/* The status line under the composer row is the system's `.composer-status`:
-   keyboard hint and receipts on the left, spend and limits trailing. */
-.code-thread-workspace__hint {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-/* The status strip is one truncated line, but this notice is a disclosure the
-   person must be able to read in full before sending, so it wraps. */
-.composer-status:has(> .code-thread-workspace__switch-notice) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.code-thread-workspace__switch-notice {
-  white-space: normal;
 }
 
 /* What a provider switch handed over, under the divider that marks it. */
@@ -2504,7 +2492,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests__search input {
   height: 30px;
   padding-right: 32px;
-  border-color: var(--oct-border);
+  border-color: var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
 }
@@ -2568,7 +2556,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-content: start;
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  /* The list reaches 8px past its text edge for a row's hover fill. With no
+     gutter here that reach ran off both sides of the tile: rows were cut at
+     the edge and their numbers touched it. */
+  padding: var(--oct-space-2) var(--oct-space-3);
+  overflow: hidden auto;
   gap: var(--oct-space-2);
 }
 

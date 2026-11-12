@@ -219,10 +219,10 @@ export function WorkOverview(props: WorkOverviewProps) {
           {props.projectName === undefined ? null : (
             <span className="work-overview__context-item">
               {props.projectId === undefined ? (
-                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                <FolderOpen aria-hidden="true" size={12} />
               ) : (
                 <ProjectIcon
-                  fallback={<FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />}
+                  fallback={<FolderOpen aria-hidden="true" size={12} />}
                   projectId={String(props.projectId)}
                   size={12}
                 />
@@ -231,7 +231,7 @@ export function WorkOverview(props: WorkOverviewProps) {
             </span>
           )}
           <span className="work-overview__context-item">
-            <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+            <ShieldCheck aria-hidden="true" size={12} />
             <span>Confined to this Project</span>
           </span>
           {props.onSelectProvider === undefined ? null : (
@@ -416,7 +416,7 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
       {due.length === 0 ? null : (
         <div className="work-status__due" role="status">
           <h3>
-            <CalendarClock aria-hidden="true" size={14} strokeWidth={1.8} />
+            <CalendarClock aria-hidden="true" size={14} />
             Follow-ups due
           </h3>
           <ul className="surface-list work-overview__items">

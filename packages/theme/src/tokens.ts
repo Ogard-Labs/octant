@@ -108,7 +108,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e8e8e6",
+    defaultLight: "#e2e2e1",
     defaultDark: "#333333",
   },
   {
@@ -117,7 +117,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dfdfdd",
+    defaultLight: "#d3d3d2",
     defaultDark: "#3b3b3b",
   },
   {
@@ -149,7 +149,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     contrastTarget: "workspace",
     contrastLevel: "ui",
     defaultLight: "#6f6f6d",
-    defaultDark: "#808080",
+    defaultDark: "#8a8a8a",
   },
   {
     id: "text-primary",

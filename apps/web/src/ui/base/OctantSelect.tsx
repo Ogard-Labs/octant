@@ -134,7 +134,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
             disabled={props.disabled}
             className={cn(
               fieldPaint,
-              "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-50 window-no-drag",
+              "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-(--oct-disabled-opacity) window-no-drag",
               props.triggerClassName,
               props.className,
             )}
@@ -212,7 +212,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
               Add endpoint's dialog opened its list underneath, out of reach. */}
           <SelectPositioner
             alignItemWithTrigger={false}
-            className="z-[var(--oct-z-modal)] outline-none window-no-drag"
+            className="z-[var(--oct-z-popup)] outline-none window-no-drag"
             sideOffset={4}
           >
             <SelectPopup>

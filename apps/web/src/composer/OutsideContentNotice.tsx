@@ -5,11 +5,14 @@ import type {
   ThreadExternalContentSource,
   ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
+import { Globe } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { describeOutsideContentReads, describeSource } from "@octant/domain";
 import "./outside-content-notice.css";
 
@@ -24,10 +27,11 @@ export interface OutsideContentThread extends ExternalContentThread {
 export const OutsideContentContext = createContext<OutsideContentThread | undefined>(undefined);
 
 /**
- * The notice for the thread around this composer, if it has read outside
- * content. A paired device is refused the read, so it never draws one.
+ * The chip for the thread around this composer, if it has read outside
+ * content, in the row under the box. A paired device is refused the read, so
+ * it never draws one.
  */
-export function ComposerOutsideContentNotice(props: {
+export function ComposerOutsideContentChip(props: {
   /** A turn is running or messages are queued: a clear would be refused. */
   readonly busy: boolean;
 }) {
@@ -58,7 +62,12 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
     setState(next);
   }, []);
   const [reviewing, setReviewing] = useState<ThreadExternalContentState>();
-  const reviewButton = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const chip = useRef<HTMLSpanElement>(null);
+  // The dialog hands focus back to the chip's button, whose element belongs to
+  // the popover adapter.
+  const reviewButton = useRef<HTMLElement | null>(null);
+  reviewButton.current = chip.current?.querySelector("button") ?? null;
 
   // A turn is what takes outside content in, so the mark is read again when
   // one starts and when it settles, not on a timer.
@@ -78,38 +87,57 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
   return (
     <>
       {state?.externalContentIngested === true ? (
-        <OctantAlert
-          action={
+        <span className="outside-content-chip" ref={chip}>
+          <OctantPopover
+            className="outside-content-popover"
+            onOpenChange={setOpen}
+            open={open}
+            side="top"
+            title="Outside content"
+            trigger={
+              <>
+                <Globe aria-hidden="true" size={14} />
+                <span className="outside-content-chip__label">Outside content</span>
+              </>
+            }
+            triggerClassName="outside-content-chip__trigger"
+            triggerLabel="Outside content"
+            triggerVariant="ghost"
+          >
+            <p className="outside-content-popover__text">
+              This thread has read outside content. Below Full access, some actions ask each time.
+            </p>
             <OctantButton
-              onClick={() => setReviewing(state)}
-              ref={reviewButton}
+              onClick={() => {
+                setOpen(false);
+                setReviewing(state);
+              }}
               size="sm"
               type="button"
-              variant="ghost"
+              variant="secondary"
             >
               Review
             </OctantButton>
-          }
-          className="outside-content-notice"
-        >
-          This thread has read outside content. Below Full access, some actions ask each time.
-        </OctantAlert>
+          </OctantPopover>
+        </span>
       ) : null}
-      {reviewing === undefined ? null : (
-        <ReviewOutsideContentDialog
-          busy={busy}
-          client={client}
-          initial={reviewing}
-          mode={mode}
-          onClose={() => setReviewing(undefined)}
-          onSettled={(next) => {
-            accept(next);
-            setReviewing(undefined);
-          }}
-          restoreFocus={reviewButton}
-          threadId={threadId}
-        />
-      )}
+      <OctantDialogPresence>
+        {reviewing === undefined ? null : (
+          <ReviewOutsideContentDialog
+            busy={busy}
+            client={client}
+            initial={reviewing}
+            mode={mode}
+            onClose={() => setReviewing(undefined)}
+            onSettled={(next) => {
+              accept(next);
+              setReviewing(undefined);
+            }}
+            restoreFocus={reviewButton}
+            threadId={threadId}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

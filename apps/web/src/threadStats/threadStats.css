@@ -1,38 +1,19 @@
-/* The quiet stats line under a thread's composer. Meta ink on the page, the
-   same step as the context strip above the box, no hue on any figure: the numbers
-   are read, not scanned for a colour. It wraps rather than scrolls so every
-   figure stays readable at phone width. */
+/* The turn figures at the top of the Thread info panel. Meta ink, the same
+   step as the panel's other rows, no hue on any figure: the numbers are read,
+   not scanned for a colour. They wrap rather than scroll so every figure stays
+   readable at phone width. */
 .thread-stats {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
+  display: grid;
   min-width: 0;
-  padding: 0 var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
-.thread-stats__line.thread-stats__line {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0 var(--oct-space-2);
-  min-width: 0;
-  height: auto;
-  min-height: 28px;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  white-space: normal;
-}
-
-.thread-stats__line:hover,
-.thread-stats__line:focus-visible {
-  color: var(--oct-fg);
+.thread-stats .thread-stats__details {
+  justify-self: start;
 }
 
 .thread-stats__figures {
@@ -68,10 +49,6 @@
 .thread-stats__item[data-hinted="true"] {
   text-decoration: underline dotted color-mix(in oklab, currentcolor 40%, transparent);
   text-underline-offset: 3px;
-}
-
-.thread-stats__hide {
-  flex: 0 0 auto;
 }
 
 .octant-dialog__popup.thread-stats-dialog {
@@ -187,20 +164,11 @@
   font-size: var(--oct-text-xs);
 }
 
-/* The popover entry beside the context meter: one switch and one way in. */
+/* The popover entry beside the context meter: one way in to the turn details. */
 .thread-stats-menu {
   display: grid;
   gap: var(--oct-space-1);
   padding-top: var(--oct-space-2);
   margin-top: var(--oct-space-2);
   border-top: 1px solid var(--oct-hairline);
-}
-
-.thread-stats-menu__switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
 }

@@ -9,6 +9,7 @@ import {
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { keybindingActionForCommand } from "./commandKeybinding";
 import { useNeedsYou, useOctantCommands } from "./CommandRegistry";
@@ -132,8 +133,6 @@ export function CommandPalette() {
     };
   }, [commands, open, query, waitingCommands]);
 
-  if (!open) return null;
-
   const active = results.length === 0 ? -1 : Math.min(activeIndex, results.length - 1);
   const statusMessage =
     results.length === 0
@@ -179,102 +178,107 @@ export function CommandPalette() {
   }
 
   return (
-    <OctantDialog
-      className="command-palette"
-      initialFocus={inputRef}
-      label="Command palette"
-      onClose={close}
-      open
-      popupId="command-palette-dialog"
-      restoreFocus={restoreFocusRef}
-    >
-      <div className="command-palette__field">
-        <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-        <OctantInput
-          {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
-          aria-controls={RESULTS_ID}
-          aria-expanded={results.length > 0}
-          aria-label="Search commands"
-          autoComplete="off"
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder="Search commands"
-          ref={inputRef}
-          role="combobox"
-          value={query}
-        />
-      </div>
-      <p
-        aria-atomic="true"
-        aria-live="polite"
-        className="command-palette__status sr-only"
-        role="status"
-      >
-        {statusMessage}
-      </p>
-      <div
-        aria-label="Command results"
-        className="command-palette__results"
-        id={RESULTS_ID}
-        role="listbox"
-      >
-        {groups.map((group) => (
-          <div
-            aria-label={group.group}
-            className="command-palette__group"
-            key={group.group}
-            role="group"
-          >
-            <p aria-hidden="true" className="command-palette__group-label">
-              {group.group}
-            </p>
-            {group.commands.map((command) => {
-              const index = indexOfCommand.get(command.id) ?? -1;
-              const actionId = keybindingActionForCommand(command.id);
-              const chord = actionId === undefined ? undefined : keybindings.bindings.get(actionId);
-              const shortcut = chord === undefined ? undefined : describeChord(chord, apple);
-              return (
-                <div
-                  aria-selected={index === active}
-                  className="command-palette__result"
-                  data-active={index === active}
-                  id={optionId(index)}
-                  key={command.id}
-                  onClick={() => run(command)}
-                  onMouseMove={() => setActiveIndex(index)}
-                  role="option"
-                >
-                  <span className="command-palette__result-title">{command.title}</span>
-                  {command.detail === undefined ? null : (
-                    <span className="command-palette__result-detail">{command.detail}</span>
-                  )}
-                  {shortcut === undefined ? null : (
-                    <kbd className="command-palette__shortcut">{shortcut}</kbd>
-                  )}
-                  {index === active ? (
-                    <span className="command-palette__result-hint">
-                      <CornerDownLeft aria-hidden="true" size={12} strokeWidth={1.8} />
-                      <span>Enter</span>
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
+    <OctantDialogPresence>
+      {open ? (
+        <OctantDialog
+          className="command-palette"
+          initialFocus={inputRef}
+          label="Command palette"
+          onClose={close}
+          open
+          popupId="command-palette-dialog"
+          restoreFocus={restoreFocusRef}
+        >
+          <div className="command-palette__field">
+            <Search aria-hidden="true" size={14} />
+            <OctantInput
+              {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
+              aria-controls={RESULTS_ID}
+              aria-expanded={results.length > 0}
+              aria-label="Search commands"
+              autoComplete="off"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(0);
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Search commands"
+              ref={inputRef}
+              role="combobox"
+              value={query}
+            />
           </div>
-        ))}
-      </div>
-      <footer className="command-palette__footer">
-        <p className="command-palette__scope" role="note">
-          Host-offered commands. Every action still runs its normal authority check.
-        </p>
-        <span aria-hidden="true" className="command-palette__close-hint">
-          <kbd>Esc</kbd>
-          <span>Close</span>
-        </span>
-      </footer>
-    </OctantDialog>
+          <p
+            aria-atomic="true"
+            aria-live="polite"
+            className="command-palette__status sr-only"
+            role="status"
+          >
+            {statusMessage}
+          </p>
+          <div
+            aria-label="Command results"
+            className="command-palette__results"
+            id={RESULTS_ID}
+            role="listbox"
+          >
+            {groups.map((group) => (
+              <div
+                aria-label={group.group}
+                className="command-palette__group"
+                key={group.group}
+                role="group"
+              >
+                <p aria-hidden="true" className="command-palette__group-label">
+                  {group.group}
+                </p>
+                {group.commands.map((command) => {
+                  const index = indexOfCommand.get(command.id) ?? -1;
+                  const actionId = keybindingActionForCommand(command.id);
+                  const chord =
+                    actionId === undefined ? undefined : keybindings.bindings.get(actionId);
+                  const shortcut = chord === undefined ? undefined : describeChord(chord, apple);
+                  return (
+                    <div
+                      aria-selected={index === active}
+                      className="command-palette__result"
+                      data-active={index === active}
+                      id={optionId(index)}
+                      key={command.id}
+                      onClick={() => run(command)}
+                      onMouseMove={() => setActiveIndex(index)}
+                      role="option"
+                    >
+                      <span className="command-palette__result-title">{command.title}</span>
+                      {command.detail === undefined ? null : (
+                        <span className="command-palette__result-detail">{command.detail}</span>
+                      )}
+                      {shortcut === undefined ? null : (
+                        <kbd className="command-palette__shortcut">{shortcut}</kbd>
+                      )}
+                      {index === active ? (
+                        <span className="command-palette__result-hint">
+                          <CornerDownLeft aria-hidden="true" size={12} />
+                          <span>Enter</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <footer className="command-palette__footer">
+            <p className="command-palette__scope" role="note">
+              Host-offered commands. Every action still runs its normal authority check.
+            </p>
+            <span aria-hidden="true" className="command-palette__close-hint">
+              <kbd>Esc</kbd>
+              <span>Close</span>
+            </span>
+          </footer>
+        </OctantDialog>
+      ) : null}
+    </OctantDialogPresence>
   );
 }

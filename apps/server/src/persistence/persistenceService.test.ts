@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeWindowId } from "@octant/contracts";
 import { Effect, Either } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { EventRegistry } from "./eventRegistry";
 import { ShellService } from "../shellService";
-import { applyMigrations, MIGRATIONS } from "./migrations";
+import { applyMigrations, MIGRATIONS, type Migration } from "./migrations";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { Persistence, PersistenceStartupFailed, makePersistenceLive } from "./persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./shellProjection";
@@ -194,6 +195,7 @@ describe("PersistenceLive", () => {
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "project-terminal", lastSequence: 1, lag: 0 },
         { name: "remote-server-grant", lastSequence: 1, lag: 0 },
+        { name: "agent-access", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "host-memory-limits", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
@@ -558,6 +560,7 @@ describe("PersistenceLive", () => {
         { projection_name: "product-feedback", global_sequence: 1, reason },
         { projection_name: "project-terminal", global_sequence: 1, reason },
         { projection_name: "remote-server-grant", global_sequence: 1, reason },
+        { projection_name: "agent-access", global_sequence: 1, reason },
         { projection_name: "thread-retention", global_sequence: 1, reason },
         { projection_name: "host-memory-limits", global_sequence: 1, reason },
         { projection_name: "thread-external-content-taint", global_sequence: 1, reason },
@@ -570,6 +573,182 @@ describe("PersistenceLive", () => {
       inspected.close();
     },
   );
+
+  describe("journal compatibility watermark", () => {
+    function seedVerifiedJournal(directory: string, rows = 3): SqliteConnection {
+      const seeded = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(seeded, MIGRATIONS, () => now);
+      for (let index = 1; index <= rows; index += 1) {
+        insertFixtureEvent(seeded, { index });
+      }
+      return seeded;
+    }
+
+    function watermarkRow(directory: string): unknown {
+      const inspected = openSqlite(join(directory, "octant.sqlite3"));
+      try {
+        return inspected
+          .prepare("SELECT verified_through, fingerprint FROM journal_verification_watermark")
+          .get();
+      } finally {
+        inspected.close();
+      }
+    }
+
+    async function startupDecodeCount(
+      directory: string,
+      build: string | null = "build-a",
+    ): Promise<number> {
+      const decode = vi.spyOn(EventRegistry.prototype, "decodePersisted");
+      try {
+        const result = await startupResult(directory, () => build ?? undefined);
+        expect(Either.isRight(result)).toBe(true);
+        return decode.mock.calls.length;
+      } finally {
+        decode.mockRestore();
+      }
+    }
+
+    it("decodes no already-verified row on a second start with an unchanged registry", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+
+      const firstStart = await startupDecodeCount(directory);
+      const secondStart = await startupDecodeCount(directory);
+
+      expect(firstStart).toBeGreaterThan(0);
+      expect(secondStart).toBe(0);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+    });
+
+    it("scans from the start again on the first start of a different build", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory, "build-a");
+
+      expect(await startupDecodeCount(directory, "build-b")).toBeGreaterThan(0);
+      expect(await startupDecodeCount(directory, "build-b")).toBe(0);
+    });
+
+    it("scans everything and writes no watermark when there is no build identity", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+
+      expect(await startupDecodeCount(directory, null)).toBeGreaterThan(0);
+      expect(await startupDecodeCount(directory, null)).toBeGreaterThan(0);
+      expect(watermarkRow(directory)).toBeUndefined();
+    });
+
+    it("scans from the start again when the verification fingerprint differs", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const changed = openSqlite(join(directory, "octant.sqlite3"));
+      changed
+        .prepare("UPDATE journal_verification_watermark SET fingerprint = 'older-registry'")
+        .run();
+      changed.close();
+
+      expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+    });
+
+    it("scans from the start again when a migration is applied in this start", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const later: Migration = {
+        version: 9999,
+        name: "fixture_later_migration",
+        sql: "CREATE TABLE fixture_later_migration (id INTEGER PRIMARY KEY) STRICT;",
+      };
+      const migrations = MIGRATIONS as Array<Migration>;
+      migrations.push(later);
+      try {
+        expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+      } finally {
+        migrations.splice(migrations.indexOf(later), 1);
+      }
+    });
+
+    it("finds a bad row appended after the watermark", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const appended = openSqlite(join(directory, "octant.sqlite3"));
+      insertFixtureEvent(appended, { index: 4, payloadJson: JSON.stringify({ value: 42 }) });
+      appended.close();
+
+      const result = await startupResult(directory);
+
+      expect(Either.isLeft(result)).toBe(true);
+      expect(watermarkRow(directory)).toBeUndefined();
+    });
+
+    it.each([
+      [
+        "a rewritten row",
+        "UPDATE event_journal SET payload_json = '{\"value\":42}' WHERE global_sequence = 2",
+      ],
+      ["a deleted and replaced row", "DELETE FROM event_journal WHERE global_sequence = 3"],
+    ] as const)("scans everything again after %s below the watermark", async (_name, statement) => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const edited = openSqlite(join(directory, "octant.sqlite3"));
+      edited.exec("PRAGMA foreign_keys = OFF");
+      edited.prepare(statement).run();
+      if (statement.startsWith("DELETE")) {
+        insertFixtureEvent(edited, { index: 3, payloadJson: JSON.stringify({ value: 42 }) });
+      }
+      edited.close();
+
+      const result = await startupResult(directory);
+
+      expect(Either.isLeft(result)).toBe(true);
+    });
+
+    it.each([
+      ["a negative value", "-5"],
+      ["a value above the journal head", "9999"],
+    ] as const)("falls back to a full scan for %s in the watermark", async (_name, value) => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      const corrupted = openSqlite(join(directory, "octant.sqlite3"));
+      corrupted.exec("PRAGMA ignore_check_constraints = ON");
+      corrupted
+        .prepare(`UPDATE journal_verification_watermark SET verified_through = ${value}`)
+        .run();
+      corrupted.close();
+
+      expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+    });
+
+    it("still scans every row when a diagnostics call asks for a fresh status", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+
+      const decodes = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            const decode = vi.spyOn(EventRegistry.prototype, "decodePersisted");
+            try {
+              persistence.status({ fresh: true });
+              return decode.mock.calls.length;
+            } finally {
+              decode.mockRestore();
+            }
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+
+      expect(decodes).toBe(3);
+    });
+  });
 
   it.each([
     ["SQLITE_BUSY", "storage-busy"],
@@ -630,13 +809,17 @@ describe("PersistenceLive", () => {
   });
 });
 
-function startupResult(directory: string) {
+function startupResult(directory: string, buildIdentity?: () => string | undefined) {
   return Effect.runPromise(
     Effect.either(
       Effect.scoped(
         Effect.provide(
           Persistence,
-          makePersistenceLive({ dataDirectory: directory, clock: () => now }),
+          makePersistenceLive({
+            dataDirectory: directory,
+            clock: () => now,
+            ...(buildIdentity === undefined ? {} : { buildIdentity }),
+          }),
         ),
       ),
     ),
@@ -655,7 +838,11 @@ function trackClose(connection: SqliteConnection, onClose: () => void): SqliteCo
 
 function insertFixtureEvent(
   connection: SqliteConnection,
-  overrides: { readonly eventVersion?: number; readonly payloadJson?: string } = {},
+  overrides: {
+    readonly eventVersion?: number;
+    readonly payloadJson?: string;
+    readonly index?: number;
+  } = {},
 ): void {
   connection
     .prepare(`
@@ -666,9 +853,9 @@ function insertFixtureEvent(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
-      "00000000-0000-4000-8000-000000000904",
+      `00000000-0000-4000-8000-0000000009${String(3 + (overrides.index ?? 1)).padStart(2, "0")}`,
       "fixture",
-      "00000000-0000-4000-8000-000000000901",
+      `00000000-0000-4000-8000-0000000019${String(overrides.index ?? 1).padStart(2, "0")}`,
       1,
       "fixture.recorded",
       overrides.eventVersion ?? 1,

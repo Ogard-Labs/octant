@@ -29,6 +29,7 @@ import {
 } from "@octant/contracts/canvas";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import {
   designAssetUrls,
   designDocument,
@@ -253,7 +254,7 @@ function DesignBoard({
           type="button"
           variant="secondary"
         >
-          <Play aria-hidden="true" size={12} strokeWidth={2} />
+          <Play aria-hidden="true" size={12} />
           {slides ? "Present" : "Play"}
         </OctantButton>
       </header>
@@ -298,16 +299,18 @@ function DesignBoard({
           </figure>
         ))}
       </div>
-      {playing === undefined ? null : (
-        <DesignPlayer
-          block={block}
-          onClose={() => setPlaying(undefined)}
-          restoreFocus={playButton}
-          size={size}
-          startFrameId={playing}
-          frame={inputs}
-        />
-      )}
+      <OctantDialogPresence>
+        {playing === undefined ? null : (
+          <DesignPlayer
+            block={block}
+            onClose={() => setPlaying(undefined)}
+            restoreFocus={playButton}
+            size={size}
+            startFrameId={playing}
+            frame={inputs}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }
@@ -418,7 +421,7 @@ function DesignPlayer({
                   type="button"
                   variant="ghost"
                 >
-                  <ChevronLeft aria-hidden="true" size={16} strokeWidth={1.8} />
+                  <ChevronLeft aria-hidden="true" size={16} />
                 </OctantButton>
                 <OctantButton
                   aria-label="Next slide"
@@ -428,7 +431,7 @@ function DesignPlayer({
                   type="button"
                   variant="ghost"
                 >
-                  <ChevronRight aria-hidden="true" size={16} strokeWidth={1.8} />
+                  <ChevronRight aria-hidden="true" size={16} />
                 </OctantButton>
               </>
             ) : (
@@ -438,7 +441,7 @@ function DesignPlayer({
                 type="button"
                 variant="ghost"
               >
-                <RotateCcw aria-hidden="true" size={12} strokeWidth={2} />
+                <RotateCcw aria-hidden="true" size={12} />
                 Restart
               </OctantButton>
             )}
@@ -450,7 +453,7 @@ function DesignPlayer({
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={16} strokeWidth={1.8} />
+              <X aria-hidden="true" size={16} />
             </OctantButton>
           </div>
         </header>
@@ -839,7 +842,7 @@ function RunningDesignBlock({
                 type="button"
                 variant="secondary"
               >
-                <Square aria-hidden="true" size={12} strokeWidth={2} />
+                <Square aria-hidden="true" size={12} />
                 Stop
               </OctantButton>
             </>
@@ -857,7 +860,7 @@ function RunningDesignBlock({
                   type="button"
                   variant="secondary"
                 >
-                  <Play aria-hidden="true" size={12} strokeWidth={2} />
+                  <Play aria-hidden="true" size={12} />
                   {state.kind === "stopped" ? "Run again" : "Run"}
                 </OctantButton>
               )}
@@ -1172,9 +1175,9 @@ export function FullscreenButton({
       variant="ghost"
     >
       {fullscreen.active ? (
-        <Minimize aria-hidden="true" size={16} strokeWidth={1.8} />
+        <Minimize aria-hidden="true" size={16} />
       ) : (
-        <Maximize aria-hidden="true" size={16} strokeWidth={1.8} />
+        <Maximize aria-hidden="true" size={16} />
       )}
     </OctantButton>
   );
