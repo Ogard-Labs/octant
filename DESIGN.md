@@ -1113,7 +1113,9 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
 until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
-that opens the new-task composer in that Project. Every step is optional from
+that opens the new-task composer in that Project. Setup also asks once whether
+Octant may check for updates, and does not ask again whatever the answer
+(maintainer request, 2026-11-12; not built yet: today first run does not ask). Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
 step's controls. Skipping preserves settled answers, waits for pending writes,
@@ -3420,7 +3422,11 @@ callbacks; the existing host or server still decides whether an action may
 proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
-and the window is a local one. Settings › Permissions lists those answers by
+and the window is a local one. The same card offers "Allow all tools of this
+server", which remembers the server instead of the one tool, and a Chat thread
+outside a Project offers "Always allow for this account" in place of the
+Project choice (maintainer request, 2026-11-12; not built yet: today a grant
+covers one tool and needs a Project). Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. Settings › Work and
 Settings › Code show the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from
@@ -3723,7 +3729,10 @@ request from the person.
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.
-- The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds. The
+- The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
+  the setting "Press ⌘Q twice to quit" is on, which is its default; with it
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
+  not built yet: today the double press cannot be turned off). The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first
