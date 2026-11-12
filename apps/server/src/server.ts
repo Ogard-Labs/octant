@@ -1124,6 +1124,7 @@ export function startOctantServer(
       sideTaskHost,
       sideTasks,
       siblingThreadsService,
+      agentMessageService,
       spendCeiling,
       threadMentionService,
       threadOutsideContentMarks,

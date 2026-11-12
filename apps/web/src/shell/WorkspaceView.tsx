@@ -542,10 +542,7 @@ export interface WorkspaceViewProps {
   readonly draftProjectRoot?: string;
   readonly draftBranchName?: string;
   /** Present while the Code draft was opened with New coordinator. */
-  readonly draftCoordinator?: {
-    readonly projectId: import("@octant/contracts/projects").ProjectId;
-    readonly onCancel: () => void;
-  };
+  readonly draftCoordinator?: import("./DraftThreadWorkspace").CoordinatorDraft;
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;

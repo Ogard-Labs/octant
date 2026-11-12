@@ -1,7 +1,10 @@
 import {
   DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_STARTS_PER_HOUR,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
   MAX_COORDINATORS_PER_PROJECT,
-  MAX_COORDINATOR_STARTS_PER_HOUR,
+  type CoordinatorBounds,
   type CoordinatorStartRefuseReason,
   type CoordinatorStartingByProject,
   type CoordinatorStartingChoice,
@@ -16,10 +19,24 @@ import { ACCESS_POSTURE_RANK } from "./codePolicy";
  * and acts on the decision; nothing here reads storage or a clock.
  */
 
-/** A message or state notice at this many hops or more is carried but wakes nothing. */
-export const MAX_WAKE_HOPS = 3;
-/** At most this many wake turns per thread in any hour. */
-export const MAX_WAKE_TURNS_PER_HOUR = 6;
+/**
+ * The bounds that apply: each one the person set, else its default. A
+ * coordinator journaled before the bounds were settable has none stored and
+ * reads as the defaults; so does a thread no coordinator directs.
+ */
+export function coordinatorBoundsFor(bounds: CoordinatorBounds | undefined): {
+  /** At most this many wake turns per thread in any hour. */
+  readonly wakesPerHour: number;
+  /** A message or state notice at this many hops or more is carried but wakes nothing. */
+  readonly rounds: number;
+  readonly startsPerHour: number;
+} {
+  return {
+    wakesPerHour: bounds?.wakesPerHour ?? DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+    rounds: bounds?.rounds ?? DEFAULT_COORDINATOR_ROUNDS,
+    startsPerHour: bounds?.startsPerHour ?? DEFAULT_COORDINATOR_STARTS_PER_HOUR,
+  };
+}
 
 export interface CoordinatorRoleFacts {
   readonly lifecycle: string;
@@ -109,10 +126,14 @@ export type CoordinatorStartDecision =
 
 /**
  * Whether one `start` call may create a worker, or becomes a proposal, and
- * at which guardrail level. A worker's level is the one named, else the
- * coordinator's, never higher than the coordinator's, and never Full access
- * from a marked coordinator: the mark asks for confirmation on risky actions,
- * and Full access would switch that confirmation off at the start.
+ * at which guardrail level. Where the person fixed the workers' level, every
+ * worker starts at it, whatever the call names and whether or not the
+ * coordinator is marked: a coordinator is marked as soon as it reads a worker,
+ * and the level is the person's own choice. Otherwise a worker's level is the
+ * one named, else the coordinator's, never higher than the coordinator's, and
+ * never Full access from a marked coordinator: the mark asks for confirmation
+ * on risky actions, and Full access would switch that confirmation off at
+ * the start.
  */
 export function decideCoordinatorStart(input: {
   readonly caller:
@@ -134,7 +155,11 @@ export function decideCoordinatorStart(input: {
   readonly openWorkers: number;
   readonly openWorkerLimit: number | undefined;
   readonly startsInLastHour: number;
+  /** The coordinator's bounds as a person set them; absent is the defaults. */
+  readonly bounds?: CoordinatorBounds | undefined;
   readonly requestedLevel: WorkerLevel | undefined;
+  /** The level a person fixed for this coordinator's workers, if any. */
+  readonly fixedWorkerLevel?: WorkerLevel | undefined;
 }): CoordinatorStartDecision {
   const caller = input.caller;
   if (
@@ -170,13 +195,19 @@ export function decideCoordinatorStart(input: {
       message: `This coordinator already has ${String(limit)} open workers. Wait for one to finish or be put away.`,
     };
   }
-  if (input.startsInLastHour >= MAX_COORDINATOR_STARTS_PER_HOUR) {
+  const { startsPerHour } = coordinatorBoundsFor(input.bounds);
+  if (input.startsInLastHour >= startsPerHour) {
     return {
       status: "refused",
       reason: "rate-limited",
-      message: `A coordinator may start at most ${String(MAX_COORDINATOR_STARTS_PER_HOUR)} workers in an hour.`,
+      message: `This coordinator may start at most ${String(startsPerHour)} workers in an hour.`,
     };
   }
+  const status =
+    input.starting === "propose-for-approval" || caller.designatedPlanner === true
+      ? "propose"
+      : "start";
+  if (input.fixedWorkerLevel !== undefined) return { status, level: input.fixedWorkerLevel };
   const ceiling = caller.level;
   const requested = input.requestedLevel;
   if (requested !== undefined && ACCESS_POSTURE_RANK[requested] > ACCESS_POSTURE_RANK[ceiling]) {
@@ -197,13 +228,7 @@ export function decideCoordinatorStart(input: {
   const chosen: WorkerLevel = requested ?? ceiling;
   const level: WorkerLevel =
     caller.marked && chosen === "full-access" ? "auto-accept-edits" : chosen;
-  return {
-    status:
-      input.starting === "propose-for-approval" || caller.designatedPlanner === true
-        ? "propose"
-        : "start",
-    level,
-  };
+  return { status, level };
 }
 
 export interface MessageWakeRecipientFacts {
@@ -233,6 +258,11 @@ export function decideMessageWake(input: {
   readonly hop: number;
   readonly wakeTurnRunning: boolean;
   readonly wakeTurnsInLastHour: number;
+  /**
+   * The bounds of the coordinator that directs the recipient (its own when it
+   * coordinates); absent is the defaults.
+   */
+  readonly bounds?: CoordinatorBounds | undefined;
 }): MessageWakeDecision {
   const fromOwnCoordinator =
     input.recipient.coordinatorThreadId !== undefined &&
@@ -241,9 +271,10 @@ export function decideMessageWake(input: {
   if (!input.recipient.messageWake && !fromOwnCoordinator) {
     return { status: "carry", reason: "switch-off" };
   }
-  if (input.hop >= MAX_WAKE_HOPS) return { status: "carry", reason: "hops" };
+  const { rounds, wakesPerHour } = coordinatorBoundsFor(input.bounds);
+  if (input.hop >= rounds) return { status: "carry", reason: "hops" };
   if (input.wakeTurnRunning) return { status: "carry", reason: "running" };
-  if (input.wakeTurnsInLastHour >= MAX_WAKE_TURNS_PER_HOUR) {
+  if (input.wakeTurnsInLastHour >= wakesPerHour) {
     return { status: "carry", reason: "hourly" };
   }
   if (!input.recipient.idle) return { status: "carry", reason: "busy" };

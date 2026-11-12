@@ -517,8 +517,9 @@ export interface CoordinatorToolPort {
  * The threads tool for one Work or Code turn.
  *
  * The read operations are offered in Plan, since none changes anything
- * outside the caller's own context. Messaging is Code to Code: it is withheld
- * in Plan and from Work, whose turns carry no messages, and every messaging
+ * outside the caller's own context. Messaging is Code to Code or Work to
+ * Work: it is withheld in Plan and where the host passes no message
+ * delivery, and every messaging
  * call re-reads the posture, because a tool set outlives the moment it was
  * composed and a thread can drop to Plan while its turn runs. `board` is the
  * designated planner's, re-resolved on every call. Each operation group
@@ -597,7 +598,7 @@ export function createThreadsTools(input: {
         });
   /** Why this turn may not message now, or `undefined` when it may. */
   const messagingRefusal = (): string | undefined => {
-    if (input.mode !== "code" || messaging === undefined) return NOT_MESSAGING;
+    if (messaging === undefined) return NOT_MESSAGING;
     const profile = profileRefusal(THREADS_TOOL_SEND_ALLOWLIST_ENTRY);
     if (profile !== undefined) return profile;
     // A coordinator's turn always runs in Plan; whether it may message
@@ -660,7 +661,7 @@ export function createThreadsTools(input: {
       const operation = fields.operation;
       if (operation === "send" || operation === "acknowledge" || operation === "receipts") {
         // A mode that never messages has no send to journal a refusal of.
-        if (input.mode !== "code" || messaging === undefined) return policy(NOT_MESSAGING);
+        if (messaging === undefined) return policy(NOT_MESSAGING);
         const refusal = messagingRefusal();
         if (refusal !== undefined) return await messaging.refuse(operation, fields, refusal);
         if (operation === "send") return await messaging.send(fields);

@@ -185,6 +185,9 @@ function harness(): Harness {
   });
 }
 
+const coordinatorWithBounds = (coordinatorBounds: Record<string, number>): CodeThread =>
+  codeThread(COORDINATOR, { coordinator: true, messageWake: true, coordinatorBounds });
+
 const startCall = (fields: Record<string, unknown>) => ({
   callerThreadId: COORDINATOR,
   windowId,
@@ -260,6 +263,24 @@ describe("starting workers", () => {
     });
   });
 
+  it("starts a marked coordinator's worker at the level the person fixed, Full access included", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, { coordinator: true, coordinatorWorkerLevel: "full-access" }),
+    );
+    h.marked.add(COORDINATOR);
+    await h.service.start(startCall({ level: "approval-gated" }));
+    const creation = h.executed.find(
+      (entry) => entry.command.kind === "create-managed-code-thread",
+    );
+    expect(creation?.command).toMatchObject({ executionPolicy: "full-access" });
+    // The worker still starts marked: the fixed level lifts the cap, not the mark.
+    expect(creation?.context).toMatchObject({
+      inheritedMark: { sourceLabel: "coordinator-start" },
+    });
+  });
+
   it("proposes instead of creating when a person chose Propose for approval for the Project", async () => {
     const h = harness();
     h.settings = {
@@ -303,9 +324,26 @@ describe("starting workers", () => {
     });
   });
 
+  it("lets a coordinator journaled without bounds make sixty starts an hour, then refuses", async () => {
+    const h = harness();
+    h.settings = { coordinatorStarting: "propose-for-approval" } as unknown as CodeSettings;
+    for (let index = 0; index < 60; index += 1) {
+      expect(await h.service.start(startCall({}))).toMatchObject({
+        result: { status: "proposed" },
+      });
+    }
+    expect(await h.service.start(startCall({}))).toMatchObject({
+      result: { status: "refused", reason: "rate-limited" },
+    });
+  });
+
   it("still counts an hour's earlier starts after the host restarts", async () => {
     const h = harness();
     h.settings = { coordinatorStarting: "propose-for-approval" } as unknown as CodeSettings;
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, { coordinator: true, coordinatorBounds: { startsPerHour: 12 } }),
+    );
     for (let index = 0; index < 12; index += 1) {
       expect(await h.service.start(startCall({}))).toMatchObject({
         result: { status: "proposed" },
@@ -327,6 +365,10 @@ describe("starting workers", () => {
       coordinatorStarting: "propose-for-approval",
       coordinatorOpenWorkerLimit: 16,
     } as unknown as CodeSettings;
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, { coordinator: true, coordinatorBounds: { startsPerHour: 12 } }),
+    );
     for (let index = 0; index < 12; index += 1) {
       const id = `20000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`;
       h.threads.set(id, codeThread(id, { coordinatorThreadId: COORDINATOR }));
@@ -401,8 +443,20 @@ describe("waking for messages and worker state", () => {
     expect(h.hostTurns).toEqual([]);
   });
 
-  it("stops a coordinator and a worker waking each other after three rounds", async () => {
+  it("lets a coordinator journaled without bounds and its worker wake each other for ten rounds", async () => {
     const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    for (let round = 0; round < 11; round += 1) {
+      const [sender, recipient] = round % 2 === 0 ? [COORDINATOR, WORKER] : [WORKER, COORDINATOR];
+      h.service.onCommittedEvents([sent(sender, recipient)]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(h.hostTurns).toHaveLength(10);
+  });
+
+  it("stops a coordinator and a worker waking each other after the rounds a person set", async () => {
+    const h = harness();
+    h.threads.set(COORDINATOR, coordinatorWithBounds({ rounds: 3 }));
     h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
     // Each reply comes from the turn the previous message woke.
     for (let round = 0; round < 4; round += 1) {
@@ -415,6 +469,7 @@ describe("waking for messages and worker state", () => {
 
   it("still refuses a fourth-round wake after the host restarts", async () => {
     const h = harness();
+    h.threads.set(COORDINATOR, coordinatorWithBounds({ rounds: 3 }));
     h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
     for (let round = 0; round < 3; round += 1) {
       const [sender, recipient] = round % 2 === 0 ? [COORDINATOR, WORKER] : [WORKER, COORDINATOR];
@@ -429,16 +484,28 @@ describe("waking for messages and worker state", () => {
     expect(h.hostTurns).toHaveLength(3);
   });
 
-  it("keeps the six wake turns an hour across a restart", async () => {
+  it("keeps a coordinator's six wake turns an hour for its worker across a restart", async () => {
     const h = harness();
-    h.threads.set(OTHER, codeThread(OTHER, { messageWake: true }));
+    h.threads.set(COORDINATOR, coordinatorWithBounds({ wakesPerHour: 6 }));
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
     const restarted = h.restart();
     for (let index = 0; index < 7; index += 1) {
       const service = index < 4 ? h.service : restarted;
-      service.onCommittedEvents([sent(COORDINATOR, OTHER)]);
+      service.onCommittedEvents([sent(COORDINATOR, WORKER)]);
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    expect(h.hostTurns.filter((turn) => turn.threadId === OTHER)).toHaveLength(6);
+    expect(h.hostTurns.filter((turn) => turn.threadId === WORKER)).toHaveLength(6);
+  });
+
+  it("wakes a thread no coordinator directs thirty times an hour, and no more", async () => {
+    const h = harness();
+    h.threads.set(COORDINATOR, coordinatorWithBounds({ wakesPerHour: 2 }));
+    h.threads.set(OTHER, codeThread(OTHER, { messageWake: true }));
+    for (let index = 0; index < 32; index += 1) {
+      h.service.onCommittedEvents([sent(COORDINATOR, OTHER)]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(h.hostTurns.filter((turn) => turn.threadId === OTHER)).toHaveLength(30);
   });
 
   it("tells an idle coordinator when a worker finishes, with a roster that names no titles", async () => {

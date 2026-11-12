@@ -377,7 +377,11 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 - **Menus.** A Code Project's sidebar menu has **New coordinator**, which
   opens the ordinary Code draft under a "New coordinator" heading and makes the
   thread a coordinator once its creation is confirmed, before the first
-  message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
+  message is sent. Under the heading the draft has **Workers start at** (this
+  thread's level or lower, or always at one named level, Full access included)
+  and three number fields for the coordinator's bounds (wakes an hour, rounds,
+  worker starts an hour), each empty for its default
+  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). A Code thread's row menu has **Make coordinator**, or **Stop
   coordinating** on a coordinator (never on a worker), the **Wake when a message
   arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
   The same items appear in a Code thread pane's header menu (right-click the

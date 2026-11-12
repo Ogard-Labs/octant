@@ -158,6 +158,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
+    | "agentMessageService"
     | "consumeCreateFromIssueFramed"
     | "githubIssueContextService"
     | "linearIssueContextService"
@@ -302,6 +303,7 @@ export function wireWork(deps: WorkDependencies) {
     routineProposalService,
     sideTasks,
     siblingThreadsService,
+    agentMessageService,
     spendCeiling,
     threadAwaitsHarnessApproval,
     threadAwaitsHarnessQuestion,
@@ -419,6 +421,9 @@ export function wireWork(deps: WorkDependencies) {
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+      confirmAgentMessagesDelivered: (messageIds) =>
+        agentMessageService.confirmDelivered(messageIds),
       prepareProductFeedbackForTurn: (input) => {
         const scope = resolveFeedbackThread(input.windowId, input.threadId);
         if (scope?.mode !== "work") return undefined;
@@ -561,14 +566,15 @@ export function wireWork(deps: WorkDependencies) {
           isAutomationOrigin: isRoutineHostScope(input.windowId),
           now: Date.now,
         };
-        // The other open Work threads of this Project, read-only: Work turns
-        // carry no agent messages, so a Work thread is offered no `send`.
+        // The other open Work threads of this Project, to read and to message:
+        // a Work turn carries the messages its siblings left it.
         const threadsTools = !browserSupported
           ? undefined
           : createThreadsTools({
               mode: "work",
               windowId: input.windowId,
               service: siblingThreadsService,
+              messaging: agentMessageService,
               source: workSiblingThreadSource(
                 {
                   threads: () => workThreadProjection.list(),

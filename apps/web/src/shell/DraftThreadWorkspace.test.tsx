@@ -158,6 +158,26 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
+  it("lets a person fix the workers' level, Full access included, and set bounds while creating a coordinator", async () => {
+    const user = userEvent.setup();
+    const onChoicesChange = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projects={projects}
+        projectId={codeProjectId}
+        coordinator={{ projectId: codeProjectId, onCancel: () => {}, onChoicesChange }}
+      />,
+    );
+    const level = screen.getByRole("combobox", { name: "Workers start at" });
+    expect(level).toHaveTextContent("Workers start at this thread's level or lower");
+    await user.click(level);
+    await user.click(screen.getByRole("option", { name: "Workers always start at Full access" }));
+    expect(onChoicesChange).toHaveBeenLastCalledWith({ workerLevel: "full-access" });
+    await user.type(screen.getByRole("spinbutton", { name: "Rounds" }), "4");
+    expect(onChoicesChange).toHaveBeenLastCalledWith({ bounds: { rounds: 4 } });
+  });
   it("keeps the context chips in the tray above the composer card with model controls below the prompt", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const composer = container.querySelector(".composer");

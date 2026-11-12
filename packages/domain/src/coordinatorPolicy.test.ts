@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_WAKE_HOPS,
   coordinatorNoticeFor,
   coordinatorStartingFor,
   decideCoordinatorRole,
@@ -95,6 +94,35 @@ describe("starting workers", () => {
     ).toMatchObject({ status: "refused", reason: "policy" });
   });
 
+  it("starts every worker at the level the person fixed, above the coordinator's own and despite its mark", () => {
+    const marked = { ...coordinator, marked: true } as const;
+    expect(
+      decideCoordinatorStart({ ...start, caller: marked, fixedWorkerLevel: "full-access" }),
+    ).toEqual({ status: "start", level: "full-access" });
+    expect(
+      decideCoordinatorStart({
+        ...start,
+        caller: marked,
+        fixedWorkerLevel: "full-access",
+        requestedLevel: "approval-gated",
+      }),
+    ).toEqual({ status: "start", level: "full-access" });
+    expect(
+      decideCoordinatorStart({
+        ...start,
+        fixedWorkerLevel: "approval-gated",
+        requestedLevel: "full-access",
+      }),
+    ).toEqual({ status: "start", level: "approval-gated" });
+    expect(
+      decideCoordinatorStart({
+        ...start,
+        caller: { ...coordinator, level: "plan" },
+        fixedWorkerLevel: "full-access",
+      }),
+    ).toMatchObject({ status: "refused", reason: "policy" });
+  });
+
   it("holds the open-worker and hourly bounds and turns a restricted start into a proposal", () => {
     expect(decideCoordinatorStart({ ...start, openWorkers: 6 })).toMatchObject({
       reason: "limit-reached",
@@ -102,9 +130,17 @@ describe("starting workers", () => {
     expect(decideCoordinatorStart({ ...start, openWorkers: 6, openWorkerLimit: 8 }).status).toBe(
       "start",
     );
-    expect(decideCoordinatorStart({ ...start, startsInLastHour: 12 })).toMatchObject({
+    expect(decideCoordinatorStart({ ...start, startsInLastHour: 59 }).status).toBe("start");
+    expect(decideCoordinatorStart({ ...start, startsInLastHour: 60 })).toMatchObject({
       reason: "rate-limited",
     });
+    expect(
+      decideCoordinatorStart({ ...start, startsInLastHour: 2, bounds: { startsPerHour: 2 } }),
+    ).toMatchObject({ reason: "rate-limited" });
+    expect(
+      decideCoordinatorStart({ ...start, startsInLastHour: 60, bounds: { startsPerHour: 61 } })
+        .status,
+    ).toBe("start");
     expect(decideCoordinatorStart({ ...start, starting: "propose-for-approval" }).status).toBe(
       "propose",
     );
@@ -183,16 +219,38 @@ describe("waking for a message", () => {
     );
   });
 
-  it("stops two agents waking each other after three rounds and six turns an hour", () => {
-    expect(decideMessageWake({ ...wake, hop: MAX_WAKE_HOPS })).toEqual({
+  it("stops two agents waking each other after ten rounds and thirty turns an hour by default", () => {
+    expect(decideMessageWake({ ...wake, hop: 9 }).status).toBe("wake");
+    expect(decideMessageWake({ ...wake, hop: 10 })).toEqual({
       status: "carry",
       reason: "hops",
     });
-    expect(decideMessageWake({ ...wake, wakeTurnsInLastHour: 6 })).toEqual({
+    expect(decideMessageWake({ ...wake, wakeTurnsInLastHour: 29 }).status).toBe("wake");
+    expect(decideMessageWake({ ...wake, wakeTurnsInLastHour: 30 })).toEqual({
       status: "carry",
       reason: "hourly",
     });
     expect(decideMessageWake({ ...wake, wakeTurnRunning: true }).status).toBe("carry");
+  });
+
+  it("holds a coordinator's own round and hourly bounds where a person set them", () => {
+    const bounds = { rounds: 2, wakesPerHour: 40 };
+    expect(decideMessageWake({ ...wake, bounds, hop: 2 })).toEqual({
+      status: "carry",
+      reason: "hops",
+    });
+    expect(decideMessageWake({ ...wake, bounds, hop: 1, wakeTurnsInLastHour: 39 }).status).toBe(
+      "wake",
+    );
+    expect(decideMessageWake({ ...wake, bounds, wakeTurnsInLastHour: 40 })).toEqual({
+      status: "carry",
+      reason: "hourly",
+    });
+    // A bound the person left out keeps its default.
+    expect(decideMessageWake({ ...wake, bounds: { rounds: 2 }, wakeTurnsInLastHour: 30 })).toEqual({
+      status: "carry",
+      reason: "hourly",
+    });
   });
 
   it("notices a worker finishing, waiting, or Done, not starting to work", () => {

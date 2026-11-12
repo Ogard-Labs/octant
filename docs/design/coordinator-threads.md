@@ -35,10 +35,11 @@ read-only gate is a maintainer live check.
   on the host; an agent, a routine, a paired device, or a peer cannot. The role
   is a field on the thread's own record: each change is journaled as
   `code.thread-updated@1` under the thread's expected version (commands
-  `set-code-thread-coordinator`, `set-code-thread-message-wake`, and
-  `set-code-thread-coordinator-wake`), a stale version is refused, and the
-  Code commands route refuses all three from anything but a local window. A
-  new thread's creation command may not carry the role, lineage, or switches.
+  `set-code-thread-coordinator`, `set-code-thread-coordinator-bounds`,
+  `set-code-thread-message-wake`, and `set-code-thread-coordinator-wake`), a
+  stale version is refused, and the Code commands route refuses all four from
+  anything but a local window. A new thread's creation command may not carry
+  the role, lineage, switches, bounds, or workers' level.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
@@ -55,10 +56,9 @@ read-only gate is a maintainer live check.
   since the board leaves coordinators out, that read no longer lists the
   planner's own card.
 - **Code only.** A Work thread may message a sibling (maintainer request,
-  2026-11-12). Not built yet: today Work threads neither send nor receive
-  messages, because only Code turns carry them, so a Work coordinator could
-  start workers but never follow up with them. Work coordinators wait until a
-  Work turn carries a message.
+  2026-11-12), and a Work turn carries the messages left for it, but no message
+  wakes a Work thread, so a Work coordinator could start workers and never
+  hear back while idle. Work coordinators are not in this design.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
 the mode's authority and the thread's posture exactly as they were, which
@@ -132,9 +132,14 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   maintainer request, 2026-11-12). With no fixed level, the worker's guardrail
   level is the one named, or the coordinator's level when none is named, and
   never higher than the coordinator's, and a worker started by a marked
-  coordinator never starts at Full access. Not built yet: today no level can
-  be fixed, so the unfixed rule always applies. After creation the worker's level is the person's to change, as on any
-  thread.
+  coordinator never starts at Full access. The person picks the fixed level
+  in the New coordinator draft (**Workers start at**); the host accepts it
+  only on the command that makes the thread a coordinator, journals it on the
+  thread (`coordinatorWorkerLevel`), refuses a later change to it, and drops
+  it at **Stop coordinating**. With a fixed level a level named in the call
+  is not read, and a proposal carries the fixed level. A thread made a
+  coordinator with **Make coordinator** has no fixed level. After creation
+  the worker's level is the person's to change, as on any thread.
 - **Lineage.** A worker belongs to the coordinator that started it. The host
   records that on the worker at creation and never changes it. When the
   coordinator stops coordinating, is archived, or is deleted, its workers stay
@@ -197,9 +202,17 @@ approval flow with one switch.
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most 60 `start` calls per coordinator in any hour by
-  default, admitted or proposed. A person sets the bound per coordinator; an
-  agent cannot (maintainer request, 2026-11-12). Not built yet: today the bound
-  is a constant twelve. The host records each call in its own store, beside the
+  default, admitted or proposed. A person sets the bound per coordinator, from
+  1 to 600; an agent cannot (maintainer request, 2026-11-12). It is one of the
+  coordinator's three bounds, with the wakes per hour and the rounds in
+  [Talking to workers](#talking-to-workers): the command
+  `set-code-thread-coordinator-bounds` replaces all three, a bound left out
+  returns to its default, and they are journaled on the coordinator's own
+  record (`coordinatorBounds`) and dropped at **Stop coordinating**. A
+  coordinator journaled before the bounds existed has none stored and takes the
+  defaults. The New coordinator draft sets them; a control that changes them on
+  an existing coordinator is not built yet, so today the command is the only
+  way. The host records each call in its own store, beside the
   wake turns and each thread's latest host turn with its hop, so the count holds
   across a restart; it never reads fewer than the workers the coordinator's
   lineage shows created in that hour, so starts made before the record existed
@@ -270,8 +283,11 @@ capped ([Starting workers](#starting-workers)).
   thread, an hourly count per thread, and the hop count. The hourly count and
   the rounds are settings a person changes per coordinator, with defaults of
   30 wakes per thread in any hour and 10 rounds; an agent cannot change them
-  (maintainer request, 2026-11-12). Not built yet: today they are constants,
-  six wakes and three rounds. A state notice
+  (maintainer request, 2026-11-12). A person sets the wakes from 1 to 600 and
+  the rounds from 1 to 100 ([Bounds](#bounds)). A coordinator's bounds apply
+  to its own wakes and to its workers' while it holds the role; every other
+  thread, a worker whose coordinator stopped included, takes the defaults. A
+  state notice
   takes the hop count of the worker turn that caused it, so a coordinator and a
   worker answering each other stop waking each other after the round bound and
   continue when a person runs a turn on either. The wake turns and hops are

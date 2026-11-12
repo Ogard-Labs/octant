@@ -149,6 +149,10 @@ export type ShellActions = {
   readonly openCoordinatorDraftInProject: (projectId: ProjectId) => Promise<void>;
   /** Turns a New coordinator draft back into an ordinary one. */
   readonly cancelCoordinatorDraft: () => void;
+  /** The workers' level and bounds a New coordinator draft sets on its thread. */
+  readonly setCoordinatorDraftChoices: (
+    choices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices,
+  ) => void;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
   readonly openImageLibrary: () => void;

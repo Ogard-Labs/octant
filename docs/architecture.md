@@ -3183,8 +3183,7 @@ are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
 coordinator at a local window, Full access included; a mark on the coordinator
 does not lower a fixed level, and the coordinator itself stays read-only
-(maintainer request, 2026-11-12; not built yet: today the bounds are the
-constants 6, 3 and 12 and no level can be fixed). The planner below is now a
+(maintainer request, 2026-11-12). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
 take the coordinator's read-only gate and roster, its `start` proposes through
 the planner's proposal path whatever the start setting, and designation also
@@ -3904,9 +3903,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   confirms a thread exists. Code and Work turns are offered the messaging
   operations and a Project has one mode, so this means Code to Code or Work to
   Work inside one Project (maintainer request, 2026-11-12, for Work). Chat
-  threads and child runs neither send nor receive. Not built yet: today Work
-  turns carry no messages, so a Work thread's `octant_threads`
-  offers no `send` (see the rationale below). A recipient is named by the same
+  threads and child runs neither send nor receive. A recipient is named by the same
   `<thread id>@<project id>` reference `list` returns; one whose Project part
   is not the sender's current Project refuses `unauthorized` in the same
   words, even when its thread part names a thread the sender could reach, and
@@ -3994,8 +3991,8 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12; not built yet: today they are the
-    constants six wakes an hour and three rounds). The host
+    (maintainer request, 2026-11-12); any other thread takes the defaults.
+    The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
     ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
@@ -4021,7 +4018,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   `receipts` operations for up to 20 durable IDs per call; `send` is always
   named. An acknowledgement is the current
   recipient reporting receipt: the host checks the exact delivered record,
-  current sender and recipient Code authority and same-Project relationship.
+  current sender and recipient authority, their shared mode and same-Project relationship.
   A sender cannot acknowledge its outgoing message or name another recipient;
   the caller thread comes from the running turn. Duplicate acknowledgements
   and replay retain one fact. Neither prompt acceptance nor turn completion
@@ -4033,7 +4030,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   count includes acknowledged messages; acknowledgement is a later receipt,
   not an additive delivery total. The messaging operations remain omitted and
   refused in Plan, on excluded profiles and cancelled turns; managed children,
-  Chat and Work gain no messaging rights. Sending again, including retrying a
+  and Chat gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
 - **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
@@ -4064,9 +4061,9 @@ Seeing sibling threads is the read-only companion to messaging, approved by
 the maintainer on 2026-10-13 and extended to Work on 2026-11-05, when the
 maintainer folded messaging and the planner's board into the same tool. The
 `octant_threads` tool lets a Work or Code turn see the other threads of its
-own Project, and a Code turn message one or wait for one to finish. Its
-operations are `help`, `list`, `read`, `wait`, and in Code `send`,
-`acknowledge`, `receipts`, and the planner's `board`. No operation creates,
+own Project, message one, or wait for one to finish. Its
+operations are `help`, `list`, `read`, `wait`, `send`, `acknowledge`,
+`receipts`, and in Code the planner's `board`. No operation creates,
 steers, completes, archives, or stops a thread. The coordinator operation
 `start`, offered only to a coordinator thread, is the one exception:
 it creates a worker thread, under the rules in
@@ -4074,11 +4071,16 @@ it creates a worker thread, under the rules in
 
 - **Rationale for Work.** Work and Code share one authority model, so the
   read-only operations, which change nothing outside the caller's own record,
-  reach Work under the same rules as Code. Messaging does not: a message is
-  carried by the recipient's next turn, and only Code turns assemble that
-  context, so a message to a Work thread would wait unread for good. Until a
-  Work turn carries, frames, and confirms a message, which the rule above now
-  asks for, Work threads neither send nor receive.
+  reach Work under the same rules as Code. Messaging follows the same way: a
+  Work turn carries the messages waiting for its thread as a Code turn does.
+  The host rechecks each one, marks the thread before the text is returned,
+  frames the body as data in the turn's required context, and journals
+  `delivered` only once the provider has been sent that context, so a turn
+  that never reaches a provider leaves the message for the next one. A Work
+  thread has no **Wake when a message arrives** switch, so a message never
+  starts a Work turn; it waits for the thread's next turn. The host refuses a
+  message between a Work and a Code thread as unreachable at admission and
+  again at delivery, whatever Project their records name.
 
 - **Who may see whom.** The caller is a Work or Code thread's turn; the
   targets are the other threads of the same Project, which are all of its

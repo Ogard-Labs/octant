@@ -2275,6 +2275,108 @@ describe("CodeService commands", () => {
     expect(after.messageWake).toBe(true);
   });
 
+  it("journals the workers' level a person fixed while making a coordinator, and drops it when it stops", async () => {
+    const fixture = serviceFixture({ project: rememberedFullAccessProject });
+    const made = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      coordinator: true,
+      workerLevel: "full-access",
+    });
+    expect(made).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ coordinator: true, coordinatorWorkerLevel: "full-access" }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored.coordinatorWorkerLevel).toBe("full-access");
+    fixture.persistence.readCodeThread.mockReturnValue(stored);
+    // The level is fixed at creation: a later command cannot change it.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: ids.thread,
+        expectedVersion: 2,
+        coordinator: true,
+        workerLevel: "approval-gated",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      coordinator: false,
+    });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorWorkerLevel" in after).toBe(false);
+  });
+
+  it("journals a coordinator's bounds as a person set them and keeps them across a wake switch change", async () => {
+    const current = thread({ coordinator: true, messageWake: true });
+    const fixture = serviceFixture({ threads: [current] });
+    const set = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-bounds",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      bounds: { wakesPerHour: 45, rounds: 4 },
+    });
+    expect(set).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({
+        coordinatorBounds: { wakesPerHour: 45, rounds: 4 },
+        version: 2,
+      }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored.coordinatorBounds).toEqual({ wakesPerHour: 45, rounds: 4 });
+    fixture.persistence.readCodeThread.mockReturnValue(stored);
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      wake: false,
+    });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(after.coordinatorBounds).toEqual({ wakesPerHour: 45, rounds: 4 });
+    fixture.persistence.readCodeThread.mockReturnValue(after);
+    // Bounds with nothing set return every bound to its default.
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-bounds",
+      threadId: ids.thread,
+      expectedVersion: 3,
+      bounds: {},
+    });
+    const cleared =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorBounds" in cleared).toBe(false);
+  });
+
+  it("refuses bounds on a thread that is not a coordinator, and a worker level without the role", async () => {
+    const fixture = serviceFixture({ threads: [thread({})] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-bounds",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        bounds: { rounds: 4 },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        coordinator: false,
+        workerLevel: "full-access",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("counts the designated planner toward the Project's four coordinators", async () => {
     const others = [1, 2, 3, 4].map((index) =>
       thread({ id: decodeCodeThreadId(`20000000-0000-4000-8000-00000000010${String(index)}`) }),
@@ -2352,6 +2454,8 @@ describe("CodeService commands", () => {
       { coordinator: true as const },
       { coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff") },
       { messageWake: true as const },
+      { coordinatorBounds: { rounds: 50 } },
+      { coordinatorWorkerLevel: "full-access" as const },
     ]) {
       await expect(
         fixture.service.execute(ids.window, {

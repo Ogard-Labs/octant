@@ -2316,6 +2316,52 @@ describe("WorkTurnService", () => {
     });
   });
 
+  it("carries a sibling Work thread's message into the turn and confirms delivery only once the provider has it", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const confirmed: Array<ReadonlyArray<string>> = [];
+    const carried = vi.fn(async () => [{ messageId: "message-1", text: "Framed sibling message" }]);
+    const fixture = serviceFixture({
+      carryAgentMessages: carried,
+      confirmAgentMessagesDelivered: async (messageIds) => {
+        confirmed.push(messageIds);
+      },
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          // The provider does not have the context until the prompt is sent.
+          expect(confirmed).toEqual([]);
+          input.onPromptSent?.();
+          return { kind: "completed", response: "Ready" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    expect(carried).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(contexts.flat()).toContainEqual({
+      kind: "user-message",
+      text: "Framed sibling message",
+    });
+    expect(confirmed).toEqual([["message-1"]]);
+  });
+
+  it("leaves a carried message waiting when the Work turn never reaches a provider", async () => {
+    const confirmed = vi.fn(async () => {});
+    const fixture = serviceFixture({
+      carryAgentMessages: async () => [{ messageId: "message-1", text: "Framed sibling message" }],
+      confirmAgentMessagesDelivered: confirmed,
+      turnRuntime: {
+        run: async () => ({
+          kind: "failed",
+          failure: { category: "unavailable", message: "The provider was unavailable." },
+        }),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    expect(confirmed).not.toHaveBeenCalled();
+  });
+
   it("refuses changed skill selections when a Work request is retried", async () => {
     const fixture = serviceFixture({
       resolveSelectedExtensions: async () => ({
@@ -5647,6 +5693,8 @@ function serviceFixture(
     readonly resolveSelectedExtensions?: WorkTurnServiceDependencies["resolveSelectedExtensions"];
     readonly resolveSideChatReturns?: WorkTurnServiceDependencies["resolveSideChatReturns"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
+    readonly carryAgentMessages?: WorkTurnServiceDependencies["carryAgentMessages"];
+    readonly confirmAgentMessagesDelivered?: WorkTurnServiceDependencies["confirmAgentMessagesDelivered"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
@@ -5861,6 +5909,12 @@ function serviceFixture(
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),
+    ...(options.carryAgentMessages === undefined
+      ? {}
+      : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.confirmAgentMessagesDelivered === undefined
+      ? {}
+      : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
     ...(options.resolveAppManagedTools === undefined
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
