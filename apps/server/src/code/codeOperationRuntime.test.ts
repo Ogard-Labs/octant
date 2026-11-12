@@ -124,7 +124,11 @@ import {
   type SiblingThreadSource,
 } from "../siblingThreads/siblingThreadTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
-import { defaultWindowWorkspace, contextKeyForProject } from "@octant/domain";
+import {
+  APPROVAL_POSTURE_CHANGED_MESSAGE,
+  defaultWindowWorkspace,
+  contextKeyForProject,
+} from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
@@ -4014,6 +4018,190 @@ describe("CodeOperationRuntime", () => {
       requestId: "provider-approval-narrowed",
       approved: true,
     });
+    fixture.close();
+  });
+
+  it("refuses an allow answered after the thread's posture changed, asks again, and still delivers a denial", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(16);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+        approval = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index];
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected a provider approval");
+      return approval.approvalId;
+    };
+    const answer = (
+      approvalId: Extract<OperationFrame["event"], { kind: "approval-requested" }>["approvalId"],
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    // Asked under Ask first; the person then hands prompts to the reviewer.
+    const first = await ask("provider-approval-before-auto", 0);
+    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+    await expect(answer(first, "approved", 17)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(connection.answerApproval).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
+    // Asked again under the posture the thread holds now, the allow goes through.
+    await expect(answer(first, "approved", 18)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-auto",
+      approved: true,
+    });
+
+    // Narrowed to Plan while asked: the allow is refused, the denial is delivered.
+    const second = await ask("provider-approval-before-plan", 1);
+    fixture.setThread(
+      decodeCodeThread({ ...thread(), autoApprove: true, executionPolicy: "plan" }),
+    );
+    await expect(answer(second, "approved", 19)).resolves.toMatchObject({
+      failure: { message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(connection.answerApproval).toHaveBeenCalledTimes(1);
+    await expect(answer(second, "denied", 20)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerApproval).toHaveBeenLastCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-plan",
+      approved: false,
+    });
+    fixture.close();
+  });
+
+  it("refuses a browser allow answered after the thread's posture changed, opening nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
+    const create = vi.fn(async () => ready);
+    const act = vi.fn(async () => ready);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ready,
+        create,
+        act,
+        releaseThread: vi.fn(async () => ready),
+      },
+    });
+    const operation = operationId(150);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "browser-before-auto",
+          toolName: "octant_browser",
+          inputJson: '{"operation":"navigate","url":"https://example.com"}',
+        }),
+      ),
+    );
+    let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+      approval = frames
+        .map((frame) => frame.event)
+        .find((event) => event.kind === "approval-requested");
+      expect(approval).toBeDefined();
+    });
+    if (approval === undefined) throw new Error("Expected browser approval");
+    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(151),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({
+      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(act).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(152),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "denied",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(act).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();
   });
 

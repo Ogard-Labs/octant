@@ -239,6 +239,7 @@ describe("WorkRequestApplicationService.listPendingForWindow", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => projectId,
         threadProviderInstanceId: () => pendingRequest.providerInstanceId,
+        threadApprovalPosture: () => "ask-first",
       },
       projection,
       eventStore: {
