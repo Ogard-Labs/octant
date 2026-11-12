@@ -146,7 +146,7 @@ describe("quitting after a start-up that cannot proceed", () => {
     const pending = quitAfterStartupFailure({
       message: "Octant storage did not become ready within 60000ms.",
       log: (message) => void order.push(`log: ${message}`),
-      showFailure: async (_message, quit) => {
+      showFailure: async (_message, { quit }) => {
         order.push("shown");
         // What the window's Quit button and its close event are given.
         requestQuit = quit;
@@ -223,6 +223,28 @@ describe("quitting after a start-up that cannot proceed", () => {
 
     expect(run.order.filter((step) => step === "finished")).toHaveLength(1);
     expect(run.order.filter((step) => step === "deadline")).toHaveLength(1);
+  });
+
+  it("tells the failure window whether a quit was already requested", async () => {
+    let control: { quit: () => void; quitRequested: () => boolean } | undefined;
+    let release: () => void = () => undefined;
+    const pending = quitAfterStartupFailure({
+      message: "reason",
+      log: () => undefined,
+      showFailure: async (_message, given) => {
+        control = given;
+      },
+      shutDown: () => new Promise<void>((resolve) => (release = resolve)),
+      onQuitRequested: () => undefined,
+      armDeadline: () => undefined,
+      finish: () => undefined,
+    });
+    release();
+    await pending;
+
+    expect(control?.quitRequested()).toBe(false);
+    control?.quit();
+    expect(control?.quitRequested()).toBe(true);
   });
 
   it("still ends the app when the failure cannot be shown", async () => {

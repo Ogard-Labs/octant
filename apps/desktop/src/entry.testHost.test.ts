@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
     quit: vi.fn(),
   },
 }));
-vi.mock("./startupFailureElectron", () => ({ showStartupFailure: fixture.error }));
+vi.mock("./startupFailureElectron", () => ({ showStartupFailureAndQuit: fixture.error }));
 vi.mock("node:fs", async (original) => ({
   ...(await original<typeof import("node:fs")>()),
   mkdirSync: vi.fn(),

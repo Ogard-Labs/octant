@@ -1,6 +1,7 @@
 import { CANVAS_PROTOTYPE_HOST_SWITCH, runCanvasPrototypeHost } from "./canvasPrototypeHost";
 import { app } from "electron";
-import { showStartupFailure } from "./startupFailureElectron";
+import { writeDiagnostic } from "./diagnosticLog";
+import { showStartupFailureAndQuit } from "./startupFailureElectron";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -87,13 +88,8 @@ if (
         error instanceof NightlyTestHostFailure
           ? error.message
           : "Octant Nightly could not open its authenticated client window.";
-      process.stderr.write(`${identity.productName}: ${message}\n`);
-      void showStartupFailure({
-        title: identity.productName,
-        message,
-        logsDirectory: undefined,
-        quit: () => app.quit(),
-      });
+      writeDiagnostic(`${identity.productName}: ${message}`);
+      void showStartupFailureAndQuit({ title: identity.productName, message });
     });
   } else {
     await launchDesktop();
@@ -204,13 +200,8 @@ async function launchDesktop(): Promise<void> {
   if (outcome.kind === "client-bridge-required") {
     app.setName(identity.productName);
     app.setPath("userData", desktopWindowStorageDirectory(identity, "", app.getPath("appData")));
-    process.stderr.write(`${identity.productName}: ${outcome.message}\n`);
-    void showStartupFailure({
-      title: identity.productName,
-      message: outcome.message,
-      logsDirectory: undefined,
-      quit: () => app.quit(),
-    });
+    writeDiagnostic(`${identity.productName}: ${outcome.message}`);
+    void showStartupFailureAndQuit({ title: identity.productName, message: outcome.message });
   }
 }
 

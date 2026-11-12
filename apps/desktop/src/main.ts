@@ -285,7 +285,12 @@ import {
   buildQuitConfirmation,
   evaluateQuitRequest,
 } from "./quitGuard";
-import { showNoticeWithoutBlocking, showStartupFailure } from "./startupFailureElectron";
+import { writeDiagnostic } from "./diagnosticLog";
+import {
+  noticeWindowIsClosing,
+  showNoticeWithoutBlocking,
+  showStartupFailure,
+} from "./startupFailureElectron";
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
@@ -4650,11 +4655,7 @@ function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
 }
 
 function logQuitProblem(message: string): void {
-  try {
-    process.stderr.write(`${message}\n`);
-  } catch {
-    // Nothing is left to report to when stderr is closed.
-  }
+  writeDiagnostic(message);
 }
 
 // Ends the app when graceful shutdown stalls. It first kills the processes the
@@ -4802,16 +4803,8 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   await quitAfterStartupFailure({
     message: formatDesktopStartupFailure(error),
     log: logQuitProblem,
-    showFailure: async (message, quit) => {
-      // A failure before ready (a replaced instance that never exited) cannot
-      // create a window yet; a quit requested meanwhile still ends the app.
-      await showStartupFailure({
-        title: "Octant could not start",
-        message,
-        logsDirectory: desktopHostStartup.logsDirectory,
-        quit,
-      });
-    },
+    showFailure: (message, control) =>
+      showStartupFailure({ title: "Octant could not start", message, ...control }),
     shutDown: () =>
       shutDownForQuit({
         closeAdmission: closeBrowserAdmissionForQuit,
@@ -5072,6 +5065,7 @@ else {
 app.on("window-all-closed", () => {
   if (
     process.platform !== "darwin" &&
+    !noticeWindowIsClosing() &&
     pendingRendererRecoveries === 0 &&
     browserSurfaceHost?.persistentOwner?.retainsProcess() !== true
   ) {

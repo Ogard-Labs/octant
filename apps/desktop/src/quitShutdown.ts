@@ -103,8 +103,15 @@ export function armQuitDeadline(options: {
 export async function quitAfterStartupFailure(options: {
   readonly message: string;
   readonly log: (message: string) => void;
-  /** Puts the failure on screen and returns without waiting for a person; `quit` ends the app. */
-  readonly showFailure: (message: string, quit: () => void) => Promise<void>;
+  /**
+   * Puts the failure on screen and returns without waiting for a person.
+   * `quit` ends the app; `quitRequested` says whether one has been asked for,
+   * so a window is not created for an app that is already leaving.
+   */
+  readonly showFailure: (
+    message: string,
+    control: { readonly quit: () => void; readonly quitRequested: () => boolean },
+  ) => Promise<void>;
   /** Releases what the failed start still holds; bounded and never rejects. */
   readonly shutDown: () => Promise<unknown>;
   /** Receives the call that ends the app on a quit requested from now on. */
@@ -135,7 +142,7 @@ export async function quitAfterStartupFailure(options: {
     return;
   }
   try {
-    await options.showFailure(options.message, quit);
+    await options.showFailure(options.message, { quit, quitRequested: () => quitRequested });
   } catch {
     options.log("Octant could not show why it did not start.");
     end();

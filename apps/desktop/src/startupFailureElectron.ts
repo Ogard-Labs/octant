@@ -1,5 +1,10 @@
 import { app, BrowserWindow, dialog } from "electron";
-import { showStartupFailureWindow, type StartupFailureWindow } from "./startupFailureWindow";
+import { writeDiagnostic } from "./diagnosticLog";
+import {
+  createNotices,
+  showStartupFailureWindow,
+  type StartupFailureWindow,
+} from "./startupFailureWindow";
 
 // A failed launch has no renderer or host to show anything, so the failure is a
 // plain window of its own: sandboxed, no script, no preload, and it loads only
@@ -32,44 +37,94 @@ function createStartupFailureWindow(title: string): StartupFailureWindow {
       );
     },
     onClosed: (listener) => window.on("closed", listener),
+    close: () => window.close(),
   };
 }
 
 /**
  * Shows why the app cannot go on, in a window, and returns once it is on
  * screen. `quit` ends the app. Never an alert without a parent: on macOS that
- * runs a nested modal loop which a signal cannot interrupt.
+ * runs a nested modal loop which a signal cannot interrupt. A quit requested
+ * before the app is ready creates no window.
  */
 export async function showStartupFailure(options: {
   readonly title: string;
   readonly message: string;
-  readonly logsDirectory: string | undefined;
   readonly quit: () => void;
+  readonly quitRequested: () => boolean;
 }): Promise<void> {
-  // A failure before ready cannot create a window yet; a quit requested
-  // meanwhile still ends the app.
-  await app.whenReady();
-  await showStartupFailureWindow({ createWindow: createStartupFailureWindow, ...options });
+  await showStartupFailureWindow({
+    ready: () => app.whenReady(),
+    createWindow: createStartupFailureWindow,
+    ...options,
+  });
 }
 
+let nightlyFailureShown = false;
+
 /**
- * Tells a person something went wrong while the app keeps running. On a live
- * window it is a sheet, which leaves the main loop free; with no window the
- * reason goes to standard error, because the only native alternative is an
- * alert that no signal can interrupt.
+ * The failure view for the Nightly launch paths, which have no quit
+ * bookkeeping of their own: Quit or closing the window calls `app.quit()`. At
+ * most one window is ever shown, however many times a path reports.
+ */
+export async function showStartupFailureAndQuit(options: {
+  readonly title: string;
+  readonly message: string;
+}): Promise<void> {
+  if (nightlyFailureShown) return;
+  nightlyFailureShown = true;
+  let leaving = false;
+  app.once("before-quit", () => {
+    leaving = true;
+  });
+  await showStartupFailure({
+    ...options,
+    quit: () => {
+      leaving = true;
+      app.quit();
+    },
+    quitRequested: () => leaving,
+  });
+}
+
+// A closing notice must not read as "the last window closed" to the
+// window-all-closed rule that quits a windowless Windows or Linux app.
+let noticeClosing = false;
+export const noticeWindowIsClosing = (): boolean => noticeClosing;
+
+function createNoticeWindow(title: string): StartupFailureWindow {
+  const window = createStartupFailureWindow(title);
+  return {
+    ...window,
+    onClosed: (listener) => {
+      window.onClosed(() => {
+        // The flag stays up through the tick that emits window-all-closed.
+        noticeClosing = true;
+        setTimeout(() => (noticeClosing = false), 0);
+        listener();
+      });
+    },
+  };
+}
+
+const notices = createNotices<BrowserWindow>({
+  createWindow: createNoticeWindow,
+  showSheet: (owner, title, message) => {
+    void dialog.showMessageBox(owner, { type: "error", title, message: title, detail: message });
+  },
+});
+
+/**
+ * Tells a person something went wrong while the app keeps running: a sheet on
+ * a visible window, otherwise a small window of its own (see `createNotices`).
+ * Never an alert without a parent.
  */
 export function showNoticeWithoutBlocking(
   owner: BrowserWindow | undefined,
   title: string,
   message: string,
 ): void {
-  if (owner !== undefined && !owner.isDestroyed()) {
-    void dialog.showMessageBox(owner, { type: "error", title, message: title, detail: message });
-    return;
-  }
-  try {
-    process.stderr.write(`${title}: ${message}\n`);
-  } catch {
-    // Nothing is left to report to when stderr is closed.
-  }
+  void notices.notify(owner, title, message).catch(() => {
+    writeDiagnostic(`${title}: ${message}`);
+  });
 }

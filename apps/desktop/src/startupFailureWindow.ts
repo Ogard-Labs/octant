@@ -14,6 +14,8 @@
 
 /** Navigating here is the Quit button; the window intercepts it and loads nothing. */
 export const STARTUP_FAILURE_QUIT_URL = "octant-startup-failure://quit";
+/** Navigating here is a notice's Close button; it closes that window only. */
+export const NOTICE_CLOSE_URL = "octant-startup-failure://close";
 
 const escapeHtml = (text: string): string =>
   text
@@ -22,16 +24,17 @@ const escapeHtml = (text: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-/** The page: what happened, the reason, where the log is, and one Quit button. */
+/**
+ * The page: a heading, the reason in its own scrolling block, and one button.
+ * The window cannot be resized, so the reason is bounded: however long it is,
+ * the heading and the button stay in view.
+ */
 export function startupFailureDocument(input: {
   readonly title: string;
   readonly message: string;
-  readonly logsDirectory: string | undefined;
+  readonly action?: { readonly label: string; readonly url: string };
 }): string {
-  const where =
-    input.logsDirectory === undefined
-      ? "The reason is also written to Octant's standard error."
-      : `The reason is also in the log folder: ${escapeHtml(input.logsDirectory)}`;
+  const action = input.action ?? { label: "Quit", url: STARTUP_FAILURE_QUIT_URL };
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -42,55 +45,117 @@ export function startupFailureDocument(input: {
   :root { color-scheme: light dark; }
   body { font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 20px 24px; }
   h1 { font-size: 15px; margin: 0 0 10px; }
-  p { margin: 0 0 10px; }
-  .reason { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-  .where { opacity: 0.7; overflow-wrap: anywhere; user-select: text; }
-  a.quit { display: inline-block; margin-top: 6px; padding: 5px 16px; border: 1px solid currentColor;
+  .reason { margin: 0 0 12px; max-height: 120px; overflow-y: auto; white-space: pre-wrap;
+    overflow-wrap: anywhere; user-select: text; }
+  a.action { display: inline-block; padding: 5px 16px; border: 1px solid currentColor;
     border-radius: 6px; color: inherit; text-decoration: none; }
 </style>
 </head>
 <body>
 <h1>${escapeHtml(input.title)}</h1>
-<p class="reason">${escapeHtml(input.message)}</p>
-<p class="where">${where}</p>
-<a class="quit" href="${STARTUP_FAILURE_QUIT_URL}" autofocus>Quit</a>
+<div class="reason">${escapeHtml(input.message)}</div>
+<a class="action" href="${action.url}" autofocus>${escapeHtml(action.label)}</a>
 </body>
 </html>`;
 }
 
-/** The slice of a window the failure view needs; main.ts adapts a BrowserWindow to it. */
+const documentUrl = (document: string): string =>
+  `data:text/html;charset=utf-8,${encodeURIComponent(document)}`;
+
+/** The slice of a window these views need; startupFailureElectron adapts a BrowserWindow to it. */
 export interface StartupFailureWindow {
-  /** Loads the document. Only the first load is allowed; anything else is refused. */
+  /** Loads the document. Only programmatic loads are allowed; page navigations are refused. */
   readonly load: (url: string) => Promise<void>;
   readonly show: () => void;
   /** Called for every navigation the page starts; `preventDefault` refuses it. */
   readonly onNavigate: (listener: (url: string, preventDefault: () => void) => void) => void;
   readonly onClosed: (listener: () => void) => void;
+  readonly close: () => void;
 }
 
 /**
  * Shows the failure in a window and returns once it is on screen. `quit` runs
  * for the Quit button and for closing the window; the caller makes it end the
- * app once. Nothing else the page does navigates anywhere.
+ * app once. A quit requested while the app was becoming ready creates no window.
  */
 export async function showStartupFailureWindow(options: {
+  readonly ready: () => Promise<void>;
+  readonly quitRequested: () => boolean;
   readonly createWindow: (title: string) => StartupFailureWindow;
   readonly title: string;
   readonly message: string;
-  readonly logsDirectory: string | undefined;
   readonly quit: () => void;
 }): Promise<void> {
+  await options.ready();
+  if (options.quitRequested()) return;
   const window = options.createWindow(options.title);
   window.onNavigate((url, preventDefault) => {
     preventDefault();
     if (url === STARTUP_FAILURE_QUIT_URL) options.quit();
   });
   window.onClosed(options.quit);
-  const document = startupFailureDocument({
-    title: options.title,
-    message: options.message,
-    logsDirectory: options.logsDirectory,
-  });
-  await window.load(`data:text/html;charset=utf-8,${encodeURIComponent(document)}`);
+  await window.load(
+    documentUrl(startupFailureDocument({ title: options.title, message: options.message })),
+  );
   window.show();
+}
+
+/** What a notice needs to know about the window that might carry its sheet. */
+export interface NoticeOwner {
+  readonly isDestroyed: () => boolean;
+  readonly isVisible: () => boolean;
+  readonly isMinimized: () => boolean;
+}
+
+/**
+ * Tells a person something went wrong while the app keeps running, without a
+ * blocking call. A sheet needs a window the person can see: Electron's async
+ * message box attaches a sheet to whatever parent it is given with no
+ * visibility check, and a sheet on a hidden or minimised window waits for that
+ * window to come back. Otherwise the notice is a small window of its own, at
+ * most one at a time (a newer notice replaces its text), whose Close button
+ * closes that window and never quits the app.
+ */
+export function createNotices<Owner extends NoticeOwner>(options: {
+  readonly createWindow: (title: string) => StartupFailureWindow;
+  readonly showSheet: (owner: Owner, title: string, message: string) => void;
+}) {
+  let current: StartupFailureWindow | undefined;
+  const showWindow = async (title: string, message: string): Promise<void> => {
+    if (current === undefined) {
+      const window = options.createWindow(title);
+      current = window;
+      window.onNavigate((url, preventDefault) => {
+        preventDefault();
+        if (url === NOTICE_CLOSE_URL) window.close();
+      });
+      window.onClosed(() => {
+        if (current === window) current = undefined;
+      });
+    }
+    await current.load(
+      documentUrl(
+        startupFailureDocument({
+          title,
+          message,
+          action: { label: "Close", url: NOTICE_CLOSE_URL },
+        }),
+      ),
+    );
+    current.show();
+  };
+  return {
+    notify: async (owner: Owner | undefined, title: string, message: string): Promise<void> => {
+      if (
+        owner !== undefined &&
+        !owner.isDestroyed() &&
+        owner.isVisible() &&
+        !owner.isMinimized()
+      ) {
+        options.showSheet(owner, title, message);
+        return;
+      }
+      await showWindow(title, message);
+    },
+  };
 }

@@ -54,7 +54,8 @@ import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
-import { showNoticeWithoutBlocking, showStartupFailure } from "./startupFailureElectron";
+import { writeDiagnostic } from "./diagnosticLog";
+import { showNoticeWithoutBlocking, showStartupFailureAndQuit } from "./startupFailureElectron";
 import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
 import {
   createNightlyDataControl,
@@ -370,8 +371,8 @@ export async function runNightlyClient(
       const result = await closeClientResources();
       // Logged, not shown: a box here would hold the quit until dismissed.
       if (result.kind !== "closed")
-        process.stderr.write(
-          `${identity.productName}: Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.\n`,
+        writeDiagnostic(
+          `${identity.productName}: Octant Nightly closed its window, but could not confirm immediate lease cleanup. The host expires the short lease automatically.`,
         );
       acceptedQuit = true;
       relaunch.quitAccepted();
@@ -390,18 +391,17 @@ export async function runNightlyClient(
     if (!recovery.recovering() && !updating) app.quit();
   });
   let bounds = { x: 100, y: 100, width: 1200, height: 800 };
+  let reconnectExhausted = false;
   const createRecovery = () =>
     createNightlyClientRecovery({
       exhausted: () => {
         const message =
           "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.";
-        process.stderr.write(`${identity.productName}: ${message}\n`);
-        void showStartupFailure({
-          title: identity.productName,
-          message,
-          logsDirectory: undefined,
-          quit: () => app.quit(),
-        });
+        // Once exhausted, a Dock click must not start a reconnect beside the
+        // failure window.
+        reconnectExhausted = true;
+        writeDiagnostic(`${identity.productName}: ${message}`);
+        void showStartupFailureAndQuit({ title: identity.productName, message });
       },
       open: (signal, onLeaseLost) =>
         openNightlyClientWindow({
@@ -604,7 +604,8 @@ export async function runNightlyClient(
     },
   });
   app.on("activate", () => {
-    if (quitRequested || updating || opening || windows.size !== 0 || recovery.recovering()) return;
+    if (quitRequested || reconnectExhausted || updating || opening) return;
+    if (windows.size !== 0 || recovery.recovering()) return;
     opening = true;
     void reopenClient().finally(() => {
       opening = false;
