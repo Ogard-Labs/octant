@@ -132,11 +132,14 @@
     0 1px 0 rgb(255 255 255 / 7%);
   /* Level 1: a panel. */
   --octant-panel-sheen: linear-gradient(180deg, var(--octant-sheen), transparent 72px);
+  /* The seat stays inside the 8px gap between two panels (its soft edge ends
+     within 8px of the box), so a panel looks the same whatever its neighbour's
+     order, and no tile's shadow darkens the top of the one beneath it. */
   /* The rim and the seat are two tokens: a panel's own content paints over
      an inset shadow, so the rim is also drawn by a pseudo-element above the
      content (see shell.css), and the seat stays on the panel's box. */
   --octant-shadow-panel-rim: inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim);
-  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 18px 36px -20px #000;
+  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 5px 8px -7px #000;
   --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
   /* Level 2: a card on a panel. A card is a hair smaller in shadow than a
      control's tile: it lies on the panel instead of standing on it. */
@@ -179,18 +182,25 @@
   /* A floating surface is frosted: the lifted fill at 88% over a blur of what
      is behind it, with a sheen at its top. Where the person asks for less
      transparency, or more contrast, the fill is the opaque float. */
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 56px);
+  /* The sheen is a strip along the lit top edge only. It ends above the first
+     line of anything a surface holds, so the meta ink on a menu's top row or a
+     dialog's title band sits on the plain float fill, as it did before. */
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 8px);
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 88%, transparent);
   --octant-float-blur: blur(30px) saturate(170%);
   /* The primary action: the accent as a gradient with a soft glow under it.
-     The gradient only ever moves the fill away from the label's colour (the
-     label is dark on a light accent, so the fill lightens; it is light on a
-     dark accent, so the fill darkens), so a label is never less legible on any
-     stop than on the flat accent. The ink is the opposite of the label. */
+     The gradient only ever moves the fill AWAY from the label's colour, for
+     any accent and any label, so no stop is less legible than the flat accent.
+     The colour away from the label is the label's own lightness turned over
+     (white for a dark label, black for a light one), taken from the theme's
+     published `--octant-primary-foreground` rather than guessed from the mode.
+     Its strength follows the same lightness: a white overlay is strongest at
+     the top (the tile is lit from above) and a black one at the bottom. */
+  --octant-accent-away: oklch(from var(--octant-primary-foreground) calc((0.5 - l) * 1000) 0 0);
   --octant-accent-sheen: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--octant-text-primary) 18%, transparent),
-    color-mix(in srgb, var(--octant-text-primary) 4%, transparent)
+    oklch(from var(--octant-accent-away) l c h / calc(0.04 + 0.14 * l)),
+    oklch(from var(--octant-accent-away) l c h / calc(0.18 - 0.14 * l))
   );
   --octant-shadow-primary:
     inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 22%),
@@ -323,19 +333,13 @@ html[data-octant-theme-mode="light"] {
   --octant-control-lift: inset 0 10px 8px -8px #ffffff;
   --octant-card-lift: inset 0 14px 12px -12px #ffffff;
   --octant-card-drop: 0 1px 2px rgb(16 24 40 / 8%), 0 10px 20px -14px rgb(16 24 40 / 26%);
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 56px);
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
   --octant-well: rgb(16 24 40 / 5%);
   --octant-shadow-well:
     inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
   --octant-shadow-panel-seat:
     0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
-    0 20px 38px -22px rgb(16 24 40 / 34%);
-  /* A white label on a dark accent: the fill only darkens toward the bottom. */
-  --octant-accent-sheen: linear-gradient(
-    180deg,
-    transparent,
-    color-mix(in srgb, var(--octant-text-primary) 14%, transparent)
-  );
+    0 6px 10px -8px rgb(16 24 40 / 34%);
   --octant-shadow-xs:
     inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
     0 1px 2px rgb(16 24 40 / 8%);
@@ -1309,7 +1313,11 @@ h6 {
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
-    min(var(--octant-bottom-panel-height, 260px), 38vh, max(0px, calc(100% - 320px)));
+    min(
+      var(--octant-bottom-panel-height, 260px),
+      38vh,
+      max(0px, calc(100% - 320px - var(--octant-sheet-inset, 0px)))
+    );
 }
 
 .workspace-layer > .primary-workspace-layer {
@@ -4969,6 +4977,14 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --octant-card-lift: 0 0 0 0 transparent;
   --octant-sheen: transparent;
   --octant-accent-sheen: linear-gradient(transparent, transparent);
+  /* The rims are the edges a surface has when its fill is flat, so they take
+     the strong border: a 7% line was the edge of a panel that main drew with
+     the soft hairline and of a card that it drew with a border. */
+  --octant-rim: var(--octant-border-strong);
+  --octant-rim-top: var(--octant-border-strong);
+  --octant-rim-float: var(--octant-border-strong);
+  --octant-control-top: var(--octant-border-strong);
+  --octant-control-rim: var(--octant-border-strong);
 }
 
 html[data-octant-increased-contrast="true"] .workspace-pane__header {

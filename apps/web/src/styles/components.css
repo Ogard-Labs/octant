@@ -247,6 +247,69 @@ html[data-octant-increased-contrast="true"]
   box-shadow: var(--octant-shadow-control-pressed);
 }
 
+/* Edges that do not depend on a shadow. The rim is a shadow, and forced colours
+   drops every shadow, so a popup, a card and a chip would have no edge at all;
+   increased contrast keeps the flat fill and takes the strong border main drew.
+   A border is drawn only here, so the normal box keeps its size, and the chip
+   that is pressed is told from one at rest by the system highlight. */
+@media (forced-colors: active) {
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ),
+  .turn-user .bubble,
+  .approval-row,
+  .provider-question-card,
+  .octant-chip {
+    border: 1px solid CanvasText;
+  }
+
+  .octant-chip[aria-pressed="true"],
+  .octant-chip[data-active="true"] {
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+    outline: 1px solid HighlightText;
+    outline-offset: -3px;
+  }
+}
+
+html[data-octant-increased-contrast="true"]
+  :is(
+    .octant-menu__popup,
+    .octant-dialog__popup,
+    .octant-sheet__popup,
+    .window-chrome__disclosure,
+    .project-dialog,
+    .folder-picker,
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    .octant-preview-card,
+    .thread-info__panel,
+    .palette,
+    .toast
+  ),
+html[data-octant-increased-contrast="true"]
+  :is(.turn-user .bubble, .approval-row, .provider-question-card) {
+  border: 1px solid var(--octant-border-strong);
+}
+
 /* A pending approval keeps its warning edge: the colour is its meaning. It
    takes the card's depth, not its rim. */
 .approval {

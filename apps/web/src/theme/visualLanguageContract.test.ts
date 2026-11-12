@@ -181,6 +181,74 @@ describe("the public-block visual language", () => {
     expect(shell).not.toContain(".shell-frame > .sidebar::before {");
   });
 
+  it("keeps every edge a surface needs when forced colours drop the shadows, and the strong border under increased contrast", () => {
+    const components = readFileSync(join(webRoot, "styles/components.css"), "utf8");
+    const forced =
+      components.match(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}\n/)?.[1] ?? "";
+    // The rim is a shadow, so each surface that lost its border to the rim gets
+    // one back here, and a chip that is pressed is told by the system highlight.
+    for (const selector of [
+      ".octant-menu__popup",
+      ".octant-dialog__popup",
+      ".palette",
+      ".toast",
+      ".turn-user .bubble",
+      ".approval-row",
+      ".provider-question-card",
+      ".octant-chip",
+    ]) {
+      expect(forced, `${selector} keeps an edge in forced colours`).toContain(selector);
+    }
+    expect(forced).toMatch(/border:\s*1px solid CanvasText/);
+    expect(forced).toMatch(/\.octant-chip\[aria-pressed="true"\][\s\S]*background:\s*Highlight/);
+    const increased = components.match(
+      /html\[data-octant-increased-contrast="true"\]\s+:is\([\s\S]*?\) \{\s*border: 1px solid var\(--octant-border-strong\)/,
+    );
+    expect(increased).not.toBeNull();
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const contrast =
+      runtime.match(/:root\[data-octant-increased-contrast="true"\] \{([^}]*)\}/)?.[1] ?? "";
+    expect(contrast).toMatch(/--octant-rim:\s*var\(--octant-border-strong\)/);
+    expect(contrast).toMatch(/--octant-rim-float:\s*var\(--octant-border-strong\)/);
+  });
+
+  it("moves the primary button's fill away from its label for any accent, and never lowers the label's legibility", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // The direction comes from the label the theme publishes, not from the mode.
+    expect(runtime).toMatch(
+      /--octant-accent-away:\s*oklch\(from var\(--octant-primary-foreground\)/,
+    );
+    expect(runtime).toMatch(
+      /--octant-accent-sheen:\s*linear-gradient\([^;]*var\(--octant-accent-away\)/,
+    );
+    const light =
+      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(light).not.toContain("--octant-accent-sheen");
+  });
+
+  it("keeps a floating surface's sheen above its first line of text and a panel's seat shadow inside the gap", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    for (const match of runtime.matchAll(
+      /--octant-float-sheen:\s*linear-gradient\([^;]*transparent (\d+)px\)/g,
+    )) {
+      expect(Number(match[1])).toBeLessThanOrEqual(10);
+    }
+    const seats = [...runtime.matchAll(/--octant-shadow-panel-seat:([^;]*);/g)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(seats.length).toBe(2);
+    for (const seat of seats) {
+      // The longest shadow: how far past the box its blurred edge ends is its
+      // offset plus its blur, less what its negative spread pulled in.
+      const long = [...seat.matchAll(/0 (\d+)px (\d+)px (-?\d+)px/g)].map(
+        (m) => Number(m[1]) + Number(m[2]) + Number(m[3]),
+      );
+      expect(Math.max(...long)).toBeLessThanOrEqual(8);
+    }
+    // The bottom panel's row never overflows the layer by the frame's gap.
+    expect(runtime).toMatch(/calc\(100% - 320px - var\(--octant-sheet-inset, 0px\)\)/);
+  });
+
   it("does not flatten the Code composer into two hairline boxes", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");

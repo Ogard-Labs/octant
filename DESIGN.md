@@ -292,7 +292,11 @@ never writes its own colour.
   sinks it (`--octant-shadow-control-pressed`). The gradient is drawn as an
   inset shadow (`--octant-control-lift`), so a recipe that sets its own fill
   still gets it. The primary button is the accent as a gradient with a soft
-  accent glow under it (`--octant-accent-sheen`, `--octant-shadow-primary`);
+  accent glow under it (`--octant-accent-sheen`, `--octant-shadow-primary`).
+  The gradient moves the fill away from the label's colour for any accent: the
+  direction is taken from the published `--octant-primary-foreground`
+  (`--octant-accent-away`), not from the mode, so no stop is less legible than
+  the flat accent;
   the composer's send is the primary once there is something to send. Ghost,
   link, bare and the suggestion chip stay flat until pointed at, as do the
   quiet controls of a row (the line under a composer, the microphone). A
@@ -306,7 +310,20 @@ never writes its own colour.
   a blur and saturation lift of what is behind it in the page. The blur is not
   asked to frost the desktop: a packaged window's native material is not
   re-blurred by a backdrop filter, so Glass tints the panels instead (below).
-  Reduced transparency and increased contrast take the opaque float.
+  Reduced transparency and increased contrast take the opaque float. The sheen
+  is a strip along the lit top edge only (8px), above the first line of anything
+  a surface holds, so the meta ink on a menu's top row or a dialog's title band
+  sits on the plain float fill and is never lower than it was.
+- **Edges that do not depend on a shadow.** The rim is a shadow, and forced
+  colours drops every shadow, so a popup, a card (user bubble, approval row,
+  provider question) and a chip take a 1px system-colour border there, and a
+  pressed chip the system highlight. Increased contrast takes the strong border
+  and sets every rim to it, so a flat fill keeps a firmer edge than the soft
+  one it had.
+- **A panel's seat shadow stays inside the gap.** It ends within 8px of the
+  panel, so a panel looks the same whatever its neighbour's order and no tile
+  darkens the top of the one beneath it. At a short window the bottom panel's
+  row subtracts the frame's gap, so the 8px below it holds.
 - **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
   the raised elevation's white top line drew as a light seam on the dark pill
   in light, so it takes the two shadows alone in both modes.
