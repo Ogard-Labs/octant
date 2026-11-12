@@ -119,7 +119,7 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
       }
       label={`Use ${name}’s own memory`}
       scope="host"
-      settingId={settingId}
+      settingId={`provider-${props.instance.id}-own-memory`}
     >
       <OctantSwitch
         checked={props.instance.ownMemory === true}

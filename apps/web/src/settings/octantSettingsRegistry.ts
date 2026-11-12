@@ -787,6 +787,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "run as itself own setup native subagents web search fetch skills mcp servers plugins hooks settings home folder claude code codex opencode mistral vibe trusted project",
         },
+        {
+          id: settingId("provider-own-memory"),
+          label: "Use the provider's own memory",
+          scope: "host",
+          keywords:
+            "provider own memory memories remember auto-memory claude code codex account across projects work code plan chat off telemetry self-update",
+        },
       ],
     },
     {
