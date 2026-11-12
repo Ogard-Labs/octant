@@ -44,7 +44,7 @@ declared twice in one block, an unresolved `var()`, a circular reference or a
 export have the same name and there is no mapping table to maintain:
 
 - `--octant-*` are the theme roles and the material: surfaces, inks, borders,
-  accent, status, bevels, shadows, glass. They are what the theme engine edits.
+  accent, status, rims, shadows, glass. They are what the theme engine edits.
 - `--oct-*` are the foundations and the aliases a stylesheet reads: type, spacing,
   radii, motion, sizes, and short colour aliases (`--oct-bg`, `--oct-fg`,
   `--oct-border`) that point at the roles.
@@ -78,7 +78,9 @@ when the original was an expression.
 - The format has no untyped token and forbids guessing a type, so a value it
   cannot express is not a token. That covers a length in `em` or `%` (the
   tracking steps, the glass saturation), a `clamp()` that depends on the
-  viewport (the display sizes), and `none`. Each is listed with its CSS value and
+  viewport (the display sizes), `none`, and relative colour syntax
+  (`oklch(from ...)`, used by `octant-accent-away` and `octant-accent-sheen`),
+  which the format cannot express. Each is listed with its CSS value and
   the reason under the root `$extensions["com.octant"].cssOnly`, and stays in
   `tokens.css`.
 
@@ -156,19 +158,25 @@ picker row; `--oct-nav-row-h` (32px) is a navigation or list row;
 `--oct-title-rail-h` (44px) is the title band. `--oct-control-height` and
 `-sm` (44 and 34px) are the touch sizes, not the desktop default.
 
-**Radius** ([Shapes and depth](../../DESIGN.md#shapes-and-depth)). One number per
-role. A control or a row takes `--oct-radius-sm`; a card, panel, well or the
-window's own cards take `--oct-radius-md`; a dialog `--oct-radius-lg`; the
-composer's pill `--oct-radius-composer`; `--oct-radius-pill` is for chips,
-meters and circular icon controls only. A corner one gap inside a rounded parent
-is concentric: the parent's radius less the gap, or square, never the same token
-again. A radius is a token, `0`, `50%`, or the 1 to 4px of a chart mark, never a
-bare pixel value.
+**Radius** ([Shapes and depth](../../DESIGN.md#shapes-and-depth)). Two numbers and
+a round exception. A control's outline is `--oct-radius-sm` (4px): every button,
+field, tab, menu and option row, filled list row, chip, and a capsule or track
+that only groups controls. A container's outline is `--oct-radius-md` (12px): a
+card, panel, well, menu, popover, dialog, the composer and a bubble.
+`--oct-radius-inset` (8px) is an object resting inside a container.
+`--oct-radius-pill` is only for what is inherently round (a switch's track, an
+avatar, a status dot, a count badge, a spinner, a meter); never a control. A part
+inside a control takes the control radius less the padding between them, never
+below 2px, and a control inside a container keeps the control radius whatever
+the container's. A radius is a token, `0`, `50%`, or the 1 to 4px of a chart
+mark, never a bare pixel value. There is no `--oct-radius-lg` or
+`--oct-radius-composer`.
 
-**Hairlines.** Panes and rows are divided by one 1px line in `--octant-border-soft`;
-`--octant-border` is the card edge; `--octant-border-strong` is a field's edge
-and `--oct-hairline` is an ink-tinted line that holds on any surface. The line
-must register on the surface it separates, so never hand-pick a grey.
+**Hairlines.** Panes and the lines between rows are divided by one 1px line in the
+ink at 10% (`--oct-hairline`; the app's pane line is the same mix);
+`--octant-border` is a card's edge on a surface that draws one, and
+`--octant-border-strong` is a field's edge. The line must register on the
+surface it separates, so never hand-pick a grey.
 
 **Colour.** Ink is `--oct-fg` (primary), `--oct-muted` (labels and detail) and
 `--oct-meta` (timestamps, hints). A fact in a list is its name in muted ink and
@@ -177,9 +185,14 @@ surface is for, not for decoration; status colours always travel with text or a
 shape. Normal text holds 4.5:1, large text and non-text marks 3:1
 ([Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability)).
 
-**Icons.** `--oct-icon-sm/md/lg` (14, 16, 20). A glyph is drawn in a box of one of
-those sizes at a stroke of 1.5 and takes `currentColor`
+**Icons.** Four sizes: `--oct-icon-xs` (12: disclosure chevrons and status
+marks), `--oct-icon-sm` (14: inside a small control, inline in text),
+`--oct-icon-md` (16: the default) and `--oct-icon-lg` (20: an empty state, a
+dialog header). One stroke, 1.5, set once by the app's icon defaults
+(`apps/web/src/ui/IconDefaults.tsx`) and taking `currentColor`
 ([Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks)).
+The stroke is a TypeScript constant there, not a custom property, so it is not
+in the export; the recipes write `1.5` for it.
 
 ## The app feel
 
@@ -192,36 +205,51 @@ specified** with its `file:line` at the time this page was written.
 
 Source: [Shapes and depth](../../DESIGN.md#shapes-and-depth).
 
-- There are three levels, each a step lighter than the one under it: the page,
-  a raised object, a floating one. A card, a menu and a dialog are never told
-  from the page by an outline alone.
-- **A control is a raised tile.** A filled button has its own fill, light on its
-  top edge (`--octant-bevel`) and a short shadow under it
-  (`--octant-shadow-control`). Pressing darkens the fill and swaps the shadow
-  for `--octant-shadow-control-pressed`; nothing scales or moves. Ghost, link and
-  chip controls draw no tile and stay flat.
-- **A well is cut in.** A field is the strong border with no fill and no shadow;
-  an inset region uses `--octant-surface-inset`. It takes no outer shadow.
-- **A card is for one object a person acts on as a whole**: the raised fill
-  (`--octant-card`), `--octant-shadow-xs`, rounded by `--oct-radius-md`.
-- **The row being shown is a raised tile** (`--octant-shadow-selected`); the row
-  under the pointer is a flat wash. Here and pointed-at are two states.
-- **A floating surface is frosted material over a ground.** A menu, popover or
-  dialog takes `--octant-float`, the overlay shadow, and exactly one 1px edge
-  (the shadow draws it; the popup sets no border). Frosted blur
-  (`--octant-glass-blur`, `--octant-glass-saturate`) is used only where a ground
-  sits behind to read through, and a reduced-transparency preference puts the
-  opaque float fill back. What sits on a floating surface steps up from it
+Depth is one material in five levels. Every surface takes a fill one step
+lighter than what it sits on, a rim brighter along its top edge, and a shadow
+that seats it, so an object is never told from the surface under it by an
+outline alone. A surface consumes the tokens and never writes its own colour.
+
+| Level      | What it is                                                     | Tokens                                                                                              |
+| ---------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The title band and the sidebar; rows sit on it with no panel   | `--octant-sidebar-opaque`; no shadow                                                                |
+| 1 Pane     | The stage and other panes: square, flat, sharing edges         | `--octant-workspace` fill, one 1px line (`--oct-hairline`) on its top and left edges                |
+| 2 Card     | An object on a pane: a tool or decision card, a Settings group | `--octant-card`, `--octant-shadow-xs` and `-sm`                                                     |
+| 3 Control  | A filled button, a chip, the selected row, a segmented thumb   | `--octant-control`, `--octant-shadow-control`, `-selected`; pressed `-control-pressed`              |
+| 3 Well     | A segmented track, a capsule of buttons, a command block       | `--octant-well`, `--octant-shadow-well`                                                             |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet | `--octant-float-glass` and `--octant-float-sheen` over `--octant-float-blur`, `--octant-shadow-pop` |
+
+- **A control is a raised tile.** A lighter top, a light line along it, a dark
+  line under the bottom edge, a ring and a short drop, all in
+  `--octant-shadow-control` (its parts are `--octant-control-top`, `-low`, `-rim`,
+  `-lift`, `-drop`). Pressing inverts it and sinks the shadow
+  (`--octant-shadow-control-pressed`); the fill darkens and nothing moves. The
+  primary button is the accent as a gradient with a soft glow
+  (`--octant-accent-sheen`, `--octant-shadow-primary`). Ghost, link and bare
+  controls draw no tile and stay flat until pointed at.
+- **A well is cut in**: darker than what it is in (`--octant-well`), an inner top
+  shadow and a light line under its bottom edge (`--octant-shadow-well`). What is
+  chosen in a well is a raised control again.
+- **A card is for one object a person acts on as a whole**, not for a plain list,
+  an empty state or a header.
+- **Floating surfaces are frosted.** In dark the fill is the float colour at 66%
+  over a blur that also lifts saturation to 180% and dims what is behind it
+  (`--octant-float-blur`); in light the fill is 78% and the blur draws what is
+  behind toward a pale grey. The pop shadow draws the brightest rim, a low rim,
+  one outer hairline and the lift, so a floating surface sets no border. A
+  reduced-transparency or increased-contrast preference puts the opaque
+  `--octant-float` back. What sits on a floating surface steps up from it
   (`--octant-float-control`, `-hover`, `-pressed`, `-line`).
-- **Panes are flat and divided by one hairline.** The frame and the sheet draw
-  the soft hairline once; no stronger line doubles it. Navigation and open form
-  layouts stay unshadowed. A shadow or bevel never decorates a flat row.
-- In dark a shadow cannot be seen on a near-black page, so the fill and the bevel
-  carry the lift; in light the surfaces are already the lightest thing, so the
-  shadow carries it. Both are in the tokens; do not tune them per theme.
-- Implemented, not specified: the frosted recipe's strengths, blur 24px and
-  saturation 150% (`apps/web/src/styles.css:145`), and the 150% saturation on
-  the thicker glass steps (`apps/web/src/styles/octant.css:6608`).
+- **Panes are flat and square.** They share edges, so a pane has no rim and no
+  seat shadow (a shadow would fall on its neighbour); only the one line divides
+  it from the ground. A shadow or rim never decorates a flat row.
+- **The row being shown is a raised control** (`--octant-shadow-selected`); the
+  row under the pointer is a flat wash. Here and pointed-at are two states.
+- In dark a shadow cannot be seen on a near-black page, so the fill and the rim
+  carry the lift; in light the top line is white and the shadows carry it. Both
+  are in the tokens; do not tune them per theme.
+- Forced colours drops every shadow, so a popup, card or chip takes a 1px
+  system-colour border there; increased contrast takes the strong border.
 
 ### Density
 
@@ -237,7 +265,7 @@ Source: [Scale](../../DESIGN.md#scale),
   `--oct-space-2`, a card row's is `--oct-space-4`.
 - Implemented, not specified: the default control's 28px comes from the button
   recipe's rem step rounded to a whole 2px
-  (`apps/web/src/ui/shadcn/button.tsx:61`), and the only 28px tokens are
+  (`apps/web/src/ui/shadcn/button.tsx:62`), and the only 28px tokens are
   `--oct-rail-button-h` and `--oct-menu-row-h` (`octant.css:224`, `:237`).
   `--oct-control-height` is 44px (`octant.css:214`), the touch size, which
   DESIGN.md states as "44px by default".
@@ -265,7 +293,7 @@ Source: [Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth),
 - **Optical alignment of icons with text.** Centre a glyph in a grid box the size
   of its column rather than nudging it with margin. Implemented, not specified:
   the one baseline nudge in the stylesheets is the spinner's
-  `vertical-align: -3px` (`octant.css:1944`); DESIGN.md has no rule for an
+  `vertical-align: -3px` (`octant.css:1947`); DESIGN.md has no rule for an
   icon beside a line of text, so a consumer should centre with `align-items` and
   check the result by eye at 13px.
 
@@ -287,8 +315,8 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
   click. A control filled with the accent inverts the edge to
   `--oct-focus-edge-on-accent`. Implemented, not specified: the edge's geometry,
   a 2px outline inset by 2px so it moves no layout and a scroller cannot clip it
-  (`octant.css:467`), and the pointer-modality switch that suppresses it
-  (`octant.css:517`; DESIGN.md names `data-octant-input` but not the CSS).
+  (`octant.css:468`), and the pointer-modality switch that suppresses it
+  (`octant.css:518`; DESIGN.md names `data-octant-input` but not the CSS).
 - **Instant press feedback.** A press darkens the fill on the same frame: the recipes
   turn the transition off while a control is pressed, and there is no scale. A disabled control is drawn at `--oct-disabled-opacity`
   with no hover fill and no pointer events.
@@ -305,9 +333,9 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
   antialiased thinning on dark), `text-rendering: optimizeLegibility`, no
   synthetic bold.
 - Implemented, not specified: `text-wrap: pretty` on paragraphs and `balance` on
-  headings (`octant.css:451`, `:457`); tabular figures wherever a number is
-  compared (`apps/web/src/styles.css:874`, `:1153`; DESIGN.md names them per
-  surface, never as a rule); `font-optical-sizing: auto` (`octant.css:433`).
+  headings (`octant.css:452`, `:458`); tabular figures wherever a number is
+  compared (`apps/web/src/styles.css:829`, `:1108`; DESIGN.md names them per
+  surface, never as a rule); `font-optical-sizing: auto` (`octant.css:434`).
 - A conflict to resolve in DESIGN.md, not here: Shapes and depth says pressing a
   raised tile "sinks it", and Motion and interaction says a press moves nothing.
   The implementation does both without movement (a darker fill and an inset
@@ -319,15 +347,16 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
 or shadow of its own; a few tints are mixed from exported colour tokens. A test
 refuses a raw colour or a token the export does not define. Add `class="oct-root"` to the page and use:
 
-| Recipe      | Classes                                                                                               | Built from                                                                              |
-| ----------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Button      | `oct-button`, `--primary`, `--ghost`                                                                  | `--octant-control`, `--octant-shadow-control`, `--oct-rail-button-h`, `--oct-radius-sm` |
-| Icon button | `oct-icon-button` with an `svg`                                                                       | `--oct-rail-button-h`, `--oct-icon-md`                                                  |
-| Field       | `oct-field`                                                                                           | `--octant-border-strong`, `--octant-control-hover`                                      |
-| Card        | `oct-card`, `oct-card__row`                                                                           | `--octant-card`, `--octant-shadow-xs`, `--oct-radius-md`                                |
-| Menu        | `oct-menu`, `--frosted`, `oct-menu__row`, `oct-menu__rule`                                            | `--octant-float`, `--octant-shadow-overlay`, `--oct-menu-row-h`, `--octant-glass-bg`    |
-| Pane layout | `oct-panes`, `__sidebar`, `__stage`, `__band`, `__body`, `oct-nav-row`                                | `--octant-border-soft`, `--oct-sidebar-w`, `--oct-title-rail-h`, `--oct-nav-row-h`      |
-| Type roles  | `oct-type-title`, `-page-title`, `-section-label`, `-row-label`, `-row-detail`, `-meta`, `-meta-mono` | `--oct-role-*`                                                                          |
+| Recipe      | Classes                                                                                               | Built from                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Button      | `oct-button`, `--primary`, `--ghost`                                                                  | `--octant-control`, `--octant-shadow-control`, `--octant-accent-sheen`, `--oct-radius-sm` |
+| Icon button | `oct-icon-button` with an `svg`                                                                       | `--oct-rail-button-h`, `--oct-icon-md`                                                    |
+| Field       | `oct-field`                                                                                           | `--octant-border-strong`, `--octant-control-hover`                                        |
+| Card        | `oct-card`, `oct-card__row`                                                                           | `--octant-card`, `--octant-shadow-sm`, `--oct-radius-md`                                  |
+| Well        | `oct-well`, `oct-segmented`, `oct-segmented__item`                                                    | `--octant-well`, `--octant-shadow-well`, `--octant-shadow-control`                        |
+| Menu        | `oct-menu`, `oct-menu__row`, `oct-menu__rule`                                                         | `--octant-float-glass`, `--octant-float-blur`, `--octant-shadow-pop`, `--oct-menu-row-h`  |
+| Pane layout | `oct-panes`, `__sidebar`, `__stage`, `__band`, `__body`, `oct-nav-row`                                | `--oct-hairline`, `--oct-sidebar-w`, `--oct-title-rail-h`, `--oct-nav-row-h`              |
+| Type roles  | `oct-type-title`, `-page-title`, `-section-label`, `-row-label`, `-row-detail`, `-meta`, `-meta-mono` | `--oct-role-*`                                                                            |
 
 The button, in full, as the template for the others:
 
@@ -366,17 +395,23 @@ button that reads as a flat web button is a regression.
 ## Known limits
 
 - The export carries each token's default value. The app overrides some of them
-  by context, and the export does not: Glass (`.shell--material-translucent`,
-  `apps/web/src/styles/shell.css:53`) replaces the card fill with a tint of the
-  ink and the xs, sm and md shadows with the glass-raised shadow; some layers
-  repoint `--oct-surface` (`apps/web/src/styles/surface.css:1009`, `:1024`);
-  increased contrast swaps the three text roles for their high-contrast values
-  (`apps/web/src/styles.css:4880`); and at 680px and narrower the hero title's
-  size is replaced by `--oct-text-2xl` (`surface.css:665`).
-- The icon stroke is written as `1.5` in the stylesheets and in the recipes; it
-  is not yet a token, so it is not in the export.
+  by context, and the export does not:
+  - Glass (`.shell.shell--material-translucent`,
+    `apps/web/src/styles/shell.css:80`) replaces the card fill with a tint of the
+    ink and the xs, sm and md shadows with the glass-raised shadow, and makes
+    each panel a tint over the window's native material;
+  - some layers repoint `--oct-surface` (`apps/web/src/styles/surface.css:994`
+    to the card fill, `:1009` to the floating surface under reduced
+    transparency);
+  - increased contrast swaps the three text roles for their high-contrast values
+    and drops the control and card lift (`apps/web/src/styles.css:4835`);
+  - at 680px and narrower the hero title's size is replaced by `--oct-text-2xl`
+    (`apps/web/src/styles/surface.css:665`).
+- The icon stroke (1.5) is a TypeScript constant in
+  `apps/web/src/ui/IconDefaults.tsx`, not a custom property, so it is not in the
+  export; the recipes write `1.5`.
 - `apps/share` declares its own hand-written radius and type set for an embedded
-  frame (`apps/share/src/frames.ts`), with different values (4 and 8px radii,
+  frame (`apps/share/src/frames.ts`), with its own values (4 and 8px radii,
   rem sizes) for a sandboxed document that loads nothing. It does not consume the
   export yet.
 - The export is a snapshot of the default theme. A custom theme's roles are the

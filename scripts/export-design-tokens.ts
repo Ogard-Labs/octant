@@ -524,7 +524,7 @@ export const GROUPS: ReadonlyArray<Group> = [
     id: "color-surface",
     label: "Surfaces: the page, cards, floating surfaces, controls and the chosen row",
     pattern:
-      /^--(?:oct-(?:bg|surface|surface-warm|selection|fill-\d|fg-soft)|octant-(?:app-background|workspace|surface(?:-canvas|-muted|-hover|-selected|-raised|-inset)?|chrome|sidebar|sidebar-opaque|floating|control|control-hover|control-pressed|card|float|float-control|float-hover|float-pressed|float-line|selection))$/,
+      /^--(?:oct-(?:bg|surface|surface-warm|selection|fill-\d|fg-soft)|octant-(?:app-background|workspace|surface(?:-canvas|-muted|-hover|-selected|-raised|-inset)?|chrome|sidebar|sidebar-opaque|floating|control|control-hover|control-pressed|card|well|float|float-control|float-hover|float-pressed|float-line|selection))$/,
   },
   {
     id: "color-ink",
@@ -608,7 +608,7 @@ export const GROUPS: ReadonlyArray<Group> = [
     id: "material",
     label: "Material: bevels, glass and the wash behind a dialog",
     pattern:
-      /^--(?:octant-(?:bevel|bevel-strong|glass-[a-z-]+|scrim)|oct-(?:glass-[a-z-]+|scrim|sheen))$/,
+      /^--(?:octant-(?:bevel|bevel-strong|glass-[a-z-]+|float-(?:glass|sheen|blur)|scrim)|oct-(?:glass-[a-z-]+|scrim|sheen))$/,
   },
   {
     id: "motion",
@@ -940,6 +940,9 @@ export function dtcgValue(resolved: string, group = ""): DtcgValue | undefined {
 }
 
 function whyNotTyped(resolved: string): string {
+  if (/\(from\s/.test(resolved)) {
+    return "relative colour syntax cannot be expressed in the format";
+  }
   if (/clamp\(|calc\(|\b\d+(?:\.\d+)?v[wh]\b/.test(resolved)) {
     return "depends on the viewport or on a value only the browser knows";
   }

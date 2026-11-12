@@ -132,14 +132,15 @@
   transition-duration: 0s;
 }
 .oct-button--primary {
-  background: var(--octant-accent);
+  background: var(--octant-accent-sheen), var(--octant-accent);
   color: var(--octant-primary-foreground);
+  box-shadow: var(--octant-shadow-primary);
 }
 .oct-button--primary:hover {
-  background: color-mix(in srgb, var(--octant-accent) 80%, transparent);
+  background: var(--octant-accent-sheen), color-mix(in srgb, var(--octant-accent) 88%, transparent);
 }
 .oct-button--primary:active {
-  background: color-mix(in srgb, var(--octant-accent) 70%, transparent);
+  background: var(--octant-accent);
   box-shadow: var(--octant-shadow-control-pressed);
 }
 .oct-button--primary:focus-visible {
@@ -227,14 +228,14 @@
 }
 
 /* ── Card ──────────────────────────────────────────────────────────────
-   A discrete object: the raised fill, one bevel and hairline, a short
-   shadow. Rows inside it are divided by a hairline inset by the card's own
-   padding, so the line starts where the text does. */
+   A discrete object on a pane: the card fill, a rim brighter along its top
+   edge, a short drop. Rows inside it are divided by a hairline inset by the
+   card's own padding, so the line starts where the text does. */
 .oct-card {
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-xs);
+  box-shadow: var(--octant-shadow-sm);
 }
 .oct-card__body {
   padding: var(--oct-space-4);
@@ -251,33 +252,63 @@
   position: absolute;
   inset: 0 var(--oct-space-4) auto;
   height: 1px;
-  background: var(--octant-border-soft);
+  background: var(--oct-hairline);
   content: "";
 }
 
+/* ── Well ──────────────────────────────────────────────────────────────
+   Cut in: darker than what it sits in, an inner top shadow, a light line
+   under its bottom edge. What is chosen in a well is a raised control again. */
+.oct-well {
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-well);
+  box-shadow: var(--octant-shadow-well);
+}
+.oct-segmented {
+  display: inline-flex;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+}
+.oct-segmented__item {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--oct-rail-button-h) - var(--oct-space-2));
+  padding: 0 var(--oct-space-3);
+  border: 0;
+  border-radius: calc(var(--oct-radius-sm) - 2px);
+  background: transparent;
+  color: var(--oct-muted);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  cursor: default;
+}
+.oct-segmented__item[aria-pressed="true"] {
+  background: var(--octant-control);
+  color: var(--oct-fg);
+  box-shadow: var(--octant-shadow-control);
+}
+
 /* ── Menu ──────────────────────────────────────────────────────────────
-   A floating surface: the float fill, the overlay shadow (it draws the one
-   hairline edge, so the menu sets no border), rows at the shared menu row
-   height standing in from the edge by the menu inset. The frosted variant is
-   for a menu over a picture or a ground; over a plain page use the default. */
+   A floating surface, frosted over whatever is behind it: the float fill
+   at partial strength over a blur, a sheen along the lit top edge, and the pop
+   shadow, which draws the rim, the one outer hairline and the lift (the menu
+   sets no border). Rows are at the shared menu row height, standing in from the
+   edge by the menu inset, at the control radius. A reduced-transparency
+   preference puts the opaque float fill back. */
 .oct-menu {
   display: inline-flex;
   min-width: calc(var(--oct-space-12) * 4);
   flex-direction: column;
   padding: var(--oct-menu-inset);
   border-radius: var(--oct-radius-md);
-  background: var(--octant-float);
-  box-shadow: var(--octant-shadow-overlay);
-}
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .oct-menu--frosted {
-    background: var(--octant-glass-bg);
-    backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-    -webkit-backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-  }
+  background: var(--octant-float-sheen), var(--octant-float-glass);
+  backdrop-filter: var(--octant-float-blur);
+  -webkit-backdrop-filter: var(--octant-float-blur);
+  box-shadow: var(--octant-shadow-pop);
 }
 @media (prefers-reduced-transparency: reduce) {
-  .oct-menu--frosted {
+  .oct-menu {
     background: var(--octant-float);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -289,7 +320,7 @@
   gap: var(--oct-space-2);
   min-height: var(--oct-menu-row-h);
   padding: 0 var(--oct-menu-row-inset);
-  border-radius: calc(var(--oct-radius-sm) - 2px);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   cursor: default;
 }
@@ -313,24 +344,22 @@
 }
 
 /* ── Panes ─────────────────────────────────────────────────────────────
-   Flat surfaces divided by one soft hairline. No card, no shadow: a pane is
-   the page. The title band is one rail high, with the hairline under it; the
-   sidebar takes the frame's colour and the stage the workspace's. */
+   Square and flush, sharing edges. The title band and the sidebar are the
+   ground, with no panel behind their rows; the stage is a pane one step
+   lighter, divided from the ground by one 1px line on its top and left edges
+   (--oct-hairline, the ink at 10%). No rim and no seat shadow: a shadow would
+   fall on the neighbour. */
 .oct-panes {
   display: grid;
   grid-template-columns: var(--oct-sidebar-w) minmax(0, 1fr);
   min-height: calc(var(--oct-space-12) * 7);
-  background: var(--octant-workspace);
-  border-radius: var(--oct-radius-md);
+  background: var(--octant-sidebar-opaque);
   overflow: hidden;
-  box-shadow: var(--octant-shadow-hairline);
 }
 .oct-panes__sidebar {
   display: flex;
   flex-direction: column;
   padding: 0 var(--oct-space-2);
-  background: var(--octant-sidebar-opaque);
-  border-right: 1px solid var(--octant-border-soft);
 }
 .oct-panes__stage {
   display: flex;
@@ -344,11 +373,13 @@
   gap: var(--oct-space-2);
   height: var(--oct-title-rail-h);
   padding: 0 var(--oct-space-4);
-  border-bottom: 1px solid var(--octant-border-soft);
 }
 .oct-panes__body {
   flex: 1;
   padding: var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
+  border-left: 1px solid var(--oct-hairline);
+  background: var(--octant-workspace);
 }
 
 /* A navigation row: one icon column, one text edge, one row height. The row
@@ -386,7 +417,7 @@
   background: var(--oct-fg-soft);
 }
 .oct-nav-row[aria-current="page"] {
-  background: var(--octant-surface-selected);
+  background: var(--octant-control);
   box-shadow: var(--octant-shadow-selected);
 }
 

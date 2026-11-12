@@ -44,6 +44,7 @@
   --octant-surface-muted: #2b2b2b;
   --octant-surface-raised: #232323;
   --octant-surface-selected: #2c2c2c;
+  --octant-well: rgb(0 0 0 / 34%);
   --octant-workspace: #1a1a1a;
   /* ── Ink: text and icon colours ── */
   --oct-fg: var(--octant-text-primary);
@@ -318,6 +319,9 @@
   --oct-sheen: rgba(240, 240, 240, 0.08);
   --octant-bevel: rgb(255 255 255 / 8%);
   --octant-bevel-strong: rgb(255 255 255 / 13%);
+  --octant-float-blur: blur(40px) saturate(180%) brightness(0.45);
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 66%, transparent);
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 8px);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-blur: 24px;
   --octant-glass-border: rgb(255 255 255 / 13%);
@@ -394,6 +398,7 @@
   --octant-surface-muted: #f0f0ef;
   --octant-surface-raised: #fdfdfc;
   --octant-surface-selected: #ebebea;
+  --octant-well: rgb(16 24 40 / 5%);
   --octant-workspace: #ffffff;
   --octant-primary-foreground: #ffffff;
   --octant-text-muted: #666666;
@@ -473,6 +478,9 @@
   --oct-sheen: rgba(27, 27, 27, 0.07);
   --octant-bevel: rgb(255 255 255 / 70%);
   --octant-bevel-strong: rgb(255 255 255 / 90%);
+  --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
@@ -515,6 +523,7 @@
     --octant-surface-muted: #f0f0ef;
     --octant-surface-raised: #fdfdfc;
     --octant-surface-selected: #ebebea;
+    --octant-well: rgb(16 24 40 / 5%);
     --octant-workspace: #ffffff;
     --octant-primary-foreground: #ffffff;
     --octant-text-muted: #666666;
@@ -594,6 +603,9 @@
     --oct-sheen: rgba(27, 27, 27, 0.07);
     --octant-bevel: rgb(255 255 255 / 70%);
     --octant-bevel-strong: rgb(255 255 255 / 90%);
+    --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
+    --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
+    --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
     --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
     --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
     --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);

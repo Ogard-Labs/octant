@@ -19,6 +19,7 @@
       }
       .demo__section {
         display: grid;
+        align-content: start;
         gap: var(--oct-space-3);
       }
       .demo__row {
@@ -34,6 +35,7 @@
       }
       .demo__ground {
         display: grid;
+        justify-items: start;
         padding: var(--oct-space-6);
         border-radius: var(--oct-radius-md);
         background: linear-gradient(
@@ -122,40 +124,33 @@
         </section>
 
         <section class="demo__section">
-          <h2 class="oct-type-section-label">Menus: opaque, and frosted over a ground</h2>
+          <h2 class="oct-type-section-label">A frosted menu over a ground, and a well</h2>
           <div class="demo__ground">
-            <div class="demo__row" style="align-items: flex-start">
-              <div class="oct-menu" role="menu">
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-chat" /></svg>New chat
-                </div>
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-code" /></svg>New code thread
-                </div>
-                <div class="oct-menu__rule"></div>
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-gear" /></svg>Settings
-                </div>
+            <div class="oct-menu" role="menu">
+              <div class="oct-menu__row" role="menuitem">
+                <svg><use href="#i-chat" /></svg>New chat
               </div>
-              <div class="oct-menu oct-menu--frosted" role="menu">
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-chat" /></svg>New chat
-                </div>
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-code" /></svg>New code thread
-                </div>
-                <div class="oct-menu__rule"></div>
-                <div class="oct-menu__row" role="menuitem">
-                  <svg><use href="#i-gear" /></svg>Settings
-                </div>
+              <div class="oct-menu__row" role="menuitem">
+                <svg><use href="#i-code" /></svg>New code thread
+              </div>
+              <div class="oct-menu__rule"></div>
+              <div class="oct-menu__row" role="menuitem">
+                <svg><use href="#i-gear" /></svg>Settings
               </div>
             </div>
+          </div>
+          <div class="demo__row">
+            <div class="oct-well oct-segmented" role="group" aria-label="Mode">
+              <button class="oct-segmented__item" type="button" aria-pressed="true">Work</button>
+              <button class="oct-segmented__item" type="button" aria-pressed="false">Code</button>
+            </div>
+            <span class="oct-type-meta">A well, with its chosen item raised</span>
           </div>
         </section>
       </div>
 
       <section class="demo__section">
-        <h2 class="oct-type-section-label">Panes divided by one hairline</h2>
+        <h2 class="oct-type-section-label">Square panes divided by one hairline</h2>
         <div class="oct-panes">
           <nav class="oct-panes__sidebar" aria-label="Sidebar">
             <div class="oct-panes__band" style="padding: 0 var(--oct-space-2)">
@@ -194,8 +189,8 @@
             </div>
             <div class="oct-panes__body">
               <p class="oct-type-row-detail oct-selectable">
-                Panes are flat and meet at one soft hairline. Depth is kept for the objects on them:
-                controls, cards and menus.
+                Panes are square, flat and share one 1px line. Depth is kept for the objects on
+                them: controls, cards and menus.
               </p>
             </div>
           </div>
