@@ -261,6 +261,27 @@ describe("context routes", () => {
     });
   });
 
+  it("names the device as who asked when a device the host's own person paired sends a command", async () => {
+    const execute = vi.fn(() => ({ kind: "compaction-started" }) as never);
+    const route = handler({ execute });
+    const deviceId = "71000000-0000-4000-8000-0000000000d8";
+    const paired = request("/api/context/commands", {
+      kind: "compact-session",
+      subject,
+      compactionId,
+    });
+    bindPrincipalRouteContext(paired, {
+      principal: { kind: "remote-device", deviceId, admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    expect((await route(paired))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledWith(expect.anything(), "local-window", windowId, {
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
+  });
+
   it("tells the service a paired device is asking, so it refuses that device a compaction", async () => {
     const execute = vi.fn((_command: unknown, principal: ContextRoutePrincipal) => {
       if (principal === "remote-device") {

@@ -154,7 +154,7 @@ export function withCodeOperationRuntime(
           readOperationContents: (windowId, input, admissionCurrent) =>
             readEvidenceBatch(windowId, input, admissionCurrent),
         }),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -199,7 +199,7 @@ function withCodeBoard(
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -1968,9 +1968,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
       readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
-      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
-      executePlannerProposal: (windowId, command, signal) =>
-        codePlannerService.resolveProposal(windowId, command, signal),
+      executePlanner: (windowId, command, actor) =>
+        codePlannerService.execute(windowId, command, actor),
+      executePlannerProposal: (windowId, command, signal, actor) =>
+        codePlannerService.resolveProposal(windowId, command, signal, actor),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: async (windowId, command, signal) => {

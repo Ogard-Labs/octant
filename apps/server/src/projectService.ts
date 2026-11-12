@@ -394,9 +394,11 @@ export class ProjectService implements ProjectServiceApi {
   async executeAgentMemory(
     command: AgentMemoryCommand,
     origin: AgentAuthoredMemoryProvenance,
+    /** The person who approved it, as the route resolved them. */
+    actor?: EventActor,
   ): Promise<MemoryCommandResult> {
     try {
-      return await this.#executeMemory(command, origin);
+      return await this.#executeMemory(command, origin, actor);
     } finally {
       this.#bootstrapMemo = undefined;
     }

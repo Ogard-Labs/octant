@@ -460,6 +460,7 @@ export function createNativeHarnessSessionRouteHandler(
         windowId,
         action: sub,
         body,
+        actor,
       });
       return json(settled.body, settled.status, origin);
     }

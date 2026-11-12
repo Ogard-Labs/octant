@@ -133,6 +133,26 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
+  it("journals a compaction a paired device asked for with the device as actor, and a local window's as it always was", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d7";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const requestedBy = async (actor?: never) => {
+      const world = createWorld();
+      planSession(world);
+      world.service.start(command(), "local-window", undefined, undefined, actor);
+      await world.service.settled();
+      const requested = world.fixture.journal
+        .replay({ afterSequence: 0 as never, limit: 1_000 } as never)
+        .filter((event) => event.eventName.includes("compaction-requested"))
+        .map((event) => event.actor);
+      world.close();
+      return requested;
+    };
+
+    expect(await requestedBy(device)).toEqual([device]);
+    expect((await requestedBy()).map((actor) => actor.kind)).toEqual(["system"]);
+  });
+
   it("summarizes the conversation before the recent tail and journals a receipt", async () => {
     const world = createWorld();
     planSession(world);

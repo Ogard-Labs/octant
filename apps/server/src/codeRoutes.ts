@@ -435,11 +435,13 @@ export interface CodeRouteService {
   readonly executePlanner?: (
     authenticatedWindowId: WindowId,
     command: CodePlannerCommand,
+    actor: EventActor,
   ) => Promise<CodePlannerCommandOutcome> | CodePlannerCommandOutcome;
   readonly executePlannerProposal?: (
     authenticatedWindowId: WindowId,
     command: CodePlannerProposalCommand,
-    signal?: AbortSignal,
+    signal: AbortSignal,
+    actor: EventActor,
   ) => Promise<CodePlannerProposalOutcome> | CodePlannerProposalOutcome;
   readonly readFollowUp?: (
     authenticatedWindowId: WindowId,
@@ -468,6 +470,7 @@ export interface CodeRouteService {
   readonly saveFile: (
     authenticatedWindowId: WindowId,
     input: CodeFileSaveInput,
+    actor: EventActor,
   ) => Promise<CodeFileSaveResultEnvelope> | CodeFileSaveResultEnvelope;
   /**
    * Open a confined file for the editor surface (#code-file tabs). Like
@@ -879,6 +882,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
+              actor: callerActor,
               ...(operation.kind === "start-provider-turn" ||
               requiresLiveCodeReviewAuthority(operation) ||
               [
@@ -966,7 +970,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           return jsonResponse(
             decodeCodeLanguageApprovalResult(
               await dependencies.language.approve(
-                { scopeId: authenticatedWindowId, principal: callerAuthority },
+                {
+                  scopeId: authenticatedWindowId,
+                  principal: callerAuthority,
+                  actor: callerActor,
+                },
                 approval,
               ),
             ),
@@ -1006,7 +1014,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
             throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
           }
-          const caller = { scopeId: authenticatedWindowId, principal: callerAuthority };
+          const caller = {
+            scopeId: authenticatedWindowId,
+            principal: callerAuthority,
+            actor: callerActor,
+          };
           const decoded = <T>(decode: (input: unknown) => T): T => {
             try {
               return decode(value);
@@ -1534,7 +1546,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeCodePlannerCommandOutcome(
-              await dependencies.service.executePlanner(authenticatedWindowId, command),
+              await dependencies.service.executePlanner(
+                authenticatedWindowId,
+                command,
+                callerActor,
+              ),
             ),
             200,
             origin,
@@ -1577,6 +1593,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 command,
                 request.signal,
+                callerActor,
               ),
             ),
             200,
@@ -2055,10 +2072,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           } catch {
             throw new CodeRouteRejected("Code file content must be valid UTF-8.", 400);
           }
-          const result = await dependencies.service.saveFile(authenticatedWindowId, {
-            ...metadata,
-            text,
-          });
+          const result = await dependencies.service.saveFile(
+            authenticatedWindowId,
+            { ...metadata, text },
+            callerActor,
+          );
           return jsonResponse(decodeCodeFileSaveResultEnvelope(result), 200, origin);
         }
         case "file-open": {

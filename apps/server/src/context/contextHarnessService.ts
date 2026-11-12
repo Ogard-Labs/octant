@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   CONTEXT_COMPACTION_EVENT_NAMES,
   CONTEXT_COMPACTION_REQUEST_SHAPE,
@@ -913,6 +914,11 @@ export class ContextHarnessService {
     /** Absent is a local window; `host-policy` is a rule the person set. */
     readonly requestedBy?: "local-window" | "host-policy";
     readonly cause?: ContextCompactionCause;
+    /**
+     * The paired device that asked, when one did. A local window's request and
+     * a rule's keep the ledger's own actor, as every other ledger event does.
+     */
+    readonly actor?: EventActor;
   }):
     | {
         readonly kind: "requested";
@@ -928,14 +934,17 @@ export class ContextHarnessService {
       aggregate: { aggregateType: "context-ledger", aggregateId: input.subject.aggregateId },
       expectedVersion: this.#aggregateVersion(input.subject.aggregateId),
       events: [
-        this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.requested, {
-          compactionId: input.compactionId,
-          subject: input.subject,
-          executor: input.executor,
-          requestedBy: input.requestedBy ?? "local-window",
-          ...(input.cause === undefined ? {} : { cause: input.cause }),
-          requestedAt,
-        }),
+        {
+          ...this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.requested, {
+            compactionId: input.compactionId,
+            subject: input.subject,
+            executor: input.executor,
+            requestedBy: input.requestedBy ?? "local-window",
+            ...(input.cause === undefined ? {} : { cause: input.cause }),
+            requestedAt,
+          }),
+          ...(input.actor === undefined ? {} : { actor: input.actor }),
+        },
       ],
     });
     return {

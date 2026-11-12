@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { Deferred, Effect, Either, Option, Stream } from "effect";
 import {
   decodeCapacityReservationId,
@@ -354,6 +355,8 @@ export class SessionCompactionService {
     principal: Principal,
     windowId?: WindowId,
     cause?: ContextCompactionCause,
+    /** The paired device that asked, when one did; it is who the request is journaled as. */
+    deviceActor?: EventActor,
   ): SessionCompactionStart {
     const { harness } = this.#options;
     const subject = command.subject;
@@ -407,6 +410,7 @@ export class SessionCompactionService {
         executor,
         requestedBy: principal === "host-policy" ? "host-policy" : "local-window",
         ...(cause === undefined ? {} : { cause }),
+        ...(deviceActor === undefined ? {} : { actor: deviceActor }),
       });
     } catch (error) {
       reservation.releaseUnstarted();

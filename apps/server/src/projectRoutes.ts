@@ -259,7 +259,11 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         const result =
           dependencies.memoryProposals === undefined
             ? { kind: "project-memory-proposal-gone" as const }
-            : await dependencies.memoryProposals.decide(windowId, decision);
+            : await dependencies.memoryProposals.decide(
+                windowId,
+                decision,
+                eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+              );
         return response(decodeProjectMemoryProposalDecisionResult(result), 200, origin);
       }
       if (isMemoryCommands) {
