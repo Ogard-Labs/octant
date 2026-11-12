@@ -222,11 +222,11 @@ function arrange(
 const percent = (fraction: number) => `${fraction * 100}%`;
 
 /**
- * The width of a divider's hit area, centred on the edge between two tiles. In
- * a narrow window a tile is a panel and each edge it shares with a neighbour
- * is pulled in by half a gap (`--octant-tile-inset`, set in dock.css), so the
- * pair end up a gap apart; from 681px up the inset is 0 and tiles share the
- * edge. An edge on the dock's own boundary never moves.
+ * The width of a divider's hit area, centred on the edge between two tiles.
+ * Each edge a tile shares with a neighbour is pulled in by half a gap
+ * (`--octant-tile-inset`, set in dock.css). Tiles are panes at every width and
+ * share the edge, so the inset is 0. An edge on the dock's own boundary never
+ * moves.
  */
 const DIVIDER_HIT = 8;
 const EDGE = 1e-4;

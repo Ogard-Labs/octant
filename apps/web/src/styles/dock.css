@@ -765,18 +765,20 @@
   overflow: hidden;
 }
 
-/* Tool tiles: several open tools drawn together beside a thread, each one
-   live. In a narrow window each is a panel of its own (level 1 of the
-   material): a rounded fill with a sheen, a rim brighter along its top edge,
-   and a seat shadow, with a gap between neighbours. From 681px up the window
-   is a grid of panes, so a tile is square and shares its edges with its
-   neighbours: it draws the one line on its top and left, and the divider's hit
-   area straddles that line. A tile is told apart by its name, not by an
-   outline: the focused one reads in the full ink and the rest a step back. */
+/* Tool tiles: open tools drawn together beside a thread, each one live. A tile
+   is a pane at every width: square, flat, on the one pane fill, sharing its
+   edges with its neighbours, and told apart by its name rather than by an
+   outline (the focused one reads in the full ink, the rest a step back). From
+   681px up the tile draws the one line on its top and left, and the divider's
+   hit area straddles that line. At 680px or less the dock is a sheet, a
+   floating container that keeps its own corner, and it holds one tool (the
+   stored layout is not drawn there), so the tile fills it with no neighbour,
+   no gap and no corner of its own. */
 .dock-tiles {
-  /* Half the gap between two narrow-window tiles: each shared edge is pulled
-     in by it (see DockTiles). Panes share their edges, so there it is 0. */
-  --octant-tile-inset: 4px;
+  /* Half the gap between two tiles. Panes share their edges, so it is 0 at
+     every width (see DockTiles); the variable stays so a gap can never be
+     introduced by one rule alone. */
+  --octant-tile-inset: 0px;
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -802,44 +804,27 @@
   /* The tile clips: anything a tool paints past its box would show in the
      next tile (a Files tree drawn over Vitals). */
   overflow: hidden;
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-panel-fill);
-  box-shadow: var(--octant-shadow-panel-seat);
+  border-radius: 0;
+  background: var(--octant-pane-fill);
 }
 
-/* The rim is drawn above the tool: an inset shadow on the tile itself is
-   painted over by anything the tool fills. */
+/* The line is drawn above the tool, on the tile's top and left edges: the
+   edge it shares with the tile above or beside it is that tile's bottom or
+   right, which draws nothing, so two tiles never show two lines. A border, so
+   forced colours keeps it. */
 .dock-tile::after {
   position: absolute;
   z-index: 3;
   inset: 0;
-  border-radius: inherit;
-  box-shadow: var(--octant-shadow-panel-rim);
+  border-radius: 0;
   content: "";
   pointer-events: none;
 }
 
 @media (min-width: 681px) {
-  .dock-tiles {
-    --octant-tile-inset: 0px;
-  }
-
-  /* Square, flat, and on the one pane fill; the line below is the only edge. */
-  .dock-tile {
-    border-radius: 0;
-    background: var(--octant-pane-fill);
-    box-shadow: none;
-  }
-
-  /* The line is drawn above the tool, on the tile's top and left edges: the
-     edge it shares with the tile above or beside it is that tile's bottom or
-     right, which draws nothing, so two tiles never show two lines. A border,
-     so forced colours keeps it. */
   .dock-tile::after {
     border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
-    border-radius: 0;
-    box-shadow: none;
   }
 }
 
