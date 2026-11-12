@@ -22,6 +22,8 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "externalContentRoutes.ts": "builds the device actor from the principal where it clears a mark",
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
   "terminalSessionRoutes.ts": "lists and reads history; changes nothing",
+  "remote/remoteHttpAuthentication.ts":
+    "answers a device's read of its own standing; that route journals nothing",
   "terminalSessions/terminalSessionAuthority.ts": "an authority predicate; changes nothing",
   "threadDocumentDeliveryAuthority.ts": "an authority predicate; changes nothing",
 };
