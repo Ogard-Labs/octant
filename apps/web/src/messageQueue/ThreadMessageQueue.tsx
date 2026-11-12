@@ -8,7 +8,7 @@ import "./thread-message-queue.css";
 
 const holdMessage: Readonly<Record<ThreadMessageQueueHoldReason, string>> = {
   paused: "The queue is paused.",
-  "host-restart": "The host restarted. Review the queue before resuming.",
+  "host-restart": "The host restarted. The queue continues when it safely can, or resume it now.",
   "delivery-unknown":
     "The host is checking whether the message started. It will not send another copy.",
   "binding-changed": "Thread settings changed. Restore them or remove and queue the message again.",

@@ -12,16 +12,19 @@ export interface CodeProjectAccessOptions {
    * revoked, but its persisted workspace stays behind.
    */
   readonly isWindowLive: (scopeId: WindowId) => boolean;
+  /** Whether a scope is a device still paired with this host; absent means none is. */
+  readonly isPairedDevice?: (scopeId: WindowId) => boolean;
 }
+
+type Admission =
+  | { readonly kind: "request"; readonly context: PrincipalRouteContext; active: boolean }
+  | { readonly kind: "queued-device"; readonly scopeId: WindowId; active: boolean };
 
 /** Bridges authenticated requests to Code services that still accept an opaque scope ID.
  * No device workspace or persistent permission is created by a remote read or command.
  */
 export class CodeProjectAccess {
-  readonly #requests = new AsyncLocalStorage<{
-    readonly context: PrincipalRouteContext;
-    active: boolean;
-  }>();
+  readonly #requests = new AsyncLocalStorage<Admission>();
   readonly #standing = new AsyncLocalStorage<true>();
   readonly #options: CodeProjectAccessOptions;
 
@@ -30,13 +33,32 @@ export class CodeProjectAccess {
   }
 
   async run<T>(context: PrincipalRouteContext, dispatch: () => Promise<T>): Promise<T> {
-    const request = { context, active: true };
+    const request: Admission = { kind: "request", context, active: true };
     return this.#requests.run(request, async () => {
       try {
         return await dispatch();
       } finally {
         // Async descendants can outlive dispatch; they must not retain admission.
         request.active = false;
+      }
+    });
+  }
+
+  /**
+   * Runs the dispatch of a message a paired device queued. The device sent no
+   * request now, so nothing here is a request's admission: each check inside
+   * asks again whether the device is still paired and the Project still
+   * active, which is what its own request would have been judged by. The
+   * admission ends when the dispatch returns, as a request's does, so the
+   * turn it starts holds what a turn the device sent itself holds and no more.
+   */
+  async runQueuedDeviceDispatch<T>(scopeId: WindowId, dispatch: () => Promise<T>): Promise<T> {
+    const admission: Admission = { kind: "queued-device", scopeId, active: true };
+    return this.#requests.run(admission, async () => {
+      try {
+        return await dispatch();
+      } finally {
+        admission.active = false;
       }
     });
   }
@@ -69,6 +91,7 @@ export class CodeProjectAccess {
     const request = this.#requests.getStore();
     if (
       request === undefined ||
+      request.kind !== "request" ||
       !request.active ||
       String(request.context.scopeId) !== String(scopeId)
     ) {
@@ -91,6 +114,11 @@ export class CodeProjectAccess {
     };
   }
 
+  /** Whether the Project is an active Code Project, as every device check here reads it. */
+  hasActiveCodeProject(projectId: ProjectId): boolean {
+    return this.#options.hasActiveCodeProject(projectId);
+  }
+
   canAccessProject(scopeId: WindowId, projectId: ProjectId): boolean {
     // A routine runs as the host, which owns every Project; a window's binding
     // narrows what that window drives, not what the host may. The dispatcher
@@ -98,6 +126,14 @@ export class CodeProjectAccess {
     // scope, and dispatch started from a request must not inherit its scope.
     if (isRoutineHostScope(scopeId)) return this.#options.hasActiveCodeProject(projectId);
     const request = this.#requests.getStore();
+    if (request?.kind === "queued-device") {
+      return (
+        request.active &&
+        String(request.scopeId) === String(scopeId) &&
+        this.#options.isPairedDevice?.(scopeId) === true &&
+        this.#options.hasActiveCodeProject(projectId)
+      );
+    }
     if (request !== undefined) {
       if (!request.active || request.context.abortSignal?.aborted === true) return false;
       if (String(request.context.scopeId) !== String(scopeId)) return false;

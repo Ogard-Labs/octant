@@ -202,7 +202,7 @@ describe("durable ordinary thread queue", () => {
     });
   });
 
-  it("keeps private bodies out of the journal and holds pending work after reopening", async () => {
+  it("keeps private bodies out of the journal and holds pending work after reopening until its window is back", async () => {
     const f = fixture();
     const c = enqueue();
     expect((await f.service.execute(windowId, c)).status).toBe("applied");
@@ -214,6 +214,7 @@ describe("durable ordinary thread queue", () => {
     const reopened = fixture(port(), f.database);
     await reopened.service.recover();
     expect((await snapshot(reopened.service)).holdReason).toBe("host-restart");
+    reopened.p.inspect.mockResolvedValueOnce({ status: "held", reason: "authority-revoked" });
     await reopened.service.tick();
     expect(reopened.p.admit).not.toHaveBeenCalled();
     expect(reopened.p.retain).toHaveBeenCalledWith(expect.objectContaining({ reason: "restore" }));
@@ -1149,5 +1150,280 @@ describe("scoped queue wakes", () => {
     await Promise.all([scopedTick, idlePromise]);
     expect(idle).toBe("resolved");
     discovery.mockRestore();
+  });
+});
+
+describe("queue after a failure or a restart", () => {
+  const failedTurn = (id: string) => ({
+    status: "ready" as const,
+    binding: "authorized-target",
+    tail: { id, status: "failed" as const, ordinaryFailure: true as const },
+  });
+  async function restart(f: ReturnType<typeof fixture>, p = port()) {
+    f.close();
+    const reopened = fixture(p, f.database);
+    await reopened.service.recover();
+    return reopened;
+  }
+
+  it("continues by itself once past a turn its mode recorded as failed and holds on the second failure in a row", async () => {
+    const f = fixture();
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "first-turn", status: "active" },
+    });
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, enqueue(1));
+    f.p.setInspection(failedTurn("first-turn"));
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect((await snapshot(f.service)).holdReason).toBeUndefined();
+
+    f.p.reconcile.mockResolvedValue({ status: "failed", ordinaryFailure: true });
+    f.p.setInspection(failedTurn("second-turn"));
+    await f.service.tick();
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    const held = await snapshot(f.service);
+    expect(held.holdReason).toBe("failed");
+    expect(held.items).toHaveLength(1);
+
+    expect((await f.service.execute(windowId, command("resume", held.version))).status).toBe(
+      "applied",
+    );
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["interrupted or stopped", { id: "turn", status: "failed" as const }],
+    ["unconfirmed", { id: "turn", status: "failed" as const, unconfirmed: true as const }],
+    ["cancelled by the person", { id: "turn", status: "cancelled" as const }],
+  ])("holds rather than continue past a turn that ended %s", async (_name, tail) => {
+    const f = fixture();
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "turn", status: "active" },
+    });
+    await f.service.execute(windowId, enqueue());
+    f.p.setInspection({ status: "ready", binding: "authorized-target", tail });
+    await f.service.tick();
+    expect(f.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(f.service)).holdReason).toBe(tail.status);
+  });
+
+  it("passes a later failure once more after a turn completed in between", async () => {
+    const f = fixture();
+    // Queued while the turn was still running, so nobody acknowledged its failure.
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "first-turn", status: "active" },
+    });
+    await f.service.execute(windowId, enqueue());
+    f.p.setInspection(failedTurn("first-turn"));
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    f.p.reconcile.mockResolvedValue({ status: "completed" });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "third-turn", status: "active" },
+    });
+    await f.service.tick();
+    await f.service.execute(windowId, enqueue((await snapshot(f.service)).version));
+    f.p.setInspection(failedTurn("third-turn"));
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues by itself once after a clean restart, when the window that queued the message is back", async () => {
+    const f = fixture();
+    const first = enqueue();
+    await f.service.execute(windowId, first);
+    await f.service.execute(windowId, enqueue(1));
+    const p = port();
+    p.setInspection({ status: "held", reason: "authority-revoked" });
+    const reopened = await restart(f, p);
+    await reopened.service.tick();
+    // The window has not registered again: the queue shows why it waits.
+    expect(p.admit).not.toHaveBeenCalled();
+    expect(p.inspect.mock.calls.at(-1)?.[0].windowId).toBe(windowId);
+    p.setInspection({ status: "ready", binding: "authorized-target" });
+    expect((await snapshot(reopened.service)).holdReason).toBe("host-restart");
+
+    await reopened.service.tick();
+    expect(p.admit).toHaveBeenCalledTimes(1);
+    expect(p.admit.mock.calls[0]?.[0]).toMatchObject({ messageId: first.messageId, windowId });
+    expect((await snapshot(reopened.service)).holdReason).toBeUndefined();
+  });
+
+  it("sends no message twice across a restart", async () => {
+    const f = fixture();
+    const first = enqueue();
+    await f.service.execute(windowId, first);
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    // Accepted before the restart: the mode still holds its turn.
+    const reopened = await restart(f);
+    await reopened.service.tick();
+    await reopened.service.tick();
+    expect(reopened.p.admit).not.toHaveBeenCalled();
+    expect(reopened.p.reconcile).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: first.messageId }),
+    );
+
+    const g = fixture();
+    await g.service.execute(windowId, enqueue());
+    const again = await restart(g);
+    await Promise.all([again.service.tick(), again.service.tick(), again.service.tick()]);
+    await again.service.tick();
+    expect(again.p.admit).toHaveBeenCalledTimes(1);
+  });
+
+  it("never continues by itself after a restart that left a delivery uncertain", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, enqueue(1));
+    f.p.admit.mockResolvedValue({ status: "unknown" });
+    f.p.reconcile.mockResolvedValue({ status: "unknown" });
+    await f.service.tick();
+    const p = port();
+    p.reconcile.mockResolvedValue({ status: "not-admitted" });
+    const reopened = await restart(f, p);
+    await reopened.service.tick();
+    await reopened.service.tick();
+    expect(p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(reopened.service)).holdReason).toBe("delivery-unknown");
+  });
+
+  it("holds after a restart when the thread's authority changed", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    const p = port();
+    p.setInspection({ status: "ready", binding: "different-target" });
+    const reopened = await restart(f, p);
+    await reopened.service.tick();
+    await reopened.service.tick();
+    expect(p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(reopened.service)).holdReason).toBe("binding-changed");
+  });
+
+  it("keeps a queue a person paused held across a restart", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, command("pause", 1));
+    const reopened = await restart(f);
+    await reopened.service.tick();
+    expect(reopened.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(reopened.service)).paused).toBe(true);
+  });
+
+  it("holds on a second restart in a row and on a failure that follows a restart", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, enqueue(1));
+    const busy = port();
+    busy.setInspection({ status: "busy", binding: "authorized-target" });
+    const once = await restart(f, busy);
+    await once.service.tick();
+    // The hold lifted by itself, and the running turn keeps the message queued.
+    expect((await snapshot(once.service)).holdReason).toBeUndefined();
+    const twice = await restart(once);
+    await twice.service.tick();
+    await twice.service.tick();
+    expect(twice.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(twice.service)).holdReason).toBe("host-restart");
+
+    const g = fixture();
+    await g.service.execute(windowId, enqueue());
+    const after = await restart(g);
+    after.p.setInspection(failedTurn("turn-after-restart"));
+    await after.service.tick();
+    expect(after.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(after.service)).holdReason).toBe("failed");
+  });
+});
+
+describe("a paired device at the queue", () => {
+  const deviceId = Schema.decodeUnknownSync(WindowId)(randomUUID());
+  function deviceFixture() {
+    const p = port();
+    const directory = mkdtempSync(join(tmpdir(), "octant-thread-queue-"));
+    dirs.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    connections.push(connection);
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const service = new ThreadMessageQueueService({
+      connection,
+      journal,
+      port: p,
+      actor,
+      clock: () => now,
+      isPairedDevice: (scopeId) => String(scopeId) === String(deviceId),
+    });
+    return { service, p };
+  }
+
+  it("queues a message, edits and removes its own, and dispatches under the device's own scope", async () => {
+    const f = deviceFixture();
+    const own = enqueue();
+    expect((await f.service.execute(deviceId, own)).status).toBe("applied");
+    expect(
+      (
+        await f.service.execute(
+          deviceId,
+          command("edit", 1, { messageId: own.messageId, prompt: "from the phone" }),
+        )
+      ).status,
+    ).toBe("applied");
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.admit.mock.calls[0]?.[0]).toMatchObject({
+      messageId: own.messageId,
+      windowId: deviceId,
+    });
+
+    f.p.reconcile.mockResolvedValue({ status: "completed" });
+    await f.service.tick();
+    const next = enqueue((await snapshot(f.service)).version);
+    await f.service.execute(deviceId, next);
+    // Removed before any pass could dispatch it.
+    expect(
+      (
+        await f.service.execute(
+          deviceId,
+          command("remove", (await snapshot(f.service)).version, { messageId: next.messageId }),
+        )
+      ).status,
+    ).toBe("applied");
+  });
+
+  it("refuses a device another's message and the pause, resume and reorder of the queue", async () => {
+    const f = deviceFixture();
+    f.p.setInspection({ status: "busy", binding: "authorized-target" });
+    const local = enqueue();
+    await f.service.execute(windowId, local);
+    const version = (await snapshot(f.service)).version;
+    const refused = { status: "refused", reason: "unauthorized" };
+    for (const attempt of [
+      command("edit", version, { messageId: local.messageId, prompt: "changed" }),
+      command("remove", version, { messageId: local.messageId }),
+      command("pause", version),
+      command("resume", version),
+      command("reorder", version, { messageIds: [local.messageId] }),
+    ])
+      expect(await f.service.execute(deviceId, attempt)).toMatchObject(refused);
+    expect(await snapshot(f.service)).toMatchObject({ version, paused: false });
+    expect((await snapshot(f.service)).items[0]?.payload?.prompt).toBe("private prompt");
   });
 });

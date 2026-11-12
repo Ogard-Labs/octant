@@ -663,6 +663,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      isPairedDeviceScope,
       projectMemoryAccess,
       threadMoveHolds,
       serverConnection,
@@ -1057,6 +1058,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      codeProjectAccess,
+      isPairedDeviceScope,
       threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,

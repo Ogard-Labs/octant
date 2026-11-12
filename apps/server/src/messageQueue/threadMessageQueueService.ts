@@ -33,6 +33,7 @@ import {
   type ThreadMessageQueueInspection,
 } from "./threadMessageQueuePort";
 import {
+  CONTINUED_PAST_RESTART,
   queueId,
   queueFingerprint,
   ThreadMessageQueuePersistence,
@@ -46,6 +47,12 @@ export interface ThreadMessageQueueServiceOptions {
   readonly port: ThreadMessageQueueModePort;
   readonly actor: EventActor;
   readonly clock?: () => string;
+  /**
+   * Whether a scope is a paired device's. A device queues a message and edits
+   * or removes its own; pausing, resuming and reordering the queue, and
+   * another's message, stay with a window on this host.
+   */
+  readonly isPairedDevice?: (scopeId: WindowId) => boolean;
 }
 /**
  * Whether a thread owes a turn. `active` is a turn its mode is running or has
@@ -63,6 +70,7 @@ export class ThreadMessageQueueService {
   readonly #store: ThreadMessageQueuePersistence;
   readonly #port: ThreadMessageQueueModePort;
   readonly #clock: () => string;
+  readonly #isPairedDevice: (scopeId: WindowId) => boolean;
   readonly #locks = new Map<string, Promise<void>>();
   readonly #pendingTicks = new Set<string>();
   #allScopesTick: Promise<void> | undefined;
@@ -79,6 +87,7 @@ export class ThreadMessageQueueService {
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#store = new ThreadMessageQueuePersistence({ ...options, clock: this.#clock });
     this.#port = options.port;
+    this.#isPairedDevice = options.isPairedDevice ?? (() => false);
   }
   async read(
     windowId: WindowId,
@@ -170,6 +179,19 @@ export class ThreadMessageQueueService {
             : refused("invalid-payload");
       }
       const state = this.#store.state(command.scope);
+      if (this.#isPairedDevice(windowId)) {
+        if (command.kind === "pause" || command.kind === "resume" || command.kind === "reorder")
+          return refused("unauthorized");
+        if (
+          (command.kind === "edit" || command.kind === "remove") &&
+          state.items.some(
+            (item) =>
+              String(item.messageId) === String(command.messageId) &&
+              String(item.queuedBy) !== String(windowId),
+          )
+        )
+          return refused("unauthorized");
+      }
       if (state.version !== command.expectedVersion) return result("conflict");
       if (command.kind === "enqueue") {
         if (
@@ -212,6 +234,7 @@ export class ThreadMessageQueueService {
                 status: "queued",
                 revision: decodeAggregateVersion(1),
                 createdAt: decodeTime(this.#clock()),
+                queuedBy: windowId,
               },
             ],
           },
@@ -323,8 +346,22 @@ export class ThreadMessageQueueService {
           }
           authorizations.set(item.messageId, authorization(windowId, current, command.scope));
         }
-        const { holdReason: _hold, ...withoutHold } = state;
-        const outcome = this.#store.write({ ...withoutHold, paused: false }, { command });
+        // A person looked: the queue may again pass one failure by itself, and
+        // every message now waits under the window that resumed it.
+        const {
+          holdReason: _hold,
+          continuedPast: _continuedPast,
+          liftsAfterRestart: _lifts,
+          ...withoutHold
+        } = state;
+        const outcome = this.#store.write(
+          {
+            ...withoutHold,
+            paused: false,
+            items: state.items.map((item) => ({ ...item, queuedBy: windowId })),
+          },
+          { command },
+        );
         if (outcome === "applied")
           for (const [key, value] of authorizations) this.#authorized.set(key, value);
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
@@ -352,8 +389,29 @@ export class ThreadMessageQueueService {
     for (const scope of this.#store.scopes())
       await this.#serial(scope, async () => {
         const state = this.#store.state(scope);
-        if (state.items.length > 0)
-          this.#hold(state, failures.has(queueId(scope)) ? "content-unavailable" : "host-restart");
+        if (state.items.length > 0) {
+          const unavailable = failures.has(queueId(scope));
+          // A queue still waiting out an earlier clean restart stays as it is:
+          // it has not continued, and a repeated start-up appends nothing.
+          const waiting = state.holdReason === "host-restart" && state.liftsAfterRestart === true;
+          // Clean means the restart cut nothing of this queue: no delivery was
+          // in flight, nobody had paused or held it, and it has not already
+          // continued by itself since a turn last completed.
+          const clean =
+            !unavailable &&
+            !state.paused &&
+            state.holdReason === undefined &&
+            state.continuedPast === undefined &&
+            state.items.every((item) => item.status === "queued" && item.queuedBy !== undefined);
+          if (unavailable || !waiting) {
+            const { liftsAfterRestart: _lifts, ...rest } = state;
+            const reason = unavailable ? "content-unavailable" : "host-restart";
+            if (clean) this.#store.write({ ...rest, holdReason: reason, liftsAfterRestart: true });
+            else if (state.liftsAfterRestart === true)
+              this.#store.write({ ...rest, holdReason: reason });
+            else this.#hold(state, reason);
+          }
+        }
         await this.#cleanup(scope);
       });
   }
@@ -458,11 +516,15 @@ export class ThreadMessageQueueService {
         return;
       }
       const terminal = reconciled.status;
+      // An ordinary failure is judged where the next message is dispatched,
+      // against the failure this queue may already have continued past.
+      const ordinary = terminal === "failed" && reconciled.ordinaryFailure === true;
+      const { continuedPast: _continuedPast, ...completedState } = state;
       const outcome = this.#store.write(
         {
-          ...state,
+          ...(terminal === "completed" ? completedState : state),
           items: state.items.slice(1),
-          ...(terminal === "completed" ? {} : { holdReason: terminal }),
+          ...(terminal === "completed" || ordinary ? {} : { holdReason: terminal }),
         },
         { settled: { messageId: head.messageId, status: terminal } },
       );
@@ -471,6 +533,18 @@ export class ThreadMessageQueueService {
       const content = this.#store.content(head.messageId);
       if (content) await this.#release(content, "accepted", true);
       state = this.#store.state(scope);
+      head = state.items[0];
+    }
+    if (
+      head !== undefined &&
+      !state.paused &&
+      state.holdReason === "host-restart" &&
+      state.liftsAfterRestart === true &&
+      !this.#disposed
+    ) {
+      const lifted = await this.#liftRestartHold(scope, state);
+      if (lifted === undefined) return;
+      state = lifted;
       head = state.items[0];
     }
     if (head === undefined || state.paused || state.holdReason !== undefined || this.#disposed)
@@ -506,10 +580,25 @@ export class ThreadMessageQueueService {
     if (
       inspection.tail &&
       (inspection.tail.status === "cancelled" || inspection.tail.status === "failed") &&
-      inspection.tail.id !== auth.acknowledgedTail
+      inspection.tail.id !== auth.acknowledgedTail &&
+      inspection.tail.id !== state.continuedPast
     ) {
-      this.#hold(state, inspection.tail.status);
-      return;
+      // The queue passes one ordinary failure by itself. A second in a row,
+      // or one that follows a restart it already continued past, holds it.
+      if (inspection.tail.ordinaryFailure !== true || state.continuedPast !== undefined) {
+        this.#hold(state, inspection.tail.status);
+        return;
+      }
+      if (this.#store.write({ ...state, continuedPast: inspection.tail.id }) !== "applied") return;
+      state = this.#store.state(scope);
+      head = state.items[0];
+      if (head === undefined) return;
+    } else if (inspection.tail?.status === "completed" && state.continuedPast !== undefined) {
+      const { continuedPast: _continuedPast, ...rest } = state;
+      if (this.#store.write(rest) !== "applied") return;
+      state = this.#store.state(scope);
+      head = state.items[0];
+      if (head === undefined) return;
     }
     if (inspection.status === "busy") return;
     const codeOperationId = scope.mode === "code" ? decodeCodeOperationId(randomUUID()) : undefined;
@@ -566,6 +655,49 @@ export class ThreadMessageQueueService {
         ),
       });
     } else this.#hold(state, "delivery-unknown");
+  }
+  /**
+   * Lifts the hold a clean restart left, once, under the authority each
+   * message was queued with. Every message is rechecked as an explicit resume
+   * rechecks it; a window that is not back yet leaves the hold in place for a
+   * later pass, and any other refusal ends the wait so a person decides.
+   * Nothing is acknowledged here: a turn the restart cut off still holds.
+   */
+  async #liftRestartHold(
+    scope: ThreadMessageQueueScope,
+    state: QueueState,
+  ): Promise<QueueState | undefined> {
+    const { liftsAfterRestart: _lifts, ...settled } = state;
+    const authorizations = new Map<string, LiveAuthorization>();
+    for (const item of state.items) {
+      const content = this.#store.content(item.messageId);
+      if (content === undefined || item.queuedBy === undefined) {
+        this.#store.write({ ...settled, holdReason: "content-unavailable" });
+        return undefined;
+      }
+      const current = await this.#inspect({
+        scope,
+        windowId: item.queuedBy,
+        intent: "resume",
+        payload: content.payload,
+      });
+      if (this.#disposed) return undefined;
+      if (current.status === "held") {
+        if (current.reason !== "authority-revoked")
+          this.#store.write({ ...settled, holdReason: queueHoldReason(current.reason) });
+        return undefined;
+      }
+      if (current.binding !== content.binding) {
+        this.#store.write({ ...settled, holdReason: "binding-changed" });
+        return undefined;
+      }
+      authorizations.set(item.messageId, { windowId: item.queuedBy, scope });
+    }
+    const { holdReason: _hold, ...lifted } = settled;
+    if (this.#store.write({ ...lifted, continuedPast: CONTINUED_PAST_RESTART }) !== "applied")
+      return undefined;
+    for (const [key, value] of authorizations) this.#authorized.set(key, value);
+    return this.#store.state(scope);
   }
   async revokeWindow(windowId: WindowId): Promise<void> {
     this.#revoked.add(String(windowId));

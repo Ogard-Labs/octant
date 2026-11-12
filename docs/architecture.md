@@ -5224,18 +5224,37 @@ or .zip>` write the same files, built by one host command
   hold it with a visible reason. After an ordinary provider failure or a
   clean restart the queue continues by itself once, with no review of the
   queued messages first; a second failure in a row holds it (maintainer
-  request, 2026-11-12). Not built yet: today any cancellation or failure
-  holds it, and restart recovery holds pending work until an authenticated
-  user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
+  request, 2026-11-12). Built: an ordinary failure is a turn its mode itself
+  recorded as failed: a Chat attempt whose outcome is `failed`, a Work turn
+  whose status is `failed` without the `interrupted` category, or Code
+  runtime work whose state is `failed`. A turn that was interrupted, stopped,
+  cancelled or cut off by a restart, one whose end is unconfirmed, and a
+  message whose delivery is unknown are not ordinary failures and hold the
+  queue. A clean restart is one that cut nothing of the queue: every message
+  was still queued, none dispatching or accepted, and the queue was not
+  paused, held, or already past its one continuation. Its hold stays visible
+  and lifts by itself once the window or paired device each message waits
+  under is live again and every message passes the checks an explicit resume
+  runs; a changed binding or lost authority holds it for a person instead.
+  The queue records the failure or restart it continued past, so a second
+  one in a row holds; a completed turn or a person's resume restores the one
+  continuation. Recovery never restores a temporary grant or guesses that an ambiguous
   send failed. Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
   resuming, or remove and resubmit the message with the new settings. Local
   authenticated windows share the queue, and a paired device may queue
-  (maintainer request, 2026-11-12; not built yet: today paired remote queue
-  commands remain unavailable until dispatch can revalidate the originating
-  device's grants).
+  (maintainer request, 2026-11-12). Built: a paired device reads a thread's
+  queue, queues a message, and edits or removes a message it queued; pause,
+  resume, reorder and another's message stay with a local window. The message
+  waits under the device's own scope, so its turn keeps every limit a turn
+  the device sends directly has. Each command and each dispatch asks again
+  that the device is still paired, is allowed the mode's send action, and
+  that the thread's Project is one the mode serves (for Code, an active one).
+  A Code dispatch has no request to be admitted by, so it is admitted as that
+  device for the dispatch alone and holds nothing afterwards. The paired
+  clients do not yet offer the queue in their composer.
   A committed queue change or terminal turn event wakes only its thread's
   dispatcher. Response text and unrelated journal writes do not scan other
   queues. A recovery pass runs once per second to catch runtime state that

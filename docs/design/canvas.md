@@ -992,7 +992,7 @@ answer lives in the thread rather than the Canvas.
 
 The block reads only, listing its questions and options with one line saying
 why, wherever it cannot send: a window without a message queue for the thread
-(a paired or remote client, whose queue commands the host also refuses), a
+(a paired or remote client), a
 Canvas the host gave no workspace scope for (its thread cannot be reached from
 here), a version older than the head on screen, and every surface that draws a
 Canvas without its thread: the thread itself (a Canvas holding a choice is a

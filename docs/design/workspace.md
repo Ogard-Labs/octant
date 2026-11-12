@@ -62,9 +62,10 @@ cancel, and a Work thread's Done mark. After an ordinary provider failure or a
 clean restart it continues by itself once, and a second failure in a row holds
 it. A paired device may queue (maintainer request, 2026-11-12;
 [Architecture: persistence](../architecture.md#persistence) owns the queue).
-Not built yet: today queued messages must be reviewed and removed before Resume
-can queue the continuation, any failure or restart holds the queue until a
-person resumes it, and a paired device cannot queue. A refused recovery leaves the notice
+Built: the queue passes one turn its mode recorded as failed and lifts the hold
+of one restart that cut nothing of it, and a paired device queues on a thread
+it may already send to. Not built yet: today queued messages must be reviewed
+and removed before Resume can queue the continuation. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the
 ordinary message queue, including any later admission refusal. A tool may have
 taken effect before the crash without recording its result; Resume is not an

@@ -797,6 +797,28 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 128 * 1_024,
   },
+  // The message queue: a paired device reads a thread's queue and queues a
+  // message on a thread it may already send to. The service rechecks the
+  // device's pairing, the thread and the mode on every command and again at
+  // dispatch, and keeps pause, resume and reorder with a window on the host.
+  {
+    id: "thread-message-queue",
+    match: { kind: "exact", path: "/api/thread-message-queue" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    id: "thread-message-queue-commands",
+    match: { kind: "exact", path: "/api/thread-message-queue/commands" },
+    surface: "authenticated-product",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: DEFAULT_BODY_BYTES,
+  },
   // Reply detail: the presentation level a paired device draws a thread at.
   // Read only; changing it stays with a window on the host.
   {

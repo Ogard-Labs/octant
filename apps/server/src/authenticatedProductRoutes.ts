@@ -230,6 +230,14 @@ export function classifyProductAction(request: Request): string | undefined {
   // never a write. Changing either is the shell route's, which a device never reaches.
   if (path === "/api/conversation-inputs")
     return method === "GET" ? "project.overview.read" : undefined;
+  // The queue serves all three modes from one path and names the mode in the
+  // command, so admission is at the least of their send actions. The queue
+  // rechecks the device against the mode's own action before it accepts a
+  // message and again before it dispatches one.
+  if (path === "/api/thread-message-queue")
+    return method === "GET" ? "project.overview.read" : undefined;
+  if (path === "/api/thread-message-queue/commands")
+    return method === "POST" ? "chat.send-turn" : undefined;
   if (path === "/api/reply-detail") {
     return method === "GET" ? "settings.read-non-secret" : undefined;
   }
