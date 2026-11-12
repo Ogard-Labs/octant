@@ -186,7 +186,7 @@ async function probeServer(
       // No address to probe: the pin must still exist on the registry with the
       // integrity the catalog holds. A newer latest is a note, not a failure.
       const { name, version, integrity } = entry.auth.package;
-      const response = await fetcher(`https://registry.npmjs.org/${name.replace("/", "%2F")}`, {
+      const response = await fetcher(`https://registry.npmjs.org/${name.replaceAll("/", "%2F")}`, {
         headers: { accept: "application/json" },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
