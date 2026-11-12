@@ -60,11 +60,18 @@ describe("the shell's edges and gaps", () => {
     expect(scroll).toMatch(/padding:\s*var\(--sidebar-rail-top\) 0/);
   });
 
-  it("never lets the dock bar's reserve for the band's controls widen the dock past its column", () => {
+  it("keeps the dock bar's content box at the dock's width less 16px, from the 280px minimum up", () => {
     const toolbar = rule(dock, ".right-utility-dock__toolbar");
-    expect(toolbar).toMatch(
-      /min\(var\(--octant-window-chrome-reserved-width, 96px\), calc\(100% - 8px\)\)/,
-    );
+    // The bar never reserves the title band's room: that left a 0px content box
+    // at 300px (349px of padding) and a clipped column.
+    expect(toolbar).not.toContain("--octant-window-chrome-reserved-width");
+    const padding = /padding:\s*4px (\S+) \S+ (\S+);/.exec(toolbar);
+    expect(padding).not.toBeNull();
+    const inset = (value: string | undefined) => (value === "var(--oct-space-2)" ? 8 : Number.NaN);
+    const horizontal = inset(padding?.[1]) + inset(padding?.[2]);
+    for (const width of [280, 300, 330, 360, 640]) {
+      expect(width - horizontal, `content box at ${width}px`).toBe(width - 16);
+    }
   });
 
   it("stands a dock card's title and every row's name on one edge", () => {

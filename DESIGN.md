@@ -1865,7 +1865,7 @@ thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`
 with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
-and below them (52px). Hover-only actions (add, more, pin, archive,
+and below them: 8 + an 18px title line + 1 + a 17px facts line + 8 is 52px, and a row stands 54px from the next with the list's 2px gap. Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. A section heading's add and more controls are the exception: the
 list's view and filter controls share that row, so they keep their width while
@@ -1892,9 +1892,11 @@ rule:
 - _The icon rail's_ face is its button (32px in the column, 2px
   apart), and the first face is centred on the title rail's centreline, so it
   stands level with the band's controls beside it (6px down in the 44px rail).
-- _A dock never clips._ The room the title band's controls take over the dock's
-  bar is clamped to what the bar has beside its start inset, so a dock narrower
-  than those controls (the 280px minimum) keeps its column inside the window.
+- _A dock never clips._ The dock's own bar holds the same 8px at both ends at
+  every width, 280px and up, and reserves nothing for the title band's
+  controls: the tool row lives in the band, a wide dock's bar is an empty
+  spacer under it, and a narrow dock is a dialog that stands away from the
+  band. A reserve for the band's room left no content box at 300px.
 - _A card's inset is exactly 16px_ (a Settings card draws its edge as an
   outline inside its box, not as a border) and a dock card's title and its rows
   stand on one edge: a title that is a button has no border, and a row's mark,

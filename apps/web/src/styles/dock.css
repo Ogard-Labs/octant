@@ -60,13 +60,13 @@
   min-width: 0;
   min-height: var(--oct-title-rail-h);
   justify-content: space-between;
-  /* The reserve is the width of the band's trailing controls, which stand
-     over the dock's own bar. It never exceeds what the bar has beside its
-     8px start inset, so a dock narrower than those controls (300px stored,
-     349px reserved) keeps its column instead of widening it past the window
-     edge. */
-  padding: 4px min(var(--octant-window-chrome-reserved-width, 96px), calc(100% - 8px))
-    var(--oct-rail-pad-end) 8px;
+  /* The same 8px at both ends, whatever the dock's width. This bar once
+     reserved the room of the title band's trailing controls, which stand over
+     it; the tool row now lives in the band and a wide dock's bar is an empty
+     spacer, and a narrow dock is a dialog that stands away from the band. The
+     reserve (349px of the 300px dock, then the clamp that followed it) left a
+     content box of nothing, so the bar can no longer pad wider than itself. */
+  padding: 4px var(--oct-space-2) var(--oct-rail-pad-end) var(--oct-space-2);
   background: transparent;
   border-bottom: 0;
   font-family: var(--oct-font-display);
