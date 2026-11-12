@@ -2189,8 +2189,9 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - There is one interaction primitive backend. A recipe style's own palette is never adopted; the `--octant-*` roles stay the theme source. A style variant for a primitive state is checked against the attribute the primitive actually writes. _Here only._
 - Desktop context and dropdown menus use native OS menus through one shared adapter. Browser clients keep accessible renderer menus.
 - Removing an existing repaint is a separate batch per pull request with before and after screenshots, and the maintainer approves the visual change (burn-down still in progress).
+- A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
-Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
 
 ### Page shell and Settings organisation
 
