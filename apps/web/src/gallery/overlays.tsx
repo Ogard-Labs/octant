@@ -426,7 +426,6 @@ export function OverlaySections() {
           </div>
         </Specimen>
         <Specimen
-          adapters={["OctantConfirmDialog", "OctantDialog", "OctantSheet"]}
           props={`<OctantConfirmDialog destructive />, <OctantSheet open />`}
           note="live and modal: opens over the page, Escape closes"
         >

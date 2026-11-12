@@ -1,14 +1,20 @@
 import { Check, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
-import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { Section, Specimen } from "./Specimen";
 
-/** What an element measures in the browser, read after paint so a label cannot drift from it. */
-function useComputed(read: (style: CSSStyleDeclaration) => string, key: unknown) {
+/**
+ * What an element measures in the browser, so a label cannot drift from the
+ * drawing. It reads in a passive effect: the theme and typography providers
+ * write their CSS variables in layout effects, which React runs child-first
+ * and before any passive effect, so the read sees the values just written.
+ * `key` re-reads on a mode, material or size change.
+ */
+function useComputed(read: (style: CSSStyleDeclaration, element: Element) => string, key: unknown) {
   const [element, setElement] = useState<Element | null>(null);
   const [text, setText] = useState("");
-  useLayoutEffect(() => {
-    if (element !== null) setText(read(getComputedStyle(element)));
-    // `read` is a module-level function at each call site; `key` re-reads on a mode or size change.
+  useEffect(() => {
+    if (element !== null) setText(read(getComputedStyle(element), element));
+    // `read` is a module-level function at each call site.
   }, [element, key]);
   return [setElement, text] as const;
 }
@@ -188,18 +194,35 @@ export function Radii(props: { readonly sizeKey: unknown }) {
 const ICON_SIZES = [12, 14, 16, 20, 24] as const;
 const STROKES = [1.5, 1.8] as const;
 
-function IconSample(props: {
+/** One row of icons; the size and stroke printed under it are read from the first drawn svg. */
+function IconCell(props: {
   readonly size: number;
   readonly stroke: number;
-  readonly children: (p: { size: number; strokeWidth: number }) => ReactNode;
+  readonly sizeKey: unknown;
 }) {
-  return <>{props.children({ size: props.size, strokeWidth: props.stroke })}</>;
+  const [ref, measured] = useComputed((_style, element) => {
+    const svg = element.querySelector("svg");
+    if (svg === null) return "no icon drawn";
+    const box = svg.getBoundingClientRect();
+    return `${String(box.width)}x${String(box.height)}, stroke ${getComputedStyle(svg).strokeWidth}`;
+  }, props.sizeKey);
+  const p = { size: props.size, strokeWidth: props.stroke };
+  return (
+    <span className="gallery-icons__cell" ref={ref}>
+      <Folder aria-hidden="true" {...p} />
+      <GitBranch aria-hidden="true" {...p} />
+      <Search aria-hidden="true" {...p} />
+      <Check aria-hidden="true" {...p} />
+      <ChevronDown aria-hidden="true" {...p} />
+      <span className="oct-meta">{measured}</span>
+    </span>
+  );
 }
 
-export function IconScale() {
+export function IconScale(props: { readonly sizeKey: unknown }) {
   return (
     <Section
-      caption="The five sizes the icon-scale contract allows, at the 1.5 stroke the shell buttons use and the 1.8 stroke most call sites still ask for."
+      caption="The five sizes the icon-scale contract allows, at the 1.5 stroke the shell buttons use and the 1.8 stroke most call sites still ask for; the size and stroke printed are measured from the drawn svg."
       id="icons"
       title="Icon sizes and stroke"
     >
@@ -207,20 +230,7 @@ export function IconScale() {
         <Specimen key={size} props={`size={${String(size)}} strokeWidth={1.5 | 1.8}`}>
           <span className="gallery-icons">
             {STROKES.map((stroke) => (
-              <span className="gallery-icons__cell" key={stroke}>
-                <IconSample size={size} stroke={stroke}>
-                  {(p) => (
-                    <>
-                      <Folder aria-hidden="true" {...p} />
-                      <GitBranch aria-hidden="true" {...p} />
-                      <Search aria-hidden="true" {...p} />
-                      <Check aria-hidden="true" {...p} />
-                      <ChevronDown aria-hidden="true" {...p} />
-                    </>
-                  )}
-                </IconSample>
-                <span className="oct-meta">stroke {String(stroke)}</span>
-              </span>
+              <IconCell key={stroke} size={size} sizeKey={props.sizeKey} stroke={stroke} />
             ))}
           </span>
         </Specimen>

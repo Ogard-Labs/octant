@@ -71,7 +71,7 @@ export function Gallery() {
   const measureKey = `${mode}-${String(size)}-${String(glass)}`;
   const onStepFocus = useCallback(() => stepFocus(), []);
   return (
-    <ThemeSettingsProvider settings={settings}>
+    <ThemeSettingsProvider rememberMode={false} settings={settings}>
       <ThemeTypographyProvider typography={settings.typography}>
         <div className={glass ? "gallery shell--material-translucent" : "gallery"}>
           <header className="gallery-bar">
@@ -123,7 +123,7 @@ export function Gallery() {
             <ColourRoles themeKey={measureKey} />
             <SpacingScale sizeKey={measureKey} />
             <Radii sizeKey={measureKey} />
-            <IconScale />
+            <IconScale sizeKey={measureKey} />
             <ControlSections />
             <OverlaySections />
             <PatternSections />

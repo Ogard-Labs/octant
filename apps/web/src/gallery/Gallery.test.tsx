@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ADAPTER_ROOTS } from "./adapterRoots";
 import { Gallery } from "./Gallery";
 
 /**
@@ -8,6 +9,12 @@ import { Gallery } from "./Gallery";
  * with a reason a reviewer can accept.
  */
 const NOT_SHOWN: Readonly<Record<string, string>> = {
+  OctantDialog:
+    "modal and portalled; it opens from a button in the gallery, so it is not in the page until pressed",
+  OctantConfirmDialog:
+    "modal and portalled; it opens from a button in the gallery, so it is not in the page until pressed",
+  OctantSheet:
+    "modal and portalled; it opens from a button in the gallery, so it is not in the page until pressed",
   OctantDialogPresence:
     "keeps a leaving dialog's content mounted during its exit and draws nothing itself",
   OctantContextMenuRoot:
@@ -55,20 +62,47 @@ function exportedAdapters(): ReadonlyArray<string> {
 }
 
 describe("component gallery", () => {
-  it("shows every shared adapter or says why it cannot", () => {
+  it("draws every shared adapter it names, or says why it cannot", () => {
     const { container } = render(<Gallery />);
-    const shown = new Set(
-      Array.from(container.querySelectorAll("[data-adapter]"), (element) => element.textContent),
-    );
+    const labelled = Array.from(container.querySelectorAll<HTMLElement>("[data-adapter]"));
+    // A name counts as shown only when an element its own render writes exists
+    // inside the specimen that names it (or, for a portalled part, in the document).
+    const drawn = new Set<string>();
+    const undrawn: Array<string> = [];
+    for (const label of labelled) {
+      const name = label.textContent ?? "";
+      const root = ADAPTER_ROOTS[name];
+      const specimen = label.closest(".gallery-specimen, .gallery-states");
+      const scope = root?.portalled === true ? document.body : specimen;
+      if (root !== undefined && scope?.querySelector(root.selector) != null) drawn.add(name);
+      else undrawn.push(name);
+    }
     const exported = exportedAdapters();
 
     expect(exported.length).toBeGreaterThan(30);
-    expect(exported.filter((name) => !shown.has(name) && NOT_SHOWN[name] === undefined)).toEqual(
+    expect(undrawn).toEqual([]);
+    expect(exported.filter((name) => !drawn.has(name) && NOT_SHOWN[name] === undefined)).toEqual(
       [],
     );
     // A name left in the list after its adapter is shown, or removed, would hide a gap later.
     expect(
-      Object.keys(NOT_SHOWN).filter((name) => shown.has(name) || !exported.includes(name)),
+      Object.keys(NOT_SHOWN).filter((name) => drawn.has(name) || !exported.includes(name)),
     ).toEqual([]);
+  });
+
+  it("leaves the app's remembered theme mode and every other stored value untouched", () => {
+    localStorage.setItem("octant.theme-mode", "light");
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+    const removals = vi.spyOn(Storage.prototype, "removeItem");
+    const cookies = vi.spyOn(document, "cookie", "set");
+    render(<Gallery />);
+
+    expect(localStorage.getItem("octant.theme-mode")).toBe("light");
+    expect(writes).not.toHaveBeenCalled();
+    expect(removals).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+    expect(cookies).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    localStorage.clear();
   });
 });
