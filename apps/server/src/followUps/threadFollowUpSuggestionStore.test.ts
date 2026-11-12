@@ -151,6 +151,34 @@ describe("thread follow-up suggestions", () => {
     expect(listed).toEqual([{ threadId: child, parentThreadId: threadId }]);
   });
 
+  it("offers a reply's predicted next message until the person sends anything, across a restart", () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    store.recordReply({
+      threadId,
+      mode: "chat",
+      suggestedBy: claude,
+      followUps: { turnId: "00000000-0000-4000-8000-000000000031", suggestions: [] } as never,
+      nextMessage: "yes, move them to the NAS",
+    });
+    expect(storeOn(connection).read(threadId)?.nextMessage).toBe("yes, move them to the NAS");
+
+    store.spendNextMessage(threadId);
+    const restarted = storeOn(connection);
+    expect(restarted.read(threadId)).toMatchObject({ followUps: { suggestions: [] } });
+    expect(restarted.read(threadId)?.nextMessage).toBeUndefined();
+
+    // A later reply's prediction replaces the spent one.
+    restarted.recordReply({
+      threadId,
+      mode: "chat",
+      suggestedBy: claude,
+      followUps: undefined,
+      nextMessage: "now delete the originals",
+    });
+    expect(storeOn(connection).read(threadId)?.nextMessage).toBe("now delete the originals");
+  });
+
   it("writes nothing for a thread whose replies never suggested anything", () => {
     const store = storeOn(openConnection());
     store.recordReply({ threadId, mode: "chat", suggestedBy: claude, followUps: undefined });

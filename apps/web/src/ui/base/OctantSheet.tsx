@@ -8,6 +8,7 @@ import {
   DialogViewport,
 } from "../shadcn/dialog";
 import { cn } from "../shadcn/utils";
+import { useLeavingFocus } from "./useLeavingFocus";
 
 export interface OctantSheetProps {
   readonly children: ReactNode;
@@ -29,6 +30,10 @@ export interface OctantSheetProps {
  * out to the edges.
  */
 export function OctantSheet(props: OctantSheetProps) {
+  const { popup, finalFocus } = useLeavingFocus({
+    open: props.open,
+    restoreFocus: props.restoreFocus,
+  });
   return (
     <Dialog
       modal
@@ -38,15 +43,20 @@ export function OctantSheet(props: OctantSheetProps) {
       open={props.open}
     >
       <DialogPortal>
+        {/* A sheet that is leaving is only there to be seen, as a dialog is:
+            its scrim and its controls take no press and no key. */}
         <DialogBackdrop
           className="octant-sheet__backdrop window-no-drag"
           data-testid="octant-sheet-backdrop"
+          inert={!props.open}
         />
         <DialogViewport className="octant-sheet__viewport window-no-drag">
           <DialogPopup
             className={cn("octant-sheet__popup window-no-drag", props.className)}
-            finalFocus={props.restoreFocus}
+            finalFocus={finalFocus}
+            inert={!props.open}
             initialFocus={props.initialFocus}
+            ref={popup}
           >
             <DialogTitle className="sr-only">{props.label}</DialogTitle>
             {props.children}

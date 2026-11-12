@@ -28,6 +28,11 @@ def group_exists(group):
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # macOS answers EPERM for a group whose only member is an exiting or
+        # unreaped zombie: the group is still present, so keep waiting for it
+        # rather than failing cleanup while the kernel finishes with it.
+        return True
 
 
 def stop_owned_group(child):
@@ -42,7 +47,7 @@ def stop_owned_group(child):
             break
         try:
             os.killpg(child.pid, action)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         deadline = time.monotonic() + bound
         while current_group_exists() and time.monotonic() < deadline:
@@ -100,6 +105,36 @@ def run(arguments, *, cwd=ROOT, timeout=60, capture=False):
             record_command_cleanup_failure(child, arguments, cleanup_error)
             raise
         ACTIVE.remove(child)
+
+
+def set_content_size(device, size):
+    """Set the owned Simulator's system text size, rebooting it once if it stalls.
+
+    On hosted macos-26 runners a freshly booted Simulator sometimes reports
+    boot complete while its UI services are still settling, and the first
+    `simctl ui content_size` then hangs past its deadline. Give each attempt
+    longer, and on a stall shut the owned device down and boot it again
+    before a second attempt; a second stall is a real failure.
+    """
+    for attempt in (1, 2):
+        try:
+            run(["xcrun", "simctl", "ui", device, "content_size", size], timeout=120)
+            return
+        except subprocess.TimeoutExpired:
+            if attempt == 2:
+                raise
+        print("OCTANT_SIMULATOR_UI_STALLED rebooting the owned Simulator once", flush=True)
+        try:
+            run(["xcrun", "simctl", "shutdown", device], timeout=120)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            # shutdown refuses a device that already stopped, and boot refuses
+            # one still booted; bootstatus then decides whether it is usable.
+            pass
+        try:
+            run(["xcrun", "simctl", "boot", device])
+        except RuntimeError:
+            pass
+        run(["xcrun", "simctl", "bootstatus", device, "-b"], timeout=180)
 
 
 if sys.platform != "darwin" or os.environ.get("GITHUB_ACTIONS") != "true":
@@ -167,7 +202,7 @@ try:
         ("standard", "large", "testColdDemoReplyForegroundAndReset"),
         ("large-text", "accessibility-extra-large", "testLargeTextEntryAndReply"),
     ):
-        run(["xcrun", "simctl", "ui", device, "content_size", size])
+        set_content_size(device, size)
         observed_size = run(["xcrun", "simctl", "ui", device, "content_size"], capture=True).strip()
         if observed_size != size:
             raise RuntimeError("The owned Simulator did not adopt the requested system text size.")
@@ -199,12 +234,13 @@ finally:
                 raise RuntimeError("Uncertain Simulator creation has no unique owned UUID; cleanup is unverified.")
         if device is not None:
             try:
-                run(["xcrun", "simctl", "shutdown", device], timeout=30)
-            except RuntimeError:
-                # A failed boot or the test runner may already have stopped it.
-                # Delete only the UUID this fixture created, then verify absence.
+                run(["xcrun", "simctl", "shutdown", device], timeout=120)
+            except (RuntimeError, subprocess.TimeoutExpired):
+                # A failed boot or the test runner may already have stopped it,
+                # or a stalled device may not answer shutdown in time. Delete
+                # only the UUID this fixture created, then verify absence.
                 pass
-            run(["xcrun", "simctl", "delete", device], timeout=30)
+            run(["xcrun", "simctl", "delete", device], timeout=120)
             remaining = run(["xcrun", "simctl", "list", "devices", "-j"], capture=True)
             if device in remaining:
                 raise RuntimeError("Owned Simulator cleanup is incomplete.")

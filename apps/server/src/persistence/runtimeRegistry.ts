@@ -373,6 +373,17 @@ import {
 } from "./productFeedbackProjection";
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { RemoteServerGrantProjection } from "./remoteServerGrantProjection";
+import { AgentAccessProjection } from "./agentAccessProjection";
+import {
+  AGENT_ACCESS_EVENT_NAMES,
+  AgentDirectKeyRotatedV1,
+  AgentGrantChangedV1,
+  AgentGrantCreatedV1,
+  AgentGrantRevokedV1,
+  AgentKeyEnrolledV1,
+  AgentKeyRemovedV1,
+  AgentThreadStartedV1,
+} from "@octant/contracts/agent-access";
 import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
@@ -752,6 +763,13 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
     .register(OWNER_APPROVAL_AUDIT_EVENT, 1, OwnerApprovalAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
+    .register(AGENT_ACCESS_EVENT_NAMES.grantCreated, 1, AgentGrantCreatedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.grantChanged, 1, AgentGrantChangedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.keyEnrolled, 1, AgentKeyEnrolledV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.keyRemoved, 1, AgentKeyRemovedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.directKeyRotated, 1, AgentDirectKeyRotatedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.grantRevoked, 1, AgentGrantRevokedV1)
+    .register(AGENT_ACCESS_EVENT_NAMES.threadStarted, 1, AgentThreadStartedV1)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
@@ -870,6 +888,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ProductFeedbackProjection())
       .register(new ProjectTerminalProjection())
       .register(new RemoteServerGrantProjection())
+      .register(new AgentAccessProjection())
       .register(new ThreadRetentionProjection())
       .register(new HostMemoryLimitsProjection())
       .register(new ExternalContentTaintProjection())

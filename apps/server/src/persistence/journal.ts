@@ -1095,11 +1095,17 @@ export class Journal {
     return (this.#selectHeadSequence.get() as { readonly head_sequence: number }).head_sequence;
   }
 
-  inspectCompatibility(batchSize = 100): JournalCompatibility {
+  /**
+   * Decodes journal rows after `verifiedThrough` (default: every row) and
+   * reports the first one that no longer decodes. A caller passes a non-zero
+   * `verifiedThrough` only for rows an earlier scan already found compatible.
+   */
+  inspectCompatibility(batchSize = 100, verifiedThrough = 0): JournalCompatibility {
     const limit =
       Number.isSafeInteger(batchSize) && batchSize >= 1 && batchSize <= 1000 ? batchSize : 100;
     const journalHead = this.headSequence();
-    let afterSequence = 0;
+    let afterSequence =
+      Number.isSafeInteger(verifiedThrough) && verifiedThrough > 0 ? verifiedThrough : 0;
 
     while (afterSequence < journalHead) {
       let events: ReadonlyArray<EventEnvelope>;

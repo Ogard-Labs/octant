@@ -102,6 +102,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
@@ -115,6 +116,8 @@ import {
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { AgentAccessSettingsSection } from "../agentAccess/AgentAccessSettingsSection";
+import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
@@ -122,6 +125,8 @@ import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
+import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
+import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -208,6 +213,7 @@ import {
   hubAdministrationOf,
   ownerUnlockOf,
   remoteAccessAdministrationOf,
+  agentAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
@@ -270,6 +276,7 @@ export interface SettingsViewProps {
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
+  readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
@@ -287,6 +294,8 @@ export interface SettingsViewProps {
   readonly providerToolingClient?: ProviderToolingClient;
   /** Code Projects on a registered server; absent off this computer. */
   readonly serverProjectsClient?: ServerProjectsClient;
+  /** Agent grants for Settings › Remote access › Agent access, from any window. */
+  readonly agentGrantClient?: AgentGrantClient;
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
@@ -1109,6 +1118,11 @@ function ActiveSectionContent({
             focusedSetting={focusedSetting}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
           />
+          <HostWorktreesSettings client={props.diskCleanupClient} focusedSetting={focusedSetting} />
+          <XcodeBuildDataSettings
+            client={props.diskCleanupClient}
+            focusedSetting={focusedSetting}
+          />
           <OpenInApplicationSettings
             applications={props.settings.openInApplications}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1363,6 +1377,16 @@ function ActiveSectionContent({
           </section>
         );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
+      const agentAccessAdministration = agentAccessAdministrationOf(props.hostBridge);
+      const agentAccess = (
+        <AgentAccessSettingsSection
+          {...(agentAccessAdministration === undefined
+            ? {}
+            : { administration: agentAccessAdministration })}
+          {...(props.agentGrantClient === undefined ? {} : { client: props.agentGrantClient })}
+          projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+        />
+      );
       const setupGuide = (
         <RemoteSetupGuide
           focusedSetting={focusedSetting}
@@ -1394,6 +1418,7 @@ function ActiveSectionContent({
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
           />
+          {agentAccess}
         </div>
       ) : (
         <div className="settings-section-stack">
@@ -1406,6 +1431,7 @@ function ActiveSectionContent({
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
           </section>
+          {agentAccess}
         </div>
       );
     }
@@ -2696,21 +2722,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 </OctantToggleGroupItem>
               ))}
             </OctantToggleGroup>
-          </SettingRow>
-        ) : null}
-        {isAvailable("thread-stats") ? (
-          <SettingRow
-            description="Tokens, cache hit, speed, first-token time, and cost under every thread's composer, for every provider. Turn details stay one click away from the context meter."
-            focused={focusedSetting === settingId("thread-stats")}
-            label="Stats line under the composer"
-            scope="app"
-            settingId="thread-stats"
-          >
-            <OctantSwitch
-              checked={props.settings.showThreadStats}
-              label="Stats line under the composer"
-              onCheckedChange={(showThreadStats) => props.onSettingsChange({ showThreadStats })}
-            />
           </SettingRow>
         ) : null}
         {isAvailable("usage-bars") ? (

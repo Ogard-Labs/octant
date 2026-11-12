@@ -227,11 +227,12 @@ describe("ChatWelcome", () => {
 
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
 
+    expect(await screen.findByText("Attachments can be added once the chat starts.")).toBeVisible();
     expect(
-      await screen.findByText("Attachments can be added once the chat starts.", {
-        selector: 'p[role="status"]',
-      }),
-    ).toBeVisible();
+      screen
+        .getByText("Attachments can be added once the chat starts.")
+        .closest(".composer-notices"),
+    ).not.toBeNull();
     expect(onCreateChat).not.toHaveBeenCalled();
   });
 

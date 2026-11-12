@@ -18,6 +18,7 @@ import type {
   BrowserActionKind,
   BrowserActionRequest,
   BrowserCaptureNotKeptReason,
+  BrowserCaptureId,
   BrowserContextId,
   BrowserProfile,
   BrowserViewportPoint,
@@ -42,6 +43,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   PanelRight,
+  PenLine,
   RotateCw,
   ShieldCheck,
   Undo2,
@@ -59,6 +61,12 @@ import { useProductFeedback } from "./useProductFeedback";
 import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
+import { BrowserMarkupStage, type MarkupNotice } from "./BrowserMarkupStage";
+import {
+  MAX_WAITING_OFFERS,
+  threadImageOfferKey,
+  threadImageOffers,
+} from "../composer/threadImageOffers";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
@@ -82,6 +90,8 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
+  // A kept capture being drawn on: the page leaves the window for as long as it is up.
+  ".browser-markup",
   ".octant-dialog__backdrop",
   ".octant-dialog__viewport",
   ".octant-dialog__popup",
@@ -124,6 +134,11 @@ export interface BrowserWorkspaceProps {
   readonly onManageExtensions?: () => void;
   /** A newly added Browser tab must not attach to another tab's current context. */
   readonly startFresh?: boolean;
+  /**
+   * Offer Draw on page. Only where this thread's message is the place a marked-up
+   * picture goes: a Browser with no thread composer beside it offers nothing.
+   */
+  readonly canDrawOnPage?: boolean;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -149,7 +164,24 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // A capture the host declined to keep is said once, apart from `message`,
   // because every poll of the page rewrites `message`.
   const [captureNotice, setCaptureNotice] = useState<string>();
+  // A confirmation is not a warning: "Added to the message" wears the neutral or
+  // success treatment, a refused capture the warning one.
+  const [captureNoticeTone, setCaptureNoticeTone] = useState<"warning" | "neutral" | "success">(
+    "warning",
+  );
+  // What happened to the picture while it is being drawn on. It is drawn in the
+  // stage, above the bar, so it never moves the still.
+  const [markupNotice, setMarkupNotice] = useState<MarkupNotice>();
   const [capturing, setCapturing] = useState(false);
+  // The person's own kept capture while it is being drawn on; its marks live in
+  // the stage and are dropped with it.
+  const [markupPicture, setMarkupPicture] = useState<string>();
+  // Each Draw on page press holds a number; leaving the page, changing context,
+  // or unmounting moves it on, so a still that arrives late is not opened over a
+  // page the person has already left.
+  const markupRequest = useRef(0);
+  const drawButton = useRef<HTMLButtonElement>(null);
+  const focusDrawButton = useRef(false);
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
@@ -298,19 +330,43 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const nativeState = nativeSurface.state;
-  const feedbackSelectionUnavailable = !activeContext
-    ? "Open a Browser page before choosing an element."
-    : snapshot?.waitingForPerson === "sign-in"
-      ? "Finish sign-in and Continue before choosing an element."
-      : nativeSurface.embedded !== undefined
-        ? "Element selection is not available in this embedded Browser presentation yet."
-        : nativeContext &&
-            (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
-              props.hostBridge.subscribeBrowserSurfaceState === undefined)
-          ? "This app build cannot select a native Browser element."
-          : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
-            ? "Refresh the page preview before choosing an element."
-            : undefined;
+  // A page that is gone leaves nothing to draw on.
+  useEffect(() => {
+    if (!activeContext) leaveMarkup();
+  }, [activeContext]);
+  const markupContextId = snapshot?.context?.contextId;
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [markupContextId]);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    [],
+  );
+  // Close and a picture left waiting for its composer hand focus back to the
+  // button that opened drawing, instead of letting it fall to the page body.
+  useEffect(() => {
+    if (markupPicture !== undefined || !focusDrawButton.current) return;
+    focusDrawButton.current = false;
+    drawButton.current?.focus();
+  }, [markupPicture]);
+  const feedbackSelectionUnavailable =
+    markupPicture !== undefined
+      ? "Finish or discard the drawing before choosing an element."
+      : !activeContext
+        ? "Open a Browser page before choosing an element."
+        : snapshot?.waitingForPerson === "sign-in"
+          ? "Finish sign-in and Continue before choosing an element."
+          : nativeSurface.embedded !== undefined
+            ? "Element selection is not available in this embedded Browser presentation yet."
+            : nativeContext &&
+                (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
+                  props.hostBridge.subscribeBrowserSurfaceState === undefined)
+              ? "This app build cannot select a native Browser element."
+              : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
+                ? "Refresh the page preview before choosing an element."
+                : undefined;
   const feedbackPointing = useBrowserFeedbackPointing({
     contextId:
       snapshot?.context?.contextId === undefined ? undefined : String(snapshot.context.contextId),
@@ -651,6 +707,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     > = {},
   ): Promise<void> {
     if (snapshot?.context === undefined || scope === undefined) return;
+    // The page is about to change under the picture: the marks go with it.
+    leaveMarkup();
     localFailure.current = false;
     setStatus("waiting");
     setMessage(undefined);
@@ -676,8 +734,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   /**
    * The person's Screenshot control: the one pane gesture that keeps a picture
    * with the thread. Refreshing the preview is an ordinary action and keeps none.
+   * Answers the kept capture's id, or undefined when none was kept.
    */
-  async function takeScreenshot(): Promise<void> {
+  async function keepScreenshot(
+    purpose: "screenshot" | "drawing" = "screenshot",
+  ): Promise<BrowserCaptureId | undefined> {
     const takeCapture = props.client.takeCapture;
     if (
       snapshot?.context === undefined ||
@@ -685,11 +746,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       props.tab.threadId === undefined ||
       takeCapture === undefined
     ) {
-      return;
+      return undefined;
     }
     localFailure.current = false;
     setCapturing(true);
     setCaptureNotice(undefined);
+    setCaptureNoticeTone("warning");
     setMessage(undefined);
     try {
       const next = await takeCapture.call(props.client, {
@@ -703,16 +765,100 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         },
       });
       update(next);
-      if (next.observation?.capture?.status === "not-kept") {
-        setCaptureNotice(captureNotKeptNotice(next.observation.capture.reason));
+      const capture = next.observation?.capture;
+      if (capture?.status === "not-kept") {
+        setCaptureNotice(captureNotKeptNotice(capture.reason, purpose));
       }
+      return capture?.status === "kept" ? capture.captureId : undefined;
     } catch (error) {
       localFailure.current = true;
       localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
       applyFailure(error, setStatus, setMessage);
+      return undefined;
     } finally {
       setCapturing(false);
     }
+  }
+
+  async function takeScreenshot(): Promise<void> {
+    await keepScreenshot();
+  }
+
+  /**
+   * Draw on page: keep a screenshot exactly as the Screenshot control does,
+   * then draw on that kept picture. No other source of pixels is read, so the
+   * credential-field refusal, the journal record and the origin's taint all
+   * apply as they do for any capture.
+   */
+  async function startMarkup(): Promise<void> {
+    const readCapture = props.client.readCapture;
+    const threadId = props.tab.threadId;
+    if (readCapture === undefined || threadId === undefined) return;
+    const request = ++markupRequest.current;
+    const captureId = await keepScreenshot("drawing");
+    if (captureId === undefined || request !== markupRequest.current) return;
+    try {
+      const image = await readCapture.call(props.client, { threadId, captureId });
+      if (request === markupRequest.current) setMarkupPicture(image.dataUrl);
+    } catch {
+      if (request === markupRequest.current) {
+        setCaptureNotice("The kept screenshot could not be opened for drawing.");
+      }
+    }
+  }
+
+  /** Drop the drawing and any still on its way; its marks go with it. */
+  function leaveMarkup(): void {
+    markupRequest.current += 1;
+    setMarkupPicture(undefined);
+    setMarkupNotice(undefined);
+  }
+
+  function closeMarkup(): void {
+    focusDrawButton.current = true;
+    leaveMarkup();
+  }
+
+  /**
+   * Hand the marked-up picture to the thread's composer and say what it made of
+   * it. Only a picture the composer attached ends drawing; a refusal leaves the
+   * drawing as it is, with the composer's reason.
+   */
+  async function addMarkupToMessage(file: File): Promise<void> {
+    if (props.tab.threadId === undefined) return;
+    setMarkupNotice(undefined);
+    // The hand-off can outlast this drawing: the Code composer uploads the
+    // picture before it answers. A drawing the person closed meanwhile, or a
+    // new one they opened, is not closed or told about the old picture.
+    const drawing = markupRequest.current;
+    const result = await threadImageOffers.offer(
+      threadImageOfferKey(props.tab.mode, String(props.tab.threadId)),
+      file,
+    );
+    if (drawing !== markupRequest.current) return;
+    if (result.status === "full") {
+      setMarkupNotice({
+        tone: "danger",
+        text: `This thread already has ${String(MAX_WAITING_OFFERS)} pictures waiting for its message. Open the thread and send or remove one first.`,
+      });
+      return;
+    }
+    if (result.status === "refused") {
+      setMarkupNotice({
+        tone: "danger",
+        text: `The picture was not added to the message: ${result.reason}`,
+      });
+      return;
+    }
+    // A composer that is open takes focus for its prompt; otherwise it stays here.
+    if (result.status === "waiting") focusDrawButton.current = true;
+    leaveMarkup();
+    setCaptureNoticeTone(result.status === "added" ? "success" : "neutral");
+    setCaptureNotice(
+      result.status === "added"
+        ? "Added to the message"
+        : "Added to the message when you open this thread",
+    );
   }
 
   async function stop(cancel: boolean): Promise<void> {
@@ -956,6 +1102,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   function nativeCommand(command: "back" | "forward" | "reload" | "stop"): void {
     if (snapshot?.context === undefined || props.hostBridge?.commandBrowserSurface === undefined)
       return;
+    leaveMarkup();
     void props.hostBridge
       .commandBrowserSurface({
         contextId: snapshot.context.contextId,
@@ -1008,305 +1155,334 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         className="browser-workspace__chrome"
         {...(activeContext ? { "data-page": "open" } : {})}
       >
-        <div className="browser-workspace__history" aria-label="Browser history controls">
-          <OctantButton
-            aria-label="Back"
-            className="browser-workspace__history-button"
-            disabled={!nativeContext || !nativeState?.canGoBack}
-            onClick={() => nativeCommand("back")}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <ArrowLeft aria-hidden="true" size={14} />
-          </OctantButton>
-          <OctantButton
-            aria-label="Forward"
-            className="browser-workspace__history-button"
-            disabled={!nativeContext || !nativeState?.canGoForward}
-            onClick={() => nativeCommand("forward")}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <ArrowRight aria-hidden="true" size={14} />
-          </OctantButton>
-          <OctantButton
-            aria-label={nativeState?.loading ? "Stop loading" : "Reload"}
-            className="browser-workspace__history-button"
-            disabled={!activeContext}
-            onClick={() => {
-              if (nativeContext) {
-                nativeCommand(nativeState?.loading ? "stop" : "reload");
-              } else if (!nativeState?.loading) {
-                // Reload must use the committed page, not an unsubmitted omnibox draft.
-                const target = committedAddress ?? validTargetUrl(url);
-                if (target !== undefined) {
-                  void act("navigate", { target });
-                }
-              }
-            }}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            {nativeState?.loading ? (
-              <X aria-hidden="true" size={14} />
-            ) : (
-              <RotateCw aria-hidden="true" size={14} />
-            )}
-          </OctantButton>
-        </div>
-        <BrowserProfileControl
-          accounts={accounts}
-          disabled={
-            starting ||
-            selectingTaskProfile ||
-            (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
-          }
-          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
-          onChange={(choice) => void chooseProfile(choice)}
-          profile={
-            taskProfileApplies
-              ? (taskProfile?.profile ?? "private")
-              : activeContext
-                ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
-                : profileChoice
-          }
-          projectProfileAvailable
-          signedInPagesAvailable={nativeSupported}
-          {...(taskProfileApplies || props.client.manageProfiles === undefined
-            ? {}
-            : { onSignOut: () => signOutOfProfile() })}
-        />
-        {nativeContext &&
-        activeContext &&
-        snapshot?.context !== undefined &&
-        (snapshot.context.authority.mode === "work" ||
-          snapshot.context.authority.mode === "code") ? (
-          <BrowserCredentialBindingControl
-            key={String(snapshot.context.contextId)}
-            client={props.client}
-            context={{
-              contextId: snapshot.context.contextId,
-              threadId: snapshot.context.threadId,
-              mode: snapshot.context.authority.mode,
-            }}
-            profile={snapshot.context.policy.profile ?? { kind: "private" }}
-            held={snapshot.waitingForPerson !== undefined}
-          />
-        ) : null}
-        {nativeContext && activeContext ? (
-          <BrowserExtensionsButton
-            agentDriving={nativeState?.control === "agent"}
-            client={props.client}
-            hostBridge={props.hostBridge}
-            profile={storedProfileOf(snapshot?.context?.policy.profile)}
-            refreshKey={
-              snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
-            }
-            {...(props.onManageExtensions === undefined
-              ? {}
-              : { onManage: props.onManageExtensions })}
-          />
-        ) : null}
-        <form
-          className="browser-workspace__omnibox"
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void navigate();
-          }}
-        >
-          <span
-            aria-label={addressSecurityLabel}
-            className="browser-workspace__security"
-            title={
-              committedAddress === undefined
-                ? "Enter an HTTP or HTTPS address"
-                : secureAddress
-                  ? "Secure HTTPS connection"
-                  : "HTTP connection is not secure"
-            }
-          >
-            {secureAddress ? (
-              <LockKeyhole aria-hidden="true" size={12} />
-            ) : (
-              <Globe2 aria-hidden="true" size={12} />
-            )}
-          </span>
-          <span className="browser-workspace__address">
-            <OctantInput
-              aria-label="Browser URL"
-              onChange={(event) => {
-                setAddressTyped(true);
-                setUrl(event.target.value);
-              }}
-              placeholder="Enter an address"
-              spellCheck={false}
-              type="text"
-              value={url}
-            />
-            <MiddleTruncatedText
-              ariaHidden
-              className="browser-workspace__address-preview"
-              value={url}
-            />
-          </span>
-        </form>
-        <BrowserAgentStatus
-          agentDriving={nativeState?.control === "agent"}
-          availability={agentAvailability}
-          {...(props.onAgentBrowserRecovery === undefined
-            ? {}
-            : { onRecover: props.onAgentBrowserRecovery })}
-        />
-        <span
-          className="browser-workspace__control-state"
-          title={
-            nativeContext
-              ? "You and the agent share this live Chromium page."
-              : "Click, type, and scroll this headless page through the shared Browser context."
-          }
-        >
-          {nativeState?.loading || nativeState?.control === "agent" ? (
-            <LoaderCircle
-              aria-hidden="true"
-              className="browser-workspace__control-spinner"
-              size={12}
-            />
-          ) : null}
-          {/* Shown only when a narrow tile leaves no room for the words. */}
-          <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
-          <span>{controlLabel}</span>
-          {activeContext ? (
-            <span
-              title={
-                snapshot?.waitingForPerson === undefined
-                  ? "Authorized Browser work and person input renew this idle interval. Preview polling does not."
-                  : "The handoff has its own finite retention window; waiting agent calls do not keep it open."
-              }
-            >
-              {snapshot?.waitingForPerson === undefined
-                ? `· ${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
-                : "· Person hold"}
-            </span>
-          ) : null}
-        </span>
-        {activeContext && personHasPage && props.client.handBack !== undefined ? (
-          <OctantButton
-            aria-label="Hand back"
-            className="browser-workspace__take-over"
-            onClick={() => void holdPage("hand-back")}
-            size="xs"
-            title="You have the page. Hand it back to let the agent use it again."
-            type="button"
-            variant="secondary"
-          >
-            <Undo2 aria-hidden="true" />
-            <span className="browser-workspace__take-over-label">Hand back</span>
-          </OctantButton>
-        ) : null}
-        {activeContext &&
-        snapshot?.ownerController !== undefined &&
-        props.client.takeOver !== undefined ? (
-          <OctantButton
-            aria-label="Reclaim locally"
-            className="browser-workspace__take-over"
-            onClick={() => void holdPage("take-over")}
-            size="xs"
-            title="Stop remote owner control and keep the page held locally"
-            type="button"
-            variant="secondary"
-          >
-            <Laptop aria-hidden="true" />
-            <span className="browser-workspace__reclaim-label">Reclaim locally</span>
-          </OctantButton>
-        ) : null}
-        {activeContext &&
-        snapshot?.waitingForPerson === undefined &&
-        props.client.takeOver !== undefined ? (
-          <OctantButton
-            aria-label="Take over"
-            className="browser-workspace__take-over"
-            onClick={() => void holdPage("take-over")}
-            size="xs"
-            title="Hold the agent's Browser calls while you use the page"
-            type="button"
-            variant="ghost"
-          >
-            <Hand aria-hidden="true" />
-            <span className="browser-workspace__take-over-label">Take over</span>
-          </OctantButton>
-        ) : null}
-        {activeContext && props.client.takeCapture !== undefined ? (
-          <OctantButton
-            aria-label="Screenshot"
-            className="browser-workspace__close"
-            disabled={capturing}
-            onClick={() => void takeScreenshot()}
-            size="icon"
-            title="Screenshot (kept with this thread)"
-            type="button"
-            variant="ghost"
-          >
-            <Camera aria-hidden="true" size={14} />
-          </OctantButton>
-        ) : null}
-        {activeContext ? (
-          props.hostBridge?.openBrowserExternal === undefined ? null : (
+        <div className="browser-workspace__nav">
+          <div className="browser-workspace__history" aria-label="Browser history controls">
             <OctantButton
-              aria-label="Open in default browser"
-              className="browser-workspace__close"
-              onClick={() => {
-                const target = validTargetUrl(committedAddress ?? url);
-                if (target !== undefined) void props.hostBridge!.openBrowserExternal!(target);
-              }}
+              aria-label="Back"
+              className="browser-workspace__history-button"
+              disabled={!nativeContext || !nativeState?.canGoBack}
+              onClick={() => nativeCommand("back")}
               size="icon"
-              title="Open in default browser"
               type="button"
               variant="ghost"
             >
-              <ExternalLink aria-hidden="true" size={14} />
+              <ArrowLeft aria-hidden="true" size={14} />
             </OctantButton>
-          )
-        ) : null}
-        {props.onDockResearch === undefined || props.tab.threadId === undefined ? null : (
-          <OctantButton
-            aria-label="Dock in the focus zone"
-            className="browser-workspace__close"
-            onClick={() =>
-              props.onDockResearch?.({
-                threadId: String(props.tab.threadId),
-                mode: props.tab.mode,
-              })
+            <OctantButton
+              aria-label="Forward"
+              className="browser-workspace__history-button"
+              disabled={!nativeContext || !nativeState?.canGoForward}
+              onClick={() => nativeCommand("forward")}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <ArrowRight aria-hidden="true" size={14} />
+            </OctantButton>
+            <OctantButton
+              aria-label={nativeState?.loading ? "Stop loading" : "Reload"}
+              className="browser-workspace__history-button"
+              disabled={!activeContext}
+              onClick={() => {
+                if (nativeContext) {
+                  nativeCommand(nativeState?.loading ? "stop" : "reload");
+                } else if (!nativeState?.loading) {
+                  // Reload must use the committed page, not an unsubmitted omnibox draft.
+                  const target = committedAddress ?? validTargetUrl(url);
+                  if (target !== undefined) {
+                    void act("navigate", { target });
+                  }
+                }
+              }}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              {nativeState?.loading ? (
+                <X aria-hidden="true" size={14} />
+              ) : (
+                <RotateCw aria-hidden="true" size={14} />
+              )}
+            </OctantButton>
+          </div>
+          <BrowserProfileControl
+            accounts={accounts}
+            disabled={
+              starting ||
+              selectingTaskProfile ||
+              (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
             }
-            size="icon"
-            title="Dock in the focus zone"
-            type="button"
-            variant="ghost"
+            {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
+            onChange={(choice) => void chooseProfile(choice)}
+            profile={
+              taskProfileApplies
+                ? (taskProfile?.profile ?? "private")
+                : activeContext
+                  ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
+                  : profileChoice
+            }
+            projectProfileAvailable
+            signedInPagesAvailable={nativeSupported}
+            {...(taskProfileApplies || props.client.manageProfiles === undefined
+              ? {}
+              : { onSignOut: () => signOutOfProfile() })}
+          />
+          {nativeContext &&
+          activeContext &&
+          snapshot?.context !== undefined &&
+          (snapshot.context.authority.mode === "work" ||
+            snapshot.context.authority.mode === "code") ? (
+            <BrowserCredentialBindingControl
+              key={String(snapshot.context.contextId)}
+              client={props.client}
+              context={{
+                contextId: snapshot.context.contextId,
+                threadId: snapshot.context.threadId,
+                mode: snapshot.context.authority.mode,
+              }}
+              profile={snapshot.context.policy.profile ?? { kind: "private" }}
+              held={snapshot.waitingForPerson !== undefined}
+            />
+          ) : null}
+          {nativeContext && activeContext ? (
+            <BrowserExtensionsButton
+              agentDriving={nativeState?.control === "agent"}
+              client={props.client}
+              hostBridge={props.hostBridge}
+              profile={storedProfileOf(snapshot?.context?.policy.profile)}
+              refreshKey={
+                snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
+              }
+              {...(props.onManageExtensions === undefined
+                ? {}
+                : { onManage: props.onManageExtensions })}
+            />
+          ) : null}
+          <form
+            className="browser-workspace__omnibox"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void navigate();
+            }}
           >
-            <PanelRight aria-hidden="true" size={14} />
-          </OctantButton>
-        )}
-        {activeContext ? (
-          <OctantButton
-            aria-label="Stop"
-            className="browser-workspace__close"
-            onClick={() => void stop(false)}
-            size="icon"
-            type="button"
-            variant="ghost"
+            <span
+              aria-label={addressSecurityLabel}
+              className="browser-workspace__security"
+              title={
+                committedAddress === undefined
+                  ? "Enter an HTTP or HTTPS address"
+                  : secureAddress
+                    ? "Secure HTTPS connection"
+                    : "HTTP connection is not secure"
+              }
+            >
+              {secureAddress ? (
+                <LockKeyhole aria-hidden="true" size={12} />
+              ) : (
+                <Globe2 aria-hidden="true" size={12} />
+              )}
+            </span>
+            <span className="browser-workspace__address">
+              <OctantInput
+                aria-label="Browser URL"
+                onChange={(event) => {
+                  setAddressTyped(true);
+                  setUrl(event.target.value);
+                }}
+                placeholder="Enter an address"
+                spellCheck={false}
+                type="text"
+                value={url}
+              />
+              <MiddleTruncatedText
+                ariaHidden
+                className="browser-workspace__address-preview"
+                value={url}
+              />
+            </span>
+          </form>
+        </div>
+        <div className="browser-workspace__tools">
+          <BrowserAgentStatus
+            agentDriving={nativeState?.control === "agent"}
+            availability={agentAvailability}
+            {...(props.onAgentBrowserRecovery === undefined
+              ? {}
+              : { onRecover: props.onAgentBrowserRecovery })}
+          />
+          <span
+            className="browser-workspace__control-state"
+            title={
+              nativeContext
+                ? "You and the agent share this live Chromium page."
+                : "Click, type, and scroll this headless page through the shared Browser context."
+            }
           >
-            <X aria-hidden="true" size={14} />
-          </OctantButton>
-        ) : null}
-        <span aria-live="polite" className="sr-only">
-          <span>{statusLabel(status)}</span>
-          {snapshot?.observation?.title === undefined ? null : (
-            <span>{snapshot.observation.title}</span>
+            {nativeState?.loading || nativeState?.control === "agent" ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="browser-workspace__control-spinner"
+                size={12}
+              />
+            ) : null}
+            {/* Shown only when a narrow tile leaves no room for the words. */}
+            <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
+            <span>{controlLabel}</span>
+            {activeContext ? (
+              <span
+                title={
+                  snapshot?.waitingForPerson === undefined
+                    ? "Authorized Browser work and person input renew this idle interval. Preview polling does not."
+                    : "The handoff has its own finite retention window; waiting agent calls do not keep it open."
+                }
+              >
+                {snapshot?.waitingForPerson === undefined
+                  ? `· ${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
+                  : "· Person hold"}
+              </span>
+            ) : null}
+          </span>
+          {activeContext && personHasPage && props.client.handBack !== undefined ? (
+            <OctantButton
+              aria-label="Hand back"
+              className="browser-workspace__take-over"
+              onClick={() => void holdPage("hand-back")}
+              size="xs"
+              title="You have the page. Hand it back to let the agent use it again."
+              type="button"
+              variant="secondary"
+            >
+              <Undo2 aria-hidden="true" />
+              <span className="browser-workspace__take-over-label">Hand back</span>
+            </OctantButton>
+          ) : null}
+          {activeContext &&
+          snapshot?.ownerController !== undefined &&
+          props.client.takeOver !== undefined ? (
+            <OctantButton
+              aria-label="Reclaim locally"
+              className="browser-workspace__take-over"
+              onClick={() => void holdPage("take-over")}
+              size="xs"
+              title="Stop remote owner control and keep the page held locally"
+              type="button"
+              variant="secondary"
+            >
+              <Laptop aria-hidden="true" />
+              <span className="browser-workspace__reclaim-label">Reclaim locally</span>
+            </OctantButton>
+          ) : null}
+          {activeContext &&
+          snapshot?.waitingForPerson === undefined &&
+          props.client.takeOver !== undefined ? (
+            <OctantButton
+              aria-label="Take over"
+              className="browser-workspace__take-over"
+              onClick={() => void holdPage("take-over")}
+              size="xs"
+              title="Hold the agent's Browser calls while you use the page"
+              type="button"
+              variant="ghost"
+            >
+              <Hand aria-hidden="true" />
+              <span className="browser-workspace__take-over-label">Take over</span>
+            </OctantButton>
+          ) : null}
+          {activeContext && props.client.takeCapture !== undefined ? (
+            <OctantButton
+              aria-label="Screenshot"
+              className="browser-workspace__close"
+              disabled={capturing}
+              onClick={() => void takeScreenshot()}
+              size="icon"
+              title="Screenshot (kept with this thread)"
+              type="button"
+              variant="ghost"
+            >
+              <Camera aria-hidden="true" size={14} />
+            </OctantButton>
+          ) : null}
+          {activeContext &&
+          props.canDrawOnPage === true &&
+          props.tab.threadId !== undefined &&
+          props.client.takeCapture !== undefined &&
+          props.client.readCapture !== undefined ? (
+            <OctantButton
+              ref={drawButton}
+              aria-label="Draw on page"
+              className="browser-workspace__close"
+              disabled={capturing || markupPicture !== undefined || feedbackPointing.pointing}
+              onClick={() => void startMarkup()}
+              size="icon"
+              title={
+                feedbackPointing.pointing
+                  ? "Finish or cancel pointing at an element before drawing on the page"
+                  : markupPicture !== undefined
+                    ? "A drawing is already open"
+                    : "Draw on page (keeps a screenshot with this thread)"
+              }
+              type="button"
+              variant="ghost"
+            >
+              <PenLine aria-hidden="true" size={14} />
+            </OctantButton>
+          ) : null}
+          {activeContext ? (
+            props.hostBridge?.openBrowserExternal === undefined ? null : (
+              <OctantButton
+                aria-label="Open in default browser"
+                className="browser-workspace__close"
+                onClick={() => {
+                  const target = validTargetUrl(committedAddress ?? url);
+                  if (target !== undefined) void props.hostBridge!.openBrowserExternal!(target);
+                }}
+                size="icon"
+                title="Open in default browser"
+                type="button"
+                variant="ghost"
+              >
+                <ExternalLink aria-hidden="true" size={14} />
+              </OctantButton>
+            )
+          ) : null}
+          {props.onDockResearch === undefined || props.tab.threadId === undefined ? null : (
+            <OctantButton
+              aria-label="Dock in the focus zone"
+              className="browser-workspace__close"
+              onClick={() =>
+                props.onDockResearch?.({
+                  threadId: String(props.tab.threadId),
+                  mode: props.tab.mode,
+                })
+              }
+              size="icon"
+              title="Dock in the focus zone"
+              type="button"
+              variant="ghost"
+            >
+              <PanelRight aria-hidden="true" size={14} />
+            </OctantButton>
           )}
-        </span>
+          {activeContext ? (
+            <OctantButton
+              aria-label="Stop"
+              className="browser-workspace__close"
+              onClick={() => void stop(false)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={14} />
+            </OctantButton>
+          ) : null}
+          <span aria-live="polite" className="sr-only">
+            <span>{statusLabel(status)}</span>
+            {snapshot?.observation?.title === undefined ? null : (
+              <span>{snapshot.observation.title}</span>
+            )}
+          </span>
+        </div>
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
         <OctantAlert tone="warning">
@@ -1336,7 +1512,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </OctantAlert>
       ) : null}
       {notice === undefined ? null : (
-        <OctantAlert className="browser-workspace__message" tone="warning">
+        <OctantAlert
+          className={
+            message === undefined && captureNoticeTone !== "warning"
+              ? "browser-workspace__notice"
+              : "browser-workspace__message"
+          }
+          tone={message === undefined ? captureNoticeTone : "warning"}
+        >
           {notice}
         </OctantAlert>
       )}
@@ -1459,6 +1642,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ref={nativeSurface.mount}
         >
           {nativeSurface.embedded}
+          {markupPicture === undefined ? null : (
+            <BrowserMarkupStage
+              dataUrl={markupPicture}
+              notice={markupNotice}
+              onAddToChat={addMarkupToMessage}
+              onClose={closeMarkup}
+            />
+          )}
           {nativeSurface.failed ? (
             <OctantAlert className="browser-workspace__native-error" tone="danger">
               <p>The live Chromium page could not attach to this pane.</p>
@@ -1467,6 +1658,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               </OctantButton>
             </OctantAlert>
           ) : null}
+        </div>
+      ) : markupPicture !== undefined ? (
+        // The headless preview's click-through handlers are not mounted while
+        // the picture is drawn on, so a stroke can never click the page.
+        <div className="browser-workspace__markup-page">
+          <BrowserMarkupStage
+            dataUrl={markupPicture}
+            notice={markupNotice}
+            onAddToChat={addMarkupToMessage}
+            onClose={closeMarkup}
+          />
         </div>
       ) : (
         <article
@@ -1686,7 +1888,10 @@ function statusLabel(status: BrowserWorkspaceStatus): string {
   return `Browser ${status}`;
 }
 
-function captureNotKeptNotice(reason: BrowserCaptureNotKeptReason): string {
+function captureNotKeptNotice(
+  reason: BrowserCaptureNotKeptReason,
+  purpose: "screenshot" | "drawing" = "screenshot",
+): string {
   const why: Record<BrowserCaptureNotKeptReason, string> = {
     "too-large": "the picture is too large",
     "not-an-image": "the host did not recognise it as an image",
@@ -1694,6 +1899,12 @@ function captureNotKeptNotice(reason: BrowserCaptureNotKeptReason): string {
     "no-picture": "the Browser gave no picture of this page",
     unavailable: "the host could not store it",
   };
+  if (purpose === "drawing") {
+    // Draw on page keeps a screenshot to draw on, so the words say what is missing.
+    return reason === "no-picture"
+      ? "There is nothing to draw on: the Browser gave no picture of this page. A page with a sign-in field is never pictured."
+      : `There is nothing to draw on: the screenshot could not be kept, because ${why[reason]}.`;
+  }
   return `This screenshot could not be kept: ${why[reason]}.`;
 }
 

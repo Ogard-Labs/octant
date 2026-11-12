@@ -1125,4 +1125,26 @@ describe("Journal", () => {
     expect(rowCount(connection, "event_journal")).toBe(1);
     connection.close();
   });
+  it("decodes only the rows after a verified sequence and still finds a bad row there", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    journal.append(
+      appendRequest([pendingEvent(ids.event1), pendingEvent(ids.event2), pendingEvent(ids.event3)]),
+    );
+    connection
+      .prepare("UPDATE event_journal SET payload_json = '{\"value\":42}' WHERE global_sequence = ?")
+      .run(3);
+
+    const skipped = journal.inspectCompatibility(100, 3);
+    const fromTheStart = journal.inspectCompatibility();
+    const afterTwo = journal.inspectCompatibility(100, 2);
+
+    expect(skipped).toEqual({ compatible: true });
+    expect(fromTheStart).toMatchObject({
+      compatible: false,
+      issue: { globalSequence: 3, reason: "event-payload-invalid" },
+    });
+    expect(afterTwo).toMatchObject({ compatible: false, issue: { globalSequence: 3 } });
+    connection.close();
+  });
 });

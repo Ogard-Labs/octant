@@ -1,3 +1,4 @@
+export * from "./agentAccessProof";
 export * from "./browserAgentAvailability";
 export * from "./questionnaire";
 export * from "./browserAutomationPolicy";

@@ -58,7 +58,7 @@
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.35;
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -72,7 +72,7 @@
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
+  line-height: var(--oct-leading-snug);
   text-transform: none;
 }
 
@@ -80,19 +80,19 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
-  line-height: 1.35;
+  line-height: var(--oct-leading-label);
 }
 
 .oct-row-detail {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
-  line-height: 1.45;
+  line-height: var(--oct-leading-detail);
 }
 
 .oct-meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  line-height: var(--oct-leading-meta);
 }
 
 .oct-meta--mono {
@@ -876,13 +876,24 @@
     top: var(--oct-title-rail-h);
     right: var(--octant-sheet-inset);
     bottom: var(--octant-sheet-inset);
-    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+    border-radius: 0 var(--oct-radius-md) var(--octant-sheet-corner-outer) 0;
   }
 
   .shell--app-backdrop.shell-frame.shell--app-backdrop-sidebar
     > .app-backdrop[data-placement="shell"] {
     left: var(--octant-rail-offset, 0px);
-    border-radius: var(--oct-radius-md);
+    border-radius: var(--oct-radius-md) var(--oct-radius-md) var(--octant-sheet-corner-outer)
+      var(--oct-radius-md);
+  }
+
+  /* With no rail the ground reaches the window's left edge, as the sheet does,
+     and square there: a rounded left corner showed a nick of frame colour. */
+  .shell--app-backdrop.shell-frame.shell--app-backdrop-sidebar:not(
+      .shell--rail-beside,
+      .shell--sidebar-rail
+    )
+    > .app-backdrop[data-placement="shell"] {
+    border-radius: 0 var(--oct-radius-md) var(--octant-sheet-corner-outer) 0;
   }
 
   /* Under Glass the sidebar's nearly clear sheet cannot quiet a ground that

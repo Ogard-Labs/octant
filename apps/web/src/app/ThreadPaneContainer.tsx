@@ -150,7 +150,6 @@ export interface ThreadPaneContainerProps {
     | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setProjectWorkDeveloperTools"
-    | "setThreadStatsVisible"
     | "setUsageOpen"
     | "setWorkComposerSelection"
     | "spendRevealChatTurn"
@@ -420,7 +419,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectActions,
     setProjectWorkStatusFile,
     setProjectWorkDeveloperTools,
-    setThreadStatsVisible,
     setUsageOpen,
     setWorkComposerSelection,
     spendRevealChatTurn,
@@ -515,8 +513,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
       <AgentProfileNamesProvider profiles={agentProfiles}>
         <SelectionThreadStarterContext.Provider value={startThreadFromSelection}>
           <ThreadStatsProvider
-            lineVisible={settings.showThreadStats ?? true}
-            onLineVisibleChange={setThreadStatsVisible}
             subjectKey={contextSubject?.aggregateId}
             summary={threadStatsSummary}
           >

@@ -20,6 +20,7 @@ import {
   type ProjectOverviewDraftRef,
 } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
@@ -1190,35 +1191,43 @@ function CrossContextBanner(props: {
   readonly onDismiss?: () => void;
   readonly onOpenInNewWindow?: () => void;
 }) {
+  const actions = (
+    <>
+      {props.onOpenInNewWindow === undefined ? null : (
+        <OctantButton
+          className="workspace-cross-context-banner__new-window"
+          onClick={props.onOpenInNewWindow}
+          type="button"
+          variant="secondary"
+        >
+          Open in new window
+        </OctantButton>
+      )}
+      {props.onDismiss === undefined ? null : (
+        <OctantButton
+          className="workspace-cross-context-banner__dismiss"
+          onClick={props.onDismiss}
+          type="button"
+          variant="ghost"
+        >
+          Dismiss
+        </OctantButton>
+      )}
+    </>
+  );
+  // Beside a composer the offer is one of its notice cards, above the pill;
+  // with no composer to stand beside it keeps the banner at the window's top.
+  if (props.inline)
+    return (
+      <OctantAlert action={actions} className="composer-notice" role="alert">
+        {props.message}
+      </OctantAlert>
+    );
   return (
     /* ui-boundary-exception: positioned-banner */
-    <div
-      className={`workspace-cross-context-banner${props.inline ? " workspace-cross-context-banner--inline" : ""}`}
-      role="alert"
-    >
+    <div className="workspace-cross-context-banner" role="alert">
       <span className="workspace-cross-context-banner__message">{props.message}</span>
-      <span className="workspace-cross-context-banner__actions">
-        {props.onOpenInNewWindow === undefined ? null : (
-          <OctantButton
-            className="workspace-cross-context-banner__new-window"
-            onClick={props.onOpenInNewWindow}
-            type="button"
-            variant="secondary"
-          >
-            Open in new window
-          </OctantButton>
-        )}
-        {props.onDismiss === undefined ? null : (
-          <OctantButton
-            className="workspace-cross-context-banner__dismiss"
-            onClick={props.onDismiss}
-            type="button"
-            variant="ghost"
-          >
-            Dismiss
-          </OctantButton>
-        )}
-      </span>
+      <span className="workspace-cross-context-banner__actions">{actions}</span>
     </div>
   );
 }
@@ -2186,6 +2195,7 @@ function renderNonCodeTab(
     ) : (
       <BrowserWorkspace
         key={tab.id}
+        canDrawOnPage
         client={props.browserAutomationClient}
         onAgentBrowserRecovery={(reason) => {
           if (tab.threadId === undefined) return;

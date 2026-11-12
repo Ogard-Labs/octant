@@ -102,7 +102,7 @@
   --octant-accent: #5b9cf5;
   --octant-accent-foreground: #141414;
   --octant-accent-text: #5b9cf5;
-  --octant-divider-strong: #808080;
+  --octant-divider-strong: #8a8a8a;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
   --octant-shadow-xs:
@@ -663,7 +663,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   position: fixed;
   right: 16px;
   bottom: 16px;
-  z-index: 80;
+  z-index: var(--oct-z-toast);
   display: grid;
   width: min(340px, calc(100vw - 32px));
   max-height: min(440px, calc(100vh - 32px));
@@ -804,7 +804,7 @@ h6 {
 }
 
 .octant-menu__positioner {
-  z-index: 80;
+  z-index: var(--oct-z-popup);
   max-width: calc(100vw - 16px);
   outline: 0;
 }
@@ -954,9 +954,15 @@ h6 {
   display: grid;
   gap: 8px;
 }
+/* A group heading is a section label: the recipe's size, weight and leading
+   in the secondary ink. */
 .activity-nav__group > h2 {
   margin-bottom: 0;
-  font-weight: 400;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: var(--oct-leading-snug);
 }
 
 .activity-nav__group > .sidebar-section {
@@ -985,8 +991,17 @@ h6 {
   font: inherit;
 }
 
+/* The button paints its own ink, so the heading's secondary ink is set on the
+   word. */
+.activity-nav__fold > span:first-child {
+  color: var(--oct-muted);
+}
+
 .activity-nav__fold-count {
   color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: normal;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1029,6 +1044,13 @@ h6 {
   min-height: var(--oct-nav-head-h);
   padding-inline: 10px;
   gap: 6px;
+}
+
+/* The account's name is a row label: primary ink, the role's size and leading. */
+.sidebar-profile .sidebar-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-label);
 }
 
 .sidebar-profile__chevron {
@@ -1173,35 +1195,11 @@ h6 {
   backdrop-filter: blur(10px) saturate(110%);
 }
 
-.composer--has-notice {
-  position: relative;
-  isolation: isolate;
-}
-
-.workspace-cross-context-banner--inline {
-  position: absolute;
-  top: auto;
-  bottom: calc(100% - 8px);
-  left: 0;
-  z-index: -1;
-  width: 100%;
-  transform: none;
-  margin: 0;
-  padding-bottom: var(--oct-space-4);
-  animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
-}
-
 .composer-notice-fallback {
   position: absolute;
   inset-inline: 16px;
   bottom: 16px;
   z-index: 20;
-}
-
-.composer-notice-fallback > .workspace-cross-context-banner--inline {
-  position: relative;
-  bottom: auto;
-  z-index: 0;
 }
 
 @keyframes composer-notice-reveal {
@@ -1213,16 +1211,6 @@ h6 {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workspace-cross-context-banner--inline {
-    animation: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline {
-  animation: none;
 }
 
 .workspace-cross-context-banner__message {
@@ -1316,9 +1304,18 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
   height: 1px;
 }
 
-.workspace-split__resize:hover::before,
-.workspace-split__resize:focus-visible::before {
-  background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
+.workspace-split__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.workspace-split[data-orientation="horizontal"] > .workspace-split__resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
+}
+
+.workspace-split[data-orientation="vertical"] > .workspace-split__resize:active::before {
+  height: 2px;
+  background: var(--oct-meta);
 }
 
 .workspace-split__resize-input {
@@ -1538,14 +1535,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 4px;
 }
 
+/* Also carries `oct-page-title`, which owns the size, weight, leading and
+   truncation; this rule only gives it its share of the row. */
 .workspace-pane__title {
   flex: 0 8 auto;
   min-width: 0;
-  overflow: hidden;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* The breadcrumb's first step: the Project the pane runs in, as plain meta
@@ -1559,8 +1553,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   max-width: 32ch;
   overflow: hidden;
   color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1568,7 +1563,22 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .workspace-pane__crumb {
   flex: none;
   color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-meta);
+}
+
+/* An outside agent started this thread. Meta text after the title, cut before
+   the title is, so the thread's name stays readable. */
+.workspace-pane__started-by {
+  flex: 0 4 auto;
+  min-width: 0;
+  max-width: 24ch;
+  overflow: hidden;
+  color: var(--oct-meta);
   font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A phone header is about 340px wide, and the title is what names the pane;
@@ -5387,7 +5397,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-label);
 }
 
 .composer-model-picker__model-detail {

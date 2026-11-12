@@ -91,7 +91,7 @@ describe("terminal color projection", () => {
     });
     expect(resolveTerminalColorProjection(dark)).toMatchObject({
       scrollbarThumb: "#4d4d4d",
-      scrollbarThumbHover: "#808080",
+      scrollbarThumbHover: "#8a8a8a",
     });
     expect(
       resolveTerminalColorProjection(

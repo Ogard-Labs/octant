@@ -6,15 +6,16 @@ import {
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import {
   ComposerContextMeterGate,
   ComposerContextMeterProvider,
 } from "../context/composerContextMeterScope";
+import { ThreadInfo } from "../composer/ThreadInfo";
 import { ThreadComposer } from "../composer/ThreadComposer";
-import { ThreadStats } from "./ThreadStats";
+import { ThreadStatsBlock } from "./ThreadStats";
 import { ThreadStatsDetailDialog } from "./ThreadStatsDetail";
 import { ThreadStatsProvider } from "./threadStatsScope";
 
@@ -76,22 +77,11 @@ function Harness(props: {
   readonly limits?: ReadonlyArray<CodeProviderLimit>;
   /** Whether this composer is the active pane, which is the only one the meter's figures belong to. */
   readonly paneActive?: boolean;
-  readonly initiallyVisible?: boolean;
-  readonly onVisibleChange?: (visible: boolean) => void;
   /** What stands in the composer's place; the bare stats line when absent. */
   readonly children?: ReactNode;
 }) {
-  const [visible, setVisible] = useState(props.initiallyVisible ?? true);
   return (
-    <ThreadStatsProvider
-      lineVisible={visible}
-      onLineVisibleChange={(next) => {
-        setVisible(next);
-        props.onVisibleChange?.(next);
-      }}
-      subjectKey="thread-a"
-      summary={props.summary}
-    >
+    <ThreadStatsProvider subjectKey="thread-a" summary={props.summary}>
       <ComposerContextMeterProvider
         status="not-planned"
         subjectKey="code-thread:a"
@@ -99,7 +89,7 @@ function Harness(props: {
       >
         <ComposerContextMeterGate enabled={props.paneActive ?? true}>
           <ComposerContextMeter />
-          {props.children ?? <ThreadStats />}
+          {props.children === undefined ? <ThreadStatsBlock /> : props.children}
           <ThreadStatsDetailDialog />
         </ComposerContextMeterGate>
       </ComposerContextMeterProvider>
@@ -112,12 +102,12 @@ function figures(line: HTMLElement): ReadonlyArray<string> {
   return Array.from(line.querySelectorAll(".thread-stats__item"), (item) => item.textContent);
 }
 
-describe("the thread stats line", () => {
-  it("states every reported figure under the composer", () => {
+describe("the thread stats block", () => {
+  it("states every reported figure in the Thread info panel", () => {
     const record = turn();
     render(<Harness summary={summaryOf([record])} />);
 
-    const line = screen.getByTestId("thread-stats-line");
+    const line = screen.getByTestId("thread-stats-block");
     expect(figures(line)).toEqual([
       "1 turn",
       "↑ 48k in",
@@ -129,52 +119,6 @@ describe("the thread stats line", () => {
     ]);
   });
 
-  it("leads with the provider's account windows as the share left", () => {
-    render(
-      <Harness
-        limits={[
-          { window: "five_hour", status: "allowed", utilization: 0.12 },
-          { window: "seven_day", status: "allowed", utilization: 0.62 },
-        ]}
-        summary={summaryOf([turn()])}
-      />,
-    );
-
-    const line = screen.getByTestId("thread-stats-line");
-    expect(within(line).getByText("5h")).toBeInTheDocument();
-    expect(within(line).getByText("88%")).toBeInTheDocument();
-    expect(within(line).getByText("week")).toBeInTheDocument();
-    expect(within(line).getByText("38%")).toBeInTheDocument();
-    expect(line).toHaveTextContent("5h88%week38%");
-    expect(
-      screen.getByRole("button", {
-        name: /^Thread stats: 5-hour limit 88% left, 7-day limit 38% left/,
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the windows alone before any turn is recorded", () => {
-    render(
-      <Harness
-        limits={[{ window: "five_hour", status: "warning", utilization: 0.85 }]}
-        summary={undefined}
-      />,
-    );
-
-    const line = screen.getByTestId("thread-stats-line");
-    // A meter standing alone carries no name on the row: the bar and its
-    // figure say what it is, and its accessible name says which window.
-    expect(within(line).queryByText("5h")).not.toBeInTheDocument();
-    expect(within(line).getByRole("img", { name: "5-hour limit, 15% left" })).toBeInTheDocument();
-    expect(within(line).getByText("15%")).toBeInTheDocument();
-    expect(line.querySelector('[data-level="near"]')).not.toBeNull();
-    // No turn means no turn detail to open, so the line must not offer to open it.
-    expect(screen.queryByRole("button", { name: /Open turn details/ })).toBeNull();
-    expect(
-      screen.getByRole("group", { name: /^Thread stats: 5-hour limit 15% left/ }),
-    ).toBeVisible();
-  });
-
   it("shows no stats line in an inactive pane, so it never carries another thread's figures", () => {
     render(
       <Harness
@@ -184,35 +128,30 @@ describe("the thread stats line", () => {
       />,
     );
 
-    expect(screen.queryByTestId("thread-stats-line")).toBeNull();
+    expect(screen.queryByTestId("thread-stats-block")).toBeNull();
   });
 
   it("shows the stats line only in the active pane of a split workspace", () => {
     render(
-      <ThreadStatsProvider
-        lineVisible
-        onLineVisibleChange={() => undefined}
-        subjectKey="thread-a"
-        summary={summaryOf([turn()])}
-      >
+      <ThreadStatsProvider subjectKey="thread-a" summary={summaryOf([turn()])}>
         <ComposerContextMeterProvider status="not-planned" subjectKey="code-thread:a">
           <ComposerContextMeterGate enabled={false}>
-            <ThreadStats />
+            <ThreadStatsBlock />
           </ComposerContextMeterGate>
           <ComposerContextMeterGate enabled>
-            <ThreadStats />
+            <ThreadStatsBlock />
           </ComposerContextMeterGate>
         </ComposerContextMeterProvider>
       </ThreadStatsProvider>,
     );
 
-    expect(screen.getAllByTestId("thread-stats-line")).toHaveLength(1);
+    expect(screen.getAllByTestId("thread-stats-block")).toHaveLength(1);
   });
 
   it("shows no line for a provider that reported neither usage nor windows", () => {
     render(<Harness summary={undefined} />);
 
-    expect(screen.queryByTestId("thread-stats-line")).toBeNull();
+    expect(screen.queryByTestId("thread-stats-block")).toBeNull();
   });
 
   it("never rounds a partial cache hit up to a whole", () => {
@@ -221,8 +160,8 @@ describe("the thread stats line", () => {
     });
     render(<Harness summary={summaryOf([record])} />);
 
-    expect(screen.getByTestId("thread-stats-line")).toHaveTextContent("cache 99.95%");
-    expect(screen.getByTestId("thread-stats-line")).not.toHaveTextContent("cache 100%");
+    expect(screen.getByTestId("thread-stats-block")).toHaveTextContent("cache 99.95%");
+    expect(screen.getByTestId("thread-stats-block")).not.toHaveTextContent("cache 100%");
   });
 
   it("marks an approximate speed with a tilde", () => {
@@ -239,7 +178,7 @@ describe("the thread stats line", () => {
     });
     render(<Harness summary={summaryOf([record])} />);
 
-    const line = screen.getByTestId("thread-stats-line");
+    const line = screen.getByTestId("thread-stats-block");
     expect(line).toHaveTextContent("~41 tok/s");
     expect(within(line).getByText("~41 tok/s")).toHaveAttribute("data-hinted", "true");
   });
@@ -248,7 +187,7 @@ describe("the thread stats line", () => {
     const record = turn({ metrics: { precision: "unavailable", wallMs: 5_000 } });
     render(<Harness summary={summaryOf([record])} />);
 
-    const line = screen.getByTestId("thread-stats-line");
+    const line = screen.getByTestId("thread-stats-block");
     expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(line).not.toHaveTextContent("tok/s");
     expect(line).not.toHaveTextContent("first token");
@@ -258,7 +197,7 @@ describe("the thread stats line", () => {
     const record = turn({ usage: { inputTokens: 48_000, outputTokens: 3_100 } });
     render(<Harness summary={summaryOf([record])} />);
 
-    expect(screen.getByTestId("thread-stats-line")).not.toHaveTextContent("cache");
+    expect(screen.getByTestId("thread-stats-block")).not.toHaveTextContent("cache");
   });
 
   it("drops est. when the provider reported the cost", () => {
@@ -267,7 +206,7 @@ describe("the thread stats line", () => {
     });
     render(<Harness summary={summaryOf([record])} />);
 
-    const line = screen.getByTestId("thread-stats-line");
+    const line = screen.getByTestId("thread-stats-block");
     expect(line).toHaveTextContent("$0.12");
     expect(line).not.toHaveTextContent("est.");
   });
@@ -276,103 +215,20 @@ describe("the thread stats line", () => {
     const record = turn({ modelId: "local-unpriced" as never });
     render(<Harness summary={summaryOf([record])} />);
 
-    expect(screen.getByTestId("thread-stats-line")).not.toHaveTextContent("$");
+    expect(screen.getByTestId("thread-stats-block")).not.toHaveTextContent("$");
   });
 
   it("shows no line for a provider that reported no usage and no timing", () => {
     const record = turn({ usage: undefined, metrics: { precision: "unavailable", wallMs: 2_000 } });
     render(<Harness summary={summaryOf([record])} />);
 
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-stats-block")).not.toBeInTheDocument();
   });
 
   it("shows no line before the host has recorded a turn", () => {
     render(<Harness summary={undefined} />);
 
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-  });
-});
-
-describe("the stats line in a thread's composer", () => {
-  function FollowUpComposer() {
-    return (
-      <ThreadComposer
-        context={<span>Project · branch</span>}
-        input={<textarea aria-label="Message" className="composer-input" />}
-        presentation="follow-up"
-        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
-      />
-    );
-  }
-  const limits: ReadonlyArray<CodeProviderLimit> = [
-    { window: "five_hour", status: "allowed", utilization: 0.12 },
-    { window: "seven_day", status: "allowed", utilization: 0.62 },
-  ];
-
-  it("states the figures under the composer's line of facts and the plan windows in that line", () => {
-    const { container } = render(
-      <Harness limits={limits} summary={summaryOf([turn()])}>
-        <FollowUpComposer />
-      </Harness>,
-    );
-
-    const under = container.querySelector(".composer-under");
-    const line = screen.getByTestId("thread-stats-line");
-    expect(container.querySelector(".thread-composer__surface")?.nextElementSibling).toBe(under);
-    // The line of facts is the last row of the composer's frame; the figures
-    // stand on the page under it.
-    const frame = under?.parentElement;
-    expect(frame).toHaveClass("composer-frame");
-    expect(frame?.nextElementSibling).toBe(line);
-    expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
-    expect(within(line).queryByText("5h")).not.toBeInTheDocument();
-    expect(under).toHaveTextContent("Project · branch");
-    expect(
-      within(under as HTMLElement).getByRole("group", { name: "Plan usage left" }),
-    ).toHaveTextContent("5h88%week38%");
-  });
-
-  it("keeps the plan windows under the composer when the stats line is hidden", () => {
-    const { container } = render(
-      <Harness initiallyVisible={false} limits={limits} summary={summaryOf([turn()])}>
-        <FollowUpComposer />
-      </Harness>,
-    );
-
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-    expect(container.querySelector(".composer-under")).toHaveTextContent("5h88%week38%");
-  });
-});
-
-describe("hiding the stats line", () => {
-  it("hides from the line's own control and reports the choice", async () => {
-    const user = userEvent.setup();
-    const onVisibleChange = vi.fn();
-    render(<Harness onVisibleChange={onVisibleChange} summary={summaryOf([turn()])} />);
-
-    await user.click(screen.getByRole("button", { name: "Hide stats line" }));
-
-    expect(onVisibleChange).toHaveBeenCalledWith(false);
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-  });
-
-  it("shows it again from the switch in the context meter", async () => {
-    const user = userEvent.setup();
-    const onVisibleChange = vi.fn();
-    render(
-      <Harness
-        initiallyVisible={false}
-        onVisibleChange={onVisibleChange}
-        summary={summaryOf([turn()])}
-      />,
-    );
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /Show context usage/ }));
-    await user.click(screen.getByRole("switch", { name: "Stats line under the composer" }));
-
-    expect(onVisibleChange).toHaveBeenCalledWith(true);
-    expect(screen.getByTestId("thread-stats-line")).toBeInTheDocument();
+    expect(screen.queryByTestId("thread-stats-block")).not.toBeInTheDocument();
   });
 });
 
@@ -381,7 +237,7 @@ describe("turn details", () => {
     const user = userEvent.setup();
     render(<Harness summary={summaryOf([turn()])} />);
 
-    await user.click(screen.getByRole("button", { name: /Open turn details/ }));
+    await user.click(screen.getByRole("button", { name: "Turn details" }));
 
     const dialog = screen.getByRole("dialog", { name: "Turn details" });
     expect(within(dialog).getByText("48,000")).toBeInTheDocument();
@@ -393,8 +249,8 @@ describe("turn details", () => {
 
   it("is reachable from the context meter while the line is hidden", async () => {
     const user = userEvent.setup();
-    render(<Harness initiallyVisible={false} summary={summaryOf([turn()])} />);
-    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
+    render(<Harness summary={summaryOf([turn()])}>{null}</Harness>);
+    expect(screen.queryByTestId("thread-stats-block")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Show context usage/ }));
     await user.click(screen.getByRole("button", { name: "Turn details" }));
@@ -422,7 +278,7 @@ describe("turn details", () => {
     const newer = turn({ usage: { inputTokens: 2_000, outputTokens: 80 } });
     render(<Harness summary={{ ...summaryOf([older, newer]), turnCount: 12 }} />);
 
-    await user.click(screen.getByRole("button", { name: /Open turn details/ }));
+    await user.click(screen.getByRole("button", { name: "Turn details" }));
     const dialog = screen.getByRole("dialog", { name: "Turn details" });
     expect(within(dialog).getByText("Turn 12 of 12")).toBeInTheDocument();
     expect(within(dialog).getByText("2,000")).toBeInTheDocument();
@@ -449,12 +305,44 @@ describe("turn details", () => {
     });
     render(<Harness summary={summaryOf([record])} />);
 
-    await user.click(screen.getByRole("button", { name: /Open turn details/ }));
+    await user.click(screen.getByRole("button", { name: "Turn details" }));
 
     const dialog = screen.getByRole("dialog", { name: "Turn details" });
     expect(dialog).toHaveTextContent("~41 tok/s");
     expect(dialog).toHaveTextContent("Speed is measured per turn and includes some tool time.");
     expect(within(dialog).getByText("Tool time")).toBeInTheDocument();
     expect(within(dialog).getByText("Retries")).toBeInTheDocument();
+  });
+});
+
+describe("the figures in a thread's Thread info panel", () => {
+  it("stand at the top of the panel and nowhere under the composer", () => {
+    const { container } = render(
+      <Harness summary={summaryOf([turn()])}>
+        <ThreadComposer
+          info={
+            <ThreadInfo>
+              <p>Access row</p>
+            </ThreadInfo>
+          }
+          input={<textarea aria-label="Message" className="composer-input" />}
+          presentation="follow-up"
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </Harness>,
+    );
+
+    const panel = container.querySelector(".thread-info__panel") as HTMLElement;
+    const block = within(panel).getByTestId("thread-stats-block");
+    expect(panel.firstElementChild).toBe(block);
+    expect(figures(block)).toContain("cache 92%");
+    // Under the composer there is the one row, and no line of figures.
+    expect(container.querySelectorAll('[data-testid="thread-stats-block"]')).toHaveLength(1);
+    expect(container.querySelector(".composer-frame")?.nextElementSibling).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hide stats line" })).toBeNull();
+    // The turn-details link they had stays.
+    expect(
+      within(block).getByRole("button", { name: "Turn details", hidden: true }),
+    ).toBeInTheDocument();
   });
 });
