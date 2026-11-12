@@ -3024,11 +3024,11 @@ it (a row removed by the confirmation it showed), and one of two dialogs that
 share a presence when the other takes its place. In a window nobody can see
 there is no exit to show, so a dialog closed there is removed at once.
 
-A dialog that is leaving is only there to be seen. Its scrim and its controls
+A dialog or a sheet that is leaving is only there to be seen. Its scrim and its controls
 take no press and no key (`inert`), so the page under it answers at once and a
 second press cannot repeat what the first did. Focus goes back to the opener
 as the exit starts, not when it ends, and when the exit ends focus is left
-where it is if the person, or a command they ran from the dialog, has moved it
+where it is if the person, or a command they ran from it, has moved it
 in the meantime.
 
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
