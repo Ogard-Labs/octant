@@ -1,0 +1,270 @@
+/* The component gallery's own layout. It uses the system's spacing and type
+   tokens and no colour of its own: every fill and ink is a role token, so the
+   page changes with the mode like the app does. Development only. */
+
+.gallery {
+  min-height: 100vh;
+  background: var(--oct-bg);
+  color: var(--oct-fg);
+}
+
+.gallery-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-6);
+  background: var(--oct-bg);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.gallery-bar__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-4);
+}
+
+.gallery-bar__field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.gallery-bar__contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.gallery-bar__contents a {
+  color: var(--oct-muted);
+  text-decoration: none;
+}
+
+.gallery-bar__contents a:hover {
+  color: var(--oct-fg);
+}
+
+.gallery-main {
+  display: grid;
+  gap: var(--oct-space-12);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--oct-space-8) var(--oct-space-6) var(--oct-space-12);
+}
+
+.gallery-section {
+  display: grid;
+  gap: var(--oct-space-4);
+  scroll-margin-top: calc(var(--oct-space-12) * 2);
+}
+
+.gallery-section__head {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.gallery-section__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--oct-space-4);
+}
+
+.gallery-specimen {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  margin: 0;
+}
+
+.gallery-specimen[data-wide="true"],
+.gallery-states {
+  grid-column: 1 / -1;
+}
+
+.gallery-specimen__stage {
+  display: grid;
+  gap: var(--oct-space-3);
+  align-content: start;
+  min-width: 0;
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+}
+
+.gallery-specimen__label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  align-items: baseline;
+}
+
+.gallery-specimen__adapter,
+.gallery-specimen__props {
+  font-family: var(--oct-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.gallery-specimen__adapter {
+  color: var(--oct-fg);
+}
+
+.gallery-specimen__note {
+  flex-basis: 100%;
+}
+
+.gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.gallery-row--top {
+  align-items: flex-start;
+}
+
+.gallery-states {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+}
+
+.gallery-states__cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--oct-space-4);
+}
+
+.gallery-states__cell {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.gallery-states__control {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: var(--oct-space-8);
+}
+
+.gallery-swatches {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--oct-space-4);
+}
+
+.gallery-swatch {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.gallery-swatch__chip {
+  display: block;
+  height: var(--oct-space-8);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.gallery-space {
+  display: block;
+  height: var(--oct-space-3);
+  background: var(--oct-accent);
+  border-radius: var(--oct-radius-sm);
+}
+
+.gallery-radius {
+  display: block;
+  width: calc(var(--oct-space-4) * 4);
+  height: calc(var(--oct-space-4) * 4);
+  background: var(--oct-fg-soft);
+  border: 1px solid var(--oct-meta);
+}
+
+.gallery-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-6);
+}
+
+.gallery-icons__cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* Room under a trigger for the popup the gallery holds open beneath it. */
+.gallery-open-stage {
+  display: grid;
+  align-content: start;
+  min-height: 160px;
+}
+
+.gallery-open-stage[data-tall="true"] {
+  min-height: 320px;
+}
+
+.gallery-field-width {
+  width: 200px;
+}
+
+.gallery-menu-trigger {
+  justify-self: start;
+}
+
+.gallery-context-target {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  color: var(--oct-muted);
+}
+
+.gallery-popover {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3);
+}
+
+.gallery-dialog-inline {
+  justify-self: start;
+}
+
+.gallery-sheet {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-6);
+}
+
+.gallery-card {
+  width: 220px;
+}
+
+.gallery-sidebar {
+  position: static;
+  display: grid;
+  gap: var(--oct-space-3);
+  width: 260px;
+  padding: var(--oct-space-2);
+}
+
+.gallery-settings {
+  max-width: 640px;
+}

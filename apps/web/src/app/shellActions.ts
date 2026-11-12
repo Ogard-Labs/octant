@@ -324,6 +324,8 @@ export type ShellActions = {
   readonly startNewThreadDraft: (mode: OctantMode) => void;
   readonly toggleBottomPanel: (opener: HTMLElement) => void;
   readonly toggleDock: (opener: HTMLElement) => void;
+  readonly runDockToolMenu: (surface: RightUtilityDockSurfaceId, value: string) => void;
+  readonly toggleDockTool: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
   readonly tryWorkRestCommand: (
     threadId: string,

@@ -399,8 +399,10 @@ describe("SplitWorkspace", () => {
     expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
     // The Project leads the breadcrumb before the title.
     expect(screen.getByText("Octant")).toHaveClass("workspace-pane__context");
-    // The thread's title is the page title role, the Project beside it is meta.
-    expect(screen.getByTitle(/^Octant \//)).toHaveClass("oct-page-title");
+    // The thread's title is a name in navigation, the Project beside it is meta.
+    const title = screen.getByTitle(/^Octant \//);
+    expect(title).toHaveClass("oct-nav-name");
+    expect(title).not.toHaveClass("oct-page-title");
 
     rerender(
       <SplitWorkspace {...splitCallbacks()} layout={layout} renderSurface={(tab) => tab.title} />,

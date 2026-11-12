@@ -1741,7 +1741,6 @@ describe("CanvasWorkspaceTab in the narrow dock sheet", () => {
       <RightUtilityDock
         canvas={<CanvasWorkspaceTab tab={canvasTab} client={client} />}
         isNarrow
-        launchableSurfaces={[canvasSurface]}
         onClose={onClose}
         onCloseTab={vi.fn()}
         onCommitWidth={vi.fn()}
