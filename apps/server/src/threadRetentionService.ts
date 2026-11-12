@@ -6,6 +6,7 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
   UtcTimestamp,
   decodeProjectId,
+  type EventActor,
   type OctantMode,
   type ProjectId,
   type PurgeThreadsOutcome,
@@ -122,6 +123,8 @@ export class ThreadRetentionService {
   setWindow(
     request: SetThreadRetentionRequest,
     principalKind: PrincipalKind,
+    /** The paired device that asked. Absent, the change is the local person's. */
+    actor?: EventActor,
   ): SetThreadRetentionOutcome {
     const existence = this.#existence(request.scope);
     const decision = decideSetRetentionWindow({
@@ -131,18 +134,18 @@ export class ThreadRetentionService {
     });
     if (decision.kind === "refused") return decision;
     const updatedAt = decodeTimestamp(this.#clock());
-    this.#append(THREAD_RETENTION_EVENT_NAMES.windowSet, {
-      kind: "window-set",
-      scope: request.scope,
-      window: request.window,
-      updatedAt,
-    });
+    this.#append(
+      THREAD_RETENTION_EVENT_NAMES.windowSet,
+      { kind: "window-set", scope: request.scope, window: request.window, updatedAt },
+      actor,
+    );
     return this.readState();
   }
 
   async purge(
     request: PurgeThreadsRequest,
     principalKind: PrincipalKind,
+    actor?: EventActor,
   ): Promise<PurgeThreadsOutcome> {
     const existence = this.#existence(request.scope);
     const decision = decidePurgeThreads({
@@ -192,13 +195,17 @@ export class ThreadRetentionService {
       if (this.#purgeThreadArtifacts !== undefined) {
         await this.#purgeThreadArtifacts({ mode: subject.mode, threadId: subject.threadId });
       }
-      this.#append(THREAD_RETENTION_EVENT_NAMES.threadPurged, {
-        kind: "thread-purged",
-        mode: subject.mode,
-        threadId: subject.threadId,
-        ...(subject.projectId === undefined ? {} : { projectId: subject.projectId }),
-        purgedAt: occurredAt,
-      });
+      this.#append(
+        THREAD_RETENTION_EVENT_NAMES.threadPurged,
+        {
+          kind: "thread-purged",
+          mode: subject.mode,
+          threadId: subject.threadId,
+          ...(subject.projectId === undefined ? {} : { projectId: subject.projectId }),
+          purgedAt: occurredAt,
+        },
+        actor,
+      );
       const canvasIds = listThreadFileAnchors(
         this.#connection,
         subject.mode,
@@ -287,7 +294,7 @@ export class ThreadRetentionService {
     return readThreadPurgeTombstone(this.#connection, mode, threadId)?.projectId;
   }
 
-  #append(eventName: string, payload: unknown): void {
+  #append(eventName: string, payload: unknown, actor?: EventActor): void {
     const version = readAggregateVersion(
       this.#connection,
       THREAD_RETENTION_AGGREGATE,
@@ -306,7 +313,7 @@ export class ThreadRetentionService {
           eventVersion: 1,
           hostId: LOCAL_HOST_ID,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user" as const, actorId: decodeActorId(LOCAL_ACTOR_ID) },
+          actor: actor ?? { kind: "local-user" as const, actorId: decodeActorId(LOCAL_ACTOR_ID) },
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },

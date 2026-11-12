@@ -29,6 +29,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { createHostPersonScopes } from "../hostPersonScope";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
   decodeBrowserContextId,
@@ -340,12 +345,20 @@ export function wireBrowser(deps: BrowserDependencies) {
           approvedWorkingFolderRoot(project, folderId),
       };
     };
+    // Session, upload and download permissions are reviewed by the host's own
+    // person: at a live window, or on a device that person paired, whose
+    // record then names the device.
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      devices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    });
     // Upload and download permissions live only in this process, so their
     // review windows and their minutes run on the authority clock.
     const browserUploadPermissions = new BrowserUploadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
         windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
@@ -362,13 +375,14 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
     const browserDownloadPermissions = new BrowserDownloadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
         windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
@@ -385,6 +399,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserDownloadPermissions.close()));
@@ -413,7 +428,7 @@ export function wireBrowser(deps: BrowserDependencies) {
           : { status: "disabled" },
       now: Date.now,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       localWindows: () => windowAuthorityStore.listWindowIds(),
       canReview: (windowId, target) => {
         if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
@@ -454,6 +469,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
       onRevoked: (grantId) => {
         void delegatedChildren?.revoke(grantId);

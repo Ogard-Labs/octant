@@ -661,9 +661,10 @@ describe("RemoteShellView", () => {
     await waitFor(() => expect(within(localOnly).queryByText("Approvals")).toBeNull());
     expect(within(localOnly).queryByText("Extensions")).toBeNull();
     expect(within(localOnly).queryByText("Provider setup")).toBeNull();
-    expect(within(localOnly).getByText("Provider credentials")).toBeInTheDocument();
+    expect(within(localOnly).queryByText("Provider credentials")).toBeNull();
+    expect(within(localOnly).queryByText("Host controls")).toBeNull();
+    expect(within(localOnly).queryByText("Paired devices")).toBeNull();
     expect(within(localOnly).getByText("Remote listener")).toBeInTheDocument();
-    expect(within(localOnly).getByText("Host controls")).toBeInTheDocument();
     expect(within(localOnly).queryByText(/cannot bind folders, approve tool use/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Code" }));

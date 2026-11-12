@@ -374,7 +374,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device changing Continue after restart, and lets a local window", async () => {
+  it("lets a device the host's own person paired change Continue after restart for a Code thread or the Code setting, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -393,7 +393,7 @@ describe("Code routes", () => {
         restartContinuation: true,
       },
     ];
-    for (const command of commands) {
+    const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/code/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -408,23 +408,32 @@ describe("Code routes", () => {
           protocolVersion: 1,
           capabilityDigest: "b".repeat(64),
           sessionId: "00000000-0000-4000-8000-000000000942" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: remoteDeviceId as never,
       });
-      const refused = await route(remote);
-      expect(refused?.status).toBe(403);
-      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      return remote;
+    };
+    for (const command of commands) {
+      for (const restricted of [undefined, "hub-roster"] as const) {
+        const refused = await route(from(command, restricted));
+        expect(refused?.status).toBe(403);
+        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      }
     }
     expect(execute).not.toHaveBeenCalled();
-    const local = await route(
-      request("/api/code/commands", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(commands[0]),
-      }),
-    );
-    expect(local?.status).toBe(200);
-    expect(execute).toHaveBeenCalledOnce();
+
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+      expect(JSON.stringify(execute.mock.lastCall)).toContain(
+        JSON.stringify({
+          kind: "remote-device",
+          actorId: remoteDeviceId,
+          deviceId: remoteDeviceId,
+        }),
+      );
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {

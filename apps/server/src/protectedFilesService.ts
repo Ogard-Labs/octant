@@ -100,7 +100,8 @@ export class ProtectedFilesService {
     });
   }
 
-  change(command: ProtectedFilesCommand): ProtectedFilesResult {
+  /** `actor` is the paired device that asked; absent, the change is the local person's. */
+  change(command: ProtectedFilesCommand, actor?: EventActor): ProtectedFilesResult {
     if (command.expectedVersion !== this.#version) {
       return refused("stale-version", "The protected files changed since you read them.");
     }
@@ -121,7 +122,7 @@ export class ProtectedFilesService {
             eventName: event.name,
             eventVersion: 1,
             correlationId: this.#dependencies.uuid(),
-            actor: this.#dependencies.actor,
+            actor: actor ?? this.#dependencies.actor,
             occurredAt: this.#dependencies.clock(),
             payload: event.payload,
           },

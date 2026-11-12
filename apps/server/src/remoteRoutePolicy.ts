@@ -18,6 +18,9 @@ import {
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
+import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
+import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
+import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -76,7 +79,9 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/folders",
   "/api/extensions/skills",
   "/api/providers/discovery",
-  "/api/host-control",
+  // The whole host's export: bulk data with no bound of its own for a remote
+  // caller. Every other host-control route is forwarded below.
+  "/api/host-control/export",
   "/api/replica-store",
   "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
@@ -102,11 +107,12 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/extensions/sign-in",
   "/api/extensions/connections",
   "/api/extensions/discovered",
-  // Provider administration and sign-in start. A key itself still reaches the
-  // credential broker only through the desktop bridge.
+  // Provider administration and sign-in start, and a provider key on its way
+  // to the credential broker: stored, replaced or cleared, never read back.
   "/api/providers/commands",
   "/api/providers/thread-native-setup",
   "/api/providers/oauth",
+  ...PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS,
   // Reviewing what a thread read and clearing its outside-content mark.
   "/api/thread-external-content",
   "/api/terminal-sessions/list",
@@ -861,6 +867,19 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     maxResponseBytes: 512 * 1_024,
   },
   {
+    // A Code thread's network access: its rules, its Project's rules and its
+    // open proposals, and the person's answers to them. It has no catalogued
+    // action, so only a device the host's own person paired reaches it; the
+    // route names that device in every rule and change it records.
+    kind: "prefix" as const,
+    path: "/api/native-harness/egress/threads/",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
     kind: "exact" as const,
     path: "/api/github/authentication",
     methods: ["GET", "HEAD"] as const,
@@ -971,6 +990,67 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     kind: "exact" as const,
     path,
     methods: ["POST"] as const,
+  })),
+  // The person's own reads and lists, for a device that person paired: every
+  // approval and question their scope can answer and putting one off, the
+  // fleet read, provider limits and an asked-for refresh, and the protected
+  // files list and its changes. None has a catalogued action.
+  ...[PENDING_REQUESTS_PATH, "/api/fleet-activity", "/api/provider-usage-limits"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  {
+    kind: "exact" as const,
+    path: `${PENDING_REQUESTS_PATH}/defer`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/provider-usage-limits/refresh",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
+  // Host control, for a device the host's own person paired: status, the
+  // data map and the retention windows are reads; service lifecycle, backup,
+  // memory limits, retention and purge are changes the route holds to 8 KiB.
+  ...["status", "data-map", "thread-retention"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: name === "thread-retention" ? (["GET", "POST"] as const) : (["GET"] as const),
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  })),
+  // Paired devices and pairing requests, for a device the host's own person
+  // paired: the lists are reads, every change a POST.
+  ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({
+    kind: "exact" as const,
+    path,
+    methods: [method],
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   })),
   {
     kind: "exact" as const,

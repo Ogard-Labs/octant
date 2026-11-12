@@ -682,12 +682,14 @@ function assembleServices(
         hostId: identity.hostId,
         deviceId: input.deviceId,
         reasonCode: "local-device-revoked",
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
       }),
-    revokeAll: () =>
+    revokeAll: (input) =>
       credentialLifecycle.revokeAll({
         commandId: uuid(),
         hostId: identity.hostId,
         reasonCode: "local-all-devices-revoked",
+        ...(input?.actor === undefined ? {} : { actor: input.actor }),
       }),
     reconcileExpired: () =>
       credentialLifecycle.reconcileExpired({

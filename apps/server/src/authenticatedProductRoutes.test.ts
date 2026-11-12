@@ -226,6 +226,11 @@ describe("authenticated product route dispatch", () => {
       ["/api/providers/commands", "POST"],
       ["/api/code/project-terminals", "POST"],
       ["/api/context/commands", "POST"],
+      ["/api/providers/credentials/set", "POST"],
+      ["/api/remote/devices/revoke", "POST"],
+      ["/api/remote/pairing-requests/approve", "POST"],
+      ["/api/host-control/lifecycle", "POST"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
     ] as const;
 
     for (const [path, method] of routes) {
@@ -256,6 +261,13 @@ describe("authenticated product route dispatch", () => {
       ["/api/diagnostics/export", "POST"],
       ["/api/providers/commands", "POST"],
       ["/api/code/project-terminals", "POST"],
+      ["/api/providers/credentials/set", "POST"],
+      ["/api/remote/devices/revoke", "POST"],
+      ["/api/remote/pairing-requests/approve", "POST"],
+      ["/api/host-control/lifecycle", "POST"],
+      ["/api/host-control/status", "GET"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "GET"],
     ] as const) {
       expect((await product({ ...handoff(path, method), principal: introduced }))?.status).toBe(
         403,

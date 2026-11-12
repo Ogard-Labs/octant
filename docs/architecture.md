@@ -508,10 +508,14 @@ the pair with two sizes in GB of 1024³ bytes, the same unit as the default
 (0.5 to 64, very low above low) that apply as
 given on any machine, without the small-machine scaling: the person chose them
 knowing what else the machine runs. The limits are a host setting in Settings >
-Host, changed only by a local window: `POST /api/host-control/memory-limits`
-sits on the loopback host-control surface, behind the `host.service.memory-limits`
-action that a paired device is denied, so a paired device can neither read nor
-change it. Each change is one journaled event
+Host, changed by a local window or a device the host's own person paired
+(maintainer decision, 2026-11-12): `POST /api/host-control/memory-limits`
+sits on the host-control surface, behind the `host.service.memory-limits`
+action, which a hub-introduced device and an agent grant are denied. The
+private listener forwards host control (status, data map, service lifecycle,
+backup, memory limits, retention and purge) for the product dispatch to judge,
+and keeps the whole host's export on the host, which has no bound for a remote
+caller. Each change is one journaled event
 (`host-memory-limits.changed@1`) naming who made it, when, and the values
 before and after; the `host_memory_limits_projection` row is rebuilt from those
 events, and saving the values already in force records nothing. A pair that is
@@ -14611,6 +14615,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
     routes. Key-pool routes under `keys/` (list, add, rename, replace,
     remove, set active, move) serve Octant Nightly's Settings the same way
     and answer only labels; the command line does not use them yet.
+  - **A paired device.** A device the host's own person paired is that
+    person (maintainer decision, 2026-11-12), so it reaches the same status,
+    set, remove and key-pool routes under `/api/providers/credentials/`,
+    over its authenticated session and nothing else: the routes take the
+    device from the session the listener verified, never from a header or the
+    body, and refuse a hub-introduced device, an unproved pairing, an agent
+    grant, a local window and the bridge secret alike. The same rules hold:
+    the key goes to the broker and nowhere else, the answers are the same
+    words and labels, the host keeps no copy of the request body, and the
+    journaled request and outcome name the device. Removing a provider
+    together with its key is not offered on these routes.
   - **Not the browser.** The loopback browser client cannot save a key, even
     on the host itself. The host cannot tell who is behind a loopback
     connection: the local session (`/api/shell/local-session`) is granted to

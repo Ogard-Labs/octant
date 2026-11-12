@@ -35,6 +35,7 @@ describe("remoteSurfaceMatrix", () => {
       "extension-install",
       "provider-setup",
       "provider-credentials",
+      "device-management",
       "listener-controls",
       "host-controls",
     ]);
@@ -49,7 +50,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(12);
+    expect(listRemoteShellSurfaces()).toHaveLength(13);
   });
 });
 
@@ -119,6 +120,9 @@ describe("what a session that acts as the host's own person reaches", () => {
       "approvals",
       "extension-install",
       "provider-setup",
+      "provider-credentials",
+      "device-management",
+      "host-controls",
     ]);
   });
 
@@ -127,7 +131,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       listRemoteShellSurfacesByAvailability("local-host-only", hostPerson).map(
         (surface) => surface.id,
       ),
-    ).toEqual(["provider-credentials", "listener-controls", "host-controls"]);
+    ).toEqual(["listener-controls"]);
   });
 
   it("holds a restricted session to the catalogue, as a session that says nothing is held", () => {
@@ -136,6 +140,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "extension-install",
       "provider-setup",
       "provider-credentials",
+      "device-management",
       "listener-controls",
       "host-controls",
     ];

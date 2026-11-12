@@ -87,6 +87,25 @@ describe("HostMemoryLimitsService", () => {
     expect(events[1]?.aggregateVersion).toBe(2);
   });
 
+  it("journals a change a paired device made as that device", () => {
+    const { service, journal } = openHarness();
+    const deviceId = "71000000-0000-4000-8000-0000000000de";
+    expect(
+      service.set({ limits: custom(3, 6) }, "person-paired-device", {
+        kind: "remote-device",
+        actorId: deviceId,
+        deviceId,
+      } as never).kind,
+    ).toBe("saved");
+
+    const [event] = journal.replayAggregateType({
+      aggregateType: "host-memory-limits",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(event?.actor).toMatchObject({ kind: "remote-device", deviceId });
+  });
+
   it("replays to the same limits when the projection is rebuilt from the journal", () => {
     const { service, journal, runtime, connection, clock } = openHarness();
     service.set({ limits: custom(3, 6) }, "local-window");
