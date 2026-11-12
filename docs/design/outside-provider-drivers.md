@@ -184,8 +184,13 @@ the open set where packages already live.
 
 ### Admission lifecycle
 
-Each step is its own action at a local window, journaled through the existing
-extension lifecycle; none implies the next.
+One **Install and trust** flow at a local window covers inspect, install,
+trust and enable: the person reads one review and confirms once, and the host
+then runs steps 1 to 4 in order, each journaled through the existing extension
+lifecycle, stopping at the first that refuses. Digest-bound trust and the
+driver's confinement are unchanged, and each step stays available on its own
+(maintainer request, 2026-11-12). Not built yet: today each step is its own
+action and none implies the next.
 
 1. **Inspect** a source with an expected digest (`inspect-package`). The review
    shows the package identity, digest, publisher and signature state, protocol
@@ -643,7 +648,11 @@ implementation; each takes the fail-closed option.
   when the response holds a call to the echo tool; the driver's own words
   count for nothing. It is offered only for models the person listed that the
   last check reported, and its record lands in the provider catalogue like
-  every endpoint's.
+  every endpoint's. The host also runs it by itself the first time a model is
+  used, from whatever turn uses it: it is a capability probe, not a grant, so
+  it needs no local window, and the manual button stays as it is (maintainer
+  request, 2026-11-12). Not built yet: today only the button runs it, and an
+  unverified model is refused tools until the person presses it.
 - **Digest-bound records.** An instance's observation, Verify tools record,
   and conformance belong to the digest it binds. A package that selects
   another digest leaves the instance `driver-not-admitted` with no models,

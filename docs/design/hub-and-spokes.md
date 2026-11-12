@@ -348,11 +348,13 @@ the CLI. The hub depends on that:
     past the application connection's lifetime.
     This boundary does not protect from other unconfined programs running as
     the same owner. Admitted remote clients, provider replies and plugins must
-    have no store-path mutation route. Work and Code stay refused until their
-    native confinement also denies the entire private profile. The authoritative
+    have no store-path mutation route. Work and Code run at Full access on
+    Windows, since Full access uses no sandbox; the guarded levels stay refused
+    until their native confinement also denies the entire private profile
+    (maintainer request, 2026-11-12). Not built yet: today the authoritative
     Work-turn and Code-command/operation entry points refuse Windows before
-    launch or journal mutation, including background routine calls; Full access
-    cannot bypass this gate. Provider process preparation refuses Windows before
+    launch or journal mutation, including background routine calls and Full
+    access, and provider process preparation refuses Windows before
     its unconfined Full-access branch. Native experiments do not admit foreground
     or desktop startup.
     The Windows foreground entry resolves the fixed native artifacts from the
@@ -394,10 +396,11 @@ the CLI. The hub depends on that:
     identity, credential and storage boundaries compose the foreground host
     described above. Desktop and Nightly consumers require their own actual
     bootstrap evidence. Boot-service installation and encrypted-disk setup
-    remain separate from this foreground implementation. Work, Code and
-    executable extensions remain unavailable until native confinement denies
-    the private profile and proves its filesystem, network and process-lifecycle
-    boundaries. The [platform release boundary](../architecture.md#current-release-boundary)
+    remain separate from this foreground implementation. Work and Code below
+    Full access, and executable extensions, remain unavailable until native
+    confinement denies the private profile and proves its filesystem, network
+    and process-lifecycle boundaries; Work and Code at Full access are not
+    built yet either. The [platform release boundary](../architecture.md#current-release-boundary)
     owns those admission requirements; storage or packaging evidence alone
     does not grant them.
 
@@ -485,9 +488,7 @@ Joining reuses pairing. It runs on the joining member:
    `octant hub join <code>`, and scans or types the code. On a phone, they
    scan or type it in the app's add-computer flow. The member must reach the
    hub's listener over Tailscale, a similar private mesh, or the same LAN;
-   joining never goes through a relay, for the same reason a device never
-   pairs through one
-   ([Hosted relay: decision 5](hosted-relay.md#maintainer-decisions)).
+   joining never goes through a relay.
 3. Both sides show the comparison code; the person approves on the hub.
 4. A spoke then shows the **hub grant** screen (below) with the roster entry,
    Introduce, and Owners ticked and everything else off, and the person
@@ -654,10 +655,12 @@ from their phone or laptop what they could do sitting at any of them. An
   actions of the administration class. It ends five minutes after it opened,
   when anything is added to or removed from the host's owner list, and when the
   device is revoked or no longer listed. Full access, merge, a sign-in copy, an
-  owner change, reading private runtime approval facts, each runtime approval
-  answer, leaving the hub, and opening a session each need their own
+  owner change, leaving the hub, and opening a session each need their own
   challenge and are refused with `own-unlock-required` when a session is all
-  that is presented.
+  that is presented. Reading private runtime approval facts and each approval
+  answer ride the session by default; a setting asks for an unlock per answer
+  instead (maintainer request, 2026-11-12). Not built yet: today each such
+  reading and each answer needs its own challenge.
 - **Alerts live on spokes.** Each spoke compares a newer roster with the one it
   held and keeps an alert for every member added, whatever Confirm new members
   says. An owner device reads them from the spoke it concerns; the hub holds no
@@ -713,6 +716,17 @@ from their phone or laptop what they could do sitting at any of them. An
   changing that host's hub and peer grants; and copying sign-ins
   ([Shared sign-ins](#shared-sign-ins)). Each use is journaled on the host
   with the device and `owner-unlock`.
+- **Threads, the Browser, and terminals.** An owner device the person marked
+  may also raise a thread to Full access or start one there (exception 7 of
+  [the Full access rule](../architecture.md#security-and-authority); the
+  choice keeps its own unlock), navigate and type in the host's agent
+  Browser, write to a thread terminal, and answer a profile's site approvals
+  (maintainer request, 2026-11-12). Any other paired device is unchanged. Not
+  built yet: today an owner device changes an existing thread's or Project's
+  posture, controls only an already-open Code Private page for 60 seconds as
+  above, starts no thread, writes to no terminal, and answers no site
+  approval; the [recovery inventory](#recovery-inventory) records what is
+  built.
 - **Before a paired client's merge.** A host may also ask a paired phone or
   web client's merge for an owner unlock, under a switch its window sets, off
   by default. The owner device answers a challenge this host's owner route
@@ -767,7 +781,10 @@ An enrolled owner can answer **one** pending Code or Work runtime file or Shell 
 on its host, including a turn started by that host's local window. This is a
 separate signed owner path. It preserves existing paired-device Code answer
 authority and never falls back to that route. The host checks its current
-owner list and grant. An administration session cannot read private action
+owner list and grant. By default an open administration session covers
+reading the private action facts and each Allow once or Deny answer; a setting
+asks for a fresh unlock per answer instead (maintainer request, 2026-11-12).
+Not built yet: today an administration session cannot read private action
 facts or answer an approval: unlock freshly to read the complete facts, then
 unlock again for **each** Allow once or Deny answer.
 
@@ -1951,8 +1968,7 @@ the path.
   addresses. A host refuses to turn the hub role on while its listener has a
   public address, and refuses a join code or roster entry that names one.
 - **No relay, no port forwarding.** Hub-and-spoke traffic never goes through a
-  relay, including a self-hosted [hosted relay](hosted-relay.md), and no
-  member opens or asks for a port on the internet. A device away from home
+  relay, and no member opens or asks for a port on the internet. A device away from home
   joins the mesh to reach its members.
 
 Rationale: the private network is the first lock. Only the person's own
@@ -2154,7 +2170,7 @@ choice to the design, the design's recommendation was taken.
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                       |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                    |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
-| H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, owner changes, a thread move's ticket, private approval reads and each approval answer need their own                                                                      |
+| H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens and, by default, approval answers; Full access, merge, credential copy, owner changes and a thread move's ticket need their own                                                                                  |
 | H19 | Which thread moves are in scope?                                            | Planned moves only. A computer that dies without warning hands nothing over; a continuously updated copy on another member is not designed                                                                                                                                                                       |
 | H20 | What authorizes a move on the destination?                                  | An owner device's own fresh unlock for every move, and the destination's Move in peer-grant item, which is in the full-member grant. The moved thread is the person's own thread there                                                                                                                           |
 | H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                         |

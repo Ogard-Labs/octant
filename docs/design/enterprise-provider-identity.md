@@ -428,9 +428,12 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   window capability. The private listener never forwards `/api/desktop`, so a
   paired device cannot reach them, and a browser on the host never holds the
   secret. Settings' `/api/providers/oauth` route never begins a device code,
-  even when a command asks for one: the code is shown only in the terminal
-  where the person typed the command, because a code shown on a page someone
-  else can reach is how device-code phishing works. Both routes refuse an
+  even when a command asks for one: the code is shown only on the host, in the
+  terminal where the person typed the command or in a local desktop window
+  that reaches the host-local routes above through the desktop app, because a
+  code shown on a page someone else can reach is how device-code phishing
+  works (local desktop window: maintainer request, 2026-11-12; not built yet,
+  today the code is shown only in the terminal). Both routes refuse an
   instance that has not opted in before any broker call, and the shared
   sign-in path checks the opt-in again for every caller.
 - **The broker's device authorization.** The broker builds
@@ -594,7 +597,9 @@ conservative reading of decision 4 and the broker operations above:
   not delete stays named and can be signed out again. Every other command
   (`begin`, `acknowledge`, `poll`, `sign-out-locally`) is refused
   (`terminal-sign-in-only`) before any broker call: the sign-in still begins
-  only in the host's terminal.
+  only in the host's terminal. A local desktop window may begin it and show
+  the code as for the directory sign-in above; a paired or remote client stays
+  refused (maintainer request, 2026-11-12; not built yet).
 
 ## Expiry, refresh, and revocation
 
@@ -713,8 +718,11 @@ depends only on 1–3.
    authorization, held in the broker. Rejected: long-lived access keys stored
    in the broker, which are reusable identity material the broker would hold
    indefinitely and which the existing Bedrock API-key path already covers as
-   static credentials; and reading the person's cloud profile files, which
-   makes Octant read another tool's credential store.
+   static credentials. Reading the person's cloud profile files is not the
+   default, since it makes Octant read another tool's credential store, but
+   the person may opt in per endpoint with "Use my AWS profile", off by
+   default, which reads their existing cloud profile (maintainer request,
+   2026-11-12; not built yet: today no cloud profile is read).
 5. **Google Vertex.** Deferred until an organization needs it. Its bearer is
    valid across the whole cloud account, so it may never reach the server;
    when it is built, the only acceptable shape is a broker-side relay that

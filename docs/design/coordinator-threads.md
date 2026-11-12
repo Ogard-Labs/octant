@@ -54,10 +54,11 @@ read-only gate is a maintainer live check.
   arrives** switch. The planner's `board` read and board offers keep working;
   since the board leaves coordinators out, that read no longer lists the
   planner's own card.
-- **Code only.** Work threads neither send nor receive messages, because only
-  Code turns carry them, so a Work coordinator could start workers but never
-  follow up with them. Work coordinators wait for the rule that lets a Work turn
-  carry a message.
+- **Code only.** A Work thread may message a sibling (maintainer request,
+  2026-11-12). Not built yet: today Work threads neither send nor receive
+  messages, because only Code turns carry them, so a Work coordinator could
+  start workers but never follow up with them. Work coordinators wait until a
+  Work turn carries a message.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
 the mode's authority and the thread's posture exactly as they were, which
@@ -124,10 +125,15 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   `provider-unavailable`, a provider or model the Project's policy disallows
   is refused by the ordinary creation command, and nothing falls back to
   another model.
-- **Authority.** The worker's guardrail level is the one named, or the
-  coordinator's level when none is named, and never higher than the
-  coordinator's. A worker started by a marked coordinator never starts at Full
-  access. After creation the worker's level is the person's to change, as on any
+- **Authority.** The person may fix the workers' level when creating the
+  coordinator at a local window, Full access included; every worker then
+  starts at that level, and a mark on the coordinator does not lower it
+  ([the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). With no fixed level, the worker's guardrail
+  level is the one named, or the coordinator's level when none is named, and
+  never higher than the coordinator's, and a worker started by a marked
+  coordinator never starts at Full access. Not built yet: today no level can
+  be fixed, so the unfixed rule always applies. After creation the worker's level is the person's to change, as on any
   thread.
 - **Lineage.** A worker belongs to the coordinator that started it. The host
   records that on the worker at creation and never changes it. When the
@@ -190,8 +196,10 @@ approval flow with one switch.
 - **Open workers.** A coordinator may have at most six open workers (neither
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
-- **Starts per hour.** At most twelve `start` calls per coordinator in any hour,
-  admitted or proposed. The host records each call in its own store, beside the
+- **Starts per hour.** At most 60 `start` calls per coordinator in any hour by
+  default, admitted or proposed. A person sets the bound per coordinator; an
+  agent cannot (maintainer request, 2026-11-12). Not built yet: today the bound
+  is a constant twelve. The host records each call in its own store, beside the
   wake turns and each thread's latest host turn with its hop, so the count holds
   across a restart; it never reads fewer than the workers the coordinator's
   lineage shows created in that hour, so starts made before the record existed
@@ -223,6 +231,8 @@ from a marked parent, but applying that rule here would stop a coordinator after
 its first read. Carrying the mark instead keeps the protection where it acts:
 the marked worker asks for single-use confirmation on risky actions, and the
 Full access cap keeps that confirmation from being switched off at the start.
+A level the person fixed for the workers is the person's own choice and is not
+capped ([Starting workers](#starting-workers)).
 
 ## Talking to workers
 
@@ -257,12 +267,16 @@ Full access cap keeps that confirmation from being switched off at the start.
   worker; a newer state replaces it. Notices reach the coordinator's next turn
   beside its roster and wake it when it is idle, under the wake bounds below.
 - **Bounds on waking.** Wake turns keep the messaging bounds: one at a time per
-  thread, at most six per thread in any hour, and the hop count. A state notice
+  thread, an hourly count per thread, and the hop count. The hourly count and
+  the rounds are settings a person changes per coordinator, with defaults of
+  30 wakes per thread in any hour and 10 rounds; an agent cannot change them
+  (maintainer request, 2026-11-12). Not built yet: today they are constants,
+  six wakes and three rounds. A state notice
   takes the hop count of the worker turn that caused it, so a coordinator and a
-  worker answering each other stop waking each other after three rounds and
+  worker answering each other stop waking each other after the round bound and
   continue when a person runs a turn on either. The wake turns and hops are
   recorded in host storage, so a restart neither resets the hourly bound nor
-  lets a fourth round wake; pending state notices stay in memory, since the
+  lets a round past the bound wake; pending state notices stay in memory, since the
   first sweep after a restart reads every worker's state again.
 
 Rationale: without notices, a coordinator learns that a worker finished only by
@@ -350,7 +364,7 @@ the start setting and the role refused from an agent, a routine, and a paired
 device; a marked coordinator's worker starting marked, and a mark that cannot be
 journaled refusing the start; the open-worker and hourly bounds; state notices
 not marking the coordinator; the hop count stopping a coordinator and worker
-after three rounds; and a coordinator's own write, shell, and Git actions
+after the round bound; and a coordinator's own write, shell, and Git actions
 refused by the read-only gate. For the workers' subagents: the graph read
 refused for a window that does not hold the coordinator and for a thread that is
 not a coordinator, before any run is read; and its answer carrying no reply,
