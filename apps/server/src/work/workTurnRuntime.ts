@@ -59,6 +59,7 @@ import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  DEFAULT_STALLED_TURN_LIMIT_MS,
   makeIdleTimeout,
   makeTurnTextParagraphs,
   type IdleTimeout,
@@ -66,10 +67,8 @@ import {
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 const MAX_EVENTS = 4_096;
-// Inactivity window, not total wall time. Matches Chat and Code: a model
-// writing one long tool call, such as a Canvas design, can be silent for
-// minutes.
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+// How long a finished turn waits for its provider session to interrupt or stop.
+const CLEANUP_TIMEOUT_MS = 1_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
 const textEncoder = new TextEncoder();
 
@@ -177,6 +176,13 @@ interface WorkTurnMeter {
 }
 
 export interface WorkTurnRuntimeOptions {
+  /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off.
+   * Read as each turn starts, so a changed setting applies to the next turn
+   * and a running turn keeps the limit it started with.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
 }
 
@@ -188,7 +194,8 @@ export interface WorkTurnRuntimeOptions {
  * worktree, checkout and pull-request authority stay Code's.
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
-  readonly #timeoutMs: number;
+  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #cleanupTimeoutMs: number;
   readonly #forceStops = new Map<
     string,
     {
@@ -207,7 +214,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   readonly #shieldReviews = new Map<string, (review: WorkShieldReview) => void>();
 
   constructor(options: WorkTurnRuntimeOptions = {}) {
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
+    this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#cleanupTimeoutMs = Math.max(1, Math.min(fixedLimitMs, CLEANUP_TIMEOUT_MS));
   }
 
   /**
@@ -260,8 +269,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   async #runTurn(input: WorkTurnRunInput, meter: WorkTurnMeter): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
-      const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
-      const idle = await Effect.runPromise(makeIdleTimeout(this.#timeoutMs));
+      const idle = await Effect.runPromise(makeIdleTimeout(this.#stalledTurnLimitMs()));
       const execution = Effect.scoped(
         this.#execute(input, idle, meter).pipe(
           Effect.catchAll((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),
@@ -290,7 +298,6 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           },
         };
       }
-      void cleanupTimeoutMs;
       return result.outcome;
     } catch (error) {
       if (input.signal.aborted) return { kind: "cancelled" };
@@ -303,7 +310,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     idle: IdleTimeout,
     meter: WorkTurnMeter,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
-    const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
+    const cleanupTimeoutMs = this.#cleanupTimeoutMs;
     const shieldReviews = this.#shieldReviews;
     const forceStops = this.#forceStops;
     return Effect.gen(function* () {
@@ -454,7 +461,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
-            Stream.tap(() => idle.touch),
+            Stream.tap((event) => idle.observe(event)),
             // Liveness only restarts the idle clock above; nothing else sees it.
             Stream.filter((event) => event.kind !== "liveness"),
             Stream.tap((event) => Effect.sync(() => meter.observe(event))),

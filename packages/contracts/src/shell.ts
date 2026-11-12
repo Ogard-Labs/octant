@@ -514,6 +514,19 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+
+/**
+ * How long a turn may go without a provider event before the host cuts it
+ * off. The floor keeps a slow first token or a long silent tool-call write
+ * from ending a healthy turn; the ceiling is one working day.
+ */
+export const MIN_STALLED_TURN_LIMIT_MINUTES = 5;
+export const MAX_STALLED_TURN_LIMIT_MINUTES = 480;
+export const StalledTurnLimitMinutes = Schema.Int.pipe(
+  Schema.between(MIN_STALLED_TURN_LIMIT_MINUTES, MAX_STALLED_TURN_LIMIT_MINUTES),
+);
+export type StalledTurnLimitMinutes = typeof StalledTurnLimitMinutes.Type;
+export const DEFAULT_STALLED_TURN_LIMIT_MINUTES: StalledTurnLimitMinutes = 30;
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
@@ -729,6 +742,14 @@ export const ShellSettings = Schema.Struct({
    */
   autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
     default: () => null,
+  }),
+  /**
+   * Cut a Chat, Work or Code turn off once its provider has sent no event for
+   * this many minutes. `null` means never: only the person stops such a turn.
+   * A store persisted before the setting existed decodes to the default.
+   */
+  stalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
+    default: () => DEFAULT_STALLED_TURN_LIMIT_MINUTES,
   }),
   /**
    * The release ring to follow, once someone has chosen one.

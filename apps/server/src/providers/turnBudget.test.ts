@@ -1,7 +1,12 @@
 import { decodeProviderRuntimeEvent, type ProviderRuntimeEvent } from "@octant/contracts";
 import { Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { countsTowardTurnEventBudget, makeIdleTimeout, makeTurnTextParagraphs } from "./turnBudget";
+import {
+  countsTowardTurnEventBudget,
+  makeIdleTimeout,
+  makeTurnTextParagraphs,
+  stalledTurnLimitMs,
+} from "./turnBudget";
 
 let sequence = 0;
 function runtimeEvent(fields: Record<string, unknown>): ProviderRuntimeEvent {
@@ -106,5 +111,86 @@ describe("turn budget", () => {
       yield* Fiber.join(watcher);
     });
     await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("does not cut a turn off while a provider tool call is reported as running", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(1_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      // Five limits of silence: the provider's own long command is still running.
+      yield* TestClock.adjust(5_000);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+      );
+      yield* TestClock.adjust(999);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* TestClock.adjust(1);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("keeps the clock paused until every running provider tool call has finished", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(1_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-2", toolName: "shell" }),
+      );
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-failure", toolCallId: "call-1", message: "Tool failed." }),
+      );
+      yield* TestClock.adjust(5_000);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-success", toolCallId: "call-2", summary: "Tool completed." }),
+      );
+      yield* TestClock.adjust(1_000);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("still cuts a silent turn off when no tool call is running", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(1_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(runtimeEvent({ kind: "text-delta", text: "Working on it." }));
+      yield* TestClock.adjust(999);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* TestClock.adjust(1);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("never cuts a turn off when the stalled-turn limit is Off", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(null);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* TestClock.adjust(7 * 24 * 60 * 60_000);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* Fiber.interrupt(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("reads the stalled-turn limit from the host setting, Off included", () => {
+    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 30 })).toBe(30 * 60_000);
+    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 5 })).toBe(5 * 60_000);
+    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: null })).toBeNull();
   });
 });

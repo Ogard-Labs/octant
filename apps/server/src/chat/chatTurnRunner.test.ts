@@ -1234,7 +1234,7 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.outcome).toBe("completed");
   });
 
-  it("names provider silence past the idle window as a timeout on the attempt", async () => {
+  it("names provider silence past the host's stalled-turn limit as a timeout on the attempt", async () => {
     const updates: ChatAttempt[] = [];
     const connection = {
       subscribe: Effect.succeed(Stream.never),
@@ -1253,7 +1253,7 @@ describe("ChatTurnRunner", () => {
       researchRouter: new ResearchRouter({
         searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
-      timeoutMs: 25,
+      stalledTurnLimitMs: () => 25,
     });
 
     const fiber = Effect.runFork(

@@ -40,7 +40,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 12      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **162** | **80**       | **5**               |
+| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1066,10 +1066,10 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - Only a protocol signal produces the fact, never message-text matching; an unknown reset stays unknown, and a billing stop gets no reset line or resume.
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
-- Chat, Work and Code each cut a turn off after the stalled-turn limit passes without a provider event: a setting in Settings › Providers & Models, 30 minutes by default, that may be turned off. A provider tool call the runtime reports as running pauses the clock as an app-managed call does, because a long tool call can leave a provider silent (maintainer request, 2026-11-12). Not built yet: today the limit is a fixed five minutes and only an app-managed call pauses it. _Here only._
+- Chat, Work and Code each cut a turn off after the stalled-turn limit passes without a provider event: a setting in Settings › Providers & Models, 30 minutes by default, that may be turned off. A provider tool call the runtime reports as running pauses the clock as an app-managed call does, because a long tool call can leave a provider silent (maintainer request, 2026-11-12). The setting is journaled with the host's other settings, changed only at a local window, and read when a turn starts, so a change applies from the next turn. Built: Claude Code, Codex, OpenCode, Pi and the ACP agents report their tool calls; a driver that reports none keeps the clock running.
 - A provider whose sessions each own a process offers Force stop in Chat, Work and Code ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude). Work requires the exact stopped request/thread/turn; Code requires the original stopped turn operation. Neither accepts a PID or kills a replacement attempt.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ## Transcript records
 

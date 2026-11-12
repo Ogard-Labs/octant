@@ -1233,6 +1233,26 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           </div>
+          <div hidden={harnessEndpointOpen} id="settings-stalled-turns">
+            <SettingsSection title="Stalled turns">
+              <div className="setgroup">
+                <SettingRow
+                  description="When a provider sends nothing for this long, Octant cuts the turn off. A tool call the provider reports as running does not count as silence. A change applies from the next turn. Off leaves a silent turn running until you stop it."
+                  focused={focusedSetting === settingId("stalled-turn-limit")}
+                  label="Stalled-turn limit"
+                  scope="host"
+                  settingId="stalled-turn-limit"
+                >
+                  <StalledTurnLimitSelect
+                    minutes={props.settings.stalledTurnLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ stalledTurnLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -2164,6 +2184,31 @@ function AutoCompactIdleSelect(props: {
       options={[
         { id: "off", label: "Never" },
         ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+const STALLED_TURN_LIMIT_CHOICES: ReadonlyArray<number> = [5, 15, 30, 60, 120, 240, 480];
+
+/** How long a turn may go without a provider event before it is cut off, plus Off. */
+function StalledTurnLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || STALLED_TURN_LIMIT_CHOICES.includes(props.minutes)
+      ? STALLED_TURN_LIMIT_CHOICES
+      : [...STALLED_TURN_LIMIT_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Stalled-turn limit"
+      id="stalled-turn-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
       ]}
       value={props.minutes === null ? "off" : String(props.minutes)}
     />

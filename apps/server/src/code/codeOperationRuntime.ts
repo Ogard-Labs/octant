@@ -350,6 +350,11 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off,
+   * read as each turn starts. Absent uses the default limit.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
    * The extra folders of a Code thread's Project, read at each turn start so
    * a folder added or removed applies from the next turn. Absent reads none.
    */
@@ -2769,7 +2774,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #runtimeWork: CodeRuntimeWorkRecorder;
   readonly #observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   #service: CodeOperationService | undefined;
-  readonly #runner = new CodeTurnRunner();
+  readonly #runner: CodeTurnRunner;
   /**
    * Starts noted before the service prepares them, under each start's own
    * operation. A stopped start can still be preparing when the next one on
@@ -2800,6 +2805,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
+    this.#runner = new CodeTurnRunner(
+      input.options.stalledTurnLimitMs === undefined
+        ? {}
+        : { stalledTurnLimitMs: input.options.stalledTurnLimitMs },
+    );
     this.#active = input.options.activeTurns ?? new Map();
     this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;

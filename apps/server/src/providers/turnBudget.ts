@@ -1,4 +1,8 @@
-import type { ProviderRuntimeEvent } from "@octant/contracts";
+import {
+  DEFAULT_STALLED_TURN_LIMIT_MINUTES,
+  type ProviderRuntimeEvent,
+  type ShellSettings,
+} from "@octant/contracts";
 import { Clock, Effect } from "effect";
 
 /**
@@ -85,9 +89,31 @@ export function makeTurnTextParagraphs(): (event: ProviderRuntimeEvent) => Provi
   };
 }
 
+/**
+ * The stalled-turn limit the host setting asks for, in milliseconds; `null`
+ * when the setting is Off and no turn is cut off for silence.
+ */
+export function stalledTurnLimitMs(
+  settings: Pick<ShellSettings, "stalledTurnLimitMinutes">,
+): number | null {
+  return settings.stalledTurnLimitMinutes === null
+    ? null
+    : settings.stalledTurnLimitMinutes * 60_000;
+}
+
+/** The limit a runner uses when nothing tells it the host's setting. */
+export const DEFAULT_STALLED_TURN_LIMIT_MS = DEFAULT_STALLED_TURN_LIMIT_MINUTES * 60_000;
+
 export interface IdleTimeout {
   /** Record activity; the idle clock restarts from now. */
   readonly touch: Effect.Effect<void>;
+  /**
+   * Record a provider event as activity. A tool call the runtime reports as
+   * started pauses the clock until the runtime reports it finished: a long
+   * build or test run inside the provider is work, and the provider says
+   * nothing while it lasts. A driver that reports no start gets no pause.
+   */
+  readonly observe: (event: ProviderRuntimeEvent) => Effect.Effect<void>;
   /** Resolves once no activity has been recorded for the configured window. */
   readonly expired: Effect.Effect<void>;
   /** App-owned work has its own deadline; it is not provider silence. */
@@ -96,26 +122,42 @@ export interface IdleTimeout {
 
 /**
  * An inactivity timeout: a turn is allowed to run for as long as the provider
- * keeps producing events, and is only cut off after `idleMs` of silence. Uses
- * the Effect clock so tests can drive it deterministically.
+ * keeps producing events, and is only cut off after `idleMs` of silence.
+ * `null` is the setting turned off: it never expires. Uses the Effect clock so
+ * tests can drive it deterministically.
  */
-export function makeIdleTimeout(idleMs: number): Effect.Effect<IdleTimeout> {
+export function makeIdleTimeout(idleMs: number | null): Effect.Effect<IdleTimeout> {
   return Effect.gen(function* () {
     let lastActivity = yield* Clock.currentTimeMillis;
     let activeActions = 0;
+    const runningProviderToolCalls = new Set<string>();
     const touch = Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
         lastActivity = now;
       }),
     );
-    const expired = Effect.gen(function* () {
-      for (;;) {
-        const now = yield* Clock.currentTimeMillis;
-        const remaining = idleMs - (now - lastActivity);
-        if (remaining <= 0 && activeActions === 0) return;
-        yield* Effect.sleep(activeActions > 0 ? idleMs : remaining);
-      }
-    });
+    const observe = (event: ProviderRuntimeEvent) =>
+      touch.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (event.kind === "tool-start") runningProviderToolCalls.add(event.toolCallId);
+            else if (event.kind === "tool-success" || event.kind === "tool-failure")
+              runningProviderToolCalls.delete(event.toolCallId);
+          }),
+        ),
+      );
+    const expired =
+      idleMs === null
+        ? Effect.never
+        : Effect.gen(function* () {
+            for (;;) {
+              const now = yield* Clock.currentTimeMillis;
+              const remaining = idleMs - (now - lastActivity);
+              const paused = activeActions > 0 || runningProviderToolCalls.size > 0;
+              if (remaining <= 0 && !paused) return;
+              yield* Effect.sleep(paused ? idleMs : remaining);
+            }
+          });
     const during = <A, E, R>(activity: Effect.Effect<A, E, R>) =>
       Effect.acquireUseRelease(
         Effect.sync(() => {
@@ -131,6 +173,6 @@ export function makeIdleTimeout(idleMs: number): Effect.Effect<IdleTimeout> {
             ),
           ),
       );
-    return { touch, expired, during };
+    return { touch, observe, expired, during };
   });
 }

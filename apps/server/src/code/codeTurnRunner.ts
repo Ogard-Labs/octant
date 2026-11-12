@@ -45,6 +45,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
+  DEFAULT_STALLED_TURN_LIMIT_MS,
   makeIdleTimeout,
   makeTurnTextParagraphs,
 } from "../providers/turnBudget";
@@ -59,7 +60,6 @@ const DEFAULT_MAX_EVENTS = 4_096;
 // Inactivity window, not a wall clock: a turn lives as long as the provider
 // keeps producing events. Long-running tools (test suites, builds) can be
 // silent for minutes.
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 export type CodeTurnOutcome = "completed" | "waiting" | "interrupted" | "failed";
 
@@ -273,22 +273,29 @@ export interface CodeTurnRunnerInput {
 export interface CodeTurnRunnerOptions {
   /** Maximum discrete (non-delta) provider events per turn. */
   readonly maxEvents?: number;
-  /** Inactivity window after which a silent turn is interrupted. */
+  /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off.
+   * Read as each turn starts, so a changed setting applies to the next turn
+   * and a running turn keeps the limit it started with.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
 }
 
 export class CodeTurnRunner {
   readonly #maxEvents: number;
-  readonly #timeoutMs: number;
+  readonly #stalledTurnLimitMs: () => number | null;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
+    this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
     const maxEvents = this.#maxEvents;
-    const timeoutMs = this.#timeoutMs;
+    const stalledTurnLimitMs = this.#stalledTurnLimitMs;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -446,7 +453,7 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(timeoutMs);
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs());
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
@@ -461,7 +468,7 @@ export class CodeTurnRunner {
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
-                yield* idle.touch;
+                yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
                 input.observeRemoteCommand?.(event);

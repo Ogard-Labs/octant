@@ -1459,8 +1459,8 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait the stalled-turn limit for a provider event before cutting a turn off, as Code does.
 The limit is a setting in Settings › Providers & Models, 30 minutes by default,
-which may be turned off (maintainer request, 2026-11-12). Not built yet: today
-it is a fixed five minutes.
+which may be turned off (maintainer request, 2026-11-12); see
+[Provider runtimes](provider-runtimes.md).
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer.

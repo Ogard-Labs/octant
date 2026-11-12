@@ -45,6 +45,7 @@ import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
+import { WorkTurnRuntime } from "../work/workTurnRuntime";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
@@ -104,6 +105,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { stalledTurnLimitMs } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -419,6 +421,10 @@ export function wireWork(deps: WorkDependencies) {
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      turnRuntime: new WorkTurnRuntime({
+        stalledTurnLimitMs: () =>
+          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      }),
       prepareProductFeedbackForTurn: (input) => {
         const scope = resolveFeedbackThread(input.windowId, input.threadId);
         if (scope?.mode !== "work") return undefined;
