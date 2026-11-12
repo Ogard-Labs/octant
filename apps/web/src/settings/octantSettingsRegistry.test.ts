@@ -296,6 +296,7 @@ describe("octantSettingsRegistry", () => {
       "subagent-concurrency-per-thread",
       "subagent-working-minutes",
       "subagent-no-limit-full-access",
+      "subagent-provider-wait-minutes",
       "default-model",
       "vision-reviewer",
     ]);

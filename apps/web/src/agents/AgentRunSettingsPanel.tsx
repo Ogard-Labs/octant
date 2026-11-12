@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   MAX_AGENT_RUN_CONCURRENCY,
+  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   MAX_AGENT_RUN_WORKING_TIME_MINUTES,
   effectiveAgentRunConcurrency,
   type AgentRunConcurrency,
@@ -70,6 +72,7 @@ export function AgentRunSettingsPanel(props: {
       readonly creationPosture: AgentRunSelectableCreationPosture;
       readonly workingTimeLimitMinutes?: number;
       readonly noWorkingTimeLimitAtFullAccess?: boolean;
+      readonly providerSlotWaitMinutes?: number;
       readonly concurrency?: AgentRunConcurrency;
     }) => {
       if (settings === undefined || saving) return;
@@ -203,6 +206,24 @@ export function AgentRunSettingsPanel(props: {
               label="No time limit at Full access"
               onCheckedChange={(checked) =>
                 void save({ creationPosture: posture, noWorkingTimeLimitAtFullAccess: checked })
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            label="Minutes to wait for a full provider"
+            description={`How long a helper waits when its provider is taking no more requests, before it stops and can be retried. Default ${DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES} minutes; a change applies to helpers already waiting.`}
+            scope="app"
+            settingId="subagent-provider-wait-minutes"
+          >
+            <OctantNumberStepper
+              label="Minutes to wait for a full provider"
+              min={1}
+              max={MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES}
+              value={
+                settings?.providerSlotWaitMinutes ?? DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES
+              }
+              onChange={(value) =>
+                void save({ creationPosture: posture, providerSlotWaitMinutes: value })
               }
             />
           </SettingRow>

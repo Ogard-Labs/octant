@@ -114,6 +114,33 @@ describe("AgentRunSettingsPanel", () => {
     await waitFor(() => expect(lift()).toBeChecked());
   });
 
+  it("waits 30 minutes for a full provider until a person changes the wait", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn(async () => ({
+      ...baseSettings({ creationPosture: "automatic", version: 2 }),
+      providerSlotWaitMinutes: 31,
+    }));
+    const client = {
+      current: vi.fn(async () => baseSettings({ creationPosture: "automatic", version: 1 })),
+      update,
+    };
+    render(<AgentRunSettingsPanel client={client} />);
+    await waitFor(() => expect(toggle()).toBeChecked());
+    const wait = () => screen.getByRole("spinbutton", { name: "Minutes to wait for a full provider" });
+    expect(wait()).toHaveValue(30);
+
+    await user.click(
+      screen.getByRole("button", { name: "Increase Minutes to wait for a full provider" }),
+    );
+
+    expect(update).toHaveBeenCalledWith({
+      creationPosture: "automatic",
+      providerSlotWaitMinutes: 31,
+      expectedVersion: 1,
+    });
+    await waitFor(() => expect(wait()).toHaveValue(31));
+  });
+
   it("turns helper agents off", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => baseSettings({ creationPosture: "off", version: 2 }));

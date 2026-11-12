@@ -80,6 +80,24 @@ describe("UpdateAgentRunPolicySettings", () => {
     ).toMatchObject({ noWorkingTimeLimitAtFullAccess: true });
   });
 
+  it("accepts only a bounded person-chosen wait for a full provider", () => {
+    expect(
+      decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 0,
+        providerSlotWaitMinutes: 45,
+      }),
+    ).toMatchObject({ providerSlotWaitMinutes: 45 });
+    for (const value of [0, 241, 1.5])
+      expect(() =>
+        decodeUpdateAgentRunPolicySettings({
+          creationPosture: "automatic",
+          expectedVersion: 0,
+          providerSlotWaitMinutes: value,
+        }),
+      ).toThrow();
+  });
+
   it("decodes a valid update command with an expected version", () => {
     const decoded = decodeUpdateAgentRunPolicySettings({
       creationPosture: "off",

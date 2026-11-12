@@ -18,6 +18,7 @@ import {
   decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
   agentRunWorkingTimeLimitMinutes,
+  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   LOCAL_HOST_ID,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
@@ -970,6 +971,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     approvals: { isCurrent: () => true },
     processes: agentRunProcessSupervisor,
+    providerSlotWaitLimitMs: () =>
+      (agentRunSettingsStore.current().providerSlotWaitMinutes ??
+        DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES) * 60_000,
     parentAuthority: {
       current: (run) =>
         currentParentAuthorityForWaiter({

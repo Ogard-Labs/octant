@@ -849,6 +849,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "helper agents subagents working time limit none unlimited full access",
         },
         {
+          id: settingId("subagent-provider-wait-minutes"),
+          label: "Minutes a helper waits for a full provider",
+          scope: "app",
+          keywords: "helper agents subagents provider full capacity wait minutes request slot limit",
+        },
+        {
           id: settingId("default-model"),
           label: "Default model",
           scope: "app",

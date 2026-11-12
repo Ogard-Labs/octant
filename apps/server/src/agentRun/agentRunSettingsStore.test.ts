@@ -145,9 +145,15 @@ describe("AgentRunSettingsStore", () => {
       noWorkingTimeLimitAtFullAccess: true,
       expectedVersion: 0,
     });
-    store.update({ creationPosture: "automatic", workingTimeLimitMinutes: 60, expectedVersion: 1 });
+    store.update({
+      creationPosture: "automatic",
+      workingTimeLimitMinutes: 60,
+      providerSlotWaitMinutes: 45,
+      expectedVersion: 1,
+    });
     expect(createStore(journal).current()).toMatchObject({
       workingTimeLimitMinutes: 60,
+      providerSlotWaitMinutes: 45,
       noWorkingTimeLimitAtFullAccess: true,
     });
     store.update({
@@ -155,7 +161,10 @@ describe("AgentRunSettingsStore", () => {
       noWorkingTimeLimitAtFullAccess: false,
       expectedVersion: 2,
     });
-    expect(createStore(journal).current().noWorkingTimeLimitAtFullAccess).toBe(false);
+    expect(createStore(journal).current()).toMatchObject({
+      providerSlotWaitMinutes: 45,
+      noWorkingTimeLimitAtFullAccess: false,
+    });
   });
 
   it("refuses limits above the ceiling", () => {

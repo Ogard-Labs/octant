@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
+| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1317,11 +1317,11 @@ Status: Built. Since: —. Detail: [Architecture: Context and usage accounting](
 One in-memory scheduler admits every Chat turn, managed child, automation and compaction against each provider instance's limits. Only a capacity answer backs a provider off.
 
 - A refused request, rejected credential, unreachable endpoint or spent usage limit is not a capacity answer; the turn fails with its own cause.
-- A managed child that finds the provider full waits for at most 30 minutes by default, a limit a person can change (maintainer request, 2026-11-12); not built yet: today the wait is a fixed five minutes. It holds no run slot, provider slot or session while it waits.
+- A managed child that finds the provider full waits for at most 30 minutes by default, a limit a person can change in Helper agents settings, from 1 to 240 minutes (maintainer request, 2026-11-12). It holds no run slot, provider slot or session while it waits.
 - When a slot frees, the host re-reads the parent. A helper whose parent drifted in authority ends Interrupted and never starts.
 - Person-started turns keep a short head start over helpers, not strict precedence.
 
-Status: Partly built. Since: —. Detail: [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
+Status: Built. Since: —. Detail: [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
 
 ### Turn metrics and spend ceilings
 

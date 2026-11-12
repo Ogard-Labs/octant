@@ -40,6 +40,18 @@ const AgentRunWorkingTimeLimit = Schema.Int.pipe(
   Schema.between(1, MAX_AGENT_RUN_WORKING_TIME_MINUTES),
 );
 
+/**
+ * How long a helper waits for a provider that is full before it ends
+ * Interrupted. Half an hour by default: a turn holding the slot is often a
+ * long one, and the earlier five minutes ended helpers that would have
+ * started a few minutes later. The ceiling matches the working-time ceiling.
+ */
+export const DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 30;
+export const MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 240;
+const AgentRunProviderSlotWaitLimit = Schema.Int.pipe(
+  Schema.between(1, MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES),
+);
+
 export const AgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   /**
@@ -48,6 +60,8 @@ export const AgentRunPolicySettings = Schema.Struct({
    * limited; it never lifts the limit for a thread below Full access.
    */
   noWorkingTimeLimitAtFullAccess: Schema.optional(Schema.Boolean),
+  /** Optional so settings journaled before it existed replay as the default. */
+  providerSlotWaitMinutes: Schema.optional(AgentRunProviderSlotWaitLimit),
   creationPosture: AgentRunCreationPosture,
   /** Optional so settings journaled before it existed replay as the defaults. */
   concurrency: Schema.optional(AgentRunConcurrency),
@@ -74,6 +88,8 @@ export const UpdateAgentRunPolicySettings = Schema.Struct({
   workingTimeLimitMinutes: Schema.optional(AgentRunWorkingTimeLimit),
   /** Absent keeps the current choice. */
   noWorkingTimeLimitAtFullAccess: Schema.optional(Schema.Boolean),
+  /** Absent keeps the current wait. */
+  providerSlotWaitMinutes: Schema.optional(AgentRunProviderSlotWaitLimit),
   creationPosture: AgentRunSelectableCreationPosture,
   /** Absent keeps the current limits. */
   concurrency: Schema.optional(AgentRunConcurrency),

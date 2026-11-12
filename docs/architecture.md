@@ -6193,8 +6193,9 @@ and hands the run slot it was about to use to the next waiter. A start refused f
 or authority ends the wait with that reason (`workspace-denied`,
 `authority-drift`) and does not retry. Thirty minutes by default, a setting
 the person can change, is the longest a helper waits (maintainer request,
-2026-11-12; not built yet: today it is a constant five minutes, the idle
-bound of a Chat turn); past it the helper ends Interrupted with
+2026-11-12): Helper agents settings hold it as `providerSlotWaitMinutes`,
+from 1 to 240, and the host reads it at every check, so a change applies to
+helpers already waiting; past it the helper ends Interrupted with
 `capacity-unavailable` and the sentence that names what is full, and Retry
 starts it again once a slot frees. A longer wait would mean a person's
 unanswered question is holding the slot, and the helper should say so rather
