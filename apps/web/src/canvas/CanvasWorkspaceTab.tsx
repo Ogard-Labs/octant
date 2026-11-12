@@ -501,12 +501,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // the form's loading effect does not re-run on every render.
   const choiceAnswers = useMemo(() => {
     const load = props.client?.choiceAnswers;
+    if (load === undefined) return undefined;
     const revise = props.client?.reviseChoiceAnswers;
-    if (load === undefined || revise === undefined) return undefined;
     return {
       canvasId: props.tab.canvasId,
       load: () => load(props.tab.canvasId),
-      revise,
+      ...(revise === undefined ? {} : { revise }),
     };
   }, [props.client, props.tab.canvasId]);
 

@@ -94,6 +94,11 @@ describe("Canvas choice answers", () => {
     );
     expect(state.sequence).toBe(2);
     expect(state.answers.map((answer) => answer.author)).toEqual([person, person]);
+    // The host records the labels the person saw, in the question's order.
+    expect(state.answers.map((answer) => answer.selectedLabels)).toEqual([
+      ["Any device"],
+      ["A", "B"],
+    ]);
 
     const changed = admit(revise([set({ selectedOptionIds: ["owner"] })], 2), state);
     if (changed.kind !== "accepted") throw new Error(changed.message);

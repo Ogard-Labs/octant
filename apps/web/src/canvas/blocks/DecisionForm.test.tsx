@@ -403,6 +403,73 @@ describe("decision form", () => {
     expect(screen.getByText(/0 of 4 answered/)).toBeInTheDocument();
   });
 
+  it("shows an earlier answer in the words the person chose, not the option's new label", async () => {
+    const user = userEvent.setup();
+    const { port } = host();
+    const view = render(<ChoiceBlock block={form} runtime={sendable(port)} />);
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /Yes/,
+        },
+      ),
+    );
+    await waitFor(() => expect(screen.getByText("1 of 4 answered")).toBeInTheDocument());
+    // The agent keeps the option id and changes what it says.
+    const relabelled = decodeCanvasBlock({
+      ...form,
+      questions: form.questions.map((question) =>
+        question.id === "who"
+          ? {
+              ...question,
+              options: question.options.map((option) =>
+                option.id === "yes" ? { ...option, label: "Publish publicly" } : option,
+              ),
+            }
+          : question,
+      ),
+    }) as CanvasChoiceBlock;
+    view.rerender(<ChoiceBlock block={relabelled} runtime={sendable(port)} />);
+    expect(await screen.findByText("Earlier answer: Yes")).toBeInTheDocument();
+    expect(screen.queryByText(/Earlier answer: Publish publicly/)).not.toBeInTheDocument();
+  });
+
+  it("shows saved answers where the window may read them and never write them", async () => {
+    const { port } = host();
+    const saved = await port.revise({
+      kind: "canvas-choice-answers-revise",
+      canvasId: port.canvasId,
+      expectedSequence: 0,
+      changes: [
+        {
+          kind: "set",
+          blockId: form.blockId,
+          questionId: "who",
+          questionFingerprint: fingerprintOf("who"),
+          selectedOptionIds: ["no"],
+        },
+      ],
+    });
+    expect(saved.kind).toBe("accepted");
+    // A paired browser's port has the read and no write.
+    const { revise: _write, ...readOnlyPort } = port;
+    render(
+      <ChoiceBlock
+        block={form}
+        runtime={{
+          kind: "read-only",
+          reason: "Answer from a window on the host.",
+          answers: readOnlyPort,
+        }}
+      />,
+    );
+    expect(await screen.findByText("1 of 4 answered")).toBeInTheDocument();
+    const who = screen.getByRole("radiogroup", { name: "Who may set it?" });
+    expect(within(who).getByRole("radio", { name: /No/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: /Send to/ })).not.toBeInTheDocument();
+  });
+
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {
     const user = userEvent.setup();
     const { port } = host({ refuse: "The thread is archived." });

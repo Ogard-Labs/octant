@@ -38,6 +38,14 @@ const answerFields = {
 /** One saved answer, as stored and as the form reads it back. */
 export const CanvasChoiceAnswer = Schema.Struct({
   ...answerFields,
+  /**
+   * The labels of the chosen options as the person saw them, in the question's
+   * order. The host writes them when it admits the answer, so an option an
+   * agent later rewords never puts new words in the person's mouth.
+   */
+  selectedLabels: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(Schema.maxItems(8)),
+  ),
   author: CanvasActor,
   answeredAt: UtcTimestamp,
 }).annotations(strict);

@@ -1069,8 +1069,10 @@ aggregate version is the Canvas's answer sequence, so concurrent writes
 conflict on the journal instead of both winning. A set names the Canvas, the
 block, the question, the `questionFingerprint` the window saw (a digest of the
 question's canonical definition: id, prompt, selection, option ids and labels,
-selection limits, `allowCustom`, `allowNote`), the selected option ids, an
-optional written answer or note, an `acceptedRecommendation` flag, and the time.
+selection limits, `allowCustom`, `allowNote`), the selected option ids and,
+written by the host, their labels as the person saw them (so an option an agent
+later rewords is never shown as the person's words), an optional written answer
+or note, an `acceptedRecommendation` flag, and the time.
 A pure `applyCanvasChoiceAnswerEvent` reducer rebuilds the answers on restart
 and on replay, and a pure `admitCanvasChoiceAnswer` policy decides each write.
 

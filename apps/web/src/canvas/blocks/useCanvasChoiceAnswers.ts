@@ -12,7 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface CanvasChoiceAnswersPort {
   readonly canvasId: CanvasId;
   readonly load: () => Promise<CanvasChoiceAnswersOutcome>;
-  readonly revise: (
+  /** Absent where a window may read saved answers and never write them. */
+  readonly revise?: (
     command: CanvasChoiceAnswersReviseCommand,
   ) => Promise<CanvasChoiceAnswersReviseResult>;
 }
@@ -72,6 +73,12 @@ export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
       const run = async (): Promise<CanvasChoiceSaveResult> => {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           let result: CanvasChoiceAnswersReviseResult;
+          if (port.revise === undefined) {
+            return {
+              status: "refused",
+              message: "Answers are saved from a window on the host.",
+            };
+          }
           try {
             result = await port.revise({
               kind: "canvas-choice-answers-revise",

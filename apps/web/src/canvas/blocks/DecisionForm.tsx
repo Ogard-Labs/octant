@@ -533,9 +533,7 @@ function DecisionQuestion(props: {
         </label>
       )}
       {props.stale === undefined ? null : (
-        <p className="canvas-choice__note">
-          Earlier answer: {earlierAnswerText(question, props.stale)}
-        </p>
+        <p className="canvas-choice__note">Earlier answer: {earlierAnswerText(props.stale)}</p>
       )}
       <p className="decision-form__status" role="status">
         {props.status?.kind === "saving"
@@ -556,13 +554,12 @@ function DecisionQuestion(props: {
 
 /**
  * An answer made before its question was revised, as the person gave it: their
- * written answer, else the labels of the options that still exist, then their
- * note. It is a reminder to adapt from, never an answer to the revised question.
+ * written answer, else the labels they chose, then their note. It is a reminder to adapt from, never an answer to the revised question.
  */
-function earlierAnswerText(question: Question, answer: CanvasChoiceAnswer): string {
-  const labels = question.options
-    .filter((option) => answer.selectedOptionIds.includes(option.id))
-    .map((option) => option.label);
+function earlierAnswerText(answer: CanvasChoiceAnswer): string {
+  // The labels are the ones the person saw when they answered; the revised
+  // question's own wording is never put in their mouth.
+  const labels = answer.selectedLabels ?? [];
   const chosen =
     answer.customAnswer !== undefined
       ? answer.customAnswer

@@ -163,6 +163,9 @@ export function admitCanvasChoiceAnswersRevision(
           questionId: change.questionId,
           questionFingerprint: change.questionFingerprint,
           selectedOptionIds: change.selectedOptionIds,
+          selectedLabels: question.options
+            .filter((option) => change.selectedOptionIds.includes(option.id))
+            .map((option) => option.label),
           ...(change.customAnswer === undefined ? {} : { customAnswer: change.customAnswer }),
           ...(change.note === undefined ? {} : { note: change.note }),
           ...(change.acceptedRecommendation === true ? { acceptedRecommendation: true } : {}),
