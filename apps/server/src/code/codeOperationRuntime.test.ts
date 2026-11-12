@@ -14116,6 +14116,40 @@ describe("streamed reply text in a Code turn", () => {
     }
   });
 
+  it("keeps the lost-text note when a cancel follows a flush that already failed", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(317, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // A caller that swallows the refusal leaves the turn running with an
+      // empty burst, so the cancel below has nothing left to flush.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      await turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(395),
+        threadId,
+        checkoutId,
+      });
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
+    } finally {
+      await turn.finish();
+    }
+  });
+
   it("fails the turn when the journal append, not the evidence put, fails during a flush", async () => {
     const turn = await streamingTurn(313);
     try {

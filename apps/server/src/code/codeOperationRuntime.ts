@@ -4766,7 +4766,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       });
     }
     if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
-    const lostText = this.#flushBeforeStop(active) ?? this.#lostTextNote(active);
+    const lostText = this.#flushBeforeStop(active);
     const forcedMessage = "The provider attempt was stopped by force.";
     active.interruptMessage =
       lostText === undefined ? forcedMessage : `${forcedMessage} ${lostText}`;
@@ -5770,12 +5770,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   #flushBeforeStop(active: ActiveTurn): string | undefined {
     try {
       this.#writeBurst(active);
-      return undefined;
     } catch (error) {
       this.#abandonBurst(active);
       active.deltaFlushFailure ??= { error };
-      return this.#lostTextNote(active);
     }
+    // An earlier timer flush may have failed already, leaving nothing to write
+    // here; the stop still owes the person the note.
+    return this.#lostTextNote(active);
   }
 
   /** The stop's note that streamed reply text was lost, once any flush has failed. */
@@ -6117,12 +6118,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       outcome = "failed";
       failure = evidenceCapacityFailure(active.deltaFlushFailure.error);
     }
-    // One terminal frame per turn: the runner settles an aborted turn after a
-    // failure was already journaled, and its `interrupted` must not stack on it.
+    // Only a lost-text failure keeps its terminal state: the runner settles the
+    // aborted turn after that failure was journaled, and its `interrupted` must
+    // not stack on it. Every other turn journals a later, different outcome as
+    // it always did.
     const journaledTerminal =
-      active.lastPersistedState === "completed" ||
-      active.lastPersistedState === "failed" ||
-      active.lastPersistedState === "interrupted"
+      active.deltaFlushFailure !== undefined &&
+      (active.lastPersistedState === "completed" ||
+        active.lastPersistedState === "failed" ||
+        active.lastPersistedState === "interrupted")
         ? active.lastPersistedState
         : undefined;
     const supersededTerminal = journaledTerminal !== undefined && journaledTerminal !== outcome;
