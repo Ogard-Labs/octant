@@ -1408,6 +1408,45 @@ interface StartingTurn {
   journaled: boolean;
 }
 
+/**
+ * What one host look at a thread's unconfirmed steps came to. `looked` says
+ * the remote was asked, not that every step settled: a step the remote could
+ * not answer for stays unconfirmed either way.
+ */
+export type CodeUnconfirmedStepSettlement =
+  | { readonly status: "looked" }
+  | {
+      readonly status: "skipped";
+      readonly reason: "thread-not-active" | "unauthorized" | "checkout-unavailable";
+    };
+
+/**
+ * The read's answer, or `undefined` once `signal` aborts first. A port that
+ * ignores the signal still cannot hold a bounded step past it, and an answer
+ * a cut-off read produced (a killed `git` reads as an unreachable remote) is
+ * not taken as the remote's.
+ */
+async function untilAborted<T>(
+  signal: AbortSignal | undefined,
+  read: Promise<T>,
+): Promise<T | undefined> {
+  if (signal === undefined) return read;
+  // A read left behind by an abort may still fail; nobody is waiting on it.
+  void read.catch(() => undefined);
+  if (signal.aborted) return undefined;
+  let stop: (() => void) | undefined;
+  const aborted = new Promise<undefined>((resolve) => {
+    stop = () => resolve(undefined);
+    signal.addEventListener("abort", stop, { once: true });
+  });
+  try {
+    const answer = await Promise.race([read, aborted]);
+    return signal.aborted ? undefined : answer;
+  } finally {
+    if (stop !== undefined) signal.removeEventListener("abort", stop);
+  }
+}
+
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
@@ -1443,6 +1482,13 @@ export class CodeOperationService {
    */
   /** Push and pull request steps still running, by thread and operation id. */
   readonly #remoteStepsInFlight = new Map<string, Promise<CodeOperationResult>>();
+  /**
+   * The host's own look at a thread's unconfirmed steps, by thread id. A look
+   * the person starts, or a push or comment they retry, waits for it, and it
+   * waits for a push or comment already being sent: a count of the person's
+   * comments taken around a new post would credit that post to the lost one.
+   */
+  readonly #settlementsInFlight = new Map<string, Promise<unknown>>();
   readonly #overwritesInFlight = new Set<{
     readonly checkoutRoot: string;
     readonly settled: Promise<unknown>;
@@ -1473,6 +1519,10 @@ export class CodeOperationService {
     // run, so a second submission arriving while the first is still talking
     // to the remote would find nothing and push or post again. It waits for
     // the first instead, then answers from the journal like any retry.
+    // Awaited only when one runs: with none, this step must be in flight
+    // before a look could start and miss it.
+    const settling = this.#settlementsInFlight.get(String(command.threadId));
+    if (settling !== undefined) await settling;
     const key = `${String(command.threadId)}:${String(command.operationId)}`;
     for (
       let earlier = this.#remoteStepsInFlight.get(key);
@@ -3879,6 +3929,7 @@ export class CodeOperationService {
       case "observe-git":
         if (git === undefined)
           return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        await this.#settlementsInFlight.get(String(thread.id));
         await this.#settleLostPushes(thread, root.checkoutRoot, git);
         return this.#gitObservation(command, root.checkoutRoot, git);
       case "review-run":
@@ -4040,6 +4091,7 @@ export class CodeOperationService {
       case "merge-pull-request":
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
+        await this.#settlementsInFlight.get(String(thread.id));
         await this.#settleLostPullRequestSteps(thread);
         return this.#pullRequestReview(command, root.checkoutRoot, git);
       case "observe-turn-review": {
@@ -4649,6 +4701,75 @@ export class CodeOperationService {
   }
 
   /**
+   * Settle, as the host and without a window, the thread's push and pull
+   * request steps whose outcome a restart left unknown, by the same looks at
+   * the remote that opening its Git and pull request tabs takes. Only an
+   * active thread is looked at, through its own checkout and remote and the
+   * pull request each step recorded; a thread that fails any of those checks
+   * is skipped and its steps stay unconfirmed.
+   *
+   * `stepSignal` is asked once per step and bounds that step's reads: a step
+   * whose reads it aborts stays unconfirmed, as an unreadable remote does.
+   */
+  async settleUnconfirmedSteps(
+    scopeId: WindowId,
+    threadId: CodeThreadId,
+    stepSignal: () => AbortSignal,
+  ): Promise<CodeUnconfirmedStepSettlement> {
+    const key = String(threadId);
+    // A push or comment the person already sent on the thread finishes first,
+    // for the same reason a retry waits for this look.
+    const sending = [...this.#remoteStepsInFlight]
+      .filter(([step]) => step.startsWith(`${key}:`))
+      .map(([, result]) => result.catch(() => undefined));
+    const running = Promise.all(sending).then(() =>
+      this.#settleUnconfirmedSteps(scopeId, threadId, stepSignal),
+    );
+    // Whoever waits for it only needs it over, never its failure.
+    const over = running.catch(() => undefined);
+    this.#settlementsInFlight.set(key, over);
+    try {
+      return await running;
+    } finally {
+      if (this.#settlementsInFlight.get(key) === over) this.#settlementsInFlight.delete(key);
+    }
+  }
+
+  async #settleUnconfirmedSteps(
+    scopeId: WindowId,
+    threadId: CodeThreadId,
+    stepSignal: () => AbortSignal,
+  ): Promise<CodeUnconfirmedStepSettlement> {
+    const thread = this.#options.authority.readThread(threadId);
+    if (thread === undefined || thread.lifecycle !== "active")
+      return { status: "skipped", reason: "thread-not-active" };
+    if (!(await this.#options.authority.canAccessProject(scopeId, thread.projectId)))
+      return { status: "skipped", reason: "unauthorized" };
+    const checkout = this.#options.authority.readCheckout(thread.checkoutId);
+    // A restart marks every available checkout waiting until a window looks
+    // at it again, so waiting is what a just-restarted host finds. The root
+    // resolved below re-checks the Project binding and the folder itself, and
+    // settling only reads the remote, so waiting is accepted; a checkout
+    // recorded as gone is not.
+    if (
+      checkout === undefined ||
+      checkout.repositoryId !== thread.repositoryId ||
+      checkout.availability === "unavailable"
+    )
+      return { status: "skipped", reason: "checkout-unavailable" };
+    if (checkout.kind === "remote-root" && this.#options.holdsServerThread?.(thread) !== true)
+      return { status: "skipped", reason: "checkout-unavailable" };
+    const root = await this.#options.authority.resolveCheckoutRoot(scopeId, thread, checkout);
+    if (root === undefined) return { status: "skipped", reason: "checkout-unavailable" };
+    // A server thread's Git runs on its server, as its Git tab's does.
+    const git =
+      checkout.kind === "remote-root" ? this.#options.serverGit?.(thread) : this.#options.git;
+    if (git !== undefined) await this.#settleLostPushes(thread, root.checkoutRoot, git, stepSignal);
+    await this.#settleLostPullRequestSteps(thread, stepSignal);
+    return { status: "looked" };
+  }
+
+  /**
    * A push the host lost mid-flight is settled by where the remote branch now
    * points: at the pushed commit, it landed; anywhere else or nowhere, it did
    * not, and pushing again is safe. A remote that cannot be read leaves the step
@@ -4658,19 +4779,27 @@ export class CodeOperationService {
     thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort,
+    stepSignal?: () => AbortSignal,
   ): Promise<void> {
     const steps = this.#options.unconfirmedSteps;
     if (steps === undefined || git.remoteHead === undefined) return;
     for (const work of steps.list(thread.id)) {
       const step = work.remoteStep;
       if (work.state !== "ambiguous" || step?.kind !== "push") continue;
-      const remote = await git.remoteHead({
-        checkoutRoot,
-        remote: step.remote,
-        remoteRef: step.remoteRef,
-        executionPolicy: thread.executionPolicy,
-      });
-      if (remote.status === "unavailable") continue;
+      const signal = stepSignal?.();
+      const remote = await untilAborted(
+        signal,
+        git.remoteHead(
+          {
+            checkoutRoot,
+            remote: step.remote,
+            remoteRef: step.remoteRef,
+            executionPolicy: thread.executionPolicy,
+          },
+          signal,
+        ),
+      );
+      if (remote === undefined || remote.status === "unavailable") continue;
       steps.settle(
         work,
         remote.status === "found" && remote.oid === step.commitOid ? "completed" : "failed",
@@ -4685,7 +4814,10 @@ export class CodeOperationService {
    * person's own comments on that pull request. Updates and merges cannot be
    * told apart from an earlier one this way, so they stay unconfirmed.
    */
-  async #settleLostPullRequestSteps(thread: CodeThread): Promise<void> {
+  async #settleLostPullRequestSteps(
+    thread: CodeThread,
+    stepSignal?: () => AbortSignal,
+  ): Promise<void> {
     const steps = this.#options.unconfirmedSteps;
     const locate = this.#options.pullRequests.locate;
     if (steps === undefined || locate === undefined) return;
@@ -4702,21 +4834,31 @@ export class CodeOperationService {
           step.priorMatches === undefined
         )
           continue;
-        const matches = await this.#ownMatchingComments(
-          step.pullRequest,
-          step.commentDigest,
-          step.reviewThreadId,
+        const signal = stepSignal?.() ?? new AbortController().signal;
+        const matches = await untilAborted(
+          signal,
+          this.#ownMatchingComments(
+            step.pullRequest,
+            step.commentDigest,
+            step.reviewThreadId,
+            signal,
+          ),
         );
         if (matches !== undefined)
           steps.settle(work, matches > step.priorMatches ? "completed" : "failed");
         continue;
       }
       if (step.action !== "create") continue;
-      const signal = new AbortController().signal;
-      const open = await locate(thread.id, "open", signal);
-      const found = open.status === "none" ? await locate(thread.id, "closed", signal) : open;
-      if (found.status === "found") steps.settle(work, "completed");
-      else if (found.status === "none") steps.settle(work, "failed");
+      const signal = stepSignal?.() ?? new AbortController().signal;
+      const found = await untilAborted(
+        signal,
+        (async () => {
+          const open = await locate(thread.id, "open", signal);
+          return open.status === "none" ? await locate(thread.id, "closed", signal) : open;
+        })(),
+      );
+      if (found?.status === "found") steps.settle(work, "completed");
+      else if (found?.status === "none") steps.settle(work, "failed");
     }
   }
 
@@ -4730,6 +4872,7 @@ export class CodeOperationService {
     target: GhPullRequestIdentityRequest,
     commentDigest: string,
     reviewThreadId: string | undefined,
+    signal: AbortSignal = new AbortController().signal,
   ): Promise<number | undefined> {
     const read = this.#options.pullRequests.actions?.ownComments;
     if (read === undefined) return undefined;
@@ -4740,7 +4883,7 @@ export class CodeOperationService {
         number: target.number,
         ...(reviewThreadId === undefined ? {} : { threadNodeId: reviewThreadId }),
       },
-      new AbortController().signal,
+      signal,
     );
     if (comments.status !== "read") return undefined;
     return comments.bodies.filter((body) => pullRequestCommentDigest(body) === commentDigest)

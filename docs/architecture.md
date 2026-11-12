@@ -5132,6 +5132,27 @@ or .zip>` write the same files, built by one host command
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
+  The host does not wait for those looks. Once restart reconciliation has run,
+  it settles every thread's unconfirmed push and pull request steps once, in the
+  background, with the same reads the Git and pull request tabs make, so the
+  person who reopens the app finds them settled and a thread held only by one
+  is released when the remote proves how it ended. Start-up never waits on it:
+  at most three threads are read at a time, each step's reads stop after 20
+  seconds, and server shutdown stops the pass. It runs as the host (the scope
+  a routine runs under) and looks only at an active thread whose Project the
+  host still holds, through the thread's own checkout root, re-resolved and
+  re-checked against the Project binding, and its own remote, and at the pull
+  request a comment recorded. A restart marks every checkout waiting until a
+  window looks at it again, and settling only reads the remote, so a waiting
+  checkout is read; one recorded as gone, an archived thread, or a root that
+  no longer resolves is skipped. An unreachable remote, a read that times out,
+  or any failure leaves the step unconfirmed; nothing is marked failed without
+  the remote's answer. It reaches no destination the tabs do not: `git
+ls-remote` against the thread's remote and the GitHub reads they already
+  make. A person's look at the Git or pull request tab, and a push or comment
+  retried on the thread, waits for the host's pass on that thread first, so
+  the same comments are never counted around a new post.
+
   The same uncertainty can arise without a restart. A push that fails without
   Git reporting the remote's answer (a dropped connection, a `[remote failure]`
   the remote never confirmed, a timeout) carries `unconfirmed` on its result
