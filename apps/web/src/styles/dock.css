@@ -889,15 +889,6 @@
   border: 0;
 }
 
-/* With a page open in a short tile the toolbar and the feedback strip took all
-   but 100px of a 240px tile. The page keeps 120px; the tool scrolls to reach
-   the strip below it. */
-.right-utility-dock__tool
-  .browser-workspace--feedback
-  > :is(.browser-workspace__native, .browser-workspace__remote, .browser-workspace__start) {
-  min-height: 120px;
-}
-
 /* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
    stays whole and clear of the next tab and the New page button. The select
    was shrink-0, so the tab's box shrank around it and the close mark ran under
