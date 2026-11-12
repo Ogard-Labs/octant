@@ -86,6 +86,34 @@ describe("AgentRunSettingsPanel", () => {
     );
   });
 
+  it("starts helpers at 120 working minutes and lets a person lift the limit at Full access", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn(async () => ({
+      ...baseSettings({ creationPosture: "automatic", version: 2 }),
+      noWorkingTimeLimitAtFullAccess: true,
+    }));
+    const client = {
+      current: vi.fn(async () => baseSettings({ creationPosture: "automatic", version: 1 })),
+      update,
+    };
+    render(<AgentRunSettingsPanel client={client} />);
+    await waitFor(() => expect(toggle()).toBeChecked());
+    expect(screen.getByRole("spinbutton", { name: "Working minutes per attempt" })).toHaveValue(
+      120,
+    );
+    const lift = () => screen.getByRole("switch", { name: "No time limit at Full access" });
+    expect(lift()).not.toBeChecked();
+
+    await user.click(lift());
+
+    expect(update).toHaveBeenCalledWith({
+      creationPosture: "automatic",
+      noWorkingTimeLimitAtFullAccess: true,
+      expectedVersion: 1,
+    });
+    await waitFor(() => expect(lift()).toBeChecked());
+  });
+
   it("turns helper agents off", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => baseSettings({ creationPosture: "off", version: 2 }));

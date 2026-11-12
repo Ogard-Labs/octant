@@ -843,6 +843,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
+          id: settingId("subagent-no-limit-full-access"),
+          label: "No helper time limit at Full access",
+          scope: "app",
+          keywords: "helper agents subagents working time limit none unlimited full access",
+        },
+        {
           id: settingId("default-model"),
           label: "Default model",
           scope: "app",
