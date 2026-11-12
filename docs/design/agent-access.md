@@ -46,7 +46,7 @@ is a bot's permission ([Bots](bots.md)). This design uses:
 | SEC-5 | Prompts from an outside agent are outside content: the thread is marked from its first turn, as a thread that read outside content is.                                                                                          |
 | NFR-1 | Spend is bounded per grant: running turns at once, turns per day, and request rate.                                                                                                                                             |
 | CON-1 | No Octant-operated relay, account, or service (Principles; [Current Release Boundary](../architecture.md#current-release-boundary)).                                                                                            |
-| CON-2 | Remote transport and authority are host concerns, not a plugin seam: like the listener and the relay connector, agent access is host transport ([Hosted relay](hosted-relay.md) states the same for its connector).             |
+| CON-2 | Remote transport and authority are host concerns, not a plugin seam: like the listener, agent access is host transport.                                                                                                         |
 
 Out of scope: outside agents answering approvals, choosing Full access, adding
 or binding Projects, reading credentials, changing settings, administering the
@@ -299,8 +299,7 @@ which needs the maintainer's explicit decision. The choices:
    the agent-access surface, only for grants marked public, with tighter limits
    and direct mode only; pairing and every other surface still refuse it. Still
    nothing Octant operates.
-3. **Octant-operated relay.** Out: it contradicts CON-1 and the canceled
-   [Hosted relay](hosted-relay.md).
+3. **Octant-operated relay.** Out: it contradicts CON-1.
 
 Decision (2026-11-11, maintainer): option 1. Option 2 would need a new
 maintainer decision and its own threat review.

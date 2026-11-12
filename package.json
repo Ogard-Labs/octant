@@ -41,7 +41,7 @@
     "style:check": "bun test scripts/check-code-style.test.ts && bun scripts/check-code-style.ts",
     "connectors:probe": "bun run --cwd scripts test check-connector-catalog && bun scripts/check-connector-catalog.ts",
     "shield:eval": "bun scripts/shield-false-allow-rate.ts",
-    "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts",
+    "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts scripts/check-decisions-register.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts && bun scripts/check-decisions-register.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --report-unused-disable-directives",

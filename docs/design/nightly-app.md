@@ -8,6 +8,11 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
+Scope hold: Nightly as a client of the host it shares with Octant takes no
+new scope until
+[the Full access rule](../architecture.md#security-and-authority) is built
+(maintainer request, 2026-11-12).
+
 Status: Octant Nightly is a usable second client. A compatible signed Octant
 registers an ordinary Nightly window, gives its bundled renderer a short-lived
 host capability and admits its native main per window; Nightly's local native

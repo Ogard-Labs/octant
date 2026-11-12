@@ -73,7 +73,10 @@ These rules hold for every phase and are not reopened by any slice:
 - A new phone capability is a new remote input or output on an existing host
   route class, admitted by the fail-closed remote route classifier
   (`apps/server/src/remoteRoutePolicy.ts`) and refused on every route it does
-  not name. Local-host-required actions stay unavailable on the phone.
+  not name. Local-host-required actions stay unavailable on the phone, except
+  what an owner device may do under
+  [Hub and spokes: Owner devices](hub-and-spokes.md#owner-devices), choosing
+  Full access included (maintainer request, 2026-11-12).
 - A notification is awareness, never authority. It carries no action that
   approves, denies, sends, or mutates; opening it lands on the thread, where the
   ordinary authenticated session and biometric gate apply.
@@ -482,8 +485,8 @@ sender holding it. The sender is a minimal Octant push gateway
   in the capability, so a leaked capability alone sends nothing.
 - The gateway never sees sealed content in the clear, product traffic,
   pairing material, or host routes. It is not a principal, cannot reach a
-  host, and carries nothing toward one; it is not the hosted relay the release
-  boundary excludes. It keeps per-capability rate counters in memory and logs
+  host, and carries nothing toward one; it is not a relay for product traffic.
+  It keeps per-capability rate counters in memory and logs
   counts and failure categories only.
 - The phone uses the gateway compiled into its build, because only a gateway
   holding that build's signing-account credential can deliver to it. The
@@ -920,9 +923,8 @@ the phone's limit with its real notifications ([M7](#maintainer-decisions)).
   checks, and an owner unlock when the host's switch is on.
 - Voice uses the host's OpenAI-compatible Voice endpoint and persists no audio
   ([Providers](../architecture.md#providers)).
-- A hosted relay stays out unless reachability evidence opens it
-  ([hosted relay design](hosted-relay.md)); the push gateway
-  above carries no product traffic and is not that relay.
+- The hosted relay is removed; the push gateway above carries no product
+  traffic and is not a relay.
 - A maintainer-operated service follows the Canvas public links shape: off by
   default, named in Settings, with a replaceable URL
   ([Canvas public links](canvas-public-links.md)).

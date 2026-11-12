@@ -215,6 +215,11 @@ the page, the workspace, or the person is reached.
   desktop app's Browser, it instead offers `sign-in` so the person can finish
   the redirect chain. It reports only the refused origin, never that URL's
   path, query, or fragment.
+- At Full access a Private page needs no site approval and may navigate
+  across origins, so this refusal is left there to profile pages, which keep
+  their site approval ([the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). Not built yet: today a Private page at Full
+  access still asks per origin and is refused outside its approved origins.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile
@@ -226,11 +231,12 @@ the page, the workspace, or the person is reached.
   binding. A new page, explicit stop, window revocation, profile clear, or host
   close clears the corresponding hint. Old hints may be evicted like the
   tool's bounded model bindings; they are not persistent page history.
-- Session deadlines stay as built: the agent tool opens a page with a ten-minute
-  session from creation; ordinary agent activity does not extend it. A handoff
+- Session deadlines follow [Page lifetime](#page-lifetime): the agent tool
+  opens a page with a ten-minute idle interval, which admitted agent activity
+  renews. A handoff
   or take-over keeps it for eleven minutes from the hold, take-over input
   renews that retention, and release keeps it for two minutes, always using
-  the later of that retention and the original session deadline.
+  the later of that retention and the ordinary idle deadline.
 
 ## Actions
 
@@ -268,9 +274,14 @@ the page, the workspace, or the person is reached.
 
 ### Upload
 
-A file leaves this computer through a page only after a person approves its
-file authority. Ordinary uploads use the thread's workspace and a one-use
-answer; a recurring routine may instead use the explicit manifest below.
+Below Full access a file leaves this computer through a page only after a
+person approves its file authority. Ordinary uploads use the thread's workspace
+and an answer the person may remember for the site; a recurring routine may
+instead use the explicit manifest below. At Full access an upload does not ask
+and the path checks below still hold
+([the Full access rule](../architecture.md#security-and-authority); maintainer
+request, 2026-11-12). Not built yet: today every upload asks at every level
+and the answer is never remembered.
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -278,7 +289,8 @@ answer; a recurring routine may instead use the explicit manifest below.
   plain file are refused before anyone is asked.
 - A symbolic link is refused, at the file and anywhere between the workspace
   and the file: the file's canonical path must be the path named.
-- At most 5 files, each at most 25 MB.
+- At most 5 files, each at most 25 MB. Both are Settings defaults the person
+  can change, not constants. Not built yet: today both are fixed.
 - The host copies each checked file into a private temporary folder before it
   asks, reading it through a descriptor that does not follow a link and that
   must still be the file it checked, and the page receives the copies. A file
@@ -287,11 +299,11 @@ answer; a recurring routine may instead use the explicit manifest below.
   a later action, so the copies stay until the page's browsing context closes
   (at most 8 uploads' worth per context, the oldest deleted first), and are
   deleted then, or at once if the upload never reached the page.
-- For an ordinary upload, the person is asked every time, naming each file with its size and the site:
+- For an ordinary upload below Full access, the person is asked, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
-  covers those files to that site once. It is never remembered, so the card has
-  no "Always allow", and it is asked at every access level, Full access
-  included, as the first Browser action on a site is. Work asks in the thread's
+  covers those files to that site once, or, with "Always allow", later uploads
+  to that site from this thread's workspace. An unanswered ask waits in Needs
+  you. At Full access nothing is asked. Work asks in the thread's
   Browser approval card; Code asks in the thread's tool approval.
 - Only the agent tool can upload: it resolves the files and holds the answer,
   and the server's Browser service refuses an upload that did not come with
@@ -301,10 +313,16 @@ answer; a recurring routine may instead use the explicit manifest below.
   computer and sends it to a site, so it keeps the narrowest reach the request
   allowed. The workspace is the folder the thread's own file tools already
   treat as its root. Broader approved-folder selection belongs only to an
-  explicit recurring manifest. Asking every time follows the Browser's first-action ask,
-  which a separate maintainer decision keeps at every access level.
+  explicit recurring manifest. At Full access the same agent already holds an
+  unwrapped shell and an open network, so an ask on an upload protects nothing
+  the shell does not already reach; below it the ask stays and can be
+  remembered per site.
 
 ### Recurring upload manifests
+
+Scope hold: upload manifests take no new scope until
+[the Full access rule](../architecture.md#security-and-authority) is built
+(maintainer request, 2026-11-12).
 
 Settings › Data & storage › Recurring uploads lets a local person review a
 separate file permission for one enabled local Work/Code routine, its current
@@ -352,11 +370,19 @@ not establish packaged or personal-account acceptance.
 
 ### Download
 
-A file comes from a page into a thread's workspace only when the person has
-turned on a switch, and then only after they answer for that file or separately review the bounded routine download manifest below.
+A file comes from a page into a thread's workspace only while a switch is on.
+At Full access the switch is on by default and a save does not ask; below Full
+access the person turns it on and answers for the file, an answer they may
+remember for the site, or separately reviews the bounded routine download manifest below
+([the Full access rule](../architecture.md#security-and-authority); maintainer
+request, 2026-11-12). Not built yet: today the switch is off by default at
+every level, every save asks at every level and is never remembered, the
+caps are constants, programs are refused at every level, and a person's own
+download in the pane is cancelled.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
-  by default. It is a host setting in the shell settings, which only a window
+  by default below Full access and on by default for a thread at Full access.
+  It is a host setting in the shell settings, which only a window
   of this computer writes: the shell route is local-only, so a paired device, a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
@@ -366,9 +392,13 @@ turned on a switch, and then only after they answer for that file or separately 
   action of the agent tool runs (the action and the settling after it) is held:
   the runtime keeps the file in a private temporary folder of the host (never
   the workspace) and cancels it as soon as more than 25 MB has arrived. At
-  most 5 files are held per browsing context, the oldest discarded first. Any
-  other download, including one the person starts in the pane and one a page
-  starts on its own between actions, is cancelled as it is with the switch off.
+  most 5 files are held per browsing context, the oldest discarded first. Both
+  caps are Settings defaults the person can change. A download a page
+  starts on its own between actions is cancelled as it is with the switch off.
+- **The person's own download.** A download the person starts in the Browser
+  pane saves to the person's Downloads folder at every level, whatever the
+  switch says; it never enters the workspace and the agent is told nothing
+  about it.
 - **The report.** The answer to that action carries `downloads`: for each held
   file a `downloadId` (`d1`, `d2`, and so on), its name (the page's suggestion
   reduced to a safe basename), its size, and its media type sniffed from the
@@ -383,7 +413,7 @@ turned on a switch, and then only after they answer for that file or separately 
   The headless runtime currently supplies no complete-chain receipt. Omitting
   it preserves ordinary per-file review and grants no recurring authority.
 - **Saving.** `download-save` names a reported `downloadId`. The server checks
-  the file, then asks the person every time: "Let the agent save report.pdf
+  the file, then, below Full access, asks the person: "Let the agent save report.pdf
   (1.2 MB, PDF) into this thread's workspace? Page: https://example.com.
   Download source: https://example.com → https://files.example.com." It
   names the file, its size, its type, the requesting page and the attested
@@ -391,9 +421,10 @@ turned on a switch, and then only after they answer for that file or separately 
   source: unverified." A page address is never substituted as source proof.
   Code refuses a save whose complete review exceeds its approval-summary byte
   limit; it never offers approval of a truncated source chain. The answer covers that file
-  once and is never remembered, so the card has no "Always allow", and it is
-  asked at every access level, Full access included. Work asks in the thread's
-  Browser approval card ("Save once" or "Deny"); Code asks in the thread's tool
+  once, or, with "Always allow", later saves from that site into this thread's
+  workspace. At Full access the save is not asked and the checks, the
+  destination rules and the journal record still apply. Work asks in the thread's
+  Browser approval card ("Save once", "Always allow" or "Deny"); Code asks in the thread's tool
   approval.
 - **Where it lands.** In `downloads/` at the root of the thread's workspace:
   the Work thread's Project folder, or the Code thread's checkout, the same
@@ -402,11 +433,13 @@ turned on a switch, and then only after they answer for that file or separately 
   `report (2).pdf`, and a file is never overwritten. A symbolic link at
   `downloads/` or anywhere on the path is refused, and the file is created
   exclusively without following a link.
-- **What is refused.** A program or installer, whatever its name says: bytes
+- **What is refused.** Below Full access, a program or installer, whatever its name says: bytes
   that begin like a Mach-O, ELF, or PE/COFF file, and names ending `.app`,
   `.pkg`, `.dmg`, `.exe`, `.msi`, `.bat`, `.cmd`, `.command`, `.sh`, `.scpt`,
   `.jar`, `.deb`, `.rpm`, or `.appimage`. This is refused before anyone is
-  asked. Everything else may be saved. A file over 25 MB, as for an upload, is
+  asked. Everything else may be saved. At Full access a program or installer
+  may be saved like any other file, since the thread's shell could fetch and
+  run one already. A file over the size cap, as for an upload, is
   never held.
 - **Clean-up.** A held file is deleted when it is saved, refused, or denied,
   when its browsing context closes, and when the host starts. The headless
@@ -426,12 +459,14 @@ turned on a switch, and then only after they answer for that file or separately 
   a thread terminal, and Plan mode refuse (`download-needs-this-computer`,
   `download-needs-a-person`, `plan-mode-read-only`), and such a turn holds no
   download. A routine's or a subagent's turn follows upload: the question goes
-  to a window that can see the thread, and an unanswered question expires and saves nothing. A batch cannot hold `download-save`.
+  to a window that can see the thread, and an unanswered question waits in Needs you and saves nothing until it is answered. A batch cannot hold `download-save`.
 - Rationale: an agent's download is a file written by a page into a folder the
-  thread's own file tools and a shell can reach, so it keeps the narrowest
-  reach the request allowed: off by default; held outside the workspace until
-  a person says yes to that one file; one folder; never over a file; and no
-  program, which a later shell command would run. The switch is a person-only
+  thread's own file tools and a shell can reach, so below Full access it keeps
+  the narrowest reach the request allowed: off by default; held outside the
+  workspace until a person says yes; one folder; never over a file; and no
+  program, which a later shell command would run. At Full access the thread's
+  shell can already fetch and run any file, so only the path, overwrite and
+  size rules remain. The switch is a person-only
   host setting for the same reason the remembered sites are: an agent must not
   be able to widen its own reach. Cancelling at the cap, rather than checking
   afterwards, keeps a page from filling the disk with a file nobody asked for;
@@ -441,9 +476,9 @@ turned on a switch, and then only after they answer for that file or separately 
   still-running candidate is cancelled, including candidates in other contexts;
   waiting for completion would leave the in-flight limit unenforced. Downloads
   whose files are already attributed are not candidates. A native completion
-  that races a cancellation remains refused and its file is deleted. The person's own download in the pane stays blocked: this
-  switch is for agents' downloads into the workspace only, and a file the
-  person wants they can fetch themselves.
+  that races a cancellation remains refused and its file is deleted. The person's own download in the pane is theirs: it
+  goes to their Downloads folder, outside the workspace, and this switch, which
+  is for agents' downloads into the workspace only, does not govern it.
 - Destination creation holds the checked folder as a working directory,
   verifies its physical location before creating a file, and writes only an
   exclusive relative basename. A concurrent ancestor/directory-link swap
@@ -482,7 +517,7 @@ turned on a switch, and then only after they answer for that file or separately 
   is relative to that selected approved root, not to the thread's workspace.
   A future selected-destination consumer must carry that receipt honestly;
   it cannot write it as a legacy workspace-relative event.
-- Not covered: a person's own downloads in the Browser pane, and a download
+- Not covered: a download
   that starts after an action's settling has ended (it is cancelled).
 
 ## Steps
@@ -633,8 +668,10 @@ runs, not when it was recorded.
   field's value), an address that contains a string, the page's
   `domcontentloaded` or `load`, or an element attached, detached, visible,
   hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
-- Every wait has a hard limit: `timeoutMs` up to 30 seconds, 10 seconds when
-  it names none, on both Browsers. A wait that runs out fails and names the
+- Every wait has a limit: `timeoutMs` up to 10 minutes, 10 seconds when
+  it names none, on both Browsers. The 10-minute ceiling is a Settings default
+  the person can change (maintainer request, 2026-11-12). Not built yet: today
+  the ceiling is a fixed 30 seconds. A wait that runs out fails and names the
   conditions that never held. A ref in a wait becomes the snapshot's selector
   without the identity check an action makes, because waiting for an element
   to change or leave is the point.
@@ -643,9 +680,12 @@ runs, not when it was recorded.
   load and then for the document to stop changing for 250 ms, at most 2
   seconds in all, before it reads the page and answers. A page that never stops
   changing costs the cap and still answers.
-- **Dialogs.** A page's own dialogs are answered by one fixed rule: an alert and
+- **Dialogs.** The agent can answer a page's dialog itself: accept it, dismiss
+  it, or give the text for a prompt (maintainer request, 2026-11-12). A dialog
+  the agent does not answer is answered by one fixed rule: an alert and
   a leave-page question are accepted; a confirm and a prompt are dismissed, so
-  the page never gets an answer the agent was not asked for. Each dialog is
+  the page never gets an answer the agent did not give. Not built yet: today
+  the agent cannot answer and the fixed rule answers every dialog. Each dialog is
   reported in the next answer as `dialogs`, with its type, its message (at most
   512 characters), and the answer. The headless Browser applies the rule to
   every dialog; the desktop Browser applies it while an agent's action runs,
@@ -696,8 +736,8 @@ use`), a size still applies. The person sees the page at the emulated size
   preset follows the device it names, because a phone without touch tests
   nothing. The answer reports what the page measures instead of echoing the
   request, so an emulation that did not take hold shows.
-- Rationale: answering a dialog by a fixed rule instead of asking keeps the
-  agent from deciding what the page asked the person, and dismissing a
+- Rationale: a dialog the agent does not answer gets a fixed rule instead of
+  a question to the person, and dismissing a
   confirm is the answer that changes nothing. Bounding the viewport to common
   phone and desktop sizes keeps the page renderable at any size it reaches.
 
@@ -767,8 +807,11 @@ needed.
 - The person sees a card in the thread: "The agent asks you to sign in on
   example.com", the reason, and **Continue** and **Cancel**. Work shows it with
   the thread's Browser approvals and Code with the Browser requests in its
-  thread; both are the same host approval, never remembered, and it waits up to
-  10 minutes, the longest a Browser approval waits.
+  thread; both are the same host approval, never remembered, and it waits until
+  the person answers it, as every ask does under
+  [Unattended work](../architecture.md#security-and-authority) (maintainer
+  request, 2026-11-12). Not built yet: today it expires after 10 minutes with
+  `browser-sign-in-expired`.
 - The page is marked as waiting for the person. Every window showing the thread
   brings its Browser forward once, through the thread's activity preview, and
   the agent tool holds every other agent Browser call on the page until the
@@ -824,6 +867,10 @@ The page is the person's as much as the agent's. Neither takes it from the
 other without saying so, and the server, not the pane, decides.
 
 ### Recurring download manifests
+
+Scope hold: download manifests take no new scope until
+[the Full access rule](../architecture.md#security-and-authority) is built
+(maintainer request, 2026-11-12).
 
 Settings › Data & storage › Recurring downloads lets a local person review a
 separate file permission for one enabled local Work/Code routine, its current
@@ -1242,11 +1289,13 @@ Several threads of one Project may each drive their own page at the same time.
 ## Bounded page scripts
 
 `run-script` reaches the same owned native page as the fixed actions when a
-local Code thread has Full access or a scoped script permission. It takes `source` and the
+local Code or Work thread has Full access, or a local Code thread has a scoped
+script permission (Work at Full access: maintainer request, 2026-11-12; not
+built yet, today Work is refused). It takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
-profile, model, window, Project and thread authority still apply. Work,
-headless, paired, routine, managed-subagent and terminal-grant callers are
+profile, model, window, Project and thread authority still apply. Work below
+Full access, headless, paired, routine, managed-subagent and terminal-grant callers are
 currently refused. Scripts cannot enter `steps` or saved/replayed flows.
 
 Below Full access, a local Code task may request a separate one-use script

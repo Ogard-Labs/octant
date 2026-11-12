@@ -73,7 +73,10 @@ approval.
 Edit the owning specification in place when approved behavior changes, and
 update the decision's entry in Decisions and requirements in the same PR. Do not
 write decision records: the archive in `docs/legacy/decisions/` is closed and
-`bun run decisions:check` refuses a new one. When a consequential tradeoff needs
+`bun run decisions:check` refuses a new one. The same check reads
+Decisions and requirements and refuses a status outside Built, Partly built,
+and Designed, not built, or a Summary table whose counts differ from the
+entries. When a consequential tradeoff needs
 its reasons, rejected alternatives, or measurements preserved, write them as a
 short rationale beside the rule in the owning specification.
 

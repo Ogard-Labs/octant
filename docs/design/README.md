@@ -42,7 +42,6 @@ Documentation builds and maintainer-owned VPS publication are specified in
 | Language services          | [Language services](language-services.md)                                                                   | Changing Code editor diagnostics or definitions, language-server or debug-adapter processes, their confinement, or their activation                                                                                           |
 | Model benchmarks           | [Model benchmarks](model-benchmarks.md)                                                                     | Changing the prompt digest and Same prompt comparison in Diagnostics, benchmark suites, runs, scoring, or the Benchmarks pages                                                                                                |
 | Mobile maturity            | [Mobile maturity](mobile-maturity.md)                                                                       | Changing Android builds, phone push notifications, phone capture or voice input, or public mobile store distribution                                                                                                          |
-| Hosted relay               | [Hosted relay](hosted-relay.md)                                                                             | Changing how a paired app reaches its host through a relay, relay grants and routes, the relay service, or what the relay can learn                                                                                           |
 | Coordinator threads        | [Coordinator threads](coordinator-threads.md)                                                               | Changing coordinator threads, the worker threads they start, the start setting, state notices, or how worker requests reach the coordinator                                                                                   |
 | Agent access               | [Agent access from other machines](agent-access.md)                                                         | Changing how an agent on another machine reaches Octant: agent grants, agent keys, the agent-access listener surface, or its MCP endpoint                                                                                     |
 | Hub and spokes             | [Hub and spokes](hub-and-spokes.md)                                                                         | Changing how hosts enroll with a hub, hub or peer grants, spoke-to-spoke delegation, or the hub's wake and push services                                                                                                      |
@@ -126,8 +125,21 @@ the former archive is in `docs/legacy/decisions/`, closed, and has no authority.
 When a durable tradeoff needs its alternatives or measurements preserved
 (journal authority, plugin trust, a measured confinement grant, update signing),
 write a short **Rationale** paragraph beside the rule in its owning
-specification. `bun run decisions:check` refuses a new record and a current
-document that cites the archive.
+specification. `bun run decisions:check` refuses a new record, a current
+document that cites the archive, and a register whose entries and Summary
+disagree: every entry has exactly one `Status:` line beginning `Built.`,
+`Partly built.` or `Designed, not built.`, each Summary row's counts equal the
+entries under its heading, the total row equals their sums, and each row links
+to an existing area heading.
+
+Keep Decisions and requirements a register:
+
+- An entry is the rule, its status, and its link to the owner. It is not a
+  build log: what landed when stays in Git and the pull request.
+- Measurements and pixel values live in the owning specification, not in the
+  register.
+- A requirement marked "Here only" is moved into its owner the next time that
+  owner is edited.
 
 ## Missing rules
 

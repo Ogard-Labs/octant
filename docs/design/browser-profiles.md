@@ -185,10 +185,10 @@ Missing or invalid native metadata refuses creation/use without removing stores.
 ### Page rules that do not change
 
 A profile changes only where site data is kept. Every other page rule stays as
-it is for a Private page: downloads are blocked, except that an agent's download
-is held and saved only when the person turned on "Let agents download files"
-and answers for each file
-([Browser for agents: Download](browser-agent-tool.md#download)); camera,
+it is for a Private page: an agent's download
+is held and saved under the switch and the ask that
+[Browser for agents: Download](browser-agent-tool.md#download) owns, and a
+download the person starts saves to their Downloads folder; camera,
 microphone, location, notifications, devices, and screen capture are refused; only http and https
 addresses open; a loopback HTTPS certificate is accepted only by the context
 opened for it; the host's session ceiling and tab limit apply.
@@ -284,7 +284,13 @@ thread made.
   origin in a profile page, the thread raises a site approval that names the
   origin and the profile: "Let the agent use github.com in the Personal profile?"
   The approval covers reading (snapshots, screenshots, text) as well as acting,
-  because reading a signed-in page reads the person's account.
+  because reading a signed-in page reads the person's account. It is asked at
+  every level, Full access included: it is on the closed list of
+  [the Full access rule](../architecture.md#security-and-authority), where a
+  Private page needs no site approval. An unanswered approval waits in Needs
+  you instead of expiring (maintainer request, 2026-11-12). Not built yet:
+  today an unanswered approval expires, and a Private page at Full access
+  still asks per origin.
 - **Remembered per profile.** "Always allow" on that approval remembers the pair
   (origin, profile) in the shell settings
   (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
@@ -294,6 +300,12 @@ thread made.
   site. A remembered Private origin never covers a profile page, and a pair
   remembered for one Project's profile never covers another Project's profile or
   the Personal profile.
+- **Allow all sites in this profile.** The same card offers "Allow all sites
+  in this profile", which remembers the profile itself, so no later origin in
+  that profile asks. Only the person's answer at the approval sets it, it
+  covers no other profile, and it is listed and forgotten in the same Settings
+  list (maintainer request, 2026-11-12). Not built yet: today every origin in
+  a profile asks or is remembered one at a time.
 - **Rebinding to a different model or authority still asks**: a remembered pair
   covers the page, not a new controller. A person-switched replacement for the
   same live task/model/authority uses the ordinary site/profile approval policy,
@@ -302,7 +314,8 @@ thread made.
   or return password/one-time-code values, and a screenshot of a frame that
   holds one is withheld. Explicit page scripts have ordinary DOM/account
   authority; see [bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
-  Below Full access, a local Code task needs exact-source one-use permission
+  At Full access they are offered to Work as well as Code. Below Full access, a
+  local Code task needs exact-source one-use permission
   naming that account authority, plus native credential/coverage checks. Private
   describes storage lifetime and never proves that a page is signed out.
 - **Plan mode** admits on every profile only the reads of the page already
@@ -318,7 +331,7 @@ thread made.
   and a window that can see the thread does. An approval for a page outside a
   profile is answered as every Browser approval is.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
-  the explicit [delegated session permission](#delegated-sessions) below; it
+  the explicit, persistent [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
   A routine's default or explicit Private navigation keeps the ordinary
   remembered-origin approval path; account delegation does not replace it.
@@ -455,9 +468,11 @@ Terminal profile grants remain window-bound.
 Cancellation/run end, grant revocation/expiry, changed task/model/authority,
 profile clear and switch-off end the affected leases. Turning the preference off
 invalidates background-bound permissions. A backend or broker restart rotates
-the native generation and restores no workload authority, even if the same
-profile store survives; a confirmed replacement generation invalidates old
-permissions. Explicit accepted Quit closes all execution views and prevents
+the native generation and ends its leases, even if the same
+profile store survives; a persistent routine or child grant
+([Delegated sessions](#delegated-sessions)) takes a fresh lease on the
+replacement generation, and today, until that is built, a confirmed
+replacement generation invalidates old permissions. Explicit accepted Quit closes all execution views and prevents
 re-enabling that stopped native owner. Native admission retires synchronously
 before the accepted quit awaits window-state flushing; later host shutdown joins
 the same bounded cleanup. Lost replies, late creates and failed
@@ -484,13 +499,19 @@ caller, authority, model or workspace refuses and invalidates it. Profile clear
 invalidates its reviews and permissions. A child end, cancellation or failure
 closes only that child's contexts, with bounded cleanup and an honest interrupted
 outcome if cleanup cannot be confirmed. The shared native engine and other
-threads stay owned by the host. A host restart restores no session permission, including routine permissions.
-The person must review again; the displayed duration is an upper bound within
-the current host lifetime. Replaying audit history cannot safely distinguish
-a committed grant from a later revocation whose durable write failed, so it
-never revives account authority.
+threads stay owned by the host. A routine's or a managed child's permission is one persistent grant, "this
+routine or child may use profile X on sites Y": it survives a host restart and
+an app update until its expiry, Revoke, or a changed binding ends it, and it
+replaces the review that lapsed on every restart (maintainer request,
+2026-11-12). A terminal permission still ends with its terminal and the host.
+The persistent grant widens nothing else: it carries no upload or download
+manifest and no owner control. A revocation must be durable before it is
+confirmed, because replaying history cannot otherwise distinguish a committed
+grant from a later revocation whose write failed; a grant whose revocation
+state cannot be proved after a restart is not restored.
 Journal records retain permission and revocation metadata, never cookies or
-credential values, and cannot reactivate a permission on replay.
+credential values. Not built yet: today a host restart restores no session
+permission, routine permissions included, and the person must review again.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
 their separate gates. A delegated session permission authorizes none of them. A named routine may
