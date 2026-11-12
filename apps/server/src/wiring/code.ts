@@ -1,3 +1,7 @@
+import { createXcodeDerivedData } from "../apple/xcodeDerivedData";
+import { scanHostWorktrees } from "../code/hostWorktreeDiscovery";
+import { removeHostWorktree } from "../code/hostWorktreeRemoval";
+import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
@@ -674,6 +678,53 @@ export function wireCode(deps: CodeDependencies) {
       worktrees: archivedWorktrees,
       windowAuthorityStore,
     });
+    // Worktrees Octant made and still owns are cleaned up through their
+    // threads, so the computer-wide list leaves them out and refuses them.
+    const ownedWorktreePaths = async (): Promise<ReadonlySet<string>> => {
+      const owned = new Set<string>();
+      for (const thread of persistence.readCodeThreads()) {
+        const checkout = persistence.readCodeCheckout(thread.checkoutId);
+        if (checkout?.kind !== "managed-worktree") continue;
+        const receipt = await managedWorktreeReceipts
+          .load(String(checkout.ownershipReceiptId))
+          .catch(() => undefined);
+        if (receipt !== undefined && receipt.state !== "removed") {
+          owned.add(receipt.canonicalWorktreePath);
+        }
+      }
+      return owned;
+    };
+    const diskCleanupRoutes = createDiskCleanupRouteHandler({
+      scan: (signal) =>
+        scanHostWorktrees(
+          {
+            homeDirectory: homedir(),
+            platform: process.platform,
+            projectFolders: () =>
+              persistence
+                .readProjects()
+                .flatMap((project) =>
+                  project.type === "code" && project.lifecycle === "active"
+                    ? [project.binding.canonicalRoot]
+                    : [],
+                ),
+            ownedWorktreePaths,
+            now: Date.now,
+          },
+          signal,
+        ),
+      remove: (request, signal) =>
+        removeHostWorktree(request, { ownedWorktreePaths, now: Date.now }, signal),
+      derivedData: createXcodeDerivedData({
+        root:
+          process.platform === "darwin"
+            ? join(homedir(), "Library", "Developer", "Xcode", "DerivedData")
+            : undefined,
+        platform: process.platform,
+        now: Date.now,
+      }),
+      windowAuthorityStore,
+    });
     const codeContent = new CodeContentStore();
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
@@ -1163,6 +1214,7 @@ export function wireCode(deps: CodeDependencies) {
       agentProfileRoutes,
       archivedWorktreeRoutes,
       buildCodeService,
+      diskCleanupRoutes,
       canAccessCodeProject,
       codeAttachments,
       codeFileWatch,
