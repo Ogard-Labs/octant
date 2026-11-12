@@ -1452,6 +1452,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Follow-up suggestions and offered side tasks are journaled offers that grant nothing. Both come from every provider, not only the harness.
 
 - A confirmed follow-up is created through the mode's ordinary creation command, and the prompt is never sent on the person's behalf.
+- A reply may also predict the person's next message, one line in their words. The empty follow-up composer shows it as its placeholder and Tab puts it in the draft; it is never sent for them, and a turn starting on the thread spends it. It comes from the same in-reply block on every provider, so it costs no extra request.
 - A side task is offered for out-of-scope work, for a split the person asked for, or for a real next step the reply recommends. It appears inline in the transcript after the offering turn, as a card asking whether to start it in a new thread or do it here.
 - Every answer is the person's click: a new thread (fresh, or forked from the conversation through the offering turn), do it here (the prompt goes to this thread now, or queued behind the running turn), or dismiss. The prompt is sent only on that click, and a Code thread still starts approval-gated.
 - A fork waits for the offering turn to finish. Chat, Code and Work each fork through their own command; a Work fork carries the conversation as a text handoff.

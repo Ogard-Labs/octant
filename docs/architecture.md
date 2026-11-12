@@ -5132,9 +5132,10 @@ or .zip>` write the same files, built by one host command
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
   place of a prompt read as noise to someone who already knew the feature and
-  said nothing to someone who did not. When the latest reply suggested a next
-  message for this thread, the empty composer shows it instead and Tab takes
-  it. A start screen's composer asks "Ask anything…" in every mode, because a
+  said nothing to someone who did not. When the latest reply predicted the
+  person's next message, or suggested a next message for this thread, the
+  empty composer shows it instead and Tab takes it; the prediction leads,
+  and it is gone once the person sends anything. A start screen's composer asks "Ask anything…" in every mode, because a
   first-time person has not started a conversation to reply to. Neither
   changes while a response runs, and accessible input labels remain stable.
 
@@ -8751,10 +8752,18 @@ the model at another size.
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
 provider, carries one fixed instructions block that lets the model end a reply
-with up to three suggestions in an `octant-follow-ups` fenced block.
-`ThreadFollowUpSuggestionStore` journals the latest reply's set per thread
-(`thread-follow-up-suggestions`), retires it when a later reply suggests
-nothing, and replays sets a harness session journaled earlier. The shared
+with an `octant-follow-ups` fenced block: up to three suggestions, and `next`,
+its prediction of the message the person will send next, in their words on
+one line (at most 280 characters; a longer or multi-line one is dropped
+whole). Every reply may carry a prediction, where most carry no suggestion, so
+the empty composer usually has something to offer at no extra request; an
+unreadable suggestion list leaves the prediction standing.
+`ThreadFollowUpSuggestionStore` journals the latest reply's set and prediction
+per thread (`thread-follow-up-suggestions`), retires them when a later reply
+suggests nothing, and replays sets a harness session journaled earlier. A turn
+starting on the thread spends the prediction
+(`thread-follow-up-next-message-spent@1`), so no surface offers the message
+just sent again while the next turn runs. The shared
 message parser leaves the block out of the reply a person reads.
 `/api/follow-up-suggestions/:threadId` reads the set, previews what one
 suggestion would create — a new thread in the same mode and Project, or a
