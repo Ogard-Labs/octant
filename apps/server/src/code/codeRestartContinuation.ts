@@ -36,7 +36,7 @@ import type { CodeOperationEventStore } from "./codeOperationEventStore";
 export const MAX_RESTART_CONTINUATIONS_CUT_OFF = 2;
 
 /** The report's bound on each list; the host control wire refuses a longer one. */
-const MAX_REPORTED_THREADS = 500;
+export const MAX_REPORTED_RESTART_THREADS = 500;
 
 /** The continuation the host last started on a thread, and how many of its chain it started. */
 export interface CodeRestartContinuationAttempt {
@@ -224,15 +224,15 @@ export async function continueCodeTurnsCutOffByRestart(
     ? undefined
     : {
         at: decodeUtcTimestamp(ports.clock()),
-        continued: continued.slice(0, MAX_REPORTED_THREADS),
+        continued: continued.slice(0, MAX_REPORTED_RESTART_THREADS),
         held: held
-          .slice(0, MAX_REPORTED_THREADS)
-          .map((entry) => ({ ...entry, detail: boundedDetail(entry.detail) })),
+          .slice(0, MAX_REPORTED_RESTART_THREADS)
+          .map((entry) => ({ ...entry, detail: boundedRestartDetail(entry.detail) })),
       };
 }
 
 /** The summary carries a short reason; a refusal's own message can run longer. */
-function boundedDetail(detail: string): string {
+export function boundedRestartDetail(detail: string): string {
   const trimmed = detail.trim();
   if (trimmed.length === 0) return "The continuation could not start.";
   return trimmed.length <= 255 ? trimmed : `${trimmed.slice(0, 254).trimEnd()}…`;

@@ -113,6 +113,8 @@ export interface ChatThreadNavigationSource {
   /** Completed and snoozed rest carried from the host's thread record. */
   readonly completedAt?: string | undefined;
   readonly snooze?: ChatThreadNavigationItem["snooze"] | undefined;
+  /** A person turned off Continue after restart for this thread. */
+  readonly restartContinuationOff?: boolean | undefined;
 }
 
 /**
@@ -233,7 +235,7 @@ export interface ChatThreadNavigationItem {
   readonly messageWake?: boolean;
   /** Code only: a person turned off this worker's Wake for coordinator. */
   readonly coordinatorWakeOff?: boolean;
-  /** Code only: a person turned off Continue after restart for this thread. */
+  /** A person turned off Continue after restart for this thread. */
   readonly restartContinuationOff?: boolean;
 }
 
@@ -305,6 +307,7 @@ export function buildChatThreadNavigation(
     ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
     ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
     ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+    ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
   }));
 }
 

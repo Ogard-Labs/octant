@@ -5102,12 +5102,14 @@ or .zip>` write the same files, built by one host command
   cut-off turn follow the continuation: the host lifts only the queue's
   `host-restart` hold, under its own scope, so the queue still waits for the
   continuation to end and still holds on a failed or cancelled one; a queue the
-  person paused stays paused. The host scope reaches a queue only in Code. Each
+  person paused stays paused. The host scope reaches a queue only to release
+  it behind such a continuation, in Chat, Work and Code alike. Each
   start keeps what it did as `restartRecovery` on the host control status (the
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
-  threads that window can open. Chat, Work, subagent runs, coordinator wakes
-  and goal loops are not continued yet.
+  threads that window can open. Chat and Work turns are continued by the same
+  rule (Chat and Work restart recovery, below); subagent runs, coordinator
+  wakes and goal loops are not continued yet.
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5126,11 +5128,46 @@ or .zip>` write the same files, built by one host command
   restart has no runtime left to finish it. The projection settles it as failed
   with the `interrupted` category, so the header reads Interrupted, the Board
   keeps the thread under Waiting with the interrupted reason, and the thread
-  takes its next message. The settlement is derived on every start and not
-  journaled, so rebuilding twice reads the same. A turn waiting on a provider
-  usage limit keeps waiting for the reset. An approval the lead was blocked on
-  stays `lost-in-restart` in the harness session: only Resume is offered, and
-  the call it guarded never runs.
+  takes its next message. The start journals that settlement as a system
+  `work.turn-updated@1`, so the next start reads the turn as settled and does
+  not count it as cut off again; a stream that moved on in between is left
+  for the next start, and rebuilding reads the same either way. A turn waiting
+  on a provider usage limit keeps waiting for the reset. An approval the lead
+  was blocked on stays `lost-in-restart` in the harness session: only Resume is
+  offered, and the call it guarded never runs.
+
+  Chat and Work restart recovery continues those turns the way Code restart
+  recovery does: once, as the host, with the message a person's Resume sends,
+  through the mode's ordinary send, which rechecks authority, posture, the
+  harness pause and the spend ceiling at that moment. In Chat the turns are the
+  attempts the start's sweep interrupts (`reapStaleProviderSessions`): an
+  attempt still queued or streaming that no process carries. An attempt already
+  interrupted, cancelled, failed, completed or waiting is retained and never
+  continued. In Work they are the turns the start settles above. Only the
+  thread's newest turn qualifies: for Chat, the newest attempt of the active
+  conversation's tail; a Retry, a rewind or a new message since means the
+  person moved on. The continuation is a send-chat-turn whose submission id, or
+  a Work turn whose request id, is derived from the cut-off attempt or turn, so
+  a repeated recovery finds the turn the first one admitted. That send takes up
+  the cut-off turn's provider session as any next message does: a provider that
+  keeps its own conversation resumes from the journaled `resumeCursor`, a
+  harness session continues when the session decision allows it, and a
+  host-owned conversation is rebuilt from the transcript, which keeps the
+  interrupted reply. The thread waits for its person, with the reason in the
+  restart notice, when Settings › Chat or Settings › Work › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff` on
+  the Chat or Work thread, set only at a local window); its own continuations
+  were cut off twice (the same per-thread crash-loop store as Code, keyed by
+  thread id, which is unique across modes); its provider keeps its own
+  conversation and the cut-off turn carries no resume cursor; the Work turn was
+  still only accepted, or the Chat answer's provider-owned session had not
+  replied yet, so its message may never have reached the provider; or
+  admission refuses the send. Chat and Work keep no journaled push or pull
+  request step, so the uncertain-external-action hold reads nothing there; the
+  continuation message tells the agent to inspect before repeating. Queued
+  messages follow the continuation under the same release as Code. A Chat
+  attempt already waiting on a question or approval at the restart is retained
+  as before, and answering it still settles it interrupted.
 
 - **Fast thread reads.** A window owns Code navigation bootstrap and the
   follow-up navigation list. Its open thread controllers consume that metadata
@@ -5441,8 +5478,8 @@ or .zip>` write the same files, built by one host command
   request, 2026-11-12). Not built yet: today any cancellation or failure
   holds it, and restart recovery holds pending work until an authenticated
   user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
-  send failed. The one exception built today is a Code thread the host continues after the
-  restart cut its turn off: the host lifts that queue's restart hold under its
+  send failed. The one exception built today is a Chat, Work or Code thread the host
+  continues after the restart cut its turn off: the host lifts that queue's restart hold under its
   own scope, so its messages follow the continuation through the same
   dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.

@@ -385,6 +385,8 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
+  A Chat or Work thread's row menu carries the same **Continue after restart**
+  checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.

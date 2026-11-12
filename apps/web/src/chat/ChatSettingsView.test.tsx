@@ -78,6 +78,30 @@ describe("ChatSettingsView", () => {
     });
   }, 15_000);
 
+  it("sends Continue after restart only when the person changes it", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn<(command: UpdateChatSettingsCommand) => Promise<boolean>>(
+      async () => true,
+    );
+    render(
+      <ChatSettingsView
+        onUpdate={onUpdate}
+        providerSnapshot={providerSnapshot()}
+        settings={settings()}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Continue after restart" })).toBeChecked();
+    await user.click(screen.getByLabelText("Enable research by default"));
+    expect(onUpdate).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ restartContinuation: expect.anything() }),
+    );
+    await user.click(screen.getByRole("switch", { name: "Continue after restart" }));
+    expect(onUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "update-chat-settings", restartContinuation: false }),
+    );
+  });
+
   it("rejects non-HTTPS endpoints unless HTTP is loopback", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn<(command: UpdateChatSettingsCommand) => boolean>(() => true);

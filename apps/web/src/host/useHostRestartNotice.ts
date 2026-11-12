@@ -35,7 +35,7 @@ function writeDismissed(ids: ReadonlyArray<string>): void {
 }
 
 /**
- * The notice that follows a restart: which Code threads the host continued
+ * The notice that follows a restart: which threads the host continued
  * by itself and which wait for the person. The host finishes its recovery
  * after it starts serving, so the status is read again on the memory
  * notice's cadence until the summary appears.

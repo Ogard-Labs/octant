@@ -299,7 +299,7 @@ describe("startOctantServer", () => {
       .mockResolvedValue();
     const reapSessions = vi
       .spyOn(ChatService.prototype, "reapStaleProviderSessions")
-      .mockResolvedValue({ reaped: 0, resumable: 0 });
+      .mockResolvedValue({ reaped: 0, resumable: 0, cutOff: [] });
 
     await Effect.runPromise(
       Effect.scoped(

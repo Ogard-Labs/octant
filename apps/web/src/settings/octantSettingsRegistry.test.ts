@@ -174,6 +174,7 @@ describe("octantSettingsRegistry", () => {
       "work-default-model",
       "work-default-access",
       "work-full-access-sandbox",
+      "work-restart-continuation",
     ]);
   });
 
@@ -281,6 +282,7 @@ describe("octantSettingsRegistry", () => {
       "chat-research-enabled",
       "chat-research-backend",
       "chat-searxng-url",
+      "chat-restart-continuation",
     ]);
   });
 

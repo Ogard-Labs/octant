@@ -561,6 +561,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "searxng url address search engine research",
         },
+        {
+          id: settingId("chat-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted answer automatically recovery chat",
+        },
       ],
     },
     {
@@ -587,6 +594,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Keep the sandbox at Full access",
           scope: "host",
           keywords: "work full access sandbox seatbelt confinement secrets network prompts",
+        },
+        {
+          id: settingId("work-restart-continuation"),
+          label: "Continue after restart",
+          scope: "mode",
+          keywords:
+            "continue after restart crash reboot quit resume interrupted turn automatically recovery work",
         },
       ],
     },
