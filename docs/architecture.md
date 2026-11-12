@@ -4429,11 +4429,14 @@ flowchart LR
   verify are `unknown`; the map never carries secret values.
 - **Startup check.** Startup decodes journal rows to prove the journal is
   readable, then records a disposable watermark: the sequence it verified
-  through plus a fingerprint of how the event registry decodes (a hash of each
-  registered event's name, version, decode schema and persisted schema, so a
-  schema change without a version bump counts) and the schema head. A schema
-  the host cannot serialize gives no fingerprint, which means a full scan. The
-  next start decodes only rows after the watermark. A different fingerprint, a
+  through plus a fingerprint of the exact server build (a hash of every chunk of
+  the bundled server plus the `effect` version beside it, the only external
+  dependency that runs the journal's schemas), the registry's event names and
+  versions, and the schema head. A source run (no bundle) or an unreadable build
+  has no identity: it neither reads nor writes a watermark and scans
+  everything, and a start that migrated computes nothing. The first start of
+  every new build therefore runs one full scan; hashing the bundle costs about
+  10 ms. The next start of the same build decodes only rows after the watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
   transaction, so purge, compaction and host-identity rewrites are covered)

@@ -593,10 +593,13 @@ describe("PersistenceLive", () => {
       }
     }
 
-    async function startupDecodeCount(directory: string): Promise<number> {
+    async function startupDecodeCount(
+      directory: string,
+      build: string | null = "build-a",
+    ): Promise<number> {
       const decode = vi.spyOn(EventRegistry.prototype, "decodePersisted");
       try {
-        const result = await startupResult(directory);
+        const result = await startupResult(directory, () => build ?? undefined);
         expect(Either.isRight(result)).toBe(true);
         return decode.mock.calls.length;
       } finally {
@@ -614,6 +617,24 @@ describe("PersistenceLive", () => {
       expect(firstStart).toBeGreaterThan(0);
       expect(secondStart).toBe(0);
       expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+    });
+
+    it("scans from the start again on the first start of a different build", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory, "build-a");
+
+      expect(await startupDecodeCount(directory, "build-b")).toBeGreaterThan(0);
+      expect(await startupDecodeCount(directory, "build-b")).toBe(0);
+    });
+
+    it("scans everything and writes no watermark when there is no build identity", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+
+      expect(await startupDecodeCount(directory, null)).toBeGreaterThan(0);
+      expect(await startupDecodeCount(directory, null)).toBeGreaterThan(0);
+      expect(watermarkRow(directory)).toBeUndefined();
     });
 
     it("scans from the start again when the verification fingerprint differs", async () => {
@@ -786,13 +807,17 @@ describe("PersistenceLive", () => {
   });
 });
 
-function startupResult(directory: string) {
+function startupResult(directory: string, buildIdentity?: () => string | undefined) {
   return Effect.runPromise(
     Effect.either(
       Effect.scoped(
         Effect.provide(
           Persistence,
-          makePersistenceLive({ dataDirectory: directory, clock: () => now }),
+          makePersistenceLive({
+            dataDirectory: directory,
+            clock: () => now,
+            ...(buildIdentity === undefined ? {} : { buildIdentity }),
+          }),
         ),
       ),
     ),

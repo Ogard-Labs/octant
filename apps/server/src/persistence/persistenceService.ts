@@ -55,6 +55,7 @@ import {
   StoreRestoreFailed,
 } from "./dataLifecycleErrors";
 import { hasPendingLocalDataRemoval } from "./dataLifecycle";
+import { bundledBuildIdentity, type BuildIdentity } from "./buildIdentity";
 import { migrateStoreWithBackup } from "./migrationBackup";
 import { backupPathFor, createStoreBackup, type StoreBackupReceipt } from "./storeBackup";
 import {
@@ -318,7 +319,11 @@ export interface PersistenceLiveOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly clock?: () => string;
   readonly openConnection?: (path: string) => SqliteConnection;
+  /** Absent in source runs, which never use the startup watermark. */
+  readonly buildIdentity?: BuildIdentity;
 }
+
+const defaultBuildIdentity = bundledBuildIdentity(import.meta.url);
 
 export function makePersistenceLive(
   options: PersistenceLiveOptions,
@@ -336,6 +341,17 @@ export function makePersistenceLive(
 }
 
 export const PersistenceLive = makePersistenceLive({ environment: process.env });
+
+function fingerprintFor(
+  buildIdentity: BuildIdentity,
+  events: Parameters<typeof journalVerificationFingerprint>[1],
+  connection: SqliteConnection,
+): string | undefined {
+  const build = buildIdentity();
+  return build === undefined
+    ? undefined
+    : journalVerificationFingerprint(build, events, connection);
+}
 
 async function acquirePersistence(options: PersistenceLiveOptions): Promise<PersistenceService> {
   const clock = options.clock ?? (() => new Date().toISOString());
@@ -400,14 +416,16 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     const runtime = createPhase1RuntimeRegistries();
     const projections = runtime.projections;
     const journal = new Journal({ connection, registry: runtime.events, projections, clock });
-    // Rows an earlier start already found compatible are skipped, unless this
-    // start migrated the schema or the registry's events changed.
-    const fingerprint = journalVerificationFingerprint(runtime.events, connection);
+    // Rows an earlier start already found compatible are skipped, but only by
+    // the same bundled build on an unmigrated schema. A migrating start, a
+    // source run or an unreadable build computes nothing and scans everything.
+    const fingerprint =
+      migration.status.appliedVersions.length > 0
+        ? undefined
+        : fingerprintFor(options.buildIdentity ?? defaultBuildIdentity, runtime.events, connection);
     const scannedHead = journal.headSequence();
     const verifiedThrough =
-      fingerprint === undefined || migration.status.appliedVersions.length > 0
-        ? 0
-        : readJournalWatermark(connection, fingerprint, scannedHead);
+      fingerprint === undefined ? 0 : readJournalWatermark(connection, fingerprint, scannedHead);
     const compatibility = journal.inspectCompatibility(100, verifiedThrough);
     if (!compatibility.compatible) {
       clearJournalWatermark(connection);
