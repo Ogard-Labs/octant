@@ -109,6 +109,7 @@ import { createGoogleCliCommandCredentials } from "../secretStores/googleCliComm
 import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 
 export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -689,7 +690,17 @@ export function wireHarness(deps: HarnessDependencies) {
   const promptDigest = openPromptDigester(
     join(providerDataDirectory, "metrics", "prompt-digest.key"),
   );
+  // Every tool call about to take effect, on every provider, so a restart
+  // can tell a turn it cut off between calls from one it cut off inside one.
+  const toolEffectLedger = new ToolEffectLedger({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
   const nativeHarnessHooks = {
+    toolEffects: (turn: Parameters<ToolEffectLedger["forTurn"]>[0]) =>
+      toolEffectLedger.forTurn(turn),
     ...(promptDigest === undefined ? {} : { promptDigest }),
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);
@@ -1103,6 +1114,7 @@ export function wireHarness(deps: HarnessDependencies) {
     followUpCreation,
     restartContinuation,
     liftRestartRecovery,
+    toolEffectLedger,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
