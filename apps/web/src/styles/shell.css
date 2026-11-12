@@ -2128,6 +2128,14 @@ html[data-octant-native-host="true"]
     pointer-events: none;
   }
 
+  /* With the sidebar collapsed and no rail beside it, the stage starts at the
+     window's own left edge, and an edge of the window is not a line between
+     two panes. */
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) > .workspace-layer::after,
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) .bottom-utility-panel::after {
+    border-left: 0;
+  }
+
   .shell-frame .right-utility-dock__surface {
     background: transparent;
   }

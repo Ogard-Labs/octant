@@ -205,6 +205,11 @@ describe("the public-block visual language", () => {
     );
     expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/width:\s*8px/);
     expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/margin-left:\s*-4px/);
+    // With the sidebar collapsed and no rail, the stage's left edge is the
+    // window's, which takes no line.
+    expect(shell).toMatch(
+      /\.shell--sidebar-collapsed\.shell-frame:not\(\.shell--sidebar-rail\) > \.workspace-layer::after,[^{]*\.bottom-utility-panel::after \{ border-left: 0/,
+    );
     // The sidebar's rows sit on the ground: it draws no panel of its own.
     expect(shell).not.toContain(".shell-frame > .sidebar::before {");
   });
