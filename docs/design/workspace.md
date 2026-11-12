@@ -885,8 +885,13 @@ alone, Hide from view, and for the Browser and Terminal Minimise to card) and Cl
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
 Stacked, a page showed four bars and named the tool
-three times. A divider is a hairline that shows a quiet strong role while hovered
-or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
+three times. Every tile is a square pane that shares its edges with its neighbours and
+with the stage: no gap and no corner, one 1px line between two panes
+([DESIGN.md](../../DESIGN.md#shapes-and-depth) owns the material), and one
+under the title band along the top. The divider's hit area is 8px wide,
+centred on that line; it is empty at rest, shows the strong border while hovered
+and the meta ink while grabbed, and keeps no accent line after a click. A window of 680px or less keeps
+its rounded tiles. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to

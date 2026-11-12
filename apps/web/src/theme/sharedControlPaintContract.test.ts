@@ -43,11 +43,11 @@ describe("shared control paint ownership", () => {
     expect(settingsGroupRules).toMatch(/box-shadow:\s*none/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
     // Inside Settings the group is a card one step above the page: raised by
-    // its fill and by the smallest raised shadow, which carries its edge.
+    // its fill and by the card shadow, which carries its rim and its seat.
     const card = settingsStyles
       .replace(/\s+/g, " ")
       .match(/\.settings-view \.settings-card-section--open > :is\([^)]*\) \{([^}]*)\}/)?.[1];
-    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-xs\)/);
+    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     expect(card).not.toMatch(/rgb\(/);
   });
 
