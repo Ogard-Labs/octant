@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { browserFrameAdmitted } from "./browserAutomationPolicy";
 import {
+  answerBrowserDialog,
   BROWSER_FRAME_HOP,
   formatBrowserPageSnapshot,
   readFramedBrowserSnapshot,
@@ -115,5 +116,44 @@ describe("which frames the agent may read", () => {
         signedIn: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("a page dialog's answer", () => {
+  it("takes the agent's answer for the dialog its action raises, and the fixed rule without one", () => {
+    expect(answerBrowserDialog("confirm", "Delete?", undefined)).toEqual({
+      answer: "dismissed",
+      answeredBy: "rule",
+    });
+    expect(answerBrowserDialog("confirm", "Delete?", { action: "accept" })).toEqual({
+      answer: "accepted",
+      answeredBy: "agent",
+    });
+    expect(answerBrowserDialog("beforeunload", "", { action: "dismiss" })).toEqual({
+      answer: "dismissed",
+      answeredBy: "agent",
+    });
+    expect(answerBrowserDialog("prompt", "Your name?", { action: "accept", text: "Ada" })).toEqual({
+      answer: "accepted",
+      answeredBy: "agent",
+      promptText: "Ada",
+    });
+    // Text means nothing to a dialog that takes none.
+    expect(answerBrowserDialog("alert", "Saved", { action: "accept", text: "Ada" })).toEqual({
+      answer: "accepted",
+      answeredBy: "agent",
+    });
+  });
+  it("withholds text from a prompt that asks for a credential, as a credential field refuses typing", () => {
+    for (const message of ["Enter your password", "API key?", "One-time passcode", "Card number"]) {
+      expect(answerBrowserDialog("prompt", message, { action: "accept", text: "hunter2" })).toEqual(
+        { answer: "dismissed", answeredBy: "rule", textWithheld: "credential-protected" },
+      );
+    }
+    // Declining such a prompt types nothing, so the agent's answer stands.
+    expect(answerBrowserDialog("prompt", "Enter your password", { action: "dismiss" })).toEqual({
+      answer: "dismissed",
+      answeredBy: "agent",
+    });
   });
 });

@@ -3417,7 +3417,9 @@ describe("Code tool families", () => {
     // recording operations, and Repair input) added their names and the url
     // and orientation arguments to both device tools, about 290 bytes; their
     // usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_860);
+    // The Browser's dialog answer argument added about 165 bytes; its usage
+    // is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_025);
   });
 
   it.each([

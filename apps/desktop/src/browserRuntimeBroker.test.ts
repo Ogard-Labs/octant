@@ -674,7 +674,7 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
-  it("passes a snapshot ref's expected element through and reports a stale one as a structured 422", async () => {
+  it("passes a snapshot ref's expected element and the agent's dialog answer through, and reports a stale ref as a structured 422", async () => {
     const surface = host();
     surface.act.mockRejectedValueOnce(new BrowserTargetStaleError());
     const broker = await startBrowserRuntimeBroker(surface as never);
@@ -683,6 +683,7 @@ describe("BrowserRuntimeBroker", () => {
         kind: "click",
         target: "#save",
         expected: { role: "button", name: "Save", url: "https://example.com/" },
+        dialog: { action: "accept", text: "Ada" },
       };
       const response = await broker.fetchForTest(
         request(broker.url, broker.token, { contextId, request: action }),
@@ -695,7 +696,7 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
-  it("refuses a resize outside the bounds and a malformed wait before the page is touched", async () => {
+  it("refuses a resize outside the bounds, a malformed wait and a malformed dialog answer before the page is touched", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);
     try {
@@ -704,6 +705,8 @@ describe("BrowserRuntimeBroker", () => {
         { kind: "resize", colorScheme: "sepia" },
         { kind: "resize", touch: "yes" },
         { kind: "resize", mobile: true },
+        { kind: "click", target: "#go", dialog: { action: "maybe" } },
+        { kind: "click", target: "#go", dialog: { action: "accept", text: "x".repeat(1025) } },
         { kind: "resize", viewport: { width: 390, height: 844 }, deviceScaleFactor: 40 },
         { kind: "wait", waitFor: { conditions: [], match: "all" } },
         { kind: "wait", waitFor: { conditions: [{ kind: "text", text: "x" }], match: "all" } },

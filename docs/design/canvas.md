@@ -855,8 +855,11 @@ against that Project, so a Canvas owned by a Chat thread outside every
 Project takes no Project share: the share overview answers no authority for it, and a
 share request is refused `scope-mismatch` with the reason. The person can
 share it through the export destinations instead, which need no Project
-(maintainer request, 2026-11-12). Not built yet: today it leaves only as a
-folder export.
+(maintainer request, 2026-11-12): **Export…** offers a window in Chat the same
+destinations for it as for any Canvas (the folder, which is the host's export
+folder, and the link destinations such as a gist or a sharehtml.org page), each
+behind the same approval card, and the export is journaled with the Canvas. A
+window in another mode is offered none, as it cannot open the Canvas.
 
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).

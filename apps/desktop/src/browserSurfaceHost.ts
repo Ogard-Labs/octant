@@ -57,6 +57,7 @@ import {
   awaitQuietPage,
   BrowserRecordingFrames,
   browserRecordingFrameKept,
+  answerBrowserDialog,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SETTLE_QUIET_MS,
@@ -108,6 +109,8 @@ import {
   type BrowserActionRequest,
   type BrowserContextId,
   type BrowserContextPolicy,
+  type BrowserDialogAnswer,
+  type BrowserDialogReport,
   type BrowserDownloadReport,
   type BrowserEmulationReport,
   type BrowserRecordingTruncation,
@@ -577,6 +580,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "diagnosticsSince"
       | "diagnosticsWarnings"
       | "auditKind"
+      | "dialog"
     >
   > & {
     /**
@@ -1673,8 +1677,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       heldDialog = undefined;
       if (held === undefined || popups.read()?.kind !== "dialog") return;
       const answer = BROWSER_DIALOG_POLICY[held.type];
-      if (reports.length < 8)
-        reports.push({ type: held.type, message: held.message.slice(0, 512), answer });
+      if (reports.length < 8) {
+        reports.push({
+          type: held.type,
+          message: held.message.slice(0, 512),
+          answer,
+          answeredBy: "rule",
+        });
+      }
       popups.retire("dialog");
       void held.handle(answer === "accepted");
     });
@@ -2668,7 +2678,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
-        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
+        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
         if (request.downloads === "hold") owned.downloads.begin();
         try {
           checkObservation();
@@ -4819,22 +4829,21 @@ function dropRecording(owned: OwnedSurface): void {
   endScreencast(owned, recording);
 }
 
-interface DialogReport {
-  readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
-  readonly message: string;
-  readonly answer: "accepted" | "dismissed";
-}
+type DialogReport = BrowserDialogReport;
 
 /**
- * Answer the page's own dialogs by the fixed policy for as long as an agent's
- * action runs, and record each one. A dialog left open would hold the page,
- * and the agent behind it, until a person found it. A debugger someone else
+ * Answer the page's own dialogs for as long as an agent's action runs, and
+ * record each one: the first by the answer the agent stated with the action,
+ * every other by the fixed policy. A dialog left open would hold the page, and
+ * the agent behind it, until a person found it. A debugger someone else
  * attached (developer tools) is left alone and the page's dialogs stay theirs.
  */
 async function guardDialogs(
   view: BrowserSurfaceViewPort,
   reports: DialogReport[],
+  agentAnswer?: BrowserDialogAnswer,
 ): Promise<() => Promise<void>> {
+  let stated = agentAnswer;
   const client = view.webContents.debugger;
   // A page that has not loaded yet is guarded too: its first load is when a
   // dialog most often opens.
@@ -4860,16 +4869,15 @@ async function guardDialogs(
       readonly message?: unknown;
     };
     const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
-    const answer = BROWSER_DIALOG_POLICY[type];
-    if (reports.length < 8) {
-      reports.push({
-        type,
-        message: (typeof opened.message === "string" ? opened.message : "").slice(0, 512),
-        answer,
-      });
-    }
+    const message = typeof opened.message === "string" ? opened.message : "";
+    const { promptText, ...decision } = answerBrowserDialog(type, message, stated);
+    stated = undefined;
+    if (reports.length < 8) reports.push({ type, message: message.slice(0, 512), ...decision });
     void client
-      .sendCommand("Page.handleJavaScriptDialog", { accept: answer === "accepted" })
+      .sendCommand("Page.handleJavaScriptDialog", {
+        accept: decision.answer === "accepted",
+        ...(promptText === undefined ? {} : { promptText }),
+      })
       .catch(() => undefined);
   };
   client.on("message", listener);
