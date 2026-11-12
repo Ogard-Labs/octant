@@ -165,6 +165,7 @@ export * from "./threadExport";
 export * from "./threadHandOff";
 export * from "./usage";
 export * from "./turnMetrics";
+export * from "./toolEffects";
 export * from "./benchmarks";
 export * from "./turnDiagnosticsReport";
 export * from "./hostHealth";
