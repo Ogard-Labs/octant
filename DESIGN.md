@@ -1442,18 +1442,28 @@ become one and the row goes away, with the reader's row where it was; Jump to
 latest, or sending a message, returns to the newest messages at the end. A
 jump happens once: after its message has been shown, nothing jumps back to it.
 
-The Browser toolbar is two groups, navigation and the address first, then the
-page's status and the tools. They share one row from 1100px; below it the
-controls become one row and the address takes a row under it, so a page open
-never takes more than two rows. In a tile from 303px wide no control is clipped
-or overlaid and only the address ellipsizes. Words leave one control at a time as
-the width falls and come back in the reverse order as it grows: who may use the
-page (below 801px), the profile (below 640px), Reclaim locally (below 610px),
-Take over and Hand back (below 521px), then the holder (below 420px). Each
-keeps its name and tooltip as a bare glyph. With no page open the address takes
-its own row below 390px. The desktop app's Open in default browser button is
-counted in these widths, so below 303px, where the row no longer fits, the last
-button wraps to a third row.
+The Browser toolbar is one row under the tile bar and never wraps. It holds back,
+forward and reload as plain icon buttons (no capsule, no fill at rest, the
+standard hover fill and disabled look); then the address field, which takes the
+rest of the width; then icon-only buttons for what else the page offers. The
+field is the system's text field: the control corner (`--oct-radius-sm`, never a
+pill), the field border, the hover edge and the keyboard-focus fill, at the
+28px rail height. Inside its start sit the page's marks, each a 20px target with
+an accessible name and tooltip: the profile (a menu button whose icon is the
+page's profile), the connection mark (lock or globe), and one status mark that
+says who may use the page, who holds it and how long it idles ("Agent can use
+this Browser. Shared live page · 10m idle"). Trailing are the extensions button
+(only when an extension is on in the page's profile), **Take over** or **Hand
+back**, and one **More Browser actions** menu that holds Screenshot, Draw on page
+(only in a Work or Code thread's Browser), Open in default browser (desktop),
+Login permission, Reclaim locally, the agent-availability recovery action, Dock
+in the focus zone and Stop this Browser session, each only when it applies; the
+menu is absent when it would be empty. The row's inset follows the tile bar: its
+first glyph stands on the bar's 12px lead inset and its last button ends 4px
+from the edge, with 4px between controls. The address keeps at least 120px:
+when the pane is narrower than 340px, Take over or Hand back moves into the
+More menu; back, forward and reload always stay. With no page open the row shows
+the same history buttons and field, and no trailing buttons.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each
@@ -1468,8 +1478,8 @@ reads by shape and word, never by colour. It moves only once opened, where a
 ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
 its first frame.
 
-**Draw on page** is a ghost icon button (a 16px pen-line) beside Screenshot in
-the Browser toolbar, offered only in a Work or Code thread's Browser. While a
+**Draw on page** is an item (a 16px pen-line) beside Screenshot in the Browser
+toolbar's More menu, offered only in a Work or Code thread's Browser. While a
 picture is drawn on, its still fills the page area, fitted and centred on the
 canvas colour, and one floating bar sits at the bottom centre
 (`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
@@ -2011,11 +2021,8 @@ their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page.
-The Browser's toolbar groups back, forward, and reload in one rounded capsule
-beside a pill-shaped address field, followed by the driver indicator and a
-quiet ghost **Take over** button (secondary **Hand back** while the person has
-the page), both extra-small, which drop their words below 720px and keep their
-names. The right dock's tools are opened from a **tool row** at the right of the
+The Browser's toolbar is one row of plain icon buttons, the address field and
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right of the
 title band, before the bottom-panel and dock toggles: icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher

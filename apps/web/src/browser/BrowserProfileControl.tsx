@@ -5,6 +5,7 @@ import { EyeOff, FolderOpen, LogOut, UserRound } from "lucide-react";
 import { useState } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import {
   BROWSER_PROFILE_DESCRIPTIONS,
@@ -21,6 +22,8 @@ export interface BrowserProfileControlProps {
   /** Signed-in pages open in the desktop app's own Browser only. */
   readonly signedInPagesAvailable: boolean;
   readonly disabled?: boolean;
+  /** An icon at the start of the Browser's address field; its name and tooltip carry the words. */
+  readonly iconOnly?: boolean;
   readonly onChange: (choice: BrowserProfileChoice) => void;
   /** Absent where the host cannot clear a profile; the menu then omits the action. */
   readonly onSignOut?: () => Promise<void> | void;
@@ -33,8 +36,7 @@ const ICONS = {
 } as const;
 
 /**
- * Where this page keeps its cookies and site data. It sits at the left of the
- * address field: Private forgets everything when the page closes, Project and
+ * Where this page keeps its cookies and site data: Private forgets everything when the page closes, Project and
  * Personal keep a sign-in on this Mac.
  */
 export function BrowserProfileControl(props: BrowserProfileControlProps) {
@@ -94,15 +96,23 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
           props.onChange(decodeBrowserProfileChoice(value));
         }}
         trigger={
-          <>
-            {icon(props.profile)}
-            <span>
-              {props.label === undefined ? "" : "Task default: "}
-              {label(props.profile)}
-            </span>
-          </>
+          props.iconOnly === true ? (
+            icon(props.profile)
+          ) : (
+            <>
+              {icon(props.profile)}
+              <span>
+                {props.label === undefined ? "" : "Task default: "}
+                {label(props.profile)}
+              </span>
+            </>
+          )
         }
-        triggerClassName="browser-profile-control"
+        triggerClassName={
+          props.iconOnly === true
+            ? `${octantButtonClassName({ variant: "ghost", size: "icon" })} browser-workspace__lead-button`
+            : "browser-profile-control"
+        }
         triggerDisabled={props.disabled === true}
         triggerLabel={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
         triggerTitle={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}

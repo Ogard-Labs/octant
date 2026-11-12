@@ -5,6 +5,7 @@ import { browserExtensionsEnabledIn } from "@octant/domain";
 import { PuzzleIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 
 export interface BrowserExtensionsButtonProps {
@@ -105,7 +106,7 @@ export function BrowserExtensionsButton(props: BrowserExtensionsButtonProps) {
             {props.agentDriving ? <span>{extensions.length}</span> : null}
           </>
         }
-        triggerClassName="browser-profile-control"
+        triggerClassName={`${octantButtonClassName({ variant: "ghost", size: "icon" })} shell-icon-button`}
         triggerLabel={
           props.agentDriving
             ? `Extensions: ${String(extensions.length)} on in this profile and visible to the agent`
