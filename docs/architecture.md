@@ -429,7 +429,9 @@ Quit link. SIGTERM, SIGINT, a logout or shutdown request, the Quit menu item,
 the Quit button and closing the window all end the app once with the cleanup
 already run; a quit requested during the release ends the app without showing
 the window; a quit requested while the app is still becoming ready creates no
-window. Every platform takes this one path. An alert with no parent window
+window, and a quit while it is still loading removes it at once (a graceful close of a
+window whose renderer is still starting held the quit until the close-grace deadline
+in a packaged run) and is not reported as a failure to show. Every platform takes this one path. An alert with no parent window
 (`dialog.showErrorBox`, the synchronous message box, and the asynchronous
 message box without a window) runs a nested modal loop (`-[NSAlert runModal]`)
 on macOS, and a packaged launch was observed to stay in it for twenty seconds

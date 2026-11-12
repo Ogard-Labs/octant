@@ -38,6 +38,9 @@ function createStartupFailureWindow(title: string): StartupFailureWindow {
     },
     onClosed: (listener) => window.on("closed", listener),
     close: () => window.close(),
+    destroy: () => {
+      if (!window.isDestroyed()) window.destroy();
+    },
   };
 }
 
@@ -56,8 +59,23 @@ export async function showStartupFailure(options: {
   await showStartupFailureWindow({
     ready: () => app.whenReady(),
     createWindow: createStartupFailureWindow,
+    onCreated: (window) => failureWindows.add(window),
     ...options,
   });
+}
+
+const failureWindows = new Set<StartupFailureWindow>();
+
+/**
+ * Removes the failure window before the app quits. A graceful close of a
+ * window that is still loading waited on its renderer: in a packaged run a
+ * SIGTERM 50 ms after the window was created left app.quit() unfinished until
+ * the 3 s close-grace deadline ended the app. Nothing in this window needs a
+ * graceful close, so a quit destroys it.
+ */
+export function destroyFailureWindows(): void {
+  for (const window of failureWindows) window.destroy();
+  failureWindows.clear();
 }
 
 let nightlyFailureShown = false;
@@ -76,6 +94,7 @@ export async function showStartupFailureAndQuit(options: {
   let leaving = false;
   app.once("before-quit", () => {
     leaving = true;
+    destroyFailureWindows();
   });
   await showStartupFailure({
     ...options,

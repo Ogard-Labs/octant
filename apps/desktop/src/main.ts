@@ -287,6 +287,7 @@ import {
 } from "./quitGuard";
 import { writeDiagnostic } from "./diagnosticLog";
 import {
+  destroyFailureWindows,
   noticeWindowIsClosing,
   showNoticeWithoutBlocking,
   showStartupFailure,
@@ -4816,7 +4817,10 @@ async function handleFatalStartup(error: unknown): Promise<void> {
       quitAfterFailedStartup = quit;
     },
     armDeadline: () => armQuitDeadline({ forceExit: forceExitAfterStalledQuit() }),
-    finish: finishQuit,
+    finish: () => {
+      destroyFailureWindows();
+      finishQuit();
+    },
   });
 }
 

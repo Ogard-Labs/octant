@@ -71,6 +71,8 @@ export interface StartupFailureWindow {
   readonly onNavigate: (listener: (url: string, preventDefault: () => void) => void) => void;
   readonly onClosed: (listener: () => void) => void;
   readonly close: () => void;
+  /** Removes the window at once, without waiting for it to agree to close. */
+  readonly destroy: () => void;
 }
 
 /**
@@ -85,6 +87,8 @@ export async function showStartupFailureWindow(options: {
   readonly title: string;
   readonly message: string;
   readonly quit: () => void;
+  /** Receives the window as soon as it exists, so a quit can remove it. */
+  readonly onCreated?: (window: StartupFailureWindow) => void;
 }): Promise<void> {
   await options.ready();
   if (options.quitRequested()) return;
@@ -93,10 +97,23 @@ export async function showStartupFailureWindow(options: {
     preventDefault();
     if (url === STARTUP_FAILURE_QUIT_URL) options.quit();
   });
-  window.onClosed(options.quit);
-  await window.load(
-    documentUrl(startupFailureDocument({ title: options.title, message: options.message })),
-  );
+  let closed = false;
+  window.onClosed(() => {
+    closed = true;
+    options.quit();
+  });
+  options.onCreated?.(window);
+  try {
+    await window.load(
+      documentUrl(startupFailureDocument({ title: options.title, message: options.message })),
+    );
+  } catch (error) {
+    // A quit removes a window that is still loading, which rejects the load:
+    // that is the app leaving, not a failure to show.
+    if (closed || options.quitRequested()) return;
+    throw error;
+  }
+  if (closed || options.quitRequested()) return;
   window.show();
 }
 

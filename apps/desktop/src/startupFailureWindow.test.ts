@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { quitAfterStartupFailure } from "./quitShutdown";
 import {
   NOTICE_CLOSE_URL,
   STARTUP_FAILURE_QUIT_URL,
@@ -23,6 +24,10 @@ function fakeWindow() {
     },
     close: () => {
       calls.push("close");
+      closed();
+    },
+    destroy: () => {
+      calls.push("destroy");
       closed();
     },
   };
@@ -232,5 +237,99 @@ describe("telling a person about a failure while the app keeps running", () => {
     await notices.notify(undefined, "A", "second");
 
     expect(windows).toHaveLength(2);
+  });
+});
+
+describe("a quit that arrives while the failure window is still loading", () => {
+  it("ends the app once, says nothing about failing to show, and needs no deadline", async () => {
+    const order: string[] = [];
+    let rejectLoad: (error: Error) => void = () => undefined;
+    let closed: () => void = () => undefined;
+    let signal: () => void = () => undefined;
+    const window: StartupFailureWindow = {
+      load: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectLoad = reject;
+        }),
+      show: () => void order.push("show"),
+      onNavigate: () => undefined,
+      onClosed: (listener) => {
+        closed = listener;
+      },
+      close: () => undefined,
+      // Removing a window that is loading aborts its load.
+      destroy: () => {
+        order.push("destroy");
+        rejectLoad(new Error("ERR_ABORTED (-3) loading 'data:text/html'"));
+        closed();
+      },
+    };
+    let created: StartupFailureWindow | undefined;
+    const run = quitAfterStartupFailure({
+      message: "reason",
+      log: (message) => void order.push(`log: ${message}`),
+      shutDown: async () => undefined,
+      onQuitRequested: (quit) => {
+        signal = quit;
+      },
+      showFailure: (message, control) =>
+        showStartupFailureWindow({
+          ready: async () => undefined,
+          createWindow: () => window,
+          onCreated: (made) => {
+            created = made;
+          },
+          title: "Octant could not start",
+          message,
+          ...control,
+        }),
+      armDeadline: () => void order.push("deadline"),
+      finish: () => {
+        created?.destroy();
+        order.push("finished");
+      },
+    });
+    await vi.waitFor(() => expect(created).toBeDefined());
+
+    signal();
+    signal();
+    await run;
+
+    expect(order).toEqual([
+      "log: Octant could not start: reason",
+      "deadline",
+      "destroy",
+      "finished",
+    ]);
+  });
+
+  it("does not show a window whose load finished after the app began to quit", async () => {
+    const fake = fakeWindow();
+    await showStartupFailureWindow({
+      ready: async () => undefined,
+      quitRequested: () => true,
+      createWindow: () => fake.window,
+      title: "Octant could not start",
+      message: "reason",
+      quit: vi.fn(),
+    });
+
+    expect(fake.calls).not.toContain("show");
+  });
+
+  it("still reports a load that failed for any other reason", async () => {
+    const fake = fakeWindow();
+    const failing = { ...fake.window, load: () => Promise.reject(new Error("ERR_FAILED")) };
+
+    await expect(
+      showStartupFailureWindow({
+        ready: async () => undefined,
+        quitRequested: () => false,
+        createWindow: () => failing,
+        title: "Octant could not start",
+        message: "reason",
+        quit: vi.fn(),
+      }),
+    ).rejects.toThrow("ERR_FAILED");
   });
 });
