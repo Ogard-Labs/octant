@@ -2338,7 +2338,7 @@ describe("BrowserWorkspace", () => {
     );
 
     it.each(["native-live", "headless"] as const)(
-      "exposes login permission only on the native Browser consumer, not %s fallback",
+      "offers Login permission in the more menu only on the native Browser consumer, and opens its review there, not on the %s fallback",
       async (presentation) => {
         const browser = client();
         browser.manageCredentialUse = vi.fn(async () =>
@@ -2356,8 +2356,9 @@ describe("BrowserWorkspace", () => {
         render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
         await screen.findByRole("button", { name: "More Browser actions" });
         if (presentation === "headless")
-          expect(screen.queryByRole("button", { name: "Login permission" })).toBeNull();
+          expect(await moreActionNames()).not.toContain("Login permission");
         else {
+          expect(await moreActionNames()).toContain("Login permission");
           await chooseMoreAction("Login permission");
           expect(
             await screen.findByRole("dialog", { name: "Browser login permission" }),

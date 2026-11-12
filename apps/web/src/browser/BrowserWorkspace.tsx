@@ -1223,11 +1223,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     refreshKey: snapshot?.context === undefined ? undefined : String(snapshot.context.contextId),
   });
   const chromeWidth = useElementWidth(chrome);
-  const canCredential =
-    nativeContext !== undefined &&
+  // One predicate for the more menu's Login permission item and the control that
+  // answers it: only a live native page in a Work or Code thread has a review to
+  // open, so a headless or remote client is never offered an action that cannot run.
+  const credentialContext =
+    nativeContext &&
     activeContext &&
     props.client.manageCredentialUse !== undefined &&
-    (snapshot?.context?.authority.mode === "work" || snapshot?.context?.authority.mode === "code");
+    snapshot?.context !== undefined &&
+    (snapshot.context.authority.mode === "work" || snapshot.context.authority.mode === "code")
+      ? {
+          contextId: snapshot.context.contextId,
+          threadId: snapshot.context.threadId,
+          mode: snapshot.context.authority.mode,
+        }
+      : undefined;
   const baseMoreItems: ReadonlyArray<OctantMenuItem> = [
     ...(ownerHolds && personHasPage && props.client.handBack !== undefined
       ? [{ icon: holdIcon("hand-back"), label: "Hand back", value: "hand-back" }]
@@ -1270,7 +1280,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           },
         ]
       : []),
-    ...(canCredential
+    ...(credentialContext !== undefined
       ? [
           {
             icon: <KeyRound aria-hidden="true" size={16} />,
@@ -1618,25 +1628,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             />
           </span>
         )}
-        {nativeContext &&
-        activeContext &&
-        snapshot?.context !== undefined &&
-        (snapshot.context.authority.mode === "work" ||
-          snapshot.context.authority.mode === "code") ? (
+        {credentialContext === undefined || snapshot?.context === undefined ? null : (
           <BrowserCredentialBindingControl
             key={String(snapshot.context.contextId)}
             client={props.client}
-            context={{
-              contextId: snapshot.context.contextId,
-              threadId: snapshot.context.threadId,
-              mode: snapshot.context.authority.mode,
-            }}
+            context={credentialContext}
             held={snapshot.waitingForPerson !== undefined}
             openRequest={credentialRequest}
             profile={snapshot.context.policy.profile ?? { kind: "private" }}
             restoreFocus={moreTrigger}
           />
-        ) : null}
+        )}
         <span aria-live="polite" className="sr-only">
           <span>{statusLabel(status)}</span>
           {snapshot?.observation?.title === undefined ? null : (
