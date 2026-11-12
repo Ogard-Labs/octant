@@ -832,6 +832,22 @@ describe("Agent Plugin MCP session manager", () => {
                             { name: "invalid", inputSchema: { type: "not-a-schema-type" } },
                             { name: "missing" },
                             { name: "boolean", inputSchema: false },
+                            {
+                              name: "regex-pattern",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  value: { type: "string", pattern: "^(a+)+$" },
+                                },
+                              },
+                            },
+                            {
+                              name: "regex-properties",
+                              inputSchema: {
+                                type: "object",
+                                patternProperties: { "^(a+)+$": { type: "string" } },
+                              },
+                            },
                             { name: "duplicate", inputSchema: { type: "object" } },
                             {
                               name: "duplicate",

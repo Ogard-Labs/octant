@@ -1087,6 +1087,65 @@ function duplicatedMcpToolNames(tools: ReadonlyArray<McpToolDefinition>): Readon
   return duplicates;
 }
 
+const SINGLE_NESTED_SCHEMA_KEYWORDS = [
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+] as const;
+const ARRAY_NESTED_SCHEMA_KEYWORDS = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
+const MAP_NESTED_SCHEMA_KEYWORDS = [
+  "$defs",
+  "definitions",
+  "dependencies",
+  "dependentSchemas",
+  "properties",
+] as const;
+
+/**
+ * JavaScript regular expressions can exhibit catastrophic backtracking. MCP
+ * schemas are server-controlled and Ajv evaluates them synchronously on the
+ * control-plane event loop, so regex-bearing schemas are not safe to execute.
+ */
+function mcpInputSchemaUsesRegularExpressions(schema: unknown): boolean {
+  if (Array.isArray(schema)) return schema.some(mcpInputSchemaUsesRegularExpressions);
+  if (schema === null || typeof schema !== "object") return false;
+  const record = schema as Readonly<Record<string, unknown>>;
+  if (
+    Object.prototype.hasOwnProperty.call(record, "pattern") ||
+    Object.prototype.hasOwnProperty.call(record, "patternProperties")
+  ) {
+    return true;
+  }
+  for (const keyword of SINGLE_NESTED_SCHEMA_KEYWORDS) {
+    if (mcpInputSchemaUsesRegularExpressions(record[keyword])) return true;
+  }
+  for (const keyword of ARRAY_NESTED_SCHEMA_KEYWORDS) {
+    const nested = record[keyword];
+    if (Array.isArray(nested) && nested.some(mcpInputSchemaUsesRegularExpressions)) return true;
+  }
+  for (const keyword of MAP_NESTED_SCHEMA_KEYWORDS) {
+    const nested = record[keyword];
+    if (
+      nested !== null &&
+      typeof nested === "object" &&
+      !Array.isArray(nested) &&
+      Object.values(nested).some(mcpInputSchemaUsesRegularExpressions)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function prepareMcpTool(
   record: Pick<AgentPluginMcpSessionRecord, "extensionId" | "packageId" | "componentId" | "scope">,
   tool: McpToolDefinition,
@@ -1100,6 +1159,7 @@ function prepareMcpTool(
     ) {
       return undefined;
     }
+    if (mcpInputSchemaUsesRegularExpressions(tool.inputSchema)) return undefined;
     const providerDefinition = decodeProviderToolDefinition({
       name: toolQualifiedName(record, tool.name),
       ...boundedToolDescription(tool.description),
