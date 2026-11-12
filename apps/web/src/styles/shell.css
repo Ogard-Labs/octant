@@ -3336,6 +3336,10 @@ form > .work-composer-adapter__attachments {
   flex: 0 0 auto;
 }
 
+.browser-workspace__control-glyph {
+  display: none;
+}
+
 .browser-workspace__omnibox {
   display: flex;
   flex: 1 1 auto;
@@ -4624,7 +4628,7 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 
 /* With a page open the row also holds who holds the page, Take over, Screenshot
    and Stop. Beside those the address field was 26 to 90px wide from 360px to
-   720px. Below 880px it takes its own row at the full width, and below 720px
+   720px. Below 880px it takes its own row at the full width, and below 780px
    the words that no longer fit whole (the profile, the availability sentence,
    Take over) give way before anything is cut. Each control keeps its name and
    tooltip. */
@@ -4639,6 +4643,60 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
+/* With a page open and less than 360px, even the holder's words do not fit
+   beside Take over, Screenshot and Stop. It keeps a 24px glyph; its words stay
+   for assistive technology and in its title. Without this the holder ended in
+   an ellipsis and Screenshot and Stop dropped to a row of their own. */
+@container browser-workspace (max-width: 359px) {
+  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__control-state {
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+  }
+  .browser-workspace__chrome:has(.browser-workspace__take-over)
+    .browser-workspace__control-state
+    > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__control-glyph {
+    display: block;
+    flex: none;
+  }
+}
+
+/* Under 320px the 12px side padding is what pushes the last control down. */
+@container browser-workspace (max-width: 319px) {
+  .browser-workspace__chrome:has(.browser-workspace__take-over),
+  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
+    padding-inline: 8px;
+  }
+}
+
+/* A wordless Take over is still a 24px target. */
+@container browser-workspace (max-width: 779px) {
+  .browser-workspace__take-over {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+/* Two rows (controls, then the address) cost 114px at three rows and 82px at
+   two; trimming the rail's padding and the gap leaves a 240px tile's page
+   its 120px. */
+@container browser-workspace (max-width: 879px) {
+  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
+    padding-block: 2px;
+    row-gap: 2px;
+  }
+  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__omnibox {
+    height: 28px;
+  }
+}
+
 /* At 360px the row is 12px too long by a gap's worth and Stop dropped to a
    line of its own, so the gaps tighten. */
 @container browser-workspace (max-width: 419px) {
@@ -4648,7 +4706,7 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
-@container browser-workspace (max-width: 719px) {
+@container browser-workspace (max-width: 779px) {
   .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-profile-control span,
   .browser-workspace__chrome:has(.browser-workspace__take-over)
     .browser-workspace__availability-label,

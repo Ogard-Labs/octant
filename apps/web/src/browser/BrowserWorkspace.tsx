@@ -36,6 +36,7 @@ import {
   Camera,
   Globe2,
   ExternalLink,
+  Eye,
   Hand,
   LoaderCircle,
   LockKeyhole,
@@ -1167,6 +1168,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {nativeState?.loading || nativeState?.control === "agent" ? (
             <LoaderCircle aria-hidden="true" size={12} />
           ) : null}
+          {/* Shown only when a narrow tile leaves no room for the words. */}
+          <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
           <span>{controlLabel}</span>
           {activeContext ? (
             <span
