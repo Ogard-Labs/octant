@@ -70,8 +70,9 @@ interface PendingApproval {
   readonly threadId: string;
   readonly authority: ToolActionAuthority;
   readonly resolve: (decision: "approved" | "denied" | "cancelled" | "expired") => void;
-  readonly timer: ReturnType<typeof setTimeout>;
-  readonly ttlMs: number;
+  /** Absent on a sign-in card, which waits for the person however long that takes. */
+  readonly timer: ReturnType<typeof setTimeout> | undefined;
+  readonly ttlMs: number | undefined;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
 }
@@ -80,7 +81,10 @@ interface PendingApproval {
  * Host-owned, provider-neutral origin approval for managed Browser calls.
  * Pending entries are scoped to the requesting window and exact thread
  * authority; a routine's entries go to the windows that can see its thread. A decision is one-shot; abort, expiry, and window revocation all
- * settle as denial so a late answer cannot resume a browser effect.
+ * settle as denial so a late answer cannot resume a browser effect. A sign-in
+ * card alone has no expiry: the person is asked to act, and a lapse would
+ * report a refusal they never gave. It ends with their answer, its turn, its
+ * thread's archive, its window, or the host.
  */
 export class BrowserToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
@@ -184,11 +188,9 @@ export class BrowserToolApprovalService {
         }
         resolve(decision);
       };
-      // Signing in can take a second factor and a password manager; it gets
-      // the longest wait the service allows.
-      const ttlMs = input.signIn === undefined ? this.#ttlMs : MAX_TTL_MS;
-      const timer = setTimeout(() => settle("expired"), ttlMs);
-      timer.unref?.();
+      const ttlMs = input.signIn === undefined ? this.#ttlMs : undefined;
+      const timer = ttlMs === undefined ? undefined : setTimeout(() => settle("expired"), ttlMs);
+      timer?.unref?.();
       const onAbort = input.signal === undefined ? undefined : () => settle("cancelled");
       const pending: PendingApproval = {
         view,
@@ -297,6 +299,13 @@ export class BrowserToolApprovalService {
     }
   }
 
+  /** Gives up what a thread still waits on, when it is archived or deleted. */
+  withdrawThread(threadId: string): void {
+    for (const pending of this.#pending.values()) {
+      if (pending.threadId === threadId) pending.resolve("cancelled");
+    }
+  }
+
   close(): void {
     for (const pending of this.#pending.values()) pending.resolve("cancelled");
   }
@@ -304,7 +313,10 @@ export class BrowserToolApprovalService {
   #expire(): void {
     const now = this.#options.now();
     for (const pending of this.#pending.values()) {
-      if (Date.parse(String(pending.view.requestedAt)) + pending.ttlMs <= now) {
+      if (
+        pending.ttlMs !== undefined &&
+        Date.parse(String(pending.view.requestedAt)) + pending.ttlMs <= now
+      ) {
         pending.resolve("expired");
       }
     }

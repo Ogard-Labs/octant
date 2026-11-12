@@ -86,11 +86,9 @@ export async function admitNativeHarnessTool(
           ? `The person did not allow ${name} here. Do not retry it; say what you would have done.`
           : outcome === "shield-denied"
             ? `Octant Shield did not allow ${name} here. Do not retry it; say what you would have done.`
-            : outcome === "expired"
-              ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
-              : outcome === "too-many-waiting"
-                ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
-                : `The turn was cancelled while waiting for approval of ${name}.`,
+            : outcome === "too-many-waiting"
+              ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
+              : `The turn was cancelled while waiting for approval of ${name}.`,
       );
     }
   }

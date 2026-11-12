@@ -18,22 +18,16 @@ import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
 import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
-const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
-
 /**
  * At most this many harness approvals wait for a person at once across the
- * whole host, the same cap the MCP and browser tool approvals use. A lead or
- * child that keeps asking would otherwise stack prompts without bound; past
- * the cap a call is refused at once and nothing is journaled.
+ * whole host, the same cap the MCP and browser tool approvals use. An
+ * approval waits until it is answered or its turn stops, never for a fixed
+ * time, so the cap is the only bound on a lead or child that keeps asking;
+ * past it a call is refused at once and nothing is journaled.
  */
 export const MAX_WAITING_NATIVE_HARNESS_APPROVALS = 32;
 
-export type NativeHarnessApprovalOutcome =
-  | "approved"
-  | "denied"
-  | "expired"
-  | "cancelled"
-  | "too-many-waiting";
+export type NativeHarnessApprovalOutcome = "approved" | "denied" | "cancelled" | "too-many-waiting";
 
 /** How an asked, journaled approval settles; a refused ask is never journaled. */
 type SettledApprovalOutcome = Exclude<NativeHarnessApprovalOutcome, "too-many-waiting">;
@@ -56,13 +50,11 @@ interface Waiter {
   readonly allowRemember: boolean;
   /** Hosts the approval listed, keyed `host port`; absent when it listed none. */
   readonly commandHosts: ReadonlySet<string> | undefined;
-  readonly expiresAt: number;
   readonly resolve: (
     outcome: SettledApprovalOutcome,
     remembered?: boolean,
     confirmed?: ToolEgressCallConfirmation,
   ) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
 }
@@ -90,7 +82,6 @@ export interface NativeHarnessApprovalStoreOptions {
   readonly sessions: Pick<NativeHarnessSessionStore, "ensure" | "askApproval" | "settleApproval">;
   readonly uuid: () => string;
   readonly clock: () => string;
-  readonly timeoutMs?: number;
   /**
    * The sources that marked a thread, read when its own single-use approval
    * is asked so the prompt can say why it asks and what the thread read.
@@ -106,6 +97,9 @@ export interface NativeHarnessApprovalStoreOptions {
 /**
  * Tool calls waiting on a person. Asking journals the approval on the
  * session and blocks the call; a decision from any surface settles it. An
+ * unanswered approval waits: only a decision or the end of its turn (the
+ * ask's abort signal) settles it, because a lapse would turn a person's
+ * absence into a refusal. An
  * "always" approval remembers the class for this thread's session only —
  * the thread's posture is untouched, so a restart asks again.
  *
@@ -198,7 +192,6 @@ export class NativeHarnessApprovalStore {
     ) {
       return settled("approved");
     }
-    this.#expire();
     if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_APPROVALS) {
       return settled("too-many-waiting");
     }
@@ -212,7 +205,6 @@ export class NativeHarnessApprovalStore {
     });
     const approvalId = decodeNativeHarnessApprovalId(this.#options.uuid());
     const askedAt = decodeUtcTimestamp(this.#options.clock());
-    const timeoutMs = this.#options.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     const approval = decodeNativeHarnessApproval({
       id: approvalId,
       toolName: input.toolName,
@@ -244,7 +236,6 @@ export class NativeHarnessApprovalStore {
         const waiter = this.#waiters.get(String(approvalId));
         if (waiter === undefined) return;
         this.#waiters.delete(String(approvalId));
-        clearTimeout(waiter.timer);
         waiter.signal?.removeEventListener("abort", waiter.onAbort);
         this.#options.sessions.settleApproval(input.threadId, approvalId, {
           status: outcome,
@@ -262,9 +253,7 @@ export class NativeHarnessApprovalStore {
           commandHosts === undefined
             ? undefined
             : new Set(commandHosts.map((entry) => commandHostKey(entry.host, entry.port))),
-        expiresAt: Date.parse(askedAt) + timeoutMs,
         resolve: settle,
-        timer: setTimeout(() => settle("expired"), timeoutMs),
         onAbort: () => settle("cancelled"),
         signal: input.signal,
       };
@@ -287,12 +276,11 @@ export class NativeHarnessApprovalStore {
   }
 
   /**
-   * The approvals a tool call is blocked on right now. A request that expired,
-   * was cancelled, or was lost to a restart has no waiter and is not here, so
-   * a reader listing what a person can still answer never lists a dead one.
+   * The approvals a tool call is blocked on right now. A request that was
+   * cancelled or lost to a restart has no waiter and is not here, so a reader
+   * listing what a person can still answer never lists a dead one.
    */
   waiting(): ReadonlyArray<{ readonly threadId: string; readonly approvalId: string }> {
-    this.#expire();
     return [...this.#waiters].map(([approvalId, waiter]) => ({
       threadId: waiter.threadId,
       approvalId,
@@ -317,7 +305,6 @@ export class NativeHarnessApprovalStore {
     | "withdrawn"
     | "host-not-offered"
     | "lost-in-restart" {
-    this.#expire();
     const waiter = this.#waiters.get(approvalId);
     let confirmed: ToolEgressCallConfirmation | undefined;
     if (waiter !== undefined && waiter.threadId === threadId) {
@@ -359,25 +346,13 @@ export class NativeHarnessApprovalStore {
   }
 
   /**
-   * Settles every approval whose time is up by the clock as expired, journaled
-   * exactly as a timer expiry is. A reader of the session view calls this
-   * first so the person is never shown an overdue approval as pending.
+   * Settles as cancelled what a thread still waits on, when it is archived or
+   * deleted. Its turn may still be running, parked on this very wait, and
+   * nothing else would ever release the slot.
    */
-  expireOverdue(): void {
-    this.#expire();
-  }
-
-  /**
-   * The timer alone is not enough: it fires late behind a busy event loop or
-   * across a machine's sleep, and until it fires an overdue approval would
-   * still be listed, could still be approved, and would hold a waiting slot.
-   * So asking, listing, and deciding all check the clock first, as the MCP
-   * and browser tool approvals do.
-   */
-  #expire(): void {
-    const now = Date.parse(this.#options.clock());
+  withdrawThread(threadId: string): void {
     for (const waiter of Array.from(this.#waiters.values())) {
-      if (waiter.expiresAt <= now) waiter.resolve("expired");
+      if (waiter.threadId === threadId) waiter.resolve("cancelled");
     }
   }
 }

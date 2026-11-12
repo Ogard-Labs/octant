@@ -20,6 +20,7 @@ import { ProjectService } from "../projectService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createProjectMemoryAccess, type ProjectMemoryAccess } from "./projectMemoryAccess";
+import { ProjectMemoryProposalService } from "./projectMemoryProposalService";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const hostScope = decodeWindowId("00000000-0000-4000-8000-000000000902");
@@ -235,6 +236,41 @@ describe("octant_memory", () => {
       await expect(pending).resolves.toMatchObject({ result: { status: "declined" } });
       expect(persistence.readProjectMemory(projectId).active).toEqual([]);
     });
+  });
+
+  it("keeps a proposed change waiting a day later, and gives it up when its thread is archived", async () => {
+    vi.useFakeTimers();
+    try {
+      const proposals = new ProjectMemoryProposalService({
+        uuid: () => "00000000-0000-4000-8000-000000000930",
+        now: () => Date.parse(now),
+        apply: async () => {
+          throw new Error("Nothing was confirmed.");
+        },
+      });
+      const outcome = proposals.propose({
+        windowId,
+        proposal: {
+          projectId,
+          mode: "code",
+          threadId,
+          change: { kind: "create", memoryKind: "fact", content: "Waits for the person." },
+          expectedVersion: 0 as never,
+        },
+      });
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(proposals.list(windowId)).toHaveLength(1);
+      // Nothing is left behind to fire later: the wait holds no timer.
+      expect(vi.getTimerCount()).toBe(0);
+
+      proposals.withdrawThread(taintedThreadId);
+      expect(proposals.list(windowId)).toHaveLength(1);
+      proposals.withdrawThread(threadId);
+      await expect(outcome).resolves.toEqual({ status: "cancelled" });
+      expect(proposals.list(windowId)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("asks for every write on a thread that read outside content and names what it read", async () => {

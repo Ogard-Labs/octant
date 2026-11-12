@@ -722,42 +722,49 @@ async function handleProposalDecision(
     claimed.settle({ status: "not-created", message: failure.message });
     return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
   };
-  if ("kind" in claimed.proposal) {
-    const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
-    if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
-      return refuse(
-        changed.kind === "automation-command-failed"
-          ? changed
-          : commandFailure("invalid", "The routine was not changed."),
+  try {
+    if ("kind" in claimed.proposal) {
+      const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
+      if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
+        return refuse(
+          changed.kind === "automation-command-failed"
+            ? changed
+            : commandFailure("invalid", "The routine was not changed."),
+        );
+      }
+      claimed.settle({ status: "confirmed", automationId: changed.automation.id });
+      return jsonResponse(
+        decodeRoutineProposalDecisionResult({
+          kind: "routine-proposal-confirmed",
+          automation: changed.automation,
+        }),
+        200,
+        origin,
       );
     }
-    claimed.settle({ status: "confirmed", automationId: changed.automation.id });
+    const result = await createThreadRoutine(dependencies, context, claimed.proposal);
+    if (result.kind !== "automation-created") {
+      return refuse(
+        result.kind === "automation-command-failed"
+          ? result
+          : commandFailure("invalid", "The routine was not created."),
+      );
+    }
+    claimed.settle({ status: "confirmed", automationId: result.automation.id });
     return jsonResponse(
       decodeRoutineProposalDecisionResult({
         kind: "routine-proposal-confirmed",
-        automation: changed.automation,
+        automation: result.automation,
       }),
       200,
       origin,
     );
+  } finally {
+    // A claimed request is off the waiting list and has no expiry, so a
+    // command that threw would leave its tool call waiting for good. Settling
+    // twice is a no-op, so this only acts when nothing above settled it.
+    claimed.settle({ status: "not-created", message: "The routine was not changed." });
   }
-  const result = await createThreadRoutine(dependencies, context, claimed.proposal);
-  if (result.kind !== "automation-created") {
-    return refuse(
-      result.kind === "automation-command-failed"
-        ? result
-        : commandFailure("invalid", "The routine was not created."),
-    );
-  }
-  claimed.settle({ status: "confirmed", automationId: result.automation.id });
-  return jsonResponse(
-    decodeRoutineProposalDecisionResult({
-      kind: "routine-proposal-confirmed",
-      automation: result.automation,
-    }),
-    200,
-    origin,
-  );
 }
 
 /**

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeAutomationCommand,
   decodeAutomationId,
@@ -533,23 +533,36 @@ describe("routine proposals from a thread", () => {
     ).toEqual([]);
   });
 
-  it("creates nothing when the proposal expires", async () => {
-    const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS, ttlMs: 1_000 });
-    const outcome: Promise<RoutineProposalOutcome> = proposals.propose({
-      windowId,
-      proposal: {
-        threadId: THREAD as never,
-        mode: "work",
-        projectId: PROJECT as never,
-        displayName: "Soon",
-        taskPrompt: "Check.",
-        trigger: { kind: "once", scheduledAt: "2026-11-01T09:00:00.000Z" as never },
-        missedRunPolicy: "skip",
-        firstRunAt: "2026-11-01T09:00:00.000Z" as never,
-      },
-    });
-    expect(await outcome).toEqual({ status: "expired" });
-    expect(proposals.list(windowId)).toEqual([]);
+  it("keeps a proposal waiting a day later, and gives it up when its thread is archived", async () => {
+    vi.useFakeTimers();
+    try {
+      const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS });
+      const outcome: Promise<RoutineProposalOutcome> = proposals.propose({
+        windowId,
+        proposal: {
+          threadId: THREAD as never,
+          mode: "work",
+          projectId: PROJECT as never,
+          displayName: "Soon",
+          taskPrompt: "Check.",
+          trigger: { kind: "once", scheduledAt: "2026-11-01T09:00:00.000Z" as never },
+          missedRunPolicy: "skip",
+          firstRunAt: "2026-11-01T09:00:00.000Z" as never,
+        },
+      });
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(proposals.list(windowId)).toHaveLength(1);
+      // Nothing is left behind to fire later: the wait holds no timer.
+      expect(vi.getTimerCount()).toBe(0);
+
+      proposals.withdrawThread("00000000-0000-4000-8000-00000000dead");
+      expect(proposals.list(windowId)).toHaveLength(1);
+      proposals.withdrawThread(THREAD);
+      expect(await outcome).toEqual({ status: "cancelled" });
+      expect(proposals.list(windowId)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rebuilds the link from the journal after a restart", async () => {

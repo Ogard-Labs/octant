@@ -1517,8 +1517,10 @@ authoritative.
   edit. The proposal carries the memory version the agent saw, so a change
   made against memory that moved while the card waited is not applied.
   Declined and cancelled proposals change nothing
-  and tell the agent so; an unanswered proposal waits in Needs you (not built
-  yet: today it expires after ten minutes). Plan mode refuses every write before asking; a turn
+  and tell the agent so; an unanswered proposal waits, with no expiry, as its
+  card in the thread until the person answers it, the turn stops, the thread
+  is archived, or the raising window goes away (built). Not built yet: the
+  pending-requests read (Needs you) does not list it. Plan mode refuses every write before asking; a turn
   with nobody at a window on this computer (a routine's run, a resumed turn,
   a paired device's turn) is refused a write that needs a card, because no card can reach the
   person. Rationale: memory reaches every later turn in the Project, so below
@@ -3553,11 +3555,12 @@ the thread it came from.
   route policy classifies an Automation list as a Project overview read and
   forwards it for the device's own host; it may not resume or edit one from the
   phone, so a paused routine says to resume it at a window on this computer.
-  The host holds it for ten minutes as a suggestion chip at the foot of the
+  The host holds it, with no expiry, as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
-  no such window open, or once it goes away, the proposal is withdrawn
-  unanswered. The chip's one click confirms and dismissing it declines.
+  no such window open, or once it goes away, the turn stops, or the thread is
+  archived, the proposal is withdrawn unanswered. The pending-requests read
+  (Needs you) does not list it (not built yet). The chip's one click confirms and dismissing it declines.
   Confirm is the `POST /api/automations/proposals/decide` route, under the same transport
   principal and Project check as `commands`. On confirm the host builds the
   definition from the thread's live facts (Project version and binding, the
@@ -3588,8 +3591,8 @@ the thread it came from.
   run this turn belongs to. They answer at any posture, Plan included, and in
   a routine's own turn. `pause` and `archive` only ask: the request waits as a
   card in the thread under the proposal rules above (the raising window or
-  paired device only, ten minutes, the shared cap of 32, withdrawn with the
-  turn), and the person's confirmation is their own pause or archive through
+  paired device only, no expiry, the shared cap of 32, withdrawn with the
+  turn or the thread's archive), and the person's confirmation is their own pause or archive through
   the `proposals/decide` route and the ordinary command, under the same
   Project check, at the routine version the agent saw, so a routine changed
   since is refused rather than changed. An agent may ask only about a routine
@@ -5747,8 +5750,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   built yet: today "Don't ask again in this thread" keeps the choice for the
   thread in host memory only, so a restart asks again, and a routine's turn
   is not offered the tool). A kept choice the host can no longer run is
-  dropped and asked again rather than swapped. An offer lives at most ten minutes and is given
-  up when its turn stops or its window goes away; Plan refuses the call,
+  dropped and asked again rather than swapped. An offer waits with no expiry and is given
+  up when its turn stops, its thread is archived, or its window goes away; the
+  pending-requests read (Needs you) does not list it (not built yet). Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
   answers with each image's attachment id, and the images themselves through
@@ -8618,14 +8622,11 @@ the model at another size.
   blocks a tool call that needs a person until a decision arrives
   (`POST /api/native-harness/sessions/:thread/approvals`) or the turn is
   interrupted. Neither expires: both wait until answered (maintainer request,
-  2026-11-12). Not built yet: today both also end after ten minutes; that
-  expiry ends the call (as
-  `question-expired`, or as a denied call) and is journaled as `expired`, the
-  same way whether the timer or the clock caught it: the host checks the
-  clock whenever a question or approval is asked, answered, or listed
-  (including a read of the session view), so one whose timer fired late (a
-  busy host, a machine that slept) is never still shown as pending,
-  answerable, or holding a slot. A Code thread's inline copy of a question is
+  2026-11-12; built). A wait holds no timer; it ends with an answer, with its
+  turn (settled `cancelled`), or with its thread's archive or deletion, which
+  the host hears from the journal and settles `cancelled` too, because a
+  thread may be archived while its turn is still parked on the wait. The
+  journaled `expired` status remains only for what a restart cut off. A Code thread's inline copy of a question is
   withdrawn whenever the question settles, however it settled. The lead's own
   approval is the same wait a question is: while a turn is blocked on it, the
   thread reads as parked on the person, not running, in every mode. Work's and
@@ -10216,9 +10217,13 @@ that is not yet effective for the thread is refused and never reaches the model.
   slot. An unanswered approval does not expire: it waits in Needs you until a
   person answers it, and a host-run turn with no window (a routine, a goal
   loop) waits there too instead of being refused (maintainer request,
-  2026-11-12). Not built yet: today an unanswered approval expires after five
-  minutes and the call is denied, checked against the clock whenever approvals
-  are listed, answered, or requested.
+  2026-11-12). Built: an approval has no expiry and holds no timer; it is
+  denied only by an answer, its turn stopping, its thread's archive or
+  deletion, or its window's authority being revoked, so a prompt whose device
+  is no longer paired waits until one of those. Not built yet: it waits as
+  the prompt in its thread (`/api/extensions/tool-approvals`) and the
+  pending-requests read (Needs you) does not list it; a host-run turn's call
+  is still refused.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
@@ -11694,11 +11699,23 @@ mechanisms are:
     question waits in Needs you until a person answers it. A time, count, or
     size limit is a default the person can change in Settings unless it
     protects a hard line or the integrity of stored data; a fixed constant
-    needs its reason stated beside it (maintainer request, 2026-11-12). Not
-    built yet: the limits the owning sections name are still constants, and
-    the asks that still expire after ten minutes (a routine proposal, a
-    routine's pause or archive ask, an image offer, a credential request)
-    have not been changed to wait.
+    needs its reason stated beside it (maintainer request, 2026-11-12).
+    Built: Octant Harness approvals and questions, MCP tool approvals,
+    Project memory proposals, routine proposals, a routine's pause or archive
+    ask, the image generation offer, and the Browser sign-in card have no
+    expiry. Each ends with the person's answer, its turn stopping, its
+    thread's archive or deletion (heard from the journal, since a thread may
+    be archived while its turn is parked on the ask), its window's authority
+    being revoked where a window owns it, or the host stopping; the caps on
+    how many may wait (32 each) are unchanged and are the only bound on what
+    is held. Not built yet: only harness approvals and questions are listed by
+    the pending-requests read (Needs you), and the others wait as cards in
+    their thread; the limits the owning sections name are still constants; a
+    Browser site approval, a Code thread's own Browser and device approvals,
+    and a benchmark cell's ten-minute park still expire. A one-use credential request keeps its ten-minute expiry:
+    its owning section states it as a bound on how long a request that takes a
+    secret stays usable, and that section, not this one, would have to change
+    first.
   - **Opt-in sandbox at Full access.** A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeAgentRun,
   decodeAgentRunId,
@@ -142,7 +142,7 @@ function agentRun(
 
 const childRun = agentRun();
 
-function fixture(options: { readonly timeoutMs?: number } = {}) {
+function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "octant-child-pending-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -164,13 +164,11 @@ function fixture(options: { readonly timeoutMs?: number } = {}) {
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   const questions = new NativeHarnessQuestionStore({
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   const askApproval = (input: { readonly child: boolean; readonly summary?: string }) =>
     approvals.ask({
@@ -256,15 +254,18 @@ describe("subagent pending requests", () => {
     expect(await list()).toEqual([]);
   });
 
-  it("does not list a subagent request that expired", async () => {
-    const { sessions, askApproval, askQuestion, list } = fixture({ timeoutMs: 5 });
-    const approval = askApproval({ child: true });
-    const question = askQuestion();
-    expect(await list()).toHaveLength(2);
-    await approval;
-    await question;
-    expect(sessions.read(parentThread)?.approvals?.[0]?.status).toBe("expired");
-    expect(await list()).toEqual([]);
+  it("still lists a subagent request a day after it was asked", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sessions, askApproval, askQuestion, list } = fixture();
+      void askApproval({ child: true });
+      void askQuestion();
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(sessions.read(parentThread)?.approvals?.[0]?.status).toBe("pending");
+      expect(await list()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not list a subagent request once the person decided it", async () => {

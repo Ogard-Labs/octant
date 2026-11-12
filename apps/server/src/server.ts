@@ -265,6 +265,7 @@ export function startOctantServer(
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
+      onThreadArchived,
       onWindowRevoked,
       personMemory,
       personMemoryAccess,
@@ -275,6 +276,7 @@ export function startOctantServer(
       imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
+      unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
@@ -297,6 +299,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunRequestOwner,
       agentRunPersistence,
+      onThreadArchived,
       persistence,
       workThreadProjection,
     });
@@ -467,6 +470,7 @@ export function startOctantServer(
     } = yield* wireWorkspace({
       isPairedDeviceScope,
       machineChangeFeed,
+      onThreadArchived,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -774,6 +778,7 @@ export function startOctantServer(
       agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
+      onThreadArchived,
       onWindowRevoked,
       browserCaptures,
       codeEvidence,
@@ -2155,6 +2160,7 @@ export function startOctantServer(
           }
           try {
             unsubscribeMachineChanges();
+            unsubscribeThreadArchivals();
             machineChangeFeed.close();
             workTurnService.closeLiveUpdates();
           } catch (error) {
