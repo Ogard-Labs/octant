@@ -36,11 +36,22 @@ function reject(code: MemoryPolicyRejectionCode, message: string): never {
   throw new MemoryPolicyRejected(code, message);
 }
 
+/** A copy that names the same actor: a device keeps its id, and nothing else rides along. */
+function cloneActor(actor: ProjectActor): ProjectActor {
+  return actor.kind === "remote-device"
+    ? { kind: actor.kind, actorId: actor.actorId, deviceId: actor.deviceId }
+    : { kind: actor.kind, actorId: actor.actorId };
+}
+
+/**
+ * A memory change is a person's own act: at this host, or on a device they
+ * paired, which the entry then names. The host never writes one by itself.
+ */
 function requireUserActor(actor: ProjectActor): ProjectActor {
-  if (actor.kind !== "local-user") {
-    reject("invalid-actor", "Project memory changes require an explicit local user action");
+  if (actor.kind === "system") {
+    reject("invalid-actor", "Project memory changes require an explicit action by a person");
   }
-  return { kind: actor.kind, actorId: actor.actorId };
+  return cloneActor(actor);
 }
 
 function normalizeContent(content: string): string {
@@ -81,10 +92,7 @@ function cloneProvenance(provenance: MemoryProvenance): MemoryProvenance {
     sourceProjectId: provenance.sourceProjectId,
     sourceEntryId: provenance.sourceEntryId,
     destinationProjectId: provenance.destinationProjectId,
-    transferredBy: {
-      kind: provenance.transferredBy.kind,
-      actorId: provenance.transferredBy.actorId,
-    },
+    transferredBy: cloneActor(provenance.transferredBy),
     transferredAt: provenance.transferredAt,
     selectedContent: provenance.selectedContent,
   };
@@ -159,7 +167,7 @@ export function supersedeMemoryEntry(
   const previousEntry: SupersededMemoryEntry = {
     ...predecessor,
     provenance: cloneProvenance(predecessor.provenance),
-    author: { kind: predecessor.author.kind, actorId: predecessor.author.actorId },
+    author: cloneActor(predecessor.author),
     status: "superseded",
     supersededBy: input.successorEntryId,
     version,
@@ -199,7 +207,7 @@ export function retractMemoryEntry(
   return {
     ...active,
     provenance: cloneProvenance(active.provenance),
-    author: { kind: active.author.kind, actorId: active.author.actorId },
+    author: cloneActor(active.author),
     status: "retracted",
     retractionReason: normalizeReason(input.reason),
     retractedBy,
@@ -236,7 +244,7 @@ export function transferMemoryEntry(
       sourceProjectId: source.projectId,
       sourceEntryId: source.id,
       destinationProjectId: input.destinationProjectId,
-      transferredBy: { kind: transferredBy.kind, actorId: transferredBy.actorId },
+      transferredBy: cloneActor(transferredBy),
       transferredAt: input.transferredAt,
       selectedContent: source.content,
     },
