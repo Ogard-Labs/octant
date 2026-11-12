@@ -86,7 +86,7 @@ Missing or invalid native metadata refuses creation/use without removing stores.
 
 - The profile is fixed per page. A new page uses its applicable default, initially
   Private. The person changes
-  it from the profile control at the left of the Browser toolbar's address field
+  it from the profile icon after the Browser toolbar's address field
   (Private, Project, Personal and the named accounts on this host). Changing it opens the same address in the chosen
   profile as a new browsing context; the old context closes, and nothing it held
   (cookies, approvals, an agent's binding) carries over. The host turns "Project"
@@ -351,9 +351,9 @@ thread made.
   profile (Project, Personal or named account). A capture of a Private page names none.
 
 The agent's activity on a profile page is visible: while the agent drives one,
-the Browser toolbar's driver indicator ("Agent active · Personal") and the
+the Browser toolbar's status icon ("Agent active · Personal", as its name and tooltip) and the
 floating page preview both show the profile's name. The toolbar's profile
-control shows the page's profile at all times. The person can take the page
+icon shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
 a paired device cannot, signed in or not.
@@ -663,7 +663,7 @@ work without it, and takes no extension-support package:
 
 ### Showing it
 
-- The Browser toolbar shows an extensions button (a puzzle-piece icon) when at
+- The Browser toolbar shows an extensions button (a puzzle-piece icon between the address field and the profile icon) when at
   least one extension is enabled in the page's profile. It lists them, opens an
   extension's options page, and has "Manage extensions…", which opens Settings.
 - When the agent drives a page whose profile has extensions enabled, the
