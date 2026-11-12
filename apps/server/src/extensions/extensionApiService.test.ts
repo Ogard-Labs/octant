@@ -414,9 +414,9 @@ describe("extension inspection and lifecycle API service", () => {
     } as never);
     const target = { extensionId, packageId, version: "1.0.0", digest: resolved.expectedDigest };
     await service.execute({ kind: "install-package", ...target } as never);
-    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false });
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false }, undefined);
     await service.execute({ kind: "install-package", ...target, trust: true } as never);
-    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true });
+    expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true }, undefined);
   });
 
   it("fails closed when lifecycle targets were not inspected or source resolution throws private details", async () => {
@@ -513,9 +513,9 @@ describe("extension inspection and lifecycle API service", () => {
       kind: "extension-effective-state",
       snapshot: effective,
     });
-    expect(setSourceTrust).toHaveBeenCalledWith(commands[0]);
-    expect(setPluginDesired).toHaveBeenCalledWith(commands[1]);
-    expect(setComponentDesired).toHaveBeenCalledWith(commands[2]);
+    expect(setSourceTrust).toHaveBeenCalledWith(commands[0], undefined);
+    expect(setPluginDesired).toHaveBeenCalledWith(commands[1], undefined);
+    expect(setComponentDesired).toHaveBeenCalledWith(commands[2], undefined);
     expect(activation.resolve).toHaveBeenCalledWith(emptySnapshot, { scope: effective.scope });
   });
 

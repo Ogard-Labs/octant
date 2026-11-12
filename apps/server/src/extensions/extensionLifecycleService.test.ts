@@ -382,6 +382,38 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(journaled).not.toContain("plugin-desired-changed");
   });
 
+  it("journals a paired device's install, trust, enable and removal with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = async (actor?: never) => {
+      const context = await setup();
+      const service = context.makeService();
+      const before = context.journal.headSequence();
+      const installed = await service.install(inspection(), { trust: true }, actor);
+      const extensionId = installed.packages[0]?.extensionId as never;
+      await service.setPluginDesired(
+        {
+          extensionId,
+          expectedStateVersion: installed.packages[0]?.stateVersion as never,
+          desired: true,
+        } as never,
+        actor,
+      );
+      await service.uninstall(extensionId, actor);
+      return context.journal
+        .replay({ afterSequence: before as never, limit: 100 } as never)
+        .map((event) => event.actor);
+    };
+
+    const byDevice = await actorsOf(device);
+    expect(byDevice.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(byDevice.map((actor) => JSON.stringify(actor)))).toEqual(
+      new Set([JSON.stringify(device)]),
+    );
+    const byWindow = await actorsOf();
+    expect(new Set(byWindow.map((actor) => actor.kind))).toEqual(new Set(["local-user"]));
+  });
+
   it("installs untrusted when trust is not asked for", async () => {
     const context = await setup();
     const snapshot = await context.makeService().install(inspection());

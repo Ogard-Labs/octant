@@ -1233,12 +1233,12 @@ export function wireProviders(deps: ProvidersDependencies) {
               pin.extensionId as ExtensionProjectPinListing["pins"][number]["extensionId"],
           })),
         }),
-        set: (projectId, extensionId, pinned) => {
+        set: (projectId, extensionId, pinned, actor) => {
           const project = persistence.readProject(decodeProjectId(projectId));
           if (project === undefined || project.lifecycle !== "active" || project.type === "chat") {
             return "refused";
           }
-          return extensionProjectPinStore.set(projectId, extensionId, pinned);
+          return extensionProjectPinStore.set(projectId, extensionId, pinned, actor);
         },
       },
       mcpServerSignIn: {

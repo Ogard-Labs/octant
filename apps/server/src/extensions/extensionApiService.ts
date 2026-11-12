@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import {
   MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH,
@@ -219,7 +220,16 @@ export class ExtensionApiService {
     };
   }
 
-  async execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult> {
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal; a paired device's install, trust, enable or removal is
+   * journaled as that device. Absent means the person at this host.
+   */
+  async execute(
+    command: ExtensionCommand,
+    signal?: AbortSignal,
+    actor?: EventActor,
+  ): Promise<ExtensionCommandResult> {
     try {
       const bundled = this.#bundledPluginCommand(command);
       if (bundled !== undefined) return bundled;
@@ -328,17 +338,17 @@ export class ExtensionApiService {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
           return await this.#stateUpdated(
-            await this.#lifecycle.install(inspection, { trust: command.trust === true }),
+            await this.#lifecycle.install(inspection, { trust: command.trust === true }, actor),
             command,
           );
         }
         case "update-package": {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
-          return await this.#stateUpdated(await this.#lifecycle.update(inspection), command);
+          return await this.#stateUpdated(await this.#lifecycle.update(inspection, actor), command);
         }
         case "rollback-package":
-          return await this.#stateUpdated(await this.#lifecycle.rollback(command), command);
+          return await this.#stateUpdated(await this.#lifecycle.rollback(command, actor), command);
         case "uninstall-package": {
           const source = this.#lifecycle
             .snapshot()
@@ -359,7 +369,7 @@ export class ExtensionApiService {
             );
           }
           try {
-            const snapshot = await this.#lifecycle.uninstall(command.extensionId);
+            const snapshot = await this.#lifecycle.uninstall(command.extensionId, actor);
             // The generated folder and its secrets go only once the package is
             // really gone; a waiting uninstall keeps them for the retry.
             if (
@@ -376,19 +386,28 @@ export class ExtensionApiService {
           }
         }
         case "set-plugin-desired":
-          return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.setPluginDesired(command, actor),
+            command,
+          );
         case "set-source-trust":
-          return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.setSourceTrust(command, actor),
+            command,
+          );
         case "trust-new-publisher":
           return await this.#stateUpdated(
-            await this.#lifecycle.trustNewPublisher(command),
+            await this.#lifecycle.trustNewPublisher(command, actor),
             command,
           );
         case "forget-publisher":
-          return await this.#stateUpdated(await this.#lifecycle.forgetPublisher(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.forgetPublisher(command, actor),
+            command,
+          );
         case "set-component-desired":
           return await this.#stateUpdated(
-            await this.#lifecycle.setComponentDesired(command),
+            await this.#lifecycle.setComponentDesired(command, actor),
             command,
           );
         case "query-effective-state":

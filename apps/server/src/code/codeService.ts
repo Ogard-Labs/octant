@@ -1758,7 +1758,6 @@ export class CodeService {
             this.#persistence.readCodeCheckoutAggregateVersion(checkout.id),
             "code.checkout-observed@1",
             { kind: "checkout-observed", checkout },
-            actor,
           );
           checkoutJournaled = true;
           if (
@@ -1798,7 +1797,6 @@ export class CodeService {
                 this.#persistence.readCodeCheckoutAggregateVersion(checkout.id),
                 "code.checkout-removed@1",
                 { kind: "checkout-removed", checkoutId: checkout.id },
-                actor,
               );
             } catch {
               // D2: compensation append failed; the orphan checkout-observed
@@ -1868,7 +1866,6 @@ export class CodeService {
             this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
             "code.checkout-observed@1",
             { kind: "checkout-observed", checkout: prepared.checkout },
-            actor,
           );
         }
         return {
@@ -2298,7 +2295,6 @@ export class CodeService {
             this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
             "code.checkout-observed@1",
             { kind: "checkout-observed", checkout: prepared.checkout },
-            actor,
           );
         }
         const rebound = decodeCodeThread({
@@ -3844,7 +3840,6 @@ export class CodeService {
         this.#persistence.readCodeCheckoutAggregateVersion(landed.id),
         "code.checkout-observed@1",
         { kind: "checkout-observed", checkout: landed },
-        actor,
       );
     }
     const moved = decodeCodeThread({

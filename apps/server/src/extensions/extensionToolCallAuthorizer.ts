@@ -2,7 +2,7 @@ import {
   decideExtensionToolGrant,
   type ExtensionToolGrantDecision,
 } from "@octant/domain/extension-tool-grant-policy";
-import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
+import type { ApprovalOutsideContent, EventActor, WindowId } from "@octant/contracts";
 import type { ExtensionToolGrantSubject } from "../persistence/extensionToolGrantProjection";
 import type { ExtensionToolCall } from "./agentPluginMcpSessionManager";
 import type { ExtensionToolApprovalService } from "./extensionToolApprovalService";
@@ -77,11 +77,11 @@ export function createExtensionToolCallAuthorizer(options: {
   // Judged again when the person answers: the prompt may have been open while
   // another call brought outside content onto the thread, and what was
   // rememberable when it was raised is then approved for that call alone.
-  const remember = (call: ExtensionToolCall): boolean => {
+  const remember = (call: ExtensionToolCall, actor: EventActor | undefined): boolean => {
     const { subject, decision } = judge(call);
     if (decision.kind === "covered") return true;
     if (subject === undefined || !decision.rememberable) return false;
-    return options.grants.record({ ...subject, ...offeredBinding(call) }) === "recorded";
+    return options.grants.record({ ...subject, ...offeredBinding(call) }, actor) === "recorded";
   };
 
   return async (call) => {
@@ -102,7 +102,7 @@ export function createExtensionToolCallAuthorizer(options: {
       mcpToolName: call.mcpToolName,
       inputJson: call.inputJson,
       ...(outsideContent === undefined ? {} : { outsideContent }),
-      ...(decision.rememberable ? { remember: () => remember(call) } : {}),
+      ...(decision.rememberable ? { remember: (actor?: EventActor) => remember(call, actor) } : {}),
       ...(call.signal === undefined ? {} : { signal: call.signal }),
     });
   };

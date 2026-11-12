@@ -30,6 +30,10 @@ const pairedDeviceId = "55000000-0000-4000-8000-000000000001";
  * introduced or an agent grant's session is; `host-person` is a device the
  * host's own person paired.
  */
+/** What a paired device's change, and a local window's, is journaled as. */
+const pairedDevice = { kind: "remote-device", actorId: pairedDeviceId, deviceId: pairedDeviceId };
+const localUser = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" };
+
 function pairedDeviceRequest(
   path: string,
   body: unknown,
@@ -295,9 +299,13 @@ describe("bounded authenticated extension routes", () => {
       }),
     );
     expect(decided?.status).toBe(200);
-    expect(list).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(list).toHaveBeenCalledWith({
+      kind: "local-window",
+      scopeId: windowId,
+      actor: localUser,
+    });
     expect(decide).toHaveBeenCalledWith(
-      { kind: "local-window", scopeId: windowId },
+      { kind: "local-window", scopeId: windowId, actor: localUser },
       {
         approvalId: "44000000-0000-4000-8000-000000000010",
         decision: "approved",
@@ -327,7 +335,7 @@ describe("bounded authenticated extension routes", () => {
     expect(refused?.status).toBe(409);
     expect(await refused?.json()).toEqual({ accepted: false });
     expect(decide).toHaveBeenCalledWith(
-      { kind: "local-window", scopeId: windowId },
+      { kind: "local-window", scopeId: windowId, actor: localUser },
       {
         approvalId: answer.approvalId,
         decision: "approved",
@@ -446,6 +454,8 @@ describe("bounded authenticated extension routes", () => {
     }
     expect(list).toHaveBeenCalledOnce();
     expect(revoke).toHaveBeenCalledOnce();
+    // The device is who the journal names for the revocation and the grant.
+    expect(revoke).toHaveBeenCalledWith(`sha256:${"b".repeat(64)}`, pairedDevice);
 
     const remember = vi.fn(() => true);
     const call = approvals.request({
@@ -478,6 +488,7 @@ describe("bounded authenticated extension routes", () => {
     );
     expect(remembered?.status).toBe(200);
     expect(remember).toHaveBeenCalledOnce();
+    expect(remember).toHaveBeenCalledWith(pairedDevice);
     await expect(call).resolves.toBe(true);
   });
 
@@ -694,6 +705,9 @@ describe("bounded authenticated extension routes", () => {
       expect(admitted?.status).toBe(200);
     }
     expect(execute).toHaveBeenCalledTimes(3);
+    for (const call of execute.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>) {
+      expect(call[2]).toEqual(pairedDevice);
+    }
     execute.mockClear();
     const accepted = await handler(
       request("/api/extensions/lifecycle", { kind: "install-package", ...target }),
@@ -1764,7 +1778,7 @@ describe("plugins pinned to a Project", () => {
       }),
     );
     expect(set?.status).toBe(200);
-    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true);
+    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true, localUser);
     expect(await set?.json()).toEqual(listing);
     const listed = await handler(
       pairedDeviceRequest("/api/extensions/project-pins", { kind: "list" }),

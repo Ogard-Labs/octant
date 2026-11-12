@@ -29,7 +29,8 @@ import {
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
-import { decodeWindowId, SkillFolderPath } from "@octant/contracts";
+import { decodeWindowId, SkillFolderPath, type EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { Schema } from "effect";
 import { AgentPluginsError } from "@octant/plugin-host/agent-plugins";
 import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
@@ -46,7 +47,11 @@ import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 export interface ExtensionRouteService {
   snapshot(): ExtensionSnapshot;
-  execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
+  execute(
+    command: ExtensionCommand,
+    signal?: AbortSignal,
+    actor?: EventActor,
+  ): Promise<ExtensionCommandResult>;
 }
 
 export function createExtensionRouteHandler(options: {
@@ -65,7 +70,12 @@ export function createExtensionRouteHandler(options: {
   /** Plugins pinned to Projects, and the Projects a local window may pin to. */
   readonly extensionProjectPins?: {
     list(): ExtensionProjectPinListing;
-    set(projectId: string, extensionId: string, pinned: boolean): "recorded" | "refused";
+    set(
+      projectId: string,
+      extensionId: string,
+      pinned: boolean,
+      actor?: EventActor,
+    ): "recorded" | "refused";
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
@@ -143,7 +153,7 @@ export function createExtensionRouteHandler(options: {
    */
   readonly toolGrants?: {
     list(): ReadonlyArray<ExtensionToolGrant>;
-    revoke(grantId: string): "revoked" | "not-found";
+    revoke(grantId: string, actor?: EventActor): "revoked" | "not-found";
   };
 }): (request: Request) => Promise<Response | undefined> {
   const now = options.now ?? Date.now;
@@ -237,6 +247,9 @@ export function createExtensionRouteHandler(options: {
     if (request.method !== "POST") {
       return response(failure("invalid", "Extension API requires POST."), 405, origin);
     }
+    // Who the journal names for what this request changes: the device, when a
+    // device asked.
+    const actor = eventActorForPrincipal(principalContext.principal);
     if (url.pathname === "/api/extensions/tool-approvals") {
       if (options.toolApprovals === undefined) {
         return response(
@@ -255,6 +268,7 @@ export function createExtensionRouteHandler(options: {
       const answerer: ExtensionToolApprovalAnswerer = {
         kind: principalAuthorityKind(principalContext.principal),
         scopeId: principalContext.scopeId,
+        actor,
       };
       if (hasExactKeys(body.value, ["kind"]) && body.value.kind === "list") {
         return response(options.toolApprovals.list(answerer), 200, origin);
@@ -306,7 +320,7 @@ export function createExtensionRouteHandler(options: {
       }
       // Revoking a grant that is already gone is not a failure: it is gone.
       return response(
-        { revoked: options.toolGrants.revoke(grantRequest.grantId) === "revoked" },
+        { revoked: options.toolGrants.revoke(grantRequest.grantId, actor) === "revoked" },
         200,
         origin,
       );
@@ -463,6 +477,7 @@ export function createExtensionRouteHandler(options: {
         added,
         request.signal,
         origin,
+        actor,
       );
     }
     if (url.pathname === "/api/extensions/project-pins") {
@@ -498,6 +513,7 @@ export function createExtensionRouteHandler(options: {
           String(pin.projectId),
           String(pin.extensionId),
           pin.pinned,
+          actor,
         );
         if (outcome === "refused") {
           return response(
@@ -751,6 +767,7 @@ export function createExtensionRouteHandler(options: {
           found,
           request.signal,
           origin,
+          actor,
         );
       }
       const path = options.agentToolingDiscovery.pluginPath(discovered.id);
@@ -860,7 +877,7 @@ export function createExtensionRouteHandler(options: {
       }
     }
     try {
-      return response(await options.service.execute(command, request.signal), 200, origin);
+      return response(await options.service.execute(command, request.signal, actor), 200, origin);
     } catch {
       return response(failure("failed", "Extension command failed."), 500, origin);
     }
@@ -1021,6 +1038,7 @@ async function addUserMcpServer(
   added: UserAddedMcpServerRequest,
   signal: AbortSignal,
   origin: string | null,
+  actor: EventActor,
 ): Promise<Response> {
   let source: ExtensionSource;
   try {
@@ -1067,6 +1085,7 @@ async function addUserMcpServer(
         digest: entry.digest,
       },
       signal,
+      actor,
     );
   } catch {
     return await abandon(failure("failed", "The server could not be installed."));
@@ -1088,6 +1107,7 @@ async function addUserMcpServer(
         expectedStateVersion: Number(state.stateVersion),
       }),
       signal,
+      actor,
     );
     if (result.kind === "extension-state-updated") current = result;
   };

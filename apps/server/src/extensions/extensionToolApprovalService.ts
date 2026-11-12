@@ -1,5 +1,5 @@
 import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
-import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
+import type { ApprovalOutsideContent, EventActor, WindowId } from "@octant/contracts";
 import {
   decodeExtensionToolApproval,
   type ExtensionToolApproval,
@@ -25,13 +25,18 @@ export const MAX_PENDING_APPROVALS = 32;
 export interface ExtensionToolApprovalAnswerer {
   readonly kind: PrincipalKind;
   readonly scopeId: WindowId;
+  /**
+   * Who a remembered answer is journaled as, resolved from the authenticated
+   * principal. Absent means the person at this host.
+   */
+  readonly actor?: EventActor;
 }
 
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
   readonly expiresAt: number;
-  readonly remember?: () => boolean;
+  readonly remember?: (actor?: EventActor) => boolean;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
@@ -106,7 +111,7 @@ export class ExtensionToolApprovalService {
      * was recorded. Absent when this call can only be approved once; the
      * prompt then offers no such answer and one sent anyway is refused.
      */
-    readonly remember?: () => boolean;
+    readonly remember?: (actor?: EventActor) => boolean;
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -189,7 +194,7 @@ export class ExtensionToolApprovalService {
         !actsAsHostPerson(answerer.kind) ||
         String(pending.windowId) !== String(answerer.scopeId) ||
         this.options.isHostScope?.(answerer.scopeId) === true ||
-        !pending.remember()
+        !pending.remember(answerer.actor)
       ) {
         return false;
       }
