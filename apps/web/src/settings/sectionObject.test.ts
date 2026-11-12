@@ -36,8 +36,12 @@ describe("a settings section", () => {
       )?.[1] ?? "";
     expect(card).toMatch(/background:\s*var\(--oct-settings-card-fill\)/);
     // The edge, the light on the top edge and the short shadow are the one
-    // token's. The clear border is what forced colours draw in their place.
-    expect(card).toMatch(/border:\s*1px solid transparent/);
+    // token's. The clear outline is what forced colours draw in their place; it is
+    // drawn inside the box and takes no room, where a border put every row's
+    // 16px inset at 17px from the card's edge.
+    expect(card).toMatch(/border:\s*0;/);
+    expect(card).toMatch(/outline:\s*1px solid transparent/);
+    expect(card).toMatch(/outline-offset:\s*-1px/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
     expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     // Menus and popovers inside a row have to escape the card, so it never clips.
