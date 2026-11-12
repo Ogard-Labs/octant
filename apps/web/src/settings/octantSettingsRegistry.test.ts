@@ -267,6 +267,8 @@ describe("octantSettingsRegistry", () => {
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",
+      "host-worktrees",
+      "xcode-build-data",
       "open-in-applications",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
@@ -397,6 +399,8 @@ describe("octantSettingsRegistry", () => {
  * they are not things a person looks up.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "agent-access-code",
+  "agent-access-edit",
   "browser-hub-claim",
   "browser-hub-joined",
   "first-run-task-mode",
@@ -450,6 +454,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "open-in-*": "open-in-applications",
   "managed-tool-*": "managed-tools-automatic-updates",
   "paired-computer-*": "paired-computers-code",
+  "agent-grant-*": "agent-access",
   "hub-auto-apply-*": "hub-auto-apply",
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",

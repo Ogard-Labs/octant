@@ -670,6 +670,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
         },
         {
+          id: settingId("host-worktrees"),
+          label: "Worktrees on this computer",
+          scope: "host",
+          keywords:
+            "worktrees agents stale scan computer home folder other tools git worktree remove prune disk space",
+        },
+        {
+          id: settingId("xcode-build-data"),
+          label: "Xcode builds",
+          scope: "host",
+          keywords:
+            "xcode derived data deriveddata build folders cache stale orphaned disk space remove",
+        },
+        {
           id: settingId("open-in-applications"),
           label: "Open in applications",
           scope: "app",
@@ -1591,6 +1605,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Pair with another computer",
           scope: "host",
           keywords: "pair pairing another computer code",
+        },
+        {
+          id: settingId("agent-access"),
+          label: "Agents on other computers",
+          scope: "host",
+          keywords:
+            "agent access grant bot outside agent another computer mcp connection code key fingerprint confirm direct key revoke started by",
         },
         {
           id: settingId("browser-hub-code"),

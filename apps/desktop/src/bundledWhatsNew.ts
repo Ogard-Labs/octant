@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BUNDLED_ANNOUNCEMENT_FILENAME,
-  loadBundledAnnouncement,
+  loadBundledAnnouncements,
 } from "./bundledWhatsNewAnnouncement";
 
 /**
@@ -32,7 +32,7 @@ export type BundledWhatsNew =
       readonly version: string;
       readonly text: string;
       readonly showAfterApply: boolean;
-      readonly announcement?: BundledWhatsNewAnnouncement;
+      readonly announcements?: ReadonlyArray<BundledWhatsNewAnnouncement>;
     }
   | {
       readonly kind: "empty";
@@ -162,11 +162,11 @@ export async function loadBundledWhatsNew(options: {
   if (document.kind === "empty") {
     return { kind: "empty", version: options.currentVersion, showAfterApply: false };
   }
-  // Only read when the notes are due: the picture crosses IPC as a data URL,
+  // Only read when the notes are due: the pictures cross IPC as data URLs,
   // and Settings reads the same answer on every open.
-  const announcement =
+  const announcements =
     decision.showAfterApply && options.announcement !== undefined
-      ? await loadBundledAnnouncement({
+      ? await loadBundledAnnouncements({
           announcementPath: options.announcement.path,
           readBounded: options.announcement.readBounded,
         })
@@ -176,7 +176,7 @@ export async function loadBundledWhatsNew(options: {
     version: options.currentVersion,
     text: document.text,
     showAfterApply: decision.showAfterApply,
-    ...(announcement === undefined ? {} : { announcement }),
+    ...(announcements === undefined ? {} : { announcements }),
   };
 }
 

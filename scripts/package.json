@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "test": "vitest run"
   },
   "devDependencies": {

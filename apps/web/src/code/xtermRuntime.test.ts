@@ -231,8 +231,8 @@ describe("Xterm runtime", () => {
       expect.objectContaining({
         theme: expect.objectContaining({
           scrollbarSliderBackground: "#4d4d4d",
-          scrollbarSliderHoverBackground: "#808080",
-          scrollbarSliderActiveBackground: "#808080",
+          scrollbarSliderHoverBackground: "#8a8a8a",
+          scrollbarSliderActiveBackground: "#8a8a8a",
         }),
       }),
     );

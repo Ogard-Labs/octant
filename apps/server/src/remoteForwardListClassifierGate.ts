@@ -42,12 +42,17 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/replica-membership/state", method: "GET" },
   { path: "/api/thread-external-content", method: "POST" },
   { path: "/api/speech/synthesis", method: "POST" },
+  { path: "/api/desktop/agent-access", method: "GET" },
+  { path: "/api/desktop/agent-access/commands", method: "POST" },
 ] as const;
 
 /**
  * Representative product paths under each forwarded prefix.
  */
 const PRODUCT_PROBES = [
+  { path: "/api/agent-grants", method: "GET" },
+  { path: "/api/agent-grants/threads", method: "GET" },
+  { path: "/api/agent-grants/revoke", method: "POST" },
   { path: "/api/chat/bootstrap", method: "GET" },
   { path: "/api/chat/commands", method: "POST" },
   { path: "/api/chat/attachments", method: "POST" },

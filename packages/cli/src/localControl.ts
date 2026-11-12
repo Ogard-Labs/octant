@@ -23,6 +23,12 @@ export interface OpenedLocalControlSession {
   readonly kind: "opened";
   /** The identity the server issued this session's authority for. */
   readonly windowId: string;
+  /**
+   * `none` for a session that is not a window: the host's own in-process
+   * session for an outside agent, which reaches thread routes as a paired
+   * device does and has no workspace to open Projects or threads in.
+   */
+  readonly workspace?: "none";
   readonly send: (request: LocalControlRequest) => Promise<LocalControlResponse>;
   /**
    * Opens a held-open NDJSON response and yields its lines as they arrive.

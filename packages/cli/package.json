@@ -10,14 +10,18 @@
     "./web": "./src/web.ts",
     "./status": "./src/status.ts",
     "./mcp": "./src/mcpCommand.ts",
+    "./agent-tools": "./src/agentMcpServer.ts",
     "./terminal-launcher": "./src/terminalLauncher.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown",
     "test": "vitest run --testTimeout=15000",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@octant/client-runtime": "workspace:*",
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",

@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 7       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **234**   | **198** | **32**       | **4**               |
+| **All areas**                                                                         | **235**   | **199** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -714,6 +714,8 @@ A repository is identified by an opaque digest of its canonical Git common direc
 
 - Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
 - Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
+- The host reads a worktree's changes without running anything the repository configured: fsmonitor off, no optional locks, submodules compared by commit, and a repository whose own config sets a filter command is not read. _Here only._
+- Settings › Code › Worktrees on this computer finds other tools' and agents' worktrees by a bounded walk of the home folder plus the Code Projects' repositories, then `git worktree list` per repository, on macOS, Linux and Windows; Spotlight does not index `.git` files. Remove refuses the main checkout, locked, Octant-owned, relinked, dirty and filter-setting worktrees, asks to confirm commits only its branch has and use in the last 15 minutes, refuses a detached HEAD's own commits, keeps the branch, and for a gone folder removes only that worktree's record, refusing a detached one whose commits only that record keeps. Bulk removal asks once first. Settings › Code › Xcode builds lists DerivedData folders whose workspace is gone or unused for 30 days. Local window only; nothing is journaled (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
@@ -982,7 +984,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine. A paired phone reads this thread's routines through the remote Automation list (a Project overview read, forwarded for the device's own host) and shows them read-only as a Scheduled list on the thread screen; resuming or editing one stays with a window.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -1063,7 +1065,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 
 - A command targets one aggregate and carries the expected aggregate version; a stale version returns a typed concurrency conflict and writes nothing. _Here only._
 - Every event carries a versioned envelope. A projection checkpoint may trail the journal head but never lead it. _Here only._
-- The store runs in WAL mode with full sync, and streamed deltas batch into one commit per short burst, so a power loss loses at most the open burst.
+- The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
 
@@ -2034,6 +2036,19 @@ A paired device may ask for a grant to open one dev server from its own computer
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Proxy sessions and server grants](../architecture.md#security-and-authority) and [Local servers and Running services](../architecture.md#security-and-authority).
 
+### Agents on other machines reach Octant through an agent grant
+
+An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
+
+- A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
+- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent.
+- Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
+- Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
+
+Status: Built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
+
 ## Credentials and sign-in
 
 ### Provider keys on a host without the desktop app
@@ -2117,7 +2132,7 @@ Release notes show once after an update the person chose finishes applying, and 
 
 - Settings > General > Updates links the notes for the running build. _Here only._
 - First-run setup never shows release notes, and opening What's New is never counted or reported. _Here only._
-- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one announcement (`whats-new-announcement.json`, strict and size-bounded, with an optional picture beside it whose name cannot leave the folder); it shows once as a dialog instead of the card. Dismissing the card, answering the announcement, or opening the notes acknowledges the update. An invalid announcement is treated as absent. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
+- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one to five announcements (`whats-new-announcement.json`: version 2 is `{ schemaVersion, announcements: [...] }`, version 1 is one entry and stays valid; strict, at most 16,384 characters, each entry within its own field limits, with optional pictures beside it whose names cannot leave the folder); they show in a row, one at a time with Back, Next and an "n of m" position, as one dialog instead of the card. A file invalid as a whole shows nothing; an invalid entry in a valid version 2 file is skipped and the first five valid ones show. Dismissing the card, closing the dialog at any step or finishing it, or opening the notes acknowledges the update once, for the whole set. Pictures are read only for entries that will be shown and cross to the renderer together. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -2666,9 +2681,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
 - At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the 32 (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
+- The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
+Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
 
 ### Browser for agents
 

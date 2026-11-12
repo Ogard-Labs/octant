@@ -27,14 +27,16 @@ export interface WhatsNewCardContent {
 
 /**
  * What a person sees after an update they chose finishes applying: one
- * announcement dialog when the release bundles one, otherwise a card in the
+ * announcement dialog when the release bundles any, otherwise a card in the
  * sidebar. Either one, once answered, acknowledges the notes for that update
- * and neither shows again. Answering never contacts a network.
+ * and neither shows again. The acknowledgement is keyed on the app version,
+ * which names one bundle, so it covers every announcement in the set and
+ * answering at any step of the dialog is one acknowledgement. Answering never contacts a network.
  */
 export interface WhatsNewController {
-  /** Set while notes are due and the release bundles an announcement. */
-  readonly announcement: BundledWhatsNewAnnouncement | undefined;
-  /** Set while notes are due and there is no announcement. */
+  /** Set while notes are due and the release bundles announcements: one to five, in order. */
+  readonly announcements: ReadonlyArray<BundledWhatsNewAnnouncement> | undefined;
+  /** Set while notes are due and there are no announcements. */
   readonly card: WhatsNewCardContent | undefined;
   readonly document: BundledWhatsNew | undefined;
   readonly notesOpen: boolean;
@@ -132,7 +134,7 @@ export function useWhatsNewAfterUpdate(options: {
       : undefined;
   const card = useMemo(
     () =>
-      due === undefined || due.announcement !== undefined
+      due === undefined || due.announcements !== undefined
         ? undefined
         : whatsNewCardContent(due.version, due.text),
     [due],
@@ -142,7 +144,7 @@ export function useWhatsNewAfterUpdate(options: {
   // commit on each streamed transcript event.
   return useMemo(
     () => ({
-      announcement: due?.announcement,
+      announcements: due?.announcements,
       card,
       document,
       notesOpen,

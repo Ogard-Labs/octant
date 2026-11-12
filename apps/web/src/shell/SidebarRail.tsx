@@ -172,120 +172,123 @@ export function SidebarRail(props: SidebarRailProps) {
         aria-label={beside ? "Destinations" : "Collapsed sidebar"}
         className="sidebar-rail__column window-no-drag"
       >
-        {beside || props.newThread === undefined ? null : (
-          <RailButton
-            icon={SquarePen}
-            label={props.newThread.label}
-            onSelect={props.newThread.onSelect}
-          />
-        )}
-        {beside || props.onOpenSearch === undefined ? null : (
-          <RailButton icon={Search} label="Search" onSelect={props.onOpenSearch} />
-        )}
-        {beside || modes.length < 2 ? null : (
-          <>
+        <div className="sidebar-rail__scroll">
+          {beside || props.newThread === undefined ? null : (
+            <RailButton
+              icon={SquarePen}
+              label={props.newThread.label}
+              onSelect={props.newThread.onSelect}
+            />
+          )}
+          {beside || props.onOpenSearch === undefined ? null : (
+            <RailButton icon={Search} label="Search" onSelect={props.onOpenSearch} />
+          )}
+          {beside || modes.length < 2 ? null : (
+            <>
+              <RailDivider />
+              <div aria-label="Workspace mode" className="sidebar-rail__group" role="group">
+                {modes.map((mode) => (
+                  <RailButton
+                    active={mode === activeMode}
+                    icon={iconForVisibleMode(mode, false)}
+                    key={mode}
+                    label={modeLabels[mode]}
+                    onSelect={() => {
+                      if (mode !== activeMode) props.onSelectMode(mode);
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          {beside ||
+          (props.home === undefined &&
+            props.tiles.length === 0 &&
+            props.destinations.length === 0) ? null : (
             <RailDivider />
-            <div aria-label="Workspace mode" className="sidebar-rail__group" role="group">
-              {modes.map((mode) => (
-                <RailButton
-                  active={mode === activeMode}
-                  icon={iconForVisibleMode(mode, false)}
-                  key={mode}
-                  label={modeLabels[mode]}
-                  onSelect={() => {
-                    if (mode !== activeMode) props.onSelectMode(mode);
-                  }}
-                />
-              ))}
-            </div>
-          </>
-        )}
-        {beside ||
-        (props.home === undefined &&
-          props.tiles.length === 0 &&
-          props.destinations.length === 0) ? null : (
-          <RailDivider />
-        )}
-        {props.home === undefined ? null : (
-          <RailButton
-            active={props.home.active}
-            icon={House}
-            label="Home"
-            onSelect={props.home.onOpen}
-          />
-        )}
-        {props.tiles.map((tile) => {
-          const rail = TILE_RAIL[tile.id];
-          return (
+          )}
+          {props.home === undefined ? null : (
             <RailButton
-              active={tile.active === true}
-              badge={tile.count}
-              icon={rail.icon}
-              key={tile.id}
-              label={`${rail.label}, ${tile.count}`}
-              tile={tile.id}
-              {...(tile.onSelect === undefined ? {} : { onSelect: tile.onSelect })}
+              active={props.home.active}
+              icon={House}
+              label="Home"
+              onSelect={props.home.onOpen}
             />
-          );
-        })}
-        {props.destinations.map((destination) => {
-          const Icon = navigationIcon(destination.id);
-          return Icon === undefined ? null : (
-            <RailButton
-              active={destination.active}
-              icon={Icon}
-              key={destination.id}
-              label={destination.label}
-              onSelect={destination.onSelect}
-            />
-          );
-        })}
-        {visibleProjects.length === 0 && props.onOpenProjects === undefined ? null : (
-          <RailDivider />
-        )}
-        {visibleProjects.map(({ project, pinned }) => {
-          const tile = (
-            <RailButton active={project.active} label={project.name} onSelect={project.onOpen}>
-              <ProjectIcon
-                fallback={
-                  <span aria-hidden="true" className="sidebar-rail__project">
-                    {projectInitial(project.name)}
-                  </span>
-                }
-                projectId={String(project.id)}
-                size={20}
+          )}
+          {props.tiles.map((tile) => {
+            const rail = TILE_RAIL[tile.id];
+            return (
+              <RailButton
+                active={tile.active === true}
+                badge={tile.count}
+                icon={rail.icon}
+                key={tile.id}
+                label={`${rail.label}, ${tile.count}`}
+                tile={tile.id}
+                {...(tile.onSelect === undefined ? {} : { onSelect: tile.onSelect })}
               />
-            </RailButton>
-          );
-          const unpin = props.onUnpinProject;
-          return pinned && unpin !== undefined ? (
-            <OctantContextMenu
-              items={[{ label: "Unpin from rail", value: "unpin" }]}
-              key={project.id}
-              onValueChange={() => unpin(String(project.id))}
-              triggerClassName="sidebar-rail__tile"
-            >
-              {tile}
-            </OctantContextMenu>
-          ) : (
-            <Fragment key={project.id}>{tile}</Fragment>
-          );
-        })}
-        {props.onOpenActivity === undefined ? null : (
-          <RailButton icon={ScrollText} label="Activity feed" onSelect={props.onOpenActivity} />
-        )}
-        {props.onOpenProjects === undefined ? null : (
-          <RailButton
-            active={props.projectsActive === true}
-            icon={Folders}
-            label="Projects"
-            onSelect={props.onOpenProjects}
-          />
-        )}
-        {props.more}
-        <span aria-hidden="true" className="sidebar-rail__spacer" />
-        {props.usage}
-        <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
+            );
+          })}
+          {props.destinations.map((destination) => {
+            const Icon = navigationIcon(destination.id);
+            return Icon === undefined ? null : (
+              <RailButton
+                active={destination.active}
+                icon={Icon}
+                key={destination.id}
+                label={destination.label}
+                onSelect={destination.onSelect}
+              />
+            );
+          })}
+          {visibleProjects.length === 0 && props.onOpenProjects === undefined ? null : (
+            <RailDivider />
+          )}
+          {visibleProjects.map(({ project, pinned }) => {
+            const tile = (
+              <RailButton active={project.active} label={project.name} onSelect={project.onOpen}>
+                <ProjectIcon
+                  fallback={
+                    <span aria-hidden="true" className="sidebar-rail__project">
+                      {projectInitial(project.name)}
+                    </span>
+                  }
+                  projectId={String(project.id)}
+                  size={20}
+                />
+              </RailButton>
+            );
+            const unpin = props.onUnpinProject;
+            return pinned && unpin !== undefined ? (
+              <OctantContextMenu
+                items={[{ label: "Unpin from rail", value: "unpin" }]}
+                key={project.id}
+                onValueChange={() => unpin(String(project.id))}
+                triggerClassName="sidebar-rail__tile"
+              >
+                {tile}
+              </OctantContextMenu>
+            ) : (
+              <Fragment key={project.id}>{tile}</Fragment>
+            );
+          })}
+          {props.onOpenActivity === undefined ? null : (
+            <RailButton icon={ScrollText} label="Activity feed" onSelect={props.onOpenActivity} />
+          )}
+          {props.onOpenProjects === undefined ? null : (
+            <RailButton
+              active={props.projectsActive === true}
+              icon={Folders}
+              label="Projects"
+              onSelect={props.onOpenProjects}
+            />
+          )}
+          {props.more}
+        </div>
+        <div className="sidebar-rail__foot">
+          {props.usage}
+          <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
+        </div>
       </nav>
     </aside>
   );

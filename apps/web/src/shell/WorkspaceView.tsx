@@ -2186,6 +2186,7 @@ function renderNonCodeTab(
     ) : (
       <BrowserWorkspace
         key={tab.id}
+        canDrawOnPage
         client={props.browserAutomationClient}
         onAgentBrowserRecovery={(reason) => {
           if (tab.threadId === undefined) return;

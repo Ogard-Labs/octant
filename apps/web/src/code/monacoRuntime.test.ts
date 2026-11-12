@@ -373,8 +373,8 @@ describe("Monaco runtime", () => {
       expect.objectContaining({
         colors: expect.objectContaining({
           "scrollbarSlider.background": "#4d4d4d",
-          "scrollbarSlider.hoverBackground": "#808080",
-          "scrollbarSlider.activeBackground": "#808080",
+          "scrollbarSlider.hoverBackground": "#8a8a8a",
+          "scrollbarSlider.activeBackground": "#8a8a8a",
         }),
       }),
     );
