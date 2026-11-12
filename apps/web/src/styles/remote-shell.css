@@ -83,6 +83,18 @@
   margin-top: var(--oct-space-3);
 }
 
+/* The expanded request has to outrank the follow-up card's two-line clamp
+   whichever sheet loads last, so it names the card's class too. */
+.follow-up-card__prompt.remote-workspace__proposal-intent--expanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.remote-workspace__proposal-toggle {
+  justify-self: start;
+}
+
 .remote-shell__header {
   display: grid;
   gap: var(--oct-space-3);
