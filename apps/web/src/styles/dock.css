@@ -889,6 +889,40 @@
   border: 0;
 }
 
+/* With a page open in a short tile the toolbar and the feedback strip took all
+   but 100px of a 240px tile. The page keeps 120px; the tool scrolls to reach
+   the strip below it. */
+.right-utility-dock__tool
+  .browser-workspace--feedback
+  > :is(.browser-workspace__native, .browser-workspace__remote, .browser-workspace__start) {
+  min-height: 120px;
+}
+
+/* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
+   stays whole and clear of the next tab and the New page button. The select
+   was shrink-0, so the tab's box shrank around it and the close mark ran under
+   the button beside it. */
+.dock-tile__lead > .dock-browser-pages {
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__close {
+  flex: none;
+}
+
 .dock-tile__control {
   width: 24px;
   min-width: 24px;
