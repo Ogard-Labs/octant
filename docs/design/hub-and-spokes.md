@@ -350,10 +350,11 @@ the CLI. The hub depends on that:
     past the application connection's lifetime.
     This boundary does not protect from other unconfined programs running as
     the same owner. Admitted remote clients, provider replies and plugins must
-    have no store-path mutation route. Work and Code run at Full access on
-    Windows, since Full access uses no sandbox; the guarded levels stay refused
-    until their native confinement also denies the entire private profile
-    (maintainer request, 2026-11-12). Not built yet: today the authoritative
+    have no store-path mutation route. Work and Code at Full access on
+    Windows are tracked separately and need Windows forms of the confined
+    launches first; the guarded levels stay refused until their native
+    confinement also denies the entire private profile (maintainer decision,
+    2026-11-12). Not built yet: today the authoritative
     Work-turn and Code-command/operation entry points refuse Windows before
     launch or journal mutation, including background routine calls and Full
     access, and provider process preparation refuses Windows before
