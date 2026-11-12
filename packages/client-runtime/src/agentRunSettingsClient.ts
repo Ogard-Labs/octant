@@ -1,5 +1,7 @@
 import {
   type AgentRunConcurrency,
+  type HostResourcePolicy,
+  HostResourceBudgetSnapshot,
   AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
   decodeHostAnswer,
@@ -13,6 +15,7 @@ export interface AgentRunSettingsClientOptions {
 
 export interface AgentRunSettingsClient {
   current(): Promise<AgentRunPolicySettings>;
+  resources?(): Promise<HostResourceBudgetSnapshot>;
   update(input: {
     readonly workingTimeLimitMinutes?: number;
     /** Absent keeps the current choice. */
@@ -22,6 +25,7 @@ export interface AgentRunSettingsClient {
     readonly creationPosture: AgentRunSelectableCreationPosture;
     /** Absent keeps the current limits. */
     readonly concurrency?: AgentRunConcurrency;
+    readonly resourcePolicy?: HostResourcePolicy;
     readonly expectedVersion: number;
   }): Promise<AgentRunPolicySettings>;
 }
@@ -47,6 +51,14 @@ export function createAgentRunSettingsClient(
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
   return {
+    async resources() {
+      const body = await requestJson(
+        options.fetch,
+        new URL("/api/agent-run-settings/resources", options.baseUrl).toString(),
+        { method: "GET", headers },
+      );
+      return decodeHostAnswer(HostResourceBudgetSnapshot)(body);
+    },
     async current() {
       const body = await requestJson(
         options.fetch,

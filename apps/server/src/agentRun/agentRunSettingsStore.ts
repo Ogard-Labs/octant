@@ -7,6 +7,7 @@ import {
   DEFAULT_AGENT_RUN_CREATION_POSTURE,
   decodeAgentRunPolicySettings,
   type AgentRunConcurrency,
+  type HostResourcePolicy,
   type AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
 } from "@octant/contracts";
@@ -56,6 +57,7 @@ export interface UpdateAgentRunSettingsInput {
   readonly creationPosture: AgentRunSelectableCreationPosture;
   /** Absent keeps the current limits. */
   readonly concurrency?: AgentRunConcurrency | undefined;
+  readonly resourcePolicy?: HostResourcePolicy | undefined;
   readonly expectedVersion: number;
 }
 
@@ -105,6 +107,7 @@ export class AgentRunSettingsStore {
     const updatedAt = this.#clock();
     let settings: AgentRunPolicySettings;
     try {
+      const resourcePolicy = input.resourcePolicy ?? this.#current.resourcePolicy;
       const concurrency = input.concurrency ?? this.#current.concurrency;
       const noLimitAtFullAccess =
         input.noWorkingTimeLimitAtFullAccess ?? this.#current.noWorkingTimeLimitAtFullAccess;
@@ -122,6 +125,7 @@ export class AgentRunSettingsStore {
           ? {}
           : { noWorkingTimeLimitAtFullAccess: noLimitAtFullAccess }),
         ...(providerSlotWaitMinutes === undefined ? {} : { providerSlotWaitMinutes }),
+        ...(resourcePolicy === undefined ? {} : { resourcePolicy }),
         ...(concurrency === undefined ? {} : { concurrency }),
         version: decodeAggregateVersion(this.#current.version + 1),
         updatedAt,

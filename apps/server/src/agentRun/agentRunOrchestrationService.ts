@@ -1373,6 +1373,10 @@ export class AgentRunOrchestrationService {
    * A released reservation can admit the oldest persisted capacity waiter.
    * The normal start path repeats approval and workspace checks before spawning it.
    */
+  retryResourceWaiters(): void {
+    this.#dequeueCapacityWaiter();
+  }
+
   #dequeueCapacityWaiter(excludedRunId?: AgentRunId): void {
     // A waiter this pass starts may hand its run slot straight back (the
     // provider was full) and ask for the next waiter. This pass is already
@@ -1552,6 +1556,7 @@ function boundedRecoveryReason(reason: string): string {
  */
 export function createInMemoryCapacityPort(
   limits: () => AgentRunConcurrency = () => DEFAULT_AGENT_RUN_CONCURRENCY,
+  onQueued?: () => void,
 ): AgentRunCapacityPort & {
   readonly queued: string[];
 } {
@@ -1568,7 +1573,8 @@ export function createInMemoryCapacityPort(
       const scope =
         reserved.size >= onHost ? "host" : forThread >= perThread ? "thread" : undefined;
       if (scope !== undefined) {
-        queued.push(String(runId));
+        if (!queued.includes(String(runId))) queued.push(String(runId));
+        onQueued?.();
         return { status: "queued", reason: "provider-capacity-saturated", scope };
       }
       const reservationId = `res-${next++}`;

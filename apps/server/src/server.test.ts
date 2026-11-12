@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { Cause, Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_HOST_RESOURCE_POLICY,
   decodeCodeBootstrap,
   decodeCodeOperationResult,
   decodeCodeThread,
@@ -80,6 +81,66 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
+  it("serves persisted resource limits through the authenticated host routes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-resources-"));
+    directories.push(directory);
+    let route: ((request: Request) => Response | Promise<Response>) | undefined;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              route = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          const call = async (path: string, init?: RequestInit) =>
+            assertResponse(await route?.(new Request(`http://127.0.0.1:13773${path}`, init)));
+          const denied = yield* Effect.promise(() => call("/api/agent-run-settings/resources"));
+          expect([401, 403]).toContain(denied.status);
+          const registered = yield* Effect.promise(() =>
+            call("/api/desktop/window-authorities", {
+              method: "POST",
+              headers: { "x-octant-desktop-secret": "desktop-secret" },
+              body: JSON.stringify({ windowId: randomUUID(), capability: "A".repeat(43) }),
+            }),
+          );
+          expect(registered.status).toBe(204);
+          const headers = {
+            "x-octant-window-capability": "A".repeat(43),
+            "content-type": "application/json",
+          };
+          const saved = yield* Effect.promise(() =>
+            call("/api/agent-run-settings", {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({
+                expectedVersion: 0,
+                creationPosture: "automatic",
+                resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, mode: "paused", maxWorkers: 1 },
+              }),
+            }),
+          );
+          expect(saved.status).toBe(200);
+          const read = yield* Effect.promise(() =>
+            call("/api/agent-run-settings/resources", { headers }),
+          );
+          expect(read.status).toBe(200);
+          const body = yield* Effect.promise(() => read.json());
+          expect(body).toMatchObject({
+            policy: { mode: "paused", maxWorkers: 1 },
+            commands: 0,
+            agents: 0,
+            reason: "paused",
+          });
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+    );
+  });
+
   it("retires saved action authority when a window closes without a journal commit", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-action-window-"));
     directories.push(directory);

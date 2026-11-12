@@ -1,3 +1,5 @@
+import { DEFAULT_HOST_RESOURCE_POLICY } from "@octant/contracts";
+import { HostResourceBudget } from "../process/hostResourceBudget";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
 import { observedChildren } from "../agentRun/agentObservedChildren";
@@ -672,6 +674,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
   });
+  const hostResourceBudget = new HostResourceBudget({
+    policy: () => agentRunSettingsStore.current().resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY,
+  });
   // Managed worktree receipts are required to admit Code children with a
   // verified isolated sandbox. Constructed early so AgentRun routes
   // can resolve receipt ids before the broader Code service graph starts.
@@ -1007,10 +1012,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         .map((run) => run.id),
   });
   const agentRunProcessSupervisor = options.agentRunProcessSupervisor ?? agentRunSessionSupervisor;
+  const retryResourceWaiters = () => agentRunOrchestration.retryResourceWaiters();
   const agentRunOrchestration = new AgentRunOrchestrationService({
     persistence: agentRunPersistence,
-    capacity: createInMemoryCapacityPort(() =>
-      effectiveAgentRunConcurrency(agentRunSettingsStore.current()),
+    capacity: createInMemoryCapacityPort(
+      () => {
+        const configured = effectiveAgentRunConcurrency(agentRunSettingsStore.current());
+        const available = hostResourceBudget.snapshot().agents;
+        return {
+          perThread: Math.min(configured.perThread, available),
+          onHost: Math.min(configured.onHost, available),
+        };
+      },
+      () => hostResourceBudget.recheck(retryResourceWaiters),
     ),
     worktree: {
       isVerifiedIsolation: (workspace) =>
@@ -1479,8 +1493,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   const agentRunSettingsRoutes = createAgentRunSettingsRouteHandler({
     windowAuthorityStore,
     store: agentRunSettingsStore,
+    resources: () => hostResourceBudget.snapshot(),
   });
   return {
+    hostResourceBudget,
     agentRunAdmission,
     agentRunChildWorktree,
     agentRunLiveConversations,

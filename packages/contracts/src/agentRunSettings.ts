@@ -1,3 +1,4 @@
+import { HostResourcePolicy } from "./hostResourcePolicy";
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { AgentRunCreationPosture } from "./agentRun";
@@ -65,6 +66,7 @@ export const AgentRunPolicySettings = Schema.Struct({
   creationPosture: AgentRunCreationPosture,
   /** Optional so settings journaled before it existed replay as the defaults. */
   concurrency: Schema.optional(AgentRunConcurrency),
+  resourcePolicy: Schema.optional(HostResourcePolicy),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -93,6 +95,7 @@ export const UpdateAgentRunPolicySettings = Schema.Struct({
   creationPosture: AgentRunSelectableCreationPosture,
   /** Absent keeps the current limits. */
   concurrency: Schema.optional(AgentRunConcurrency),
+  resourcePolicy: Schema.optional(HostResourcePolicy),
   expectedVersion: AggregateVersion,
 }).annotations(strict);
 export type UpdateAgentRunPolicySettings = typeof UpdateAgentRunPolicySettings.Type;

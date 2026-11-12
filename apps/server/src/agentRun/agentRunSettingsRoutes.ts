@@ -1,4 +1,7 @@
-import { decodeUpdateAgentRunPolicySettings } from "@octant/contracts";
+import {
+  type HostResourceBudgetSnapshot,
+  decodeUpdateAgentRunPolicySettings,
+} from "@octant/contracts";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -10,6 +13,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 export interface AgentRunSettingsRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly store: Pick<AgentRunSettingsStore, "current" | "update">;
+  readonly resources?: () => HostResourceBudgetSnapshot;
   readonly now?: () => number;
 }
 
@@ -44,7 +48,11 @@ export function createAgentRunSettingsRouteHandler(
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/agent-run-settings") return undefined;
+    if (
+      url.pathname !== "/api/agent-run-settings" &&
+      url.pathname !== "/api/agent-run-settings/resources"
+    )
+      return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failure("AgentRun settings requests must use loopback.", 400, null);
@@ -65,6 +73,13 @@ export function createAgentRunSettingsRouteHandler(
       return failure("AgentRun settings request is invalid.", 400, origin);
     }
 
+    if (url.pathname.endsWith("/resources")) {
+      if (request.method !== "GET")
+        return failure("HTTP method is not supported for this route.", 405, origin);
+      return dependencies.resources === undefined
+        ? failure("Resource readings are unavailable.", 503, origin)
+        : json(dependencies.resources(), 200, origin);
+    }
     if (request.method === "GET") {
       return json({ settings: dependencies.store.current() }, 200, origin);
     }

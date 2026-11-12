@@ -1,3 +1,5 @@
+import { HostResourceBudget } from "../process/hostResourceBudget";
+import { DEFAULT_HOST_RESOURCE_POLICY } from "@octant/contracts";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readdir } from "node:fs/promises";
@@ -40,6 +42,91 @@ function confinedOptions(
 }
 
 describe("RepositoryTestProcessPort", () => {
+  it("passes the reserved worker allocation to a command and releases it after exit", async () => {
+    const budget = new HostResourceBudget({
+      policy: () => ({
+        ...DEFAULT_HOST_RESOURCE_POLICY,
+        mode: "manual",
+        maxCommands: 1,
+        maxWorkers: 2,
+      }),
+    });
+    const child = fakeChild(99999999);
+    let environment: NodeJS.ProcessEnv | undefined;
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({
+        resourceBudget: budget,
+        processGroupExists: () => false,
+        spawn: (_command, _args, options) => {
+          environment = options.env;
+          return child;
+        },
+      }),
+    );
+    const pending = port.execute({
+      argv: [process.execPath, "-e", "void 0"],
+      cwd: realpathSync(temporaryDirectory()),
+      environment: { VITEST_MAX_WORKERS: "100" },
+      timeoutMs: 1000,
+    });
+    await vi.waitFor(() => expect(environment?.VITEST_MAX_WORKERS).toBe("2"));
+    expect(budget.snapshot().activeCommands).toBe(1);
+    child.close(0, null);
+    expect(await pending).toMatchObject({ termination: "exited", cleanupUncertain: false });
+    expect(budget.snapshot().activeCommands).toBe(0);
+    budget.dispose();
+  });
+
+  it("shares host admission and rechecks authority after waiting", async () => {
+    const budget = new HostResourceBudget({
+      policy: () => ({
+        ...DEFAULT_HOST_RESOURCE_POLICY,
+        mode: "manual",
+        maxCommands: 1,
+        maxWorkers: 2,
+      }),
+    });
+    const held = await budget.acquire(undefined, 1000);
+    const spawn = vi.fn();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn, resourceBudget: budget }));
+    const pending = port.execute({
+      argv: [process.execPath, "-e", "void 0"],
+      cwd: realpathSync(temporaryDirectory()),
+      environment: {},
+      timeoutMs: 1000,
+      admitStart: () => false,
+    });
+    expect(budget.snapshot().queuedCommands).toBe(1);
+    held?.release();
+    expect((await pending).termination).toBe("cancelled");
+    expect(spawn).not.toHaveBeenCalled();
+    expect(budget.snapshot().activeCommands).toBe(0);
+    budget.dispose();
+  });
+
+  it("cancels a resource wait without spawning a command", async () => {
+    const budget = new HostResourceBudget({
+      policy: () => ({ ...DEFAULT_HOST_RESOURCE_POLICY, mode: "paused" }),
+    });
+    const spawn = vi.fn();
+    const controller = new AbortController();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn, resourceBudget: budget }));
+    const pending = port.execute(
+      {
+        argv: [process.execPath, "-e", "void 0"],
+        cwd: realpathSync(temporaryDirectory()),
+        environment: {},
+        timeoutMs: 1000,
+      },
+      controller.signal,
+    );
+    controller.abort();
+    expect((await pending).termination).toBe("cancelled");
+    expect(spawn).not.toHaveBeenCalled();
+    expect(budget.snapshot().queuedCommands).toBe(0);
+    budget.dispose();
+  });
+
   it("refuses revoked named-command authority after asynchronous executable preparation and before spawn", async () => {
     const cwd = temporaryDirectory();
     const bin = temporaryDirectory();
