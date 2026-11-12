@@ -1,4 +1,5 @@
 import {
+  OWNER_UNLOCK_HEADER,
   WorkThreadFailure as WorkThreadFailureSchema,
   decodeWorkBoardQuery,
   decodeWorkBoardView,
@@ -19,7 +20,9 @@ import {
   NATIVE_ARTIFACTS_LOCAL_ONLY,
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
+import { authorizePrincipalAction } from "@octant/domain";
 import { Schema } from "effect";
+import type { OwnerActionUnlockPort } from "./hub/pairedMergeUnlock";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
@@ -33,6 +36,7 @@ const JSON_BODY_LIMIT = 1_048_576;
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const decodeWorkThreadFailure = Schema.decodeUnknownSync(WorkThreadFailureSchema);
+const fatalUtf8 = new TextDecoder("utf-8", { fatal: true });
 
 export interface WorkThreadRouteService {
   readonly bootstrap: (
@@ -55,6 +59,12 @@ export interface WorkThreadRouteService {
 export interface WorkThreadRouteDependencies {
   readonly service: WorkThreadRouteService;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /**
+   * The owner unlock a paired client's command may carry for choosing Full
+   * access. The hub side is wired later, so it is read when a command arrives;
+   * absent, a paired client never raises a thread.
+   */
+  readonly ownerActionUnlock?: () => OwnerActionUnlockPort | undefined;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
 }
@@ -205,10 +215,27 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
-      // A paired device may lower a thread; raising one, or the default new
-      // threads start at, to Full access is chosen at a window on this host,
-      // as it is for Code.
-      if (raisesWorkToFullAccess(command) && refusesFullAccessRaise(request)) {
+      // A paired device may lower a thread; raising one to Full access is
+      // chosen at a window on this host or on an owner device, whose fresh
+      // unlock for this exact command comes beside it, as it is for Code. The
+      // default new threads start at stays with a window.
+      if (
+        raisesWorkToFullAccess(command) &&
+        refusesFullAccessRaise(request) &&
+        authorizePrincipalAction({
+          principalKind: "remote-device",
+          action: "code.remember-full-access",
+          ownerUnlock:
+            command.kind !== "update-work-settings" &&
+            dependencies.ownerActionUnlock?.()?.verifyAction("full-access", {
+              path: url.pathname,
+              body: fatalUtf8.decode(body),
+              proof: request.headers.get(OWNER_UNLOCK_HEADER),
+            }).status === "unlocked"
+              ? "fresh"
+              : "absent",
+        }).kind === "deny"
+      ) {
         return failureResponse(
           { category: "unauthorized", message: WORK_FULL_ACCESS_LOCAL_ONLY },
           403,
@@ -370,7 +397,8 @@ class WorkThreadRouteRejected extends Error {
   }
 }
 
-const WORK_FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+const WORK_FULL_ACCESS_LOCAL_ONLY =
+  "Full access is chosen in the Octant window on this host, or on one of its owner devices after a fresh unlock.";
 
 /** Whether a command would put a Work thread, or new Work threads, at Full access. */
 function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {

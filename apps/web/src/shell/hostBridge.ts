@@ -256,6 +256,7 @@ export type HubAdministrationOperation =
   | "owners-remove"
   | "confirm-new-members"
   | "paired-merge-unlock"
+  | "owner-approval-answer-unlock"
   | "confirm-member"
   | "alert-dismiss"
   | "alert-remove"

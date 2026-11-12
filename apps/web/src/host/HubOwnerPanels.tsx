@@ -222,6 +222,35 @@ export function PairedMergeUnlockSwitch(props: {
   );
 }
 
+/**
+ * Whether each approval answer from an owner device (a runtime approval or a
+ * profile site approval) needs its own unlock here, instead of riding the
+ * device's open five-minute session. Only this window sets it.
+ */
+export function OwnerApprovalAnswerUnlockSwitch(props: {
+  readonly enabled: boolean;
+  readonly busy: boolean;
+  readonly onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="setgroup">
+      <SettingRow
+        description="An owner device answers a waiting file, Shell or Browser site approval here after one unlock, which covers its answers for five minutes. Turn this on to ask for a fresh unlock before every Allow once or Deny. Off by default."
+        label="Owner unlock for each approval answer"
+        scope="host"
+        settingId="hub-owner-approval-answer-unlock"
+      >
+        <OctantSwitch
+          checked={props.enabled}
+          disabled={props.busy}
+          label="Owner unlock for each approval answer"
+          onCheckedChange={props.onChange}
+        />
+      </SettingRow>
+    </div>
+  );
+}
+
 /** Confirm new members, the members held for it, and the alerts newer rosters raised. */
 export function NewMemberChecks(props: {
   readonly confirmNewMembers: boolean;

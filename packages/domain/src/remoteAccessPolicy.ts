@@ -181,6 +181,19 @@ const LOCAL_HOST_ACTIONS = new Set([
   "speech.synthesize",
 ]);
 
+/**
+ * The local-host-required actions an owner device the person marked may also
+ * take, each only with a fresh unlock the host verified for that one request.
+ * The list is closed: credentials, pairing, listener and device management,
+ * extension trust and install, and root binding are not on it, so they stay
+ * with a window whatever a device presents.
+ */
+const OWNER_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
+  "code.remember-full-access",
+  // Navigating and typing only; the Browser policy names the kinds.
+  "browser.session.manage",
+]);
+
 export function classifyRemoteAction(action: string): RemoteActionDecision {
   if (REMOTE_APPROVABLE_ACTIONS.has(action)) return { kind: "remote-approvable" };
   if (LOCAL_HOST_ACTIONS.has(action)) return { kind: "local-host-required" };
@@ -202,12 +215,16 @@ export type PrincipalActionDecision =
 
 /**
  * Principal-aware least-authority gate. Unknown actions fail closed. Remote
- * principals cannot become local-window or mint native/local receipts.
+ * principals cannot become local-window or mint native/local receipts. A
+ * remote principal reaches a local-host-required action only when the action
+ * is one an owner device may take and the host verified that device's fresh
+ * unlock for this request; the caller says `fresh` only after that check.
  */
 export function authorizePrincipalAction(input: {
   readonly principalKind: PrincipalKind;
   readonly action: string;
   readonly requestedPrincipalKind?: PrincipalKind;
+  readonly ownerUnlock?: "fresh" | "absent";
 }): PrincipalActionDecision {
   if (
     input.requestedPrincipalKind !== undefined &&
@@ -230,7 +247,11 @@ export function authorizePrincipalAction(input: {
   if (classification.kind === "rejected") {
     return { kind: "deny", reason: "unknown-action" };
   }
-  if (classification.kind === "local-host-required" && input.principalKind !== "local-window") {
+  if (
+    classification.kind === "local-host-required" &&
+    input.principalKind !== "local-window" &&
+    !(input.ownerUnlock === "fresh" && OWNER_DEVICE_ACTIONS.has(input.action))
+  ) {
     return { kind: "deny", reason: "local-host-required" };
   }
   return { kind: "allow" };

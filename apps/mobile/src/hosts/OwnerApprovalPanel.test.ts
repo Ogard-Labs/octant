@@ -124,11 +124,11 @@ describe("phone owner file approval recovery", () => {
       );
       if (shell) expect(document.body.textContent).toContain("Working folder: /fixture");
       expect(document.body.textContent).toContain("Runs on Home Mac");
-      await press("Unlock and deny");
+      await press("Deny");
       expect(f.answerApproval).toHaveBeenCalledWith(
         expect.objectContaining({ approved: false, actionDigest: target.actionDigest }),
       );
-      expect(buttons("Unlock and deny")).toHaveLength(0);
+      expect(buttons("Deny")).toHaveLength(0);
       expect(document.body.textContent).not.toContain(
         shell ? "full-command-through-final-line" : "all content through final line",
       );

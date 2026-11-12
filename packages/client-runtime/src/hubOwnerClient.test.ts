@@ -977,7 +977,19 @@ describe("owner client with the Mac's unlock key", () => {
 });
 
 describe("owner approval client proofs", () => {
-  it("obtains new exact private-read and answer proofs even with an open administration session", async () => {
+  const answerRequest = {
+    ownerMemberId: OWNER_ID,
+    hostMemberId: HOST_ID,
+    mode: "code",
+    threadId: MEMBER_ID,
+    projectId: MEMBER_ID,
+    requestId: ALERT_ID,
+    targetVersion: "a".repeat(64),
+    actionDigest: "b".repeat(64),
+    approved: true,
+  };
+
+  it("reads the private facts and answers under the open session without unlocking again", async () => {
     const unlock = await rawSigner(await p256());
     const host = scriptedHost((request) =>
       request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
@@ -985,27 +997,92 @@ describe("owner approval client proofs", () => {
     const client = clientFor(host.transport, unlock.signer);
     await client.openSession();
     await client.readApprovals?.();
-    const request = {
-      ownerMemberId: OWNER_ID,
-      hostMemberId: HOST_ID,
-      mode: "code",
-      threadId: MEMBER_ID,
-      projectId: MEMBER_ID,
-      requestId: ALERT_ID,
-      targetVersion: "a".repeat(64),
-      actionDigest: "b".repeat(64),
-      approved: true,
-    };
     const { decodeOwnerApprovalAnswer } = await import("@octant/contracts/owner-approvals");
-    await client.answerApproval?.(decodeOwnerApprovalAnswer(request));
-    await client.answerApproval?.(decodeOwnerApprovalAnswer({ ...request, approved: false }));
-    expect(unlock.sessions.opened).toBe(4);
+    await client.answerApproval?.(decodeOwnerApprovalAnswer(answerRequest));
+    await client.answerApproval?.(decodeOwnerApprovalAnswer({ ...answerRequest, approved: false }));
+    expect(unlock.sessions.opened).toBe(1);
     const actions = host.requests.filter((request) => request.path.includes("/approvals/"));
     expect(actions).toHaveLength(3);
     for (const action of actions) {
-      expect(action.headers.get(OWNER_SESSION_HEADER)).toBeNull();
-      expect(action.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
+      expect(action.headers.get(OWNER_SESSION_HEADER)).toBe(SESSION_ID);
+      expect(action.headers.get(OWNER_UNLOCK_HEADER)).toBeNull();
     }
-    expect(actions[1]?.body).not.toBe(actions[2]?.body);
+  });
+
+  it("unlocks for one answer when the host asks for an unlock per answer", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) => {
+      if (request.path === "/api/hub/owner/session") return openedSession(SESSION_ENDS);
+      if (
+        request.path === "/api/hub/owner/approvals/answer" &&
+        request.headers.get(OWNER_SESSION_HEADER) !== null
+      ) {
+        return Response.json({ status: "refused", kind: "own-unlock-required" }, { status: 403 });
+      }
+      return undefined;
+    });
+    const client = clientFor(host.transport, unlock.signer);
+    await client.openSession();
+    const { decodeOwnerApprovalAnswer } = await import("@octant/contracts/owner-approvals");
+
+    const result = await client.answerApproval?.(decodeOwnerApprovalAnswer(answerRequest));
+
+    expect(result?.status).toBe("done");
+    expect(unlock.sessions.opened).toBe(2);
+    const answers = host.requests.filter((request) => request.path.endsWith("/approvals/answer"));
+    expect(answers).toHaveLength(2);
+    expect(answers[1]?.headers.get(OWNER_SESSION_HEADER)).toBeNull();
+    expect(answers[1]?.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
+    // The session itself is still good for the next administration action.
+    expect(client.hasSession()).toBe(true);
+  });
+
+  it("spends the unlock for a first reading on a session, which the answers after it ride", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+    const { decodeOwnerApprovalAnswer } = await import("@octant/contracts/owner-approvals");
+
+    await client.readApprovals?.();
+    await client.answerApproval?.(decodeOwnerApprovalAnswer(answerRequest));
+
+    expect(unlock.sessions.opened).toBe(1);
+    expect(client.hasSession()).toBe(true);
+    const actions = host.requests.filter((request) => request.path.includes("/approvals/"));
+    expect(actions.map((action) => action.headers.get(OWNER_SESSION_HEADER))).toEqual([
+      SESSION_ID,
+      SESSION_ID,
+    ]);
+  });
+
+  it("reports the refusal and reads nothing when the host will not open a session", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session"
+        ? Response.json({ status: "refused", kind: "not-an-owner" }, { status: 403 })
+        : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+
+    const result = await client.readApprovals?.();
+
+    expect(result).toEqual({ status: "refused", kind: "not-an-owner" });
+    expect(host.requests.filter((request) => request.path.includes("/approvals/"))).toEqual([]);
+  });
+
+  it("answers with one fresh unlock when no session is open", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost(() => undefined);
+    const client = clientFor(host.transport, unlock.signer);
+    const { decodeOwnerApprovalAnswer } = await import("@octant/contracts/owner-approvals");
+
+    await client.answerApproval?.(decodeOwnerApprovalAnswer(answerRequest));
+
+    expect(unlock.sessions.opened).toBe(1);
+    const answers = host.requests.filter((request) => request.path.endsWith("/approvals/answer"));
+    expect(answers).toHaveLength(1);
+    expect(answers[0]?.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
+  OWNER_UNLOCKED_ACTION_PATHS,
   OWNER_UNLOCK_HEADER,
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
@@ -914,6 +915,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   // A paired client's merge may carry an owner device's unlock beside it.
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS.map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedRequestHeaders: [...REMOTE_REQUEST_HEADERS, OWNER_UNLOCK_HEADER] as const,
+    allowedContentTypes: ["application/json"] as const,
+  })),
+  // A paired client's Code or Work thread command may carry one too, for
+  // choosing Full access; the route refuses the choice without it.
+  ...OWNER_UNLOCKED_ACTION_PATHS.map((path) => ({
     kind: "exact" as const,
     path,
     methods: ["POST"] as const,

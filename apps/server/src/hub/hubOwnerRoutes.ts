@@ -11,7 +11,9 @@ import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // fresh challenge for one action, or an open administration session (five
 // minutes, decision H17) for the actions that class allows; Full access, a
 // credential copy, an owner change, and opening a session each need their own
-// challenge. The hub, a
+// challenge. Reading private runtime approval facts and answering an approval
+// ride the session unless this host's window asked for an unlock per answer.
+// The hub, a
 // standby, a peer, and anything that is not on the owner list are refused; an
 // agent or a routine holds no member key and reaches only the product routes.
 
@@ -22,6 +24,7 @@ import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
+  OWNER_UNLOCKED_ACTION_PATHS,
   OWNER_UNLOCK_HEADER,
   decodeConfirmNewMembersRequest,
   decodeHubGrant,
@@ -40,6 +43,7 @@ import {
   decodeOwnerPostureChangeRequest,
   decodeOwnerPostureReadRequest,
   decodeOwnerRemovalRequest,
+  decodeOwnerSiteApprovalAnswerRequest,
   decodeOwnerThreadWakeChangeRequest,
   decodeOwnerThreadWakeReadRequest,
   decodeOwnerUnlockProof,
@@ -49,8 +53,10 @@ import {
   type HubGrant,
   type HubMemberId,
   type HubMembershipChangedPayload,
+  type OwnerSiteApprovalAnswerRequest,
   type OwnerUnlockProof,
 } from "@octant/contracts";
+import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import {
   authorizeOwnerRequest,
   ownerPostureUnlockClass,
@@ -106,6 +112,8 @@ export const HUB_OWNER_ROUTES = {
   signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
   approvalRead: `${HUB_OWNER_ROUTE_PREFIX}/approvals/read`,
   approvalAnswer: `${HUB_OWNER_ROUTE_PREFIX}/approvals/answer`,
+  siteApprovalRead: `${HUB_OWNER_ROUTE_PREFIX}/site-approvals/read`,
+  siteApprovalAnswer: `${HUB_OWNER_ROUTE_PREFIX}/site-approvals/answer`,
   browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
@@ -148,6 +156,8 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.challenge,
   HUB_OWNER_ROUTES.approvalRead,
   HUB_OWNER_ROUTES.approvalAnswer,
+  HUB_OWNER_ROUTES.siteApprovalRead,
+  HUB_OWNER_ROUTES.siteApprovalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -156,6 +166,7 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.browserControl,
   HUB_OWNER_ROUTES.threadMoveTicket,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
+  ...OWNER_UNLOCKED_ACTION_PATHS,
 ]);
 
 /**
@@ -166,14 +177,19 @@ const EITHER: ReadonlySet<string> = new Set([
 const MERGE_ROUTES: ReadonlySet<string> = new Set(CODE_OWNER_UNLOCKED_MERGE_PATHS);
 
 /**
+ * Product routes that take an owner device's unlock beside a paired client's
+ * command. Like a merge, the command is answered there and only its challenge
+ * is issued here, to an owner this route authenticated.
+ */
+const OWNER_ACTION_ROUTES: ReadonlySet<string> = new Set(OWNER_UNLOCKED_ACTION_PATHS);
+
+/**
  * The actions that always need their own fresh challenge, whatever session is
  * open (decision H17): opening a session, owner changes, copying a sign-in, and
  * the actions that change who may be an owner or leave the hub. Full access is
  * decided by the posture asked for; an owner join code by its body.
  */
 const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
-  HUB_OWNER_ROUTES.approvalRead,
-  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -190,8 +206,18 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
-function unlockClassFor(route: string, body: string): OwnerUnlockClass {
+function unlockClassFor(
+  route: string,
+  body: string,
+  approvalAnswerNeedsOwnUnlock: boolean,
+): OwnerUnlockClass {
   if (OWN_UNLOCK_ROUTES.has(route)) return "own";
+  if (
+    (route === HUB_OWNER_ROUTES.approvalAnswer || route === HUB_OWNER_ROUTES.siteApprovalAnswer) &&
+    approvalAnswerNeedsOwnUnlock
+  ) {
+    return "own";
+  }
   try {
     if (route === HUB_OWNER_ROUTES.joinCode) {
       return decodeOwnerJoinCodeRequest(JSON.parse(body)).owner ? "own" : "administration";
@@ -218,8 +244,25 @@ function ownerListStamp(scope: OwnerScope): string {
 const MAX_BODY_BYTES = 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
 
+/**
+ * The profile site approvals waiting on this host, as an owner device reads
+ * and answers them. `answer` is false when the approval is no longer waiting.
+ */
+export interface OwnerSiteApprovalHost {
+  readonly list: () => ReadonlyArray<BrowserToolApproval>;
+  readonly answer: (decision: OwnerSiteApprovalAnswerRequest) => boolean;
+}
+
 export interface HubOwnerRouteOptions {
   readonly approvals?: OwnerApprovalHost;
+  /**
+   * Whether each approval answer (a runtime approval or a profile site
+   * approval) needs its own fresh unlock here. Absent or false, an open
+   * administration session covers the answers.
+   */
+  readonly approvalAnswerNeedsOwnUnlock?: () => boolean;
+  /** Profile site approvals; absent on a host that runs no Browser. */
+  readonly siteApprovals?: OwnerSiteApprovalHost;
   readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
@@ -365,7 +408,9 @@ export function createHubOwnerRouteHandler(
     // challenge answer is judged by it alone; one that carries only a session
     // id is covered only if its action is an administration one.
     const needsUnlock = UNLOCKED_ROUTES.has(route);
-    const unlockClass = needsUnlock ? unlockClassFor(route, body) : "own";
+    const unlockClass = needsUnlock
+      ? unlockClassFor(route, body, options.approvalAnswerNeedsOwnUnlock?.() === true)
+      : "own";
     const proof = readUnlockProof(request);
     const sessionId = request.headers.get(OWNER_SESSION_HEADER);
     let unlockResult: OwnerUnlockVerification | undefined;
@@ -419,10 +464,20 @@ export function createHubOwnerRouteHandler(
     };
 
     if (route === HUB_OWNER_ROUTES.approvalRead || route === HUB_OWNER_ROUTES.approvalAnswer) {
-      if (options.approvals === undefined || unlockResult?.status !== "fresh")
-        return refused(403, "unlock-required");
+      if (options.approvals === undefined) return refused(403, "unlock-required");
       const stamp = ownerListStamp(scope);
       const deadline = (options.now ?? Date.now)() + 60_000;
+      // An answer that rode a session is delivered only while that session is
+      // still open: the runtime asks again immediately before its one-use
+      // delivery, and a session that ended in between covers nothing.
+      const unlockStillCovers = () =>
+        unlockResult?.status === "fresh" ||
+        (sessionId !== null &&
+          options.unlock.checkSession({
+            sessionId,
+            ownerMemberId: senderId,
+            ownerListStamp: stamp,
+          }).status === "open");
       const current = () => {
         const latest = scopeFor(route, body);
         return (
@@ -431,6 +486,7 @@ export function createHubOwnerRouteHandler(
           !("kind" in latest) &&
           ownerListStamp(latest) === stamp &&
           !latest.inactiveDeviceMemberIds.includes(senderId) &&
+          unlockStillCovers() &&
           authorizeOwnerRequest({
             host: latest.host,
             grant: latest.grant,
@@ -564,11 +620,43 @@ export function createHubOwnerRouteHandler(
       case HUB_OWNER_ROUTES.browserTakeOver:
       case HUB_OWNER_ROUTES.browserControl:
         return refused(400, "invalid");
+      case HUB_OWNER_ROUTES.siteApprovalRead: {
+        if (options.siteApprovals === undefined) return refused(409, "unsupported");
+        const asked = json();
+        if (
+          typeof asked !== "object" ||
+          asked === null ||
+          Array.isArray(asked) ||
+          Object.keys(asked).length !== 0
+        ) {
+          return refused(400, "invalid");
+        }
+        return Response.json(
+          { status: "read", approvals: options.siteApprovals.list() },
+          { headers: NO_STORE },
+        );
+      }
+      case HUB_OWNER_ROUTES.siteApprovalAnswer: {
+        if (options.siteApprovals === undefined) return refused(409, "unsupported");
+        const decision = decodeOwnerSiteApprovalAnswerRequest(json());
+        if (!options.siteApprovals.answer(decision)) return refused(409, "not-waiting");
+        options.record({
+          change: "owner-site-approval-answered",
+          actingPrincipal: principal,
+          memberId: input.senderMemberId,
+        });
+        return Response.json({ status: "answered" }, { headers: NO_STORE });
+      }
       case HUB_OWNER_ROUTES.challenge: {
         const asked = decodeOwnerChallengeRequest(json());
-        // A challenge is for one of the actions below or a paired client's
-        // merge, never for itself or a read.
-        if (!UNLOCKED_ROUTES.has(asked.path) && !MERGE_ROUTES.has(asked.path)) {
+        // A challenge is for one of the actions below, a paired client's
+        // merge, or a product command only an owner device may send, never for
+        // itself or a read.
+        if (
+          !UNLOCKED_ROUTES.has(asked.path) &&
+          !MERGE_ROUTES.has(asked.path) &&
+          !OWNER_ACTION_ROUTES.has(asked.path)
+        ) {
           return refused(400, "invalid");
         }
         const issued = options.unlock.issue({

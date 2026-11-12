@@ -248,6 +248,16 @@ function checkOriginAllowed(target: string, policy: BrowserContextPolicy): boole
  * typing, and closing tabs stay with the person at the machine, so a phone can
  * never point the host's browser at a new origin or put text into a field.
  */
+/**
+ * The host-driving actions an owner device may take from a paired client with
+ * its own fresh unlock: pointing the agent Browser at an address and putting
+ * text into a field. Closing tabs, choosing options, dragging, uploading,
+ * resizing, recording and tab changes stay with the person at the machine.
+ */
+export function ownerDeviceMayDriveBrowser(kind: BrowserActionKind): boolean {
+  return kind === "navigate" || kind === "type";
+}
+
 export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicyDecision {
   if (kind === "navigate") {
     return { kind: "denied", reason: "Navigating the host's browser is not a remote action." };

@@ -564,7 +564,7 @@ describe("remote route policy", () => {
     }
   });
 
-  it("lets a paired client's merge carry an owner unlock, and no other product route", async () => {
+  it("lets a paired client's merge, its Code or Work thread command and its Browser action carry an owner unlock, and no other product route", async () => {
     const fixture = handler();
     const preflight = (path: string) =>
       fixture.route(
@@ -584,10 +584,20 @@ describe("remote route policy", () => {
       "/api/code/project-pull-requests/merge",
       "/api/code/project-pull-requests/merge-stack",
       "/api/code/project-pull-requests/merge-when-ready",
+      "/api/code/commands",
+      "/api/work/threads/commands",
+      "/api/browser/actions",
     ]) {
       expect([path, (await preflight(path)).status]).toEqual([path, 204]);
     }
-    expect((await preflight("/api/code/project-pull-requests/auto-fix")).status).toBe(403);
+    for (const path of [
+      "/api/code/project-pull-requests/auto-fix",
+      "/api/code/board",
+      "/api/chat/commands",
+      "/api/browser/approvals",
+    ]) {
+      expect([path, (await preflight(path)).status]).toEqual([path, 403]);
+    }
   });
 
   it("rejects oversized requests and prevents a rejected response from leaking raw headers", async () => {
