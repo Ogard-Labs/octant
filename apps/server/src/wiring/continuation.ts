@@ -272,10 +272,11 @@ function startCodeRestartContinuation(
     runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
     enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,
     attempts: createCodeRestartContinuationAttempts(persistence.connection),
-    resumability: (thread, continuation) =>
+    resumability: (thread, continuation, cutOffOperationId) =>
       codeRestartResumability(
         codeBoardEventStore.providerSessionForThread(thread.id, continuation),
         thread,
+        cutOffOperationId,
       ),
     // What a window's first read does: the restart left every checkout
     // waiting until someone looks at it again.

@@ -15044,10 +15044,11 @@ describe("continuing a Code turn a restart cut off", () => {
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
       attempts: createCodeRestartContinuationAttempts(host.connection),
-      resumability: (current, continuation) =>
+      resumability: (current, continuation, cutOffOperationId) =>
         codeRestartResumability(
           host.operationEvents.providerSessionForThread(current.id, continuation),
           current,
+          cutOffOperationId,
         ),
       recoverCheckouts: async () => {},
       liftHarnessRecovery: async () => ({ kind: "none" }),
@@ -15127,6 +15128,32 @@ describe("continuing a Code turn a restart cut off", () => {
       ).resolves.toBeUndefined();
       expect(third.connection.resume).not.toHaveBeenCalled();
       expect(third.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose cut-off turn never reached its provider, instead of continuing the previous turn's session", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await Effect.runPromise(Queue.offer(first.queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(statuses(first.host).at(-1)?.[1]).toBe("completed"));
+      // The next turn's launch never returns, so it never records a session of
+      // its own; the thread's newest session is still the previous turn's.
+      vi.mocked(first.connection.resume).mockImplementation(() => Effect.never);
+      vi.mocked(first.connection.start).mockImplementation(() => Effect.never);
+      await first.host.runtime.execute(windowId, start(63));
+      const second = restartAfter(first.host);
+      hosts.push(second.host);
+      expect(second.cutOff).toEqual([{ threadId, operationId: String(operationId(63)) }]);
+      const recovery = recoveryOn(second.host, second.cutOff);
+      const summary = await continueCodeTurnsCutOffByRestart(recovery.ports);
+      // Continuing the old session would drop the person's unsent request.
+      expect(summary?.continued).toEqual([]);
+      expect(summary?.held).toEqual([expect.objectContaining({ threadId: String(threadId) })]);
+      expect(second.connection.resume).not.toHaveBeenCalled();
+      expect(second.connection.send).not.toHaveBeenCalled();
     } finally {
       for (const host of hosts) host.close();
     }

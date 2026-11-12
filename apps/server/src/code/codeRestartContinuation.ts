@@ -101,15 +101,20 @@ export type CodeRestartResumability =
 export function codeRestartResumability(
   recovered: ReturnType<CodeOperationEventStore["providerSessionForThread"]>,
   thread: CodeThread,
+  cutOffOperationId: string,
 ): CodeRestartResumability {
   if (recovered.status !== "ok")
     return { kind: "held", detail: "Octant could not read this thread's provider session." };
   const session = recovered.session;
-  if (session === undefined)
+  // Every turn records its own session when it launches. A newest session
+  // from an earlier turn means the cut-off turn never reached its provider:
+  // continuing that older session would drop the person's unsent request and
+  // its attachments, so the thread waits for them instead.
+  if (session === undefined || String(recovered.sessionOperationId) !== cutOffOperationId)
     return {
       kind: "held",
       detail:
-        "The turn stopped before its provider session started, so there is no session to continue.",
+        "The turn stopped before it reached its provider, so its message was never sent. Send it again.",
     };
   if (
     session.resumeCursor === undefined &&
@@ -136,6 +141,7 @@ export interface CodeRestartContinuationPorts {
   readonly resumability: (
     thread: CodeThread,
     continuation: CodeOperationId,
+    cutOffOperationId: string,
   ) => CodeRestartResumability;
   /** Restart left every checkout waiting; a turn runs only in an available one. */
   readonly recoverCheckouts: () => Promise<void>;
@@ -264,7 +270,7 @@ function guard(
         "Octant stopped twice while continuing this thread by itself. Check it before continuing.",
     };
   const continuation = decodeCodeOperationId(restartContinuationId(operationId));
-  const resumable = ports.resumability(thread, continuation);
+  const resumable = ports.resumability(thread, continuation, operationId);
   return resumable.kind === "held"
     ? { reason: "cannot-resume", detail: resumable.detail }
     : undefined;
