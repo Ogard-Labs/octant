@@ -1,11 +1,5 @@
 import { ChevronDown, Ellipsis } from "lucide-react";
-import {
-  useLayoutEffect,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
 import {
   OctantMenuGroup,
   OctantMenuGroupLabel,
@@ -47,6 +41,9 @@ const FOLDS: ReadonlyArray<DockBarFold> = ["full", "named", "menu", "row"];
 const isAction = (item: DockBarItem): boolean =>
   (item.kind === "button" && item.words !== true) || item.kind === "menu";
 const isWords = (item: DockBarItem) => item.kind === "button" && item.words === true;
+/** What moves to the secondary row, whole, when the bar cannot hold it: never cut. */
+const isRowable = (item: DockBarItem): boolean =>
+  item.kind === "node" || isWords(item) || (item.kind === "text" && item.cue === true);
 const isSwitch = (item: DockBarItem): item is DockBarChoice =>
   item.kind === "choice" && item.compact !== true;
 
@@ -59,7 +56,8 @@ function widthOf(items: ReadonlyArray<DockBarItem>, fold: DockBarFold, rulers: R
     moreWidth +
     items.reduce((sum, item) => {
       if (isAction(item)) return fold === "menu" || fold === "row" ? sum : sum + GAP + CONTROL;
-      if (item.kind === "node") return fold === "row" ? sum : sum + GAP + item.width;
+      if (isRowable(item) && fold === "row") return sum;
+      if (item.kind === "node") return sum + GAP + (rulers.get(`node:${item.id}`) || item.width);
       if (item.kind === "choice") {
         const named = fold !== "full" || item.compact === true;
         return sum + GAP + (rulers.get(`${named ? "named" : "full"}:${item.id}`) ?? 0);
@@ -106,17 +104,32 @@ export function useFoldedControls(
       for (const ruler of node.querySelectorAll<HTMLElement>("[data-ruler]")) {
         rulers.set(ruler.dataset.ruler ?? "", ruler.offsetWidth);
       }
+      // A control the tool draws is measured as drawn, by an inner box that is
+      // its natural width wherever the control stands, so a tag or a count
+      // that grows it is seen.
+      for (const drawn of node.querySelectorAll<HTMLElement>("[data-node-ruler]")) {
+        rulers.set(`node:${drawn.dataset.nodeRuler ?? ""}`, drawn.getBoundingClientRect().width);
+      }
+      // The insets are the bar's own (the tile bar's 12 and 8, the bottom panel's
+      // controls region's 8 and 8), read, not assumed.
+      const style = getComputedStyle(node);
+      const padded = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const insets = Number.isFinite(padded) && padded > 0 ? padded : INSETS;
       const name = node.querySelector<HTMLElement>(".dock-tile__name");
       const lead = name === null ? 0 : 14 + GAP + name.scrollWidth;
-      const room = node.clientWidth - INSETS - lead - trailing;
-      const fits = FOLDS.find((step) => widthOf(items, step, rulers) <= room);
-      setFold(fits ?? "row");
+      const room = node.clientWidth - insets - lead - trailing;
+      // The row exists only for something that must move to it.
+      const steps = items.some(isRowable) ? FOLDS : FOLDS.filter((step) => step !== "row");
+      const fits = steps.find((step) => widthOf(items, step, rulers) <= room);
+      setFold(fits ?? steps.at(-1) ?? "menu");
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
-    for (const ruler of node.querySelectorAll("[data-ruler]")) observer.observe(ruler);
+    for (const ruler of node.querySelectorAll("[data-ruler], [data-node-ruler]")) {
+      observer.observe(ruler);
+    }
     return () => observer.disconnect();
     // `key` stands for everything about the items that changes their width.
   }, [bar, key, trailing]);
@@ -311,36 +324,36 @@ function MoreMenu(props: {
 }
 
 /**
- * Arrow keys move between a toolbar's controls, as a toolbar should; Tab still
- * leaves it. Disabled controls are skipped.
+ * One keyboard model for the whole toolbar, in capture so a word switch's own
+ * arrow handling never sees the key: Left and Right move through every control
+ * in the order they stand (entering and leaving the switch at its ends), Home
+ * and End go to the first and last, and moving never presses anything. The
+ * order is the visual one, so a control moved to the secondary row follows the
+ * rest. Tab still leaves the toolbar. Disabled controls are skipped.
  */
 function moveAlongToolbar(event: KeyboardEvent<HTMLDivElement>) {
   const forward = event.key === "ArrowRight";
   if (!forward && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
-  const controls = [...event.currentTarget.querySelectorAll("button")].filter(
-    (button) => !button.disabled && button.closest("[inert]") === null,
-  );
-  const at = controls.findIndex((button) => button === document.activeElement);
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const here = target.closest("button");
+  const controls = [...event.currentTarget.querySelectorAll("button")]
+    .filter((button) => !button.disabled && button.closest("[inert]") === null)
+    .map((button) => ({ button, box: button.getBoundingClientRect() }))
+    .sort((a, b) =>
+      Math.abs(a.box.top - b.box.top) > 4 ? a.box.top - b.box.top : a.box.left - b.box.left,
+    );
+  const at = controls.findIndex((control) => control.button === here);
   if (at < 0) return;
   event.preventDefault();
+  event.stopPropagation();
   const next =
     event.key === "Home"
       ? 0
       : event.key === "End"
         ? controls.length - 1
         : (at + (forward ? 1 : -1) + controls.length) % controls.length;
-  controls[next]?.focus();
-}
-
-/** The controls a tool draws itself, moved under the bar when the bar cannot hold them. */
-export function DockBarNodes(props: { readonly items: ReadonlyArray<DockBarItem> }): ReactNode {
-  return props.items.map((item) =>
-    item.kind === "node" ? (
-      <span className="dock-tile__tool-node" key={item.id}>
-        {item.node}
-      </span>
-    ) : null,
-  );
+  controls[next]?.button.focus();
 }
 
 /**
@@ -356,59 +369,65 @@ export function DockBarRow(props: {
 }) {
   if (props.items.length === 0) return null;
   const actions = props.items.filter(isAction);
-  const lead = props.items.filter((item) => !isAction(item));
+  const lead = props.items.filter((item) => !isAction(item) && !isRowable(item));
+  const rowable = props.items.filter(isRowable);
+  const drawItem = (item: DockBarItem) => {
+    if (item.kind === "text")
+      return (
+        <span
+          aria-live={item.live === true ? "polite" : undefined}
+          className="dock-tile__tool-text"
+          key={item.id}
+          title={item.text}
+        >
+          {item.dot === undefined ? null : (
+            <span aria-hidden="true" className="device-dot" data-dot={item.dot} />
+          )}
+          {item.text}
+        </span>
+      );
+    if (item.kind === "node")
+      return (
+        <span className="dock-tile__tool-node" key={item.id}>
+          <span className="dock-tile__tool-node-body" data-node-ruler={item.id}>
+            {item.node}
+          </span>
+        </span>
+      );
+    if (item.kind === "button")
+      return (
+        <OctantButton
+          aria-label={item.label}
+          className="dock-bar-chip window-no-drag"
+          disabled={item.disabled === true}
+          key={item.id}
+          onClick={item.onSelect}
+          title={item.title ?? item.label}
+          type="button"
+          variant="bare"
+        >
+          {item.label}
+        </OctantButton>
+      );
+    if (item.kind !== "choice") return null;
+    return props.fold === "full" && isSwitch(item) ? (
+      <WordSwitch choice={item} key={item.id} />
+    ) : (
+      <ChoiceMenu choice={item} key={item.id} />
+    );
+  };
   return (
     <div
       aria-label={`${props.toolLabel} controls`}
       className="dock-tile__tool-controls"
-      onKeyDown={moveAlongToolbar}
+      onKeyDownCapture={moveAlongToolbar}
       role="toolbar"
     >
       <Rulers items={props.items} />
-      <div className="dock-tile__tool-lead">
-        {lead.map((item) => {
-          if (item.kind === "text")
-            return (
-              <span
-                aria-live={item.live === true ? "polite" : undefined}
-                className="dock-tile__tool-text"
-                key={item.id}
-              >
-                {item.dot === undefined ? null : (
-                  <span aria-hidden="true" className="device-dot" data-dot={item.dot} />
-                )}
-                {item.text}
-              </span>
-            );
-          if (item.kind === "node")
-            return props.fold === "row" ? null : (
-              <span className="dock-tile__tool-node" key={item.id}>
-                {item.node}
-              </span>
-            );
-          if (item.kind === "button")
-            return (
-              <OctantButton
-                aria-label={item.label}
-                className="dock-bar-chip window-no-drag"
-                disabled={item.disabled === true}
-                key={item.id}
-                onClick={item.onSelect}
-                title={item.title ?? item.label}
-                type="button"
-                variant="bare"
-              >
-                {item.label}
-              </OctantButton>
-            );
-          if (item.kind !== "choice") return null;
-          return props.fold === "full" && isSwitch(item) ? (
-            <WordSwitch choice={item} key={item.id} />
-          ) : (
-            <ChoiceMenu choice={item} key={item.id} />
-          );
-        })}
-      </div>
+      <div className="dock-tile__tool-lead">{lead.map(drawItem)}</div>
+      {rowable.length === 0 ? null : (
+        <div className="dock-tile__tool-cues">{rowable.map(drawItem)}</div>
+      )}
       {actions.length === 0 ? null : (
         <div className="dock-tile__tool-actions">
           {props.fold === "menu" || props.fold === "row" ? (

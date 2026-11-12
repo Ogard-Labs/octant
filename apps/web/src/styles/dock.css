@@ -1053,6 +1053,7 @@
 /* A tool shown alone has no tile bar; its controls stand in one row of the
    bar's height, insets and hairline, holding only them. */
 .dock-tile__row {
+  position: relative;
   display: flex;
   height: 32px;
   flex: none;
@@ -1150,13 +1151,46 @@
   display: inline-flex;
   min-width: 0;
   align-items: center;
+}
+
+/* The control as drawn, at its natural width wherever it stands: the bar
+   measures this box, so a tag or a count that grows it is seen. */
+.dock-tile__tool-node-body {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
   gap: var(--oct-space-1);
 }
 
-/* The controls a tool draws itself, moved under the bar when the bar cannot
-   hold them: the one secondary row, on the bar's insets and hairline. */
-.dock-tile__row--nodes {
+/* What must stay readable or whole (a billed desktop's provider and place, a
+   control the tool draws itself) stands after the tool's words. When the bar
+   cannot hold it beside the name it moves, without being drawn again, to the
+   one secondary row under the bar: 32px on the bar's insets and hairline, in
+   the same toolbar. In the bottom panel it scrolls within its own box. */
+.dock-tile__tool-cues {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: var(--oct-space-1);
+}
+
+.dock-tile__bar[data-fold="row"],
+.dock-tile__row[data-fold="row"] {
+  margin-bottom: 32px;
+}
+
+:is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 32px;
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+.bottom-utility-panel__controls .dock-tile__tool-cues {
+  overflow-x: auto;
 }
 
 /* The words laid out unseen, so the bar knows how much room they need. */

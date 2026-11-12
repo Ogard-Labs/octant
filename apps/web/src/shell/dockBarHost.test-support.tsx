@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { DockBarRow } from "./DockBarRow";
+import { DockBarRow, type DockBarFold } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot, type DockBarPlacement } from "./dockBarControls";
 
 /**
@@ -10,6 +10,8 @@ import { DockBarContext, useDockBarSlot, type DockBarPlacement } from "./dockBar
 export function DockBarTestHost(props: {
   readonly placement: DockBarPlacement;
   readonly toolLabel?: string;
+  /** How far the host has folded the controls; the default is none. */
+  readonly fold?: DockBarFold;
   readonly children: ReactNode;
 }) {
   const { host, items } = useDockBarSlot(props.placement);
@@ -17,7 +19,11 @@ export function DockBarTestHost(props: {
     <DockBarContext.Provider value={host}>
       <div data-testid="bar">
         {items === undefined ? null : (
-          <DockBarRow fold="full" items={items} toolLabel={props.toolLabel ?? "Tool"} />
+          <DockBarRow
+            fold={props.fold ?? "full"}
+            items={items}
+            toolLabel={props.toolLabel ?? "Tool"}
+          />
         )}
       </div>
       {props.children}

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { RefreshCw } from "lucide-react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { useState, type ReactNode } from "react";
+import { StrictMode, useState, type ReactNode } from "react";
 import { DockBarTestHost } from "./dockBarHost.test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockTiles, type DockTileContent } from "./DockTiles";
@@ -15,7 +15,7 @@ import type { DockTileLayout } from "./rightUtilityDockSelection";
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 const rule = (selector: string) =>
   dockStylesheet.match(
-    new RegExp(`${selector.replace(/[.[\]]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+    new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
   )?.[1] ?? "";
 
 function Tool(props: { readonly onRefresh: () => void }) {
@@ -110,13 +110,16 @@ const aloneWithoutControls: DockTileLayout = {
 };
 
 let textWidth = 0;
+let barWidth = 0;
+let nodeWidth = 0;
 
 /** A bar `width` wide whose switch needs 150px in words and 90px named, beside a 40px name. */
 function barOfWidth(width: number) {
+  barWidth = width;
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
     function (this: HTMLElement) {
       return this.classList.contains("dock-tile__bar") || this.classList.contains("dock-tile__row")
-        ? width
+        ? barWidth
         : 0;
     },
   );
@@ -143,6 +146,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   textWidth = 0;
+  barWidth = 0;
+  nodeWidth = 0;
 });
 
 describe("a tool's controls in its tile's bar", () => {
@@ -536,43 +541,259 @@ describe("a tile that changes between tiled and alone", () => {
   });
 });
 
+function observers() {
+  const callbacks: ResizeObserverCallback[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        callbacks.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    },
+  );
+  return () =>
+    act(() => {
+      for (const callback of callbacks) callback([], {} as ResizeObserver);
+    });
+}
+
+function measuredNodes() {
+  const original = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this instanceof HTMLElement && this.dataset.nodeRuler !== undefined
+      ? ({ width: nodeWidth, height: 24, top: 0, left: 0 } as DOMRect)
+      : original.call(this);
+  });
+}
+
+function Drawn() {
+  useDockBarControls([
+    { kind: "node", id: "own", width: 232, node: <button type="button">Versions</button> },
+  ]);
+  return null;
+}
+
+function dockOf(tool: ReactNode, layout: DockTileLayout = two) {
+  return (
+    <DockTiles
+      focusedTabId="one"
+      layout={layout}
+      onCloseTile={() => {}}
+      onFocusTile={() => {}}
+      onHideTile={() => {}}
+      onMoveTile={() => {}}
+      onResizeColumn={() => {}}
+      onResizeColumns={() => {}}
+      onShowTileAlone={() => {}}
+      renderTile={(tabId) => content(tabId, tabId === "one" ? tool : <Plain />)}
+    />
+  );
+}
+
 describe("controls a tool draws itself", () => {
-  it("moves under the bar as the one secondary row when the bar cannot hold them, and stays in the bar when it can", () => {
-    function Drawn() {
+  it("stays mounted, in the same toolbar, when the bar can no longer hold it and it moves to the secondary row", () => {
+    const fire = observers();
+    barOfWidth(500);
+    render(dockOf(<Drawn />));
+    const toolbar = screen.getByRole("toolbar", { name: "one controls" });
+    const versions = within(toolbar).getByRole("button", { name: "Versions" });
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "full");
+    barWidth = 280;
+    fire();
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
+    // The control is the same element in the same toolbar: it was not drawn again.
+    expect(
+      within(screen.getByRole("toolbar", { name: "one controls" })).getByRole("button", {
+        name: "Versions",
+      }),
+    ).toBe(versions);
+    expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
+  });
+
+  it("measures the control as drawn, not the width it declared", () => {
+    measuredNodes();
+    nodeWidth = 400;
+    barOfWidth(500);
+    render(dockOf(<Drawn />));
+    // 232px was declared and would fit; the control is 400px as drawn.
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
+  });
+});
+
+describe("a bar and its secondary row", () => {
+  function Cues() {
+    useDockBarControls([
+      { kind: "text", id: "state", text: "iOS 27 · Running", live: true },
+      {
+        kind: "button",
+        id: "view-only",
+        label: "View only",
+        words: true,
+        icon: RefreshCw,
+        onSelect: () => {},
+      },
+      { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: () => {} },
+    ]);
+    return null;
+  }
+
+  it("moves a state kept in words (a cue) to the row, in the toolbar, when nothing else fits", () => {
+    textWidth = 300;
+    barOfWidth(280);
+    render(dockOf(<Cues />));
+    // A words button is a cue and could move, so the row is allowed here...
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
+    // ...and what moved is in it, in the toolbar; nothing else is.
+    const cues = document.querySelector(".dock-tile__tool-cues");
+    expect(cues).not.toBeNull();
+    expect(
+      within(cues as HTMLElement).getByRole("button", { name: "View only" }),
+    ).toBeInTheDocument();
+  });
+
+  it("draws no row at all when the tool has only status text and actions, however narrow", () => {
+    function Plainly() {
       useDockBarControls([
-        { kind: "node", id: "own", width: 232, node: <button type="button">Versions</button> },
+        { kind: "text", id: "state", text: "iOS 27 · Running", live: true },
+        { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: () => {} },
       ]);
       return null;
     }
-    const dock = (
-      <DockTiles
-        focusedTabId="one"
-        layout={two}
-        onCloseTile={() => {}}
-        onFocusTile={() => {}}
-        onHideTile={() => {}}
-        onMoveTile={() => {}}
-        onResizeColumn={() => {}}
-        onResizeColumns={() => {}}
-        onShowTileAlone={() => {}}
-        renderTile={(tabId) => content(tabId, tabId === "one" ? <Drawn /> : <Plain />)}
-      />
-    );
-    barOfWidth(500);
-    const { unmount } = render(dock);
-    expect(document.querySelector(".dock-tile__bar .dock-tile__tool-node")).not.toBeNull();
-    expect(document.querySelector(".dock-tile__row--nodes")).toBeNull();
-    unmount();
-    vi.restoreAllMocks();
+    textWidth = 400;
     barOfWidth(280);
-    render(dock);
-    expect(document.querySelector(".dock-tile__bar .dock-tile__tool-node")).toBeNull();
-    const row = document.querySelector(".dock-tile__row--nodes");
-    expect(row).not.toBeNull();
-    expect(
-      within(row as HTMLElement).getByRole("button", { name: "Versions" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
+    render(dockOf(<Plainly />));
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "menu");
+    expect(document.querySelector(".dock-tile__tool-cues")).toBeNull();
+  });
+});
+
+describe("a billed desktop's cue at the dock's minimum", () => {
+  it("moves to the secondary row whole, with its full text as the tooltip, before the name is cut", () => {
+    function Billed() {
+      useDockBarControls([
+        {
+          kind: "text",
+          id: "where",
+          text: "A cloud provider with a long name · A far away place",
+          cue: true,
+          dot: "running",
+        },
+        { kind: "text", id: "state", text: "Live · 3 min", live: true },
+        {
+          kind: "button",
+          id: "release",
+          label: "Release desktop",
+          icon: RefreshCw,
+          onSelect: () => {},
+        },
+      ]);
+      return null;
+    }
+    textWidth = 200;
+    barOfWidth(280);
+    render(dockOf(<Billed />));
+    const bar = document.querySelector(".dock-tile__bar");
+    expect(bar).toHaveAttribute("data-fold", "row");
+    const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
+    const where = within(cues).getByText("A cloud provider with a long name · A far away place");
+    expect(where).toHaveAttribute("title", "A cloud provider with a long name · A far away place");
+    expect(screen.getByText("one", { selector: ".dock-tile__name" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
+  });
+});
+
+describe("a toolbar's keys", () => {
+  function Switched() {
+    const [view, setView] = useState("a");
+    useDockBarControls([
+      {
+        kind: "choice",
+        id: "view",
+        label: "View",
+        options: [
+          { id: "a", label: "One" },
+          { id: "b", label: "Two" },
+          { id: "c", label: "Three" },
+        ],
+        value: view,
+        onChange: setView,
+      },
+      { kind: "button", id: "r", label: "Refresh", icon: RefreshCw, onSelect: () => {} },
+      { kind: "button", id: "s", label: "Share", icon: RefreshCw, onSelect: () => {} },
+    ]);
+    return <p>{`view ${view}`}</p>;
+  }
+
+  it("leaves a word switch at its ends in both directions, goes Home and End across the whole toolbar and presses nothing", async () => {
+    render(dockOf(<Switched />));
+    const toolbar = screen.getByRole("toolbar", { name: "one controls" });
+    const [one, two_, three, refresh, share] = within(toolbar).getAllByRole("button");
+    three?.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(refresh).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(three).toHaveFocus();
+    await userEvent.keyboard("{Home}");
+    expect(one).toHaveFocus();
+    await userEvent.keyboard("{End}");
+    expect(share).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(one).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(two_).toHaveFocus();
+    expect(screen.getByText("view a")).toBeInTheDocument();
+  });
+});
+
+describe("the slot at a folded width", () => {
+  it("keeps each registrant's action reachable in the one More menu a folded host draws", async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    render(
+      <DockBarTestHost fold="menu" placement="tiled" toolLabel="Tool">
+        <Registrant id="a" label="Refresh a" onSelect={first} />
+        <Registrant id="b" label="Refresh b" onSelect={second} />
+      </DockBarTestHost>,
+    );
+    expect(screen.queryByRole("button", { name: "Refresh a" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More Tool actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Refresh b" }));
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+});
+
+describe("a registrant mounted twice", () => {
+  it("draws one control for a strict-mode double mount", () => {
+    render(
+      <StrictMode>
+        <DockBarTestHost placement="tiled">
+          <Registrant id="a" label="Refresh a" />
+        </DockBarTestHost>
+      </StrictMode>,
+    );
+    expect(screen.getAllByRole("button", { name: "Refresh a" })).toHaveLength(1);
+  });
+
+  it("settles on one control after a fast unmount and remount", () => {
+    function Flip(props: { readonly on: boolean }) {
+      return (
+        <DockBarTestHost placement="tiled">
+          {props.on ? <Registrant id="a" label="Refresh a" /> : null}
+        </DockBarTestHost>
+      );
+    }
+    const { rerender } = render(<Flip on />);
+    for (let index = 0; index < 5; index += 1) {
+      rerender(<Flip on={false} />);
+      rerender(<Flip on />);
+    }
+    expect(screen.getAllByRole("button", { name: "Refresh a" })).toHaveLength(1);
+    rerender(<Flip on={false} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

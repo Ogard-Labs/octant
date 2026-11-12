@@ -23,7 +23,8 @@ export interface DockBarButton {
   readonly disabled?: boolean;
   /**
    * A state that must read at a glance (View only) stays in words: the button
-   * shows its label, and never folds into the More menu while it is there.
+   * shows its label, never folds into the More menu while it is there and, as a
+   * cue, moves to the secondary row rather than being cut.
    */
   readonly words?: boolean;
 }
@@ -73,11 +74,19 @@ export interface DockBarText {
   readonly live?: boolean;
   /** A status mark before the words (running, busy, lost, idle). */
   readonly dot?: "running" | "busy" | "lost" | "idle";
+  /**
+   * A cue a person must be able to read (a billed Desktop's provider and place).
+   * It is never cut to an ellipsis: when the bar cannot hold it beside the
+   * tool's name it moves to the one secondary row.
+   */
+  readonly cue?: boolean;
 }
 
 /**
  * A control the tool draws itself (a popover trigger with its own panel). It
- * never folds, so `width` says how much room the bar must keep for it.
+ * never folds and is measured as drawn; `width` is only the room kept for it
+ * before it has been. Where the bar cannot hold it, it moves to the one
+ * secondary row without being remounted.
  */
 export interface DockBarNode {
   readonly kind: "node";
@@ -133,7 +142,7 @@ export function useDockBarControls(
         case "choice":
           return [item.id, item.label, item.value, item.options, item.compact === true];
         case "text":
-          return [item.id, item.text, item.live === true, item.dot];
+          return [item.id, item.text, item.live === true, item.dot, item.cue === true];
         case "node":
           return [item.id, item.width];
       }

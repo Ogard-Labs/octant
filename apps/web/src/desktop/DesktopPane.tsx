@@ -464,7 +464,7 @@ function StartConfirmation(props: {
   );
 }
 
-function DesktopToolbar(props: {
+export function DesktopToolbar(props: {
   readonly title: string;
   /** Provider and place of a lease, said under its name in the desktops menu. */
   readonly describe: (lease: DesktopLease) => string;
@@ -489,6 +489,7 @@ function DesktopToolbar(props: {
       id: "where",
       text: props.title,
       dot: dotFor(state),
+      cue: true,
     },
     { kind: "text", id: "state", text: stateWords(state, props.now()), live: true },
   ];

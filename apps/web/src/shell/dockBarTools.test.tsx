@@ -5,7 +5,10 @@ import { DockTiles, type DockTileContent } from "./DockTiles";
 import { AgentHierarchyPanel } from "../agents/AgentHierarchyPanel";
 import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyModel";
 import { SideChatPanel } from "../chat/SideChatPanel";
+import { decodeDesktopLease } from "@octant/contracts";
+import { DesktopToolbar } from "../desktop/DesktopPane";
 import { DeviceToolbar } from "../device/DeviceToolbar";
+import { DockBarTestHost } from "./dockBarHost.test-support";
 import { DockBarContext, type DockBarItem, type DockBarPlacement } from "./dockBarControls";
 
 const placements: ReadonlyArray<DockBarPlacement> = ["tiled", "alone", "bottom"];
@@ -247,5 +250,52 @@ describe("a device's state kept visible in a bar", () => {
     await userEvent.click(within(toolbar).getByRole("button", { name: "More Simulator actions" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Home" }));
     expect(onKey).toHaveBeenCalledWith("home");
+  });
+});
+
+describe("a desktop's controls under the fold", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const lease = decodeDesktopLease({
+    leaseId: "80000000-0000-4000-8000-000000000002",
+    owner: { mode: "code", threadId: "80000000-0000-4000-8000-000000000001" },
+    providerId: "host-local",
+    locality: "host-local",
+    billed: false,
+    state: "ready",
+    requestedAt: "2026-10-27T12:00:00.000Z",
+    expiresAt: "2026-10-27T12:30:00.000Z",
+    maximumExpiresAt: "2026-10-27T16:00:00.000Z",
+    idleMinutes: 15,
+    updatedAt: "2026-10-27T12:00:05.000Z",
+  });
+
+  it("keeps Extend and Release reachable in the More menu once the bar has folded them", async () => {
+    const onExtend = vi.fn();
+    const onRelease = vi.fn();
+    render(
+      <DockBarTestHost fold="menu" placement="tiled" toolLabel="Desktop">
+        <DesktopToolbar
+          describe={() => "This host"}
+          leases={[lease]}
+          now={() => Date.parse("2026-10-27T12:05:00.000Z")}
+          onExtend={onExtend}
+          onRelease={onRelease}
+          onSelect={() => {}}
+          pending={undefined}
+          selected={lease}
+          state={{ kind: "live", lease }}
+          title="This host"
+        />
+      </DockBarTestHost>,
+    );
+    expect(screen.queryByRole("button", { name: "Release desktop" })).toBeNull();
+    const bar = within(screen.getByTestId("bar"));
+    await userEvent.click(bar.getByRole("button", { name: "More Desktop actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /^Add \d+ minutes$/ }));
+    expect(onExtend).toHaveBeenCalledTimes(1);
+    await userEvent.click(bar.getByRole("button", { name: "More Desktop actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Release desktop" }));
+    expect(onRelease).toHaveBeenCalledTimes(1);
   });
 });

@@ -11,7 +11,7 @@ import {
   type Ref,
 } from "react";
 import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
-import { DockBarNodes, DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
+import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 import { IconButton } from "./IconButton";
 import {
@@ -477,6 +477,7 @@ function Tile(props: {
         // trail, and every bar is one height so neighbouring tiles line up.
         <div
           className="dock-tile__bar"
+          data-fold={folded}
           data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
           ref={bar}
         >
@@ -546,18 +547,9 @@ function Tile(props: {
           </>
         </div>
       )}
-      {!props.single && folded === "row" && barItems !== undefined ? (
-        <div className="dock-tile__row dock-tile__row--nodes">
-          <DockBarNodes items={barItems} />
-        </div>
-      ) : null}
       {props.single && barItems !== undefined && barItems.length > 0 ? (
-        <div className="dock-tile__row" ref={row}>
-          <DockBarRow
-            fold={folded === "row" ? "menu" : folded}
-            items={barItems}
-            toolLabel={content.label}
-          />
+        <div className="dock-tile__row" data-fold={folded} ref={row}>
+          <DockBarRow fold={folded} items={barItems} toolLabel={content.label} />
         </div>
       ) : null}
       <DockBarContext.Provider value={barHost}>
