@@ -3237,9 +3237,13 @@ form > .work-composer-adapter__attachments {
   font-size: var(--oct-text-xs);
 }
 
+/* The toolbar adapts to the width it is given, which in a dock tile can be as
+   little as 280px, so the workspace is the container the queries below ask. */
 .browser-workspace {
+  container: browser-workspace / inline-size;
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
+  /* minmax: a narrow toolbar may take a second line instead of being clipped. */
+  grid-template-rows: minmax(40px, auto) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -3248,7 +3252,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-workspace--message {
-  grid-template-rows: 40px auto minmax(0, 1fr);
+  grid-template-rows: minmax(40px, auto) auto minmax(0, 1fr);
 }
 
 .browser-workspace--state {
@@ -3425,6 +3429,7 @@ form > .work-composer-adapter__attachments {
   background: transparent;
   box-shadow: none;
   font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
 }
 
 .browser-workspace__control-state {
@@ -4549,7 +4554,12 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 .browser-workspace__agent-availability {
   min-width: 0;
   max-width: 30%;
+  overflow: hidden;
 }
+/* Each link of the chain has to be allowed to shrink for the label's ellipsis
+   to work; with only the label allowed, it drew past a 3px box over the next
+   control's words. */
+.browser-workspace__agent-availability > span,
 .browser-workspace__agent-availability > button {
   min-width: 0;
 }
@@ -4561,5 +4571,51 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 @media (max-width: 720px) {
   .browser-workspace__availability-label {
     display: none;
+  }
+}
+
+/* A tool tile can be as narrow as 280px, where the row's words no longer fit
+   beside the history capsule: the profile and availability controls keep their
+   icon, name, and tooltip and drop their words, and who holds the page keeps
+   its words but ends in an ellipsis instead of running over its neighbour. */
+@container browser-workspace (max-width: 479px) {
+  .browser-profile-control {
+    padding: 0 var(--oct-space-2);
+  }
+  .browser-profile-control span,
+  .browser-workspace__availability-label {
+    display: none;
+  }
+  .browser-workspace__agent-availability {
+    flex: none;
+    max-width: none;
+  }
+  .browser-workspace__control-state {
+    flex: none;
+    max-width: 40cqw;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .browser-workspace__control-state > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Below this the address field would be squeezed to a sliver beside the other
+   controls, so the controls keep the first line and it takes the second at the
+   full width. */
+@container browser-workspace (max-width: 359px) {
+  .browser-workspace__chrome {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .browser-workspace__omnibox {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .browser-workspace__control-state {
+    max-width: 32cqw;
   }
 }
