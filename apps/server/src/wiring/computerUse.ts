@@ -14,6 +14,7 @@ import {
   decodeWorkThreadId,
   type DesktopPreviewRequest,
   type DesktopPreviewAnswer,
+  type WorkAccess,
 } from "@octant/contracts";
 import type { DesktopLeaseCaller } from "../computerUse/desktopLeaseService";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
@@ -122,7 +123,13 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<UsageWiring, "validationEventStore"> &
-  Pick<FoundationsWiring, "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<
+    FoundationsWiring,
+    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection"
+  > & {
+    /** The level a Work thread's running turn holds; wired later, read per call. */
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+  };
 
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
@@ -432,8 +439,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               : [],
           // Read from the thread as it stands now, so lowering a thread from
           // Full access brings back the ask on its next action. A Code
-          // owner also carries its turn's posture, which may sit below the
-          // thread's; Chat has no Full access.
+          // owner also carries its turn's posture, and a Work thread's
+          // running turn its own level, either of which may sit below the
+          // thread's (a routine under a lower ceiling); Chat has no Full access.
           fullAccess: (owner) =>
             owner.mode === "code"
               ? owner.executionPolicy === "full-access" &&
@@ -441,7 +449,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
                   "full-access"
               : owner.mode === "work" &&
                 workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.access ===
-                  "full-access",
+                  "full-access" &&
+                (deps.runningWorkTurnAccess(owner.threadId) ?? "full-access") === "full-access",
           externalContentIngested: (owner) =>
             readThreadExternalContentTaint(persistence.connection, owner.threadId)
               .externalContentIngested,

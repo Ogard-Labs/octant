@@ -98,9 +98,18 @@ export class DesktopDownloadHold {
         personDownloads === undefined
           ? undefined
           : freePersonDownloadPath(personDownloads, item.getFilename());
-      if (path === undefined) event.preventDefault?.();
+      if (path === undefined) {
+        event.preventDefault?.();
+        return;
+      }
+      // The name stays taken until this download ends, whatever its outcome:
+      // a finished file is then on disk, and a cancelled one frees the name.
+      pendingPersonDownloads.add(path);
+      item.on("done", () => {
+        pendingPersonDownloads.delete(path);
+      });
       // Without a save path Electron would open a save dialog over the pane.
-      else item.setSavePath(path);
+      item.setSavePath(path);
       return;
     }
     if (this.#root === undefined) {
@@ -246,14 +255,24 @@ export class DesktopDownloadHold {
 }
 
 /**
+ * Destinations handed to a person's downloads that have not finished. A file
+ * appears on disk only once its download writes it, so two downloads of one
+ * name that start together would otherwise both be given the same path and
+ * one would overwrite the other. Shared by every pane's hold, because they
+ * all save into the one Downloads folder.
+ */
+const pendingPersonDownloads = new Set<string>();
+
+/**
  * Where a person's download lands: the page's suggested name reduced to a safe
- * basename, numbered past any file already there so nothing is overwritten.
+ * basename, numbered past any file already there or still arriving, so
+ * nothing is overwritten.
  */
 function freePersonDownloadPath(folder: string, suggested: string): string | undefined {
   const name = safeBrowserDownloadName(suggested);
   for (let copy = 1; copy <= MAX_PERSON_DOWNLOAD_COPIES; copy += 1) {
     const path = join(folder, numberedBrowserDownloadName(name, copy));
-    if (!existsSync(path)) return path;
+    if (!existsSync(path) && !pendingPersonDownloads.has(path)) return path;
   }
   return undefined;
 }

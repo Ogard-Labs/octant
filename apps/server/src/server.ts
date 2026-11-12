@@ -332,6 +332,8 @@ export function startOctantServer(
       codeParentActiveTurn,
       codeSessionAuthority,
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
+      // Deferred: Work's running turns are wired later in this scope.
+      runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       isProjectPolicyTargetAllowed,
       nativeHarnessSessions,
       nativeHarnessApprovals,
@@ -420,6 +422,8 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      // Deferred: Work's running turns are wired later in this scope.
+      runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       onWindowRevoked,
       browserAuthority,
       externalContentIngestionStore,

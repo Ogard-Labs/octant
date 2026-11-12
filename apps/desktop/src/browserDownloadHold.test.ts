@@ -71,6 +71,24 @@ describe("DesktopDownloadHold", () => {
     expect(hold.claim("d1")).toBeUndefined();
   });
 
+  it("gives two downloads of the same name that start together their own files, in any pane", async () => {
+    const downloads = await root();
+    const first = new FakeItem("report.pdf");
+    const second = new FakeItem("report.pdf");
+    // Neither file exists yet when the second starts, in another pane's hold.
+    new DesktopDownloadHold(undefined).accept({}, first, downloads);
+    new DesktopDownloadHold(undefined).accept({}, second, downloads);
+
+    expect(first.savePath).toBe(join(downloads, "report.pdf"));
+    expect(second.savePath).toBe(join(downloads, "report (2).pdf"));
+
+    // A name is free again once its download ended without leaving a file.
+    first.emit("done", {}, "cancelled");
+    const third = new FakeItem("report.pdf");
+    new DesktopDownloadHold(undefined).accept({}, third, downloads);
+    expect(third.savePath).toBe(join(downloads, "report.pdf"));
+  });
+
   it("holds a download for the agent's running action even when the person drove the pane last", async () => {
     const downloads = await root();
     const hold = new DesktopDownloadHold(await root());

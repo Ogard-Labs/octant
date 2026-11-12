@@ -2402,6 +2402,42 @@ describe("WorkTurnService", () => {
     expect(answers).toEqual([{ result: "framed notes" }]);
   });
 
+  it("tells a selected extension's tools the level the turn runs at, not the thread's stored one", async () => {
+    const resolveSelectedExtensions = vi.fn<
+      NonNullable<WorkTurnServiceDependencies["resolveSelectedExtensions"]>
+    >(async () => ({ kind: "resolved", context: [] }));
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      resolveSelectedExtensions,
+      turnRuntime: { run: async () => ({ kind: "completed", response: "Ready" }) },
+    });
+    // A routine or goal-loop round runs under a ceiling below the thread's
+    // own Full access, and an extension tool must be asked about at that level.
+    await fixture.service.startFirstTurn(
+      ids.window,
+      {
+        ...startCommand(),
+        extensionSelections: [
+          {
+            kind: "plugin",
+            extensionId: "94000000-0000-4000-8000-000000000011",
+            packageId: "94000000-0000-4000-8000-000000000012",
+            componentId: "notes-server",
+            packageVersion: "1.0.0",
+            packageDigest: `sha256:${"a".repeat(64)}`,
+            catalogEpoch: `sha256:${"b".repeat(64)}`,
+            origin: { kind: "draft", reference: "notes" },
+          },
+        ],
+      },
+      { accessCeiling: "ask-first" },
+    );
+    await fixture.waitForIdle();
+    expect(resolveSelectedExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ access: "ask-first" }) }),
+    );
+  });
+
   it("refuses selected skill instructions that exceed the Work input budget", async () => {
     const fixture = serviceFixture({
       safeInputBudgetTokens: 500,
