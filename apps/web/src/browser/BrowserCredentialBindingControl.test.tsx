@@ -261,3 +261,46 @@ describe("Browser selected-item consent", () => {
     );
   });
 });
+
+describe("Browser login permission asked from the more menu", () => {
+  const listed = () =>
+    vi.fn(async (_command: BrowserCredentialCommand) =>
+      decodeBrowserCredentialResult({ kind: "browser-credential-grants", grants: [] }),
+    );
+  const control = (
+    manageCredentialUse: ReturnType<typeof listed>,
+    contextId: string,
+    openRequest: number,
+  ) => (
+    <BrowserCredentialBindingControl
+      key={contextId}
+      client={{ manageCredentialUse }}
+      context={{ ...target, contextId: contextId as typeof target.contextId }}
+      held
+      openRequest={openRequest}
+      profile={target.profile}
+    />
+  );
+
+  it("opens the review only when the person asks while it is mounted, never on a remount for a new context", async () => {
+    const manageCredentialUse = listed();
+    const view = render(control(manageCredentialUse, id(1), 0));
+    expect(screen.queryByText("Browser login permission")).toBeNull();
+
+    view.rerender(control(manageCredentialUse, id(1), 1));
+    expect(await screen.findByText("Browser login permission")).toBeTruthy();
+    await waitFor(() => expect(manageCredentialUse).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText("Browser login permission")).toBeNull());
+
+    // A new page: the control remounts with the old request number still in hand.
+    view.rerender(control(manageCredentialUse, id(9), 1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Browser login permission")).toBeNull();
+    expect(manageCredentialUse).toHaveBeenCalledTimes(1);
+
+    view.rerender(control(manageCredentialUse, id(9), 2));
+    expect(await screen.findByText("Browser login permission")).toBeTruthy();
+    expect(manageCredentialUse).toHaveBeenCalledTimes(2);
+  });
+});

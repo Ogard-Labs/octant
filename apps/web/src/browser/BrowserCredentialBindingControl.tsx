@@ -77,8 +77,14 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
 
   const openReview = useRef<() => void>(() => undefined);
   const { openRequest } = props;
+  // A request made before this control mounted (the person asked once, then the
+  // page's context changed and the control remounted) is not a new ask: only a
+  // number that arrives while it is mounted opens the review.
+  const handledRequest = useRef(openRequest);
   useEffect(() => {
-    if (openRequest !== undefined && openRequest > 0) openReview.current();
+    if (openRequest === undefined || openRequest === handledRequest.current) return;
+    handledRequest.current = openRequest;
+    openReview.current();
   }, [openRequest]);
 
   const manage = props.client.manageCredentialUse;
