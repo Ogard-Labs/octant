@@ -2928,9 +2928,10 @@ describe("WorkThreadWorkspace", () => {
       status: "refused",
       reason: "Choose an image-capable model to attach images.",
     });
-    expect(await screen.findByLabelText("Attached images")).toHaveTextContent(
-      "Choose an image-capable model to attach images.",
-    );
+    // The refusal is a card above the pill, not a line among the chips.
+    const refusal = await screen.findByText("Choose an image-capable model to attach images.");
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
+    expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("browser-markup.png")).not.toBeInTheDocument();
   });
 
