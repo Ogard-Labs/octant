@@ -1079,6 +1079,13 @@ const CodeRuntimeWorkFields = {
   kind: CodeRuntimeWorkKind,
   state: CodeRuntimeWorkState,
   updatedAt: UtcTimestamp,
+  /**
+   * The work acts on a remote (a push, or a pull request step), so if the host
+   * loses it mid-flight the effect may have landed without the host learning
+   * so. Restart reconciliation reads it to leave such work `ambiguous` rather
+   * than `interrupted`.
+   */
+  reachesNetwork: Schema.optional(Schema.Literal(true)),
 } as const;
 // The member with evidence comes first: a client ignores unknown fields in a
 // host answer, so the bare member listed first would accept an evidence-bearing

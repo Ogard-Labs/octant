@@ -86,7 +86,11 @@ export class CodeRuntimeWorkRecorder {
   readonly #actor: typeof EventActor.Type;
   readonly #open = new Map<
     CodeRuntimeWorkUnitId,
-    { readonly version: number; readonly state: CodeRuntimeWorkState }
+    {
+      readonly version: number;
+      readonly state: CodeRuntimeWorkState;
+      readonly reachesNetwork: boolean;
+    }
   >();
 
   constructor(options: CodeRuntimeWorkRecorderOptions) {
@@ -102,8 +106,9 @@ export class CodeRuntimeWorkRecorder {
     readonly id: CodeRuntimeWorkUnitId;
     readonly threadId: CodeThreadId;
     readonly kind: CodeRuntimeWorkKind;
+    readonly reachesNetwork: boolean;
   }): CodeRuntimeWorkRecordOutcome {
-    return this.#record(input.id, input.threadId, input.kind, "running");
+    return this.#record(input.id, input.threadId, input.kind, "running", input.reachesNetwork);
   }
 
   /**
@@ -156,7 +161,13 @@ export class CodeRuntimeWorkRecorder {
     readonly kind: CodeRuntimeWorkKind;
     readonly state: CodeRuntimeWorkState;
   }): CodeRuntimeWorkRecordOutcome {
-    const outcome = this.#record(input.id, input.threadId, input.kind, input.state);
+    const outcome = this.#record(
+      input.id,
+      input.threadId,
+      input.kind,
+      input.state,
+      this.#open.get(input.id)?.reachesNetwork ?? false,
+    );
     if (outcome.status === "recorded" && input.state !== "running" && input.state !== "waiting")
       this.#open.delete(input.id);
     return outcome;
@@ -172,6 +183,7 @@ export class CodeRuntimeWorkRecorder {
     threadId: CodeThreadId,
     kind: CodeRuntimeWorkKind,
     state: CodeRuntimeWorkState,
+    reachesNetwork: boolean,
   ): CodeRuntimeWorkRecordOutcome {
     const current = this.#open.get(id);
     // One record per state change. A turn that reports `running` again after it
@@ -187,6 +199,7 @@ export class CodeRuntimeWorkRecorder {
         kind,
         state,
         updatedAt: this.#clock(),
+        ...(reachesNetwork ? { reachesNetwork: true } : {}),
       });
     } catch {
       // A unit id that is not a work identity is a wiring mistake, not a
@@ -218,7 +231,7 @@ export class CodeRuntimeWorkRecorder {
       // there.
       return { status: "failed", kind: "journal-unavailable" };
     }
-    this.#open.set(id, { version: expectedVersion + 1, state });
+    this.#open.set(id, { version: expectedVersion + 1, state, reachesNetwork });
     return { status: "recorded" };
   }
 }
@@ -242,11 +255,17 @@ export class CodeRuntimeWorkRecorder {
  * same unfinished work twice and let one of the two waits clear while the
  * other did not.
  */
-export function codeRuntimeWorkStarted(
-  command: CodeOperationCommand,
-): { readonly id: CodeRuntimeWorkUnitId; readonly kind: CodeRuntimeWorkKind } | undefined {
+export function codeRuntimeWorkStarted(command: CodeOperationCommand):
+  | {
+      readonly id: CodeRuntimeWorkUnitId;
+      readonly kind: CodeRuntimeWorkKind;
+      readonly reachesNetwork: boolean;
+    }
+  | undefined {
   const plan = codeRuntimeWorkPlan(command);
-  return plan?.starts === true ? { id: plan.id, kind: plan.kind } : undefined;
+  return plan?.starts === true
+    ? { id: plan.id, kind: plan.kind, reachesNetwork: plan.reachesNetwork }
+    : undefined;
 }
 
 /**

@@ -1282,7 +1282,12 @@ export function createCodeOperationRuntime(
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
-          runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
+          runtimeWork.open({
+            id: started.id,
+            threadId: command.threadId,
+            kind: started.kind,
+            reachesNetwork: started.reachesNetwork,
+          }),
         );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
@@ -3541,6 +3546,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         id: active.operationId,
         threadId: active.thread.id,
         kind: "provider-turn",
+        reachesNetwork: false,
       }),
     );
     return turnState("running");

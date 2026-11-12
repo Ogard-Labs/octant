@@ -5008,6 +5008,12 @@ or .zip>` write the same files, built by one host command
   provider session cursors, or earlier events. Already settled turns remain settled;
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
+  Other running Code work has no process left after a restart. A push or pull
+  request step may already have landed on the remote, so it becomes `ambiguous`
+  and keeps the thread Waiting ("could not confirm how the last step ended")
+  rather than letting it read Ready; its runtime-work record says it reaches the
+  network when it opens. File, terminal, test, review, and local Git work, whose
+  result is in the checkout, becomes `interrupted`.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed
