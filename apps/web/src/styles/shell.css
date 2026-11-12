@@ -3446,7 +3446,7 @@ form > .work-composer-adapter__attachments {
   white-space: nowrap;
 }
 
-.browser-workspace__control-state svg {
+.browser-workspace__control-spinner {
   animation: browser-spin var(--oct-motion-spin) linear infinite;
 }
 
@@ -4584,13 +4584,24 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
-/* A tool tile can be as narrow as 280px, where the row's words no longer fit
-   beside the history capsule: the profile and availability controls keep their
-   icon, name, and tooltip and drop their words, and who holds the page keeps
-   its words but ends in an ellipsis instead of running over its neighbour.
-   The availability sentence is the longest of them (157px) and the address
-   field must keep 160px, so its words go first, below 640px, instead of being
-   cut to "Agent can use t…". The profile word (51px) goes below 520px so the field keeps 160px. */
+/* The Browser's toolbar at narrow widths. These are container-width rules, so
+   they apply wherever the Browser is that narrow, in a dock tile or in a full
+   pane, and the same control at the same width looks the same.
+
+   Widths measured at 1x: history 88, profile 30 bare and 157 with words ("Task
+   default: Private"), availability 12 bare and 173 with its sentence, the
+   holder 24 as a glyph and 97 with words ("Preview · 5m idle"), Take over 24
+   and 85 with words, Screenshot 28, Stop 28, plus 28 and a gap for the desktop
+   app's "Open in default browser", which the web render lacks. The budget
+   below includes it. Gaps are 8px, 4px under 420px; side padding 12px, 8px
+   under 320px. The dock sets the rail's gap and padding on a rule of its own,
+   so the rules that change them name `.browser-workspace` as well. */
+
+/* No page open. The row is the history capsule, the profile, the address, who
+   may use the page, and who holds it. */
+
+/* The availability sentence is 173px and the address must keep 160px: its
+   words go below 640px instead of being cut to "Agent can use t…". */
 @container browser-workspace (max-width: 639px) {
   .browser-workspace__availability-label {
     display: none;
@@ -4606,6 +4617,8 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
+/* The profile's words (51px) go below 520px so the address keeps 160px, and
+   the holder ends in an ellipsis rather than running over its neighbour. */
 @container browser-workspace (max-width: 519px) {
   .browser-profile-control {
     padding: 0 var(--oct-space-2);
@@ -4626,102 +4639,12 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
 }
 
-/* With a page open the row also holds who holds the page, Take over, Screenshot
-   and Stop. Beside those the address field was 26 to 90px wide from 360px to
-   720px. Below 880px it takes its own row at the full width, and below 780px
-   the words that no longer fit whole (the profile, the availability sentence,
-   Take over) give way before anything is cut. Each control keeps its name and
-   tooltip. */
-@container browser-workspace (max-width: 879px) {
-  .browser-workspace__chrome:has(.browser-workspace__take-over) {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__omnibox {
-    order: 1;
-    flex-basis: 100%;
-  }
-}
-
-/* With a page open and less than 360px, even the holder's words do not fit
-   beside Take over, Screenshot and Stop. It keeps a 24px glyph; its words stay
-   for assistive technology and in its title. Without this the holder ended in
-   an ellipsis and Screenshot and Stop dropped to a row of their own. */
+/* Below 360px the address would be a sliver beside the controls, so it takes a
+   second row at the full width. */
 @container browser-workspace (max-width: 359px) {
-  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__control-state {
-    justify-content: center;
-    min-width: 24px;
-    min-height: 24px;
-  }
-  .browser-workspace__chrome:has(.browser-workspace__take-over)
-    .browser-workspace__control-state
-    > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__control-glyph {
-    display: block;
-    flex: none;
-  }
-}
-
-/* Under 320px the 12px side padding is what pushes the last control down. */
-@container browser-workspace (max-width: 319px) {
-  .browser-workspace__chrome:has(.browser-workspace__take-over),
-  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
-    padding-inline: 8px;
-  }
-}
-
-/* A wordless Take over is still a 24px target. */
-@container browser-workspace (max-width: 779px) {
-  .browser-workspace__take-over {
-    min-width: 24px;
-    min-height: 24px;
-  }
-}
-
-/* Two rows (controls, then the address) cost 114px at three rows and 82px at
-   two; trimming the rail's padding and the gap leaves a 240px tile's page
-   its 120px. */
-@container browser-workspace (max-width: 879px) {
-  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
-    padding-block: 2px;
-    row-gap: 2px;
-  }
-  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__omnibox {
-    height: 28px;
-  }
-}
-
-/* At 360px the row is 12px too long by a gap's worth and Stop dropped to a
-   line of its own, so the gaps tighten. */
-@container browser-workspace (max-width: 419px) {
-  .browser-workspace__chrome:has(.browser-workspace__take-over),
-  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
-    column-gap: 4px;
-  }
-}
-
-@container browser-workspace (max-width: 779px) {
-  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-profile-control span,
-  .browser-workspace__chrome:has(.browser-workspace__take-over)
-    .browser-workspace__availability-label,
-  .browser-workspace__take-over-label {
-    display: none;
-  }
-}
-
-/* Below this the address field would be squeezed to a sliver beside the other
-   controls, so the controls keep the first line and it takes the second at the
-   full width. */
-@container browser-workspace (max-width: 359px) {
-  .browser-workspace__chrome {
+  .browser-workspace .browser-workspace__chrome {
     flex-wrap: wrap;
-    row-gap: 4px;
+    row-gap: var(--oct-space-1);
   }
   .browser-workspace__omnibox {
     order: 1;
@@ -4729,5 +4652,112 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   }
   .browser-workspace__control-state {
     max-width: 32cqw;
+  }
+}
+
+/* A page open (data-page="open"). The row also holds Take over, Screenshot and
+   Stop. Words go in this order as the width falls: the availability sentence,
+   the profile's words, Take over's words, the holder's words. Each threshold
+   is the width at which the row with those words and the address's 160px (or,
+   once the address wraps, the words alone) fits on one line, plus the 36px
+   budget for the desktop app's extra button. Each control keeps its name and
+   tooltip when its words are hidden. */
+
+/* The address fits beside every control and every word from 978px: row one's
+   764 + a gap + the address pill, 206px for a 160px field. Below it the
+   address takes its own row. */
+@container browser-workspace (max-width: 977px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    flex-wrap: wrap;
+    row-gap: var(--oct-space-1);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__omnibox {
+    order: 1;
+    flex-basis: 100%;
+  }
+}
+
+/* With every word shown, row one is 764px: the availability sentence (161px
+   more than its glyph) goes first, below 764px. */
+@container browser-workspace (max-width: 763px) {
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__availability-label {
+    display: none;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability {
+    flex: none;
+    max-width: none;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability > button {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+/* The profile's words (127px more than its glyph) go next, below 603px. */
+@container browser-workspace (max-width: 602px) {
+  .browser-workspace__chrome[data-page="open"] .browser-profile-control span {
+    display: none;
+  }
+}
+
+/* "Reclaim locally" is the longest button label (86px more than its glyph);
+   with Take over beside it, its words go below 565px. */
+@container browser-workspace (max-width: 564px) {
+  .browser-workspace__reclaim-label {
+    display: none;
+  }
+}
+
+/* Take over's and Hand back's words (61px more) go below 476px, and the bare
+   button stays a 24px target. */
+@container browser-workspace (max-width: 475px) {
+  .browser-workspace__take-over {
+    min-width: 24px;
+    min-height: 24px;
+  }
+  .browser-workspace__take-over-label {
+    display: none;
+  }
+}
+
+/* Under 420px the gaps tighten to 4px: at 8px the row is 24px too long at 400. */
+@container browser-workspace (max-width: 419px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    column-gap: var(--oct-space-1);
+  }
+}
+
+/* The holder's words (73px more than its glyph) go last, below 390px. It keeps
+   a 24px glyph; its words stay for assistive technology and in its title. */
+@container browser-workspace (max-width: 389px) {
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state {
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-glyph {
+    display: block;
+    flex: none;
+  }
+}
+
+/* At 280px the row with the desktop app's extra button is 306px. The history
+   and icon buttons shrink to 24px (the smallest target) and the side padding
+   to 4px, which makes it 275px. */
+@container browser-workspace (max-width: 319px) {
+  .browser-workspace .browser-workspace__chrome[data-page="open"] {
+    padding-inline: var(--oct-space-1);
+  }
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__history button,
+  .browser-workspace__chrome[data-page="open"] .browser-workspace__close {
+    width: 24px;
+    height: 24px;
   }
 }
