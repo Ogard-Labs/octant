@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Octant tokens: minimum recipes</title>
+    <!-- Loads only the generated tokens and the recipes. No network, no build.
+         Open with #light to see the light theme. -->
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="recipes.css" />
+    <style>
+      /* Layout of this page only; every value is a token. */
+      .demo {
+        display: grid;
+        gap: var(--oct-space-8);
+        max-width: calc(var(--oct-space-12) * 24);
+        padding: var(--oct-space-8) var(--oct-space-6);
+        margin: 0 auto;
+      }
+      .demo__section {
+        display: grid;
+        gap: var(--oct-space-3);
+      }
+      .demo__row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--oct-space-2);
+      }
+      .demo__split {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--oct-space-6);
+      }
+      .demo__ground {
+        display: grid;
+        padding: var(--oct-space-6);
+        border-radius: var(--oct-radius-md);
+        background: linear-gradient(
+          135deg,
+          var(--octant-palette-blue),
+          var(--octant-palette-purple) 55%,
+          var(--octant-palette-pink)
+        );
+      }
+      .demo__stack {
+        display: grid;
+        gap: var(--oct-space-1);
+      }
+      .demo__field {
+        width: calc(var(--oct-space-12) * 5);
+      }
+    </style>
+  </head>
+  <body class="oct-root">
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></symbol>
+      <symbol id="i-search" viewBox="0 0 16 16">
+        <circle cx="7" cy="7" r="4.25" />
+        <path d="m10.25 10.25 3 3" />
+      </symbol>
+      <symbol id="i-chat" viewBox="0 0 16 16">
+        <path
+          d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5A1.5 1.5 0 0 1 11.5 11H7l-3 2.5V11A1.5 1.5 0 0 1 3 9.5z"
+        />
+      </symbol>
+      <symbol id="i-code" viewBox="0 0 16 16"><path d="m6 5-3 3 3 3M10 5l3 3-3 3" /></symbol>
+      <symbol id="i-gear" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r="2" />
+        <path
+          d="M8 2.5v1.5M8 12v1.5M2.5 8H4M12 8h1.5M4.1 4.1l1 1M10.9 10.9l1 1M11.9 4.1l-1 1M5.1 10.9l-1 1"
+        />
+      </symbol>
+    </svg>
+
+    <main class="demo">
+      <header class="demo__section">
+        <h1 class="oct-type-title">Octant tokens</h1>
+        <p class="oct-type-row-detail">
+          Minimum recipes built only from <code class="oct-type-meta-mono">tokens.css</code>, dark
+          by default.
+          <button class="oct-button oct-button--ghost" id="toggle" type="button">
+            Switch theme
+          </button>
+        </p>
+      </header>
+
+      <section class="demo__section">
+        <h2 class="oct-type-section-label">Buttons</h2>
+        <div class="demo__row">
+          <button class="oct-button oct-button--primary" type="button">Primary</button>
+          <button class="oct-button" type="button">Secondary</button>
+          <button class="oct-button oct-button--ghost" type="button">Ghost</button>
+          <button class="oct-button" type="button" disabled>Disabled</button>
+          <button class="oct-icon-button" type="button" aria-label="Add">
+            <svg><use href="#i-plus" /></svg>
+          </button>
+          <button class="oct-icon-button" type="button" aria-label="Search">
+            <svg><use href="#i-search" /></svg>
+          </button>
+          <input class="oct-field demo__field" placeholder="Search threads" aria-label="Search" />
+        </div>
+      </section>
+
+      <div class="demo__split">
+        <section class="demo__section">
+          <h2 class="oct-type-section-label">Card with divided rows</h2>
+          <div class="oct-card" style="align-self: start">
+            <div class="oct-card__row">
+              <span class="oct-type-row-label">Interface size</span>
+              <span class="oct-type-row-detail" style="margin-left: auto">13px</span>
+            </div>
+            <div class="oct-card__row">
+              <span class="oct-type-row-label">Reduce motion</span>
+              <span class="oct-type-row-detail" style="margin-left: auto">System</span>
+            </div>
+            <div class="oct-card__row">
+              <span class="oct-type-row-label">Transparency</span>
+              <span class="oct-type-row-detail" style="margin-left: auto">Frosted</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="demo__section">
+          <h2 class="oct-type-section-label">Menus: opaque, and frosted over a ground</h2>
+          <div class="demo__ground">
+            <div class="demo__row" style="align-items: flex-start">
+              <div class="oct-menu" role="menu">
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-chat" /></svg>New chat
+                </div>
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-code" /></svg>New code thread
+                </div>
+                <div class="oct-menu__rule"></div>
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-gear" /></svg>Settings
+                </div>
+              </div>
+              <div class="oct-menu oct-menu--frosted" role="menu">
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-chat" /></svg>New chat
+                </div>
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-code" /></svg>New code thread
+                </div>
+                <div class="oct-menu__rule"></div>
+                <div class="oct-menu__row" role="menuitem">
+                  <svg><use href="#i-gear" /></svg>Settings
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="demo__section">
+        <h2 class="oct-type-section-label">Panes divided by one hairline</h2>
+        <div class="oct-panes">
+          <nav class="oct-panes__sidebar" aria-label="Sidebar">
+            <div class="oct-panes__band" style="padding: 0 var(--oct-space-2)">
+              <span class="oct-type-page-title">Octant</span>
+              <button
+                class="oct-icon-button"
+                type="button"
+                aria-label="New"
+                style="margin-left: auto"
+              >
+                <svg><use href="#i-plus" /></svg>
+              </button>
+            </div>
+            <div class="demo__stack" style="padding-top: var(--oct-space-2)">
+              <div class="oct-nav-row" aria-current="page">
+                <span class="oct-nav-row__icon"
+                  ><svg><use href="#i-chat" /></svg></span
+                >Chat
+              </div>
+              <div class="oct-nav-row">
+                <span class="oct-nav-row__icon"
+                  ><svg><use href="#i-code" /></svg></span
+                >Code
+              </div>
+              <div class="oct-nav-row">
+                <span class="oct-nav-row__icon"
+                  ><svg><use href="#i-gear" /></svg></span
+                >Settings
+              </div>
+            </div>
+          </nav>
+          <div class="oct-panes__stage">
+            <div class="oct-panes__band">
+              <span class="oct-type-page-title">Chat</span>
+              <span class="oct-type-meta">Today</span>
+            </div>
+            <div class="oct-panes__body">
+              <p class="oct-type-row-detail oct-selectable">
+                Panes are flat and meet at one soft hairline. Depth is kept for the objects on them:
+                controls, cards and menus.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      // Page chrome for the demo only; the tokens need no script.
+      (function () {
+        var root = document.documentElement;
+        function apply(theme) {
+          root.setAttribute("data-theme", theme);
+        }
+        if (location.hash === "#light") apply("light");
+        document.getElementById("toggle").addEventListener("click", function () {
+          apply(root.getAttribute("data-theme") === "light" ? "dark" : "light");
+        });
+      })();
+    </script>
+  </body>
+</html>
