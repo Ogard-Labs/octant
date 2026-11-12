@@ -593,7 +593,14 @@ export class ThreadMessageQueueService {
       state = this.#store.state(scope);
       head = state.items[0];
       if (head === undefined) return;
-    } else if (inspection.tail?.status === "completed" && state.continuedPast !== undefined) {
+    } else if (
+      inspection.tail?.status === "completed" &&
+      state.continuedPast !== undefined &&
+      // A tail that completed before the restart says nothing about the
+      // continuation after it; only the settling of a message this queue
+      // dispatched since then restores that allowance.
+      state.continuedPast !== CONTINUED_PAST_RESTART
+    ) {
       const { continuedPast: _continuedPast, ...rest } = state;
       if (this.#store.write(rest) !== "applied") return;
       state = this.#store.state(scope);

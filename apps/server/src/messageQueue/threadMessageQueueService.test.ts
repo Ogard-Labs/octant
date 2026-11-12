@@ -1305,6 +1305,28 @@ describe("queue after a failure or a restart", () => {
     expect((await snapshot(reopened.service)).holdReason).toBeUndefined();
   });
 
+  it("holds on a failure that follows its restart continuation, though an older turn had completed before the restart", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, enqueue(1));
+    const p = port();
+    p.setInspection({
+      status: "ready",
+      binding: "authorized-target",
+      tail: { id: "turn-before-restart", status: "completed" },
+    });
+    const reopened = await restart(f, p);
+    await reopened.service.tick();
+    expect(p.admit).toHaveBeenCalledTimes(1);
+
+    p.reconcile.mockResolvedValue({ status: "failed", ordinaryFailure: true });
+    p.setInspection(failedTurn("turn-after-restart"));
+    await reopened.service.tick();
+    await reopened.service.tick();
+    expect(p.admit).toHaveBeenCalledTimes(1);
+    expect((await snapshot(reopened.service)).holdReason).toBe("failed");
+  });
+
   it("sends no message twice across a restart", async () => {
     const f = fixture();
     const first = enqueue();
