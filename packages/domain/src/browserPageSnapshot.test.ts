@@ -150,6 +150,14 @@ describe("a page dialog's answer", () => {
         { answer: "dismissed", answeredBy: "rule", textWithheld: "credential-protected" },
       );
     }
+    // A word that only contains a credential word is not one.
+    for (const message of ["Discard changes? Type YES to confirm.", "Enter the postcard message"]) {
+      expect(answerBrowserDialog("prompt", message, { action: "accept", text: "YES" })).toEqual({
+        answer: "accepted",
+        answeredBy: "agent",
+        promptText: "YES",
+      });
+    }
     // Declining such a prompt types nothing, so the agent's answer stands.
     expect(answerBrowserDialog("prompt", "Enter your password", { action: "dismiss" })).toEqual({
       answer: "dismissed",

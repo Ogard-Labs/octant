@@ -124,7 +124,7 @@ export type BrowserPageReadResult =
  */
 export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageReadResult {
   const credentialHint =
-    /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/;
+    /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|\bcards?\b|ssn|secret|token|api.?key)/;
   const clip = (value: string, limit: number): string => {
     const flat = value.replace(/\s+/g, " ").trim();
     return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`;
@@ -1480,7 +1480,7 @@ export function dialogType(value: string): keyof typeof BROWSER_DIALOG_POLICY {
  * evidence of what its text would be.
  */
 const CREDENTIAL_PROMPT =
-  /(?:password|passcode|passphrase|one-time|otp|\bpin\b|credit|card|ssn|secret|token|api.?key)/i;
+  /(?:password|passcode|passphrase|one-time|otp|\bpin\b|credit|\bcards?\b|ssn|secret|token|api.?key)/i;
 
 export interface BrowserDialogDecision {
   readonly answer: "accepted" | "dismissed";
