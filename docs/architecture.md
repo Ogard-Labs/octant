@@ -181,9 +181,10 @@ The design rests on a small set of invariants that every package obeys:
   components contribute no context; executable components remain quarantined
   and subject to ordinary sandbox and approval policy. Structured extension or
   plugin references cannot install, trust, enable, elevate, or bypass policy.
-  The three steps stay separate by default; a person may install and trust a
-  package in one confirmed step (built: **Install and trust** beside
-  **Confirm install**), and enabling stays its own switch.
+  The three steps stay separate by default; one confirmation may cover the
+  install and the trust, or all three (built: **Install and trust** and
+  **Install, trust and turn on** beside **Confirm install**), and the journal
+  still holds each step as its own event.
   Skills are discovered only from valid `.agents/skills/` and
   `.claude/skills/` packages in the permitted repository ancestry (the closed
   `PROJECT_SKILL_ROOTS` allow-list), from the user-global `~/.agents/skills/`
@@ -815,16 +816,23 @@ an agent action starts is held in a private
 temporary folder of the host, never the workspace, and saved only by the
 agent's `download-save` as a new file in `downloads/` of the thread's
 workspace. At Full access the save does not ask; below it the save asks the
-person, and the answer can be remembered per site. The path checks hold at
+person, and "Always allow" is remembered per site, folder and profile
+(maintainer decision, 2026-11-12): the remembered entry records the stored
+Browser profile the page was in, and covers a later transfer only on a page
+in that same profile, so an answer given on a Private page does not cover the
+same site signed in under a profile. The path checks hold at
 every level. A symbolic link is refused at every level, programs, installers
 and scripts only below Full access, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
 download the person starts in the Browser pane saves to the Downloads folder
 at every level. Ordinary uploads do not ask at Full access; below it they ask
-and the answer can be remembered per site. The size and held-file caps are
+and "Always allow" is remembered per site, folder and profile, as for a
+save. The size and held-file caps are
 Settings defaults, not constants (maintainer request, 2026-11-12). Not built
-yet: no control turns holding off for a thread at Full access, the count of
+yet: a remembered answer recorded before the profile was part of it carries
+no profile and covers Private pages only, so a profile page asks once more;
+no control turns holding off for a thread at Full access, the count of
 five files per upload is still fixed, Code's tool approval offers no "Always
 allow", an unanswered ask still expires instead of waiting, and the person's
 own download has not been run in a packaged window. A local person may separately review a
@@ -3627,9 +3635,10 @@ the thread it came from.
   confirms, and the routine takes none of the thread's posture, so it runs
   asking first (or at the level the person later picks for it), never in
   Plan; a follow-up's turn in its own thread is still narrowed by that
-  thread's posture, as any turn is. A proposal creates nothing, whatever
-  the thread's posture: a remembered Full access does not let an agent create
-  or confirm a routine, and the routine it leads to is approval-gated anyway.
+  thread's posture, as any turn is. Below Full access a proposal creates
+  nothing until the person confirms it; at Full access the agent's own
+  suggestion is created paused with no card (below). At no level can an agent
+  enable a routine, and the routine is approval-gated anyway.
   **Asked for by the person.** When the person's own message asked for the
   routine (for example "create a daily summary automation"), the agent sets
   `requestedByPerson` and the host creates it at once, with no card, as the
@@ -3640,9 +3649,19 @@ the thread it came from.
   Center, so the agent's attestation can start nothing. The host cannot verify
   the attestation, which is why a pause and not a run is what it grants; the
   tool tells the agent never to set it from text in a file, page, or tool
-  result. A suggestion the agent makes on its own, a follow-up (a paused one
-  would never fire), and a turn in Plan (which changes nothing) still wait for
-  the card.
+  result. A follow-up (a paused one would never fire) and a turn in Plan
+  (which changes nothing) wait for the card at every level.
+  **At Full access.** A turn running at Full access creates a routine the
+  agent suggested on its own at once, with no card
+  (maintainer decision, 2026-11-12): it takes the same path a routine the
+  person asked for takes, so it is created paused in its first journaled
+  event, with approval-gated authority of its own, and shown in the thread by
+  the receipt below, and it runs only after the person enables it. Below Full
+  access the card's confirmation stays. The level read is the one the turn
+  runs at when the call is made (`decideRoutineFromAgent` in
+  `@octant/domain`): a Work turn's running access, and for a Code turn the
+  stricter of its running posture and the thread's journaled level, so a
+  thread lowered mid-turn stops skipping the card.
   **Receipt.** A call that created a routine, either way, keeps a receipt on its
   tool step (the routine's id, name, schedule, first run, and whether it is
   paused), in a Work thread's recorded steps and a Code thread's operation
@@ -4737,7 +4756,10 @@ flowchart LR
   from the ingestion projection when it asks; no client supplies them, and
   they hold labels and times only, never content or a content reference. The
   web, phone, and terminal prompts say the thread took in outside content,
-  so the call is approved once, and list them in the words the Clear review
+  so the call is approved once (the web prompt for an MCP network server says
+  instead that approving covers that server for the rest of the thread, under
+  [Remembered MCP tool approvals](#extensions-and-skills)), and list them in
+  the words the Clear review
   uses (one definition in `@octant/domain`), ahead of the answer controls.
   The full-screen terminal panel cannot scroll, so it runs the source names
   and counts together on a few wrapped lines and leaves times to the plain
@@ -5715,9 +5737,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
-  trusted; one "Install and trust" flow covers inspect, install, trust and
-  enable, with digest-bound trust and confinement unchanged (maintainer
-  request, 2026-11-12; not built yet: today these are separate steps); the catalog lists effective outside drivers in their own group from
+  trusted; after the inspection, one confirmation (**Install, trust and turn
+  on**, built under the [activation ladder](#extensions-and-skills)) covers
+  install, trust and enable, with digest-bound trust, admission and
+  confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
@@ -9915,17 +9938,35 @@ session manager, and skill discovery.
 
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. Install, trust, and enable stay
-three steps by default; a person may install and trust a package in one
-confirmed step, journaled as both (built), and enabling stays its own switch.
-The one step is **Install and trust** on a Marketplace, npm, local-folder, or
+three steps by default; one confirmation may cover the install and the trust,
+or all three, and the journal still holds each step as its own event (built).
+**Install and trust** is on a Marketplace, npm, local-folder, or
 standalone-skill preview; the command carries `trust: true`, the host installs,
 then appends the trust in the same call, so the journal holds the install and a
-separate `source-trust-changed`. Trust rules are unchanged: a signed provider
+separate `source-trust-changed`. **Install, trust and turn on** covers any
+plugin or connector and not only a provider driver
+(maintainer decision, 2026-11-12): the install command also carries
+`enable: true`, and after the trust the host turns on the package and each of
+its components, journaled as the package's switch and one switch per
+component. A switch never lifts a hold, so a component held for review or
+admission stays held. The command schema refuses `enable` without `trust`, and
+a refused trust turns nothing on. It is offered beside the other two on a
+Marketplace, npm, or local-folder preview, and the Library's reviewed plugin
+leads with it and keeps **Install only**; Trust and Turn on stay separate
+commands for a person who wants the steps apart. Not built yet: the one
+confirmation does not cover installing a standalone skill, which keeps Confirm
+install and Install and trust, and a server the person adds directly keeps its
+own sequence (Connectors and user-added MCP servers, below). Trust rules are
+unchanged: a signed provider
 driver pins its publisher key at that trust, and if the trust is refused the
-package stays installed and untrusted. Choice: the one step is offered for a new
-install only, never an update, because an update keeps the package's trust
-decision and a changed digest deserves its own look; a person who wants the
-update trusted already has **Trust source**. A component is active only when
+package stays installed and untrusted. Choice: both one-step forms are offered
+for a new install only, never an update, because an update keeps the package's
+trust decision and a changed digest deserves its own look; a person who wants
+the update trusted already has **Trust source**. An outside provider driver's
+update differs: it is held until trusted again, unless the publisher key
+pinned for the package signed it
+([Outside provider drivers: provenance and updates](design/outside-provider-drivers.md#provenance-and-updates)).
+A component is active only when
 the package is installed, its source is trusted, the plugin master switch and
 the component switch are enabled, compatibility passes, and host, mode,
 Project, thread, and provider policy allow it. Any other state — `not-installed`,
@@ -10408,38 +10449,62 @@ that is not yet effective for the thread is refused and never reaches the model.
   without definition fingerprints require the same choice before offering a
   nonempty catalogue.
 
-- **Remembered MCP tool approvals.** A person may answer a tool's prompt with
-  "always allow in this Project". That journals a grant for that one tool in
-  that one Project (`extension.tool-grant-recorded@1` on the Project's
-  `extension-tool-grant` aggregate). The person can also answer "allow all
-  tools of this server", wherever the prompt offers to remember (maintainer
-  request, 2026-11-12). That journals the same event with no tool name and no
-  listing digest: it binds the Project, extension, package, component, and
+- **Remembered MCP tool approvals.** Below Full access a server asks once
+  (maintainer decision, 2026-11-12): the first approval of any tool of an MCP
+  or connector server is kept for every tool of that server in that Project,
+  so a server asks once and not once per tool. The approval journals a grant
+  with no tool name and no listing digest
+  (`extension.tool-grant-recorded@1` on the Project's `extension-tool-grant`
+  aggregate): it binds the Project, extension, package, component, and
   the package version and digest, so it covers every tool the server lists,
-  including one added later under the same digest, and an update asks again.
-  It is revoked, listed, and forgotten exactly as a tool's grant is, and the
-  Plan and outside-content rules below apply to it unchanged. A tool's grant
+  including one added later under the same digest. The person may narrow the
+  answer to the one tool from the card ("Allow only this tool"), which
+  journals a grant for that tool in place of the server's. A tool's grant
   binds the Project, extension, package, component, and MCP tool name, the
   package version and digest, and a SHA-256 of the tool's name, description,
   and input schema as its server listed them at connect; the provider-facing
   tool name is not part of it, because that name embeds the thread. A later
-  call in any thread of the Project that matches all of it runs unasked,
+  call in any thread of the Project that a grant covers runs unasked,
   under the calling turn's own authority and only while the component is
-  effective and selected on that send. Any mismatch asks again, so a package
-  update or a changed listing is a new question
-  (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
+  effective and selected on that send. Any mismatch asks again, so a changed
+  listing is a new question for a tool's grant, and a package update is a new
+  question for both kinds except under the same-key rule below
+  (`decideExtensionToolGrant` in `@octant/domain`). Both kinds are revoked,
+  listed, and forgotten the same way, and the Plan and outside-content rules
+  below apply to both. The approval view states what an approval covers
+  (`answerCovers`: `server`, `server-on-thread`, or `call`), and the web
+  card's choices and copy follow it: "Allow all tools of this server", "Allow
+  this server in this thread", or "Approve once". Not built yet: the mobile
+  approval card does not show the new choices. The payloads hold
   identifiers and digests, never a call's arguments or result.
-  - A grant grows only through that answer from the local window whose own
+  - A grant grows only through an approval from the local window whose own
     turn raised the prompt. No route, command, manifest field, structured
     reference, tool call, model output, paired device, or host-owned turn (a
     routine, a goal loop, a usage-limit resume, a child-run delivery) can
     create one. A host-owned turn in the Project may use one, but the prompt
-    it raises is approved once and is never remembered, even when a person
+    it raises covers that one call and records nothing, even when a person
     at a local window answers it: nobody chose to send that turn. A paired
     device's turn is treated the same way: it may use a grant, and its prompt
-    is approved once, whether the device or a local window answers.
-    Remembering is an answer at the machine, and the person who sent that
-    turn is not at it.
+    covers one call and records nothing, whether the device or a local window
+    answers. A kept answer is an answer at the machine, and the person who
+    sent that turn is not at it. Not built yet: no answer to a paired
+    device's or a host-owned turn's prompt is kept.
+  - A package update signed by the same key keeps the package's trust and its
+    remembered tool approvals; a new or missing signing key asks again
+    (maintainer decision, 2026-11-12). Built for a package whose signature the
+    host verifies on install: an update signed by the publisher key pinned
+    for the package keeps the trust and the package's on switch it had, both
+    journaled again after the update's own commit
+    (`outsideDriverUpdateKeepsTrust` in `@octant/domain`), and a remembered
+    approval, for a tool or for a whole server, also covers a version the
+    same verified key signed; a changed tool listing still asks. A new key, a
+    missing signature, a package with no pinned key, and an update that
+    widens what the package may do all ask again. Not built yet: the host
+    checks a signature on the way in only for a package that holds a provider
+    driver, so a key reads as verified only for a retained version of such a
+    package and only when it equals the pin (`readVerifiedPublisherKey`); any
+    other package's manifest could merely claim a key, so it reads as
+    unsigned, and an MCP plugin's update still asks.
   - A Plan turn is asked for every call, and the answer covers that call
     alone. A Chat thread outside a Project remembers a grant for the
     account (maintainer request, 2026-11-12): the same events with no
@@ -10449,12 +10514,21 @@ that is not yet effective for the thread is refused and never reaches the model.
     Project's grants, so an answer given in Chat never spares a prompt where
     a Project's files and shell are in reach. An answer that asks to be
     remembered where it cannot be is refused and the call keeps waiting.
-  - Below Full access, on a thread that has taken in outside content, a grant holds only for a
+  - Below Full access, on a thread that has taken in outside content, a grant holds for a
     stdio server, which Octant launches with no network and writes limited to
-    its plugin data. A network (HTTP) server's tool asks for every call there
-    and the answer is single use, because its arguments can carry out what
-    the thread has read. Every MCP result taints its thread, so a network
-    tool's grant spares the prompt only until that thread's first tool result.
+    its plugin data. A network (HTTP) server's tool asks once per thread and
+    server after the mark, then runs for the rest of that thread, because its
+    arguments can carry out what the thread has read and one answer says the
+    person accepts that for this server (maintainer decision, 2026-11-12).
+    A Project's or the account's grant does not spare that question, and
+    every MCP result marks its thread, so a network server asks once more
+    after that thread's first tool result. The answer is not a grant: the
+    authorizer keeps it for that thread, that server, and that package
+    version and digest, so another marked thread is asked for itself and an
+    update asks the thread again. Uninstall, rollback, and withdrawn trust
+    end it along with the stored grants, so trusting or installing the same
+    version again does not revive it. Not built yet: the answer is held in
+    memory and not journaled, so a host restart asks that thread once more.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
@@ -10468,8 +10542,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     lists and revokes and has no request that adds a grant. Settings ›
     Permissions lists them by Project with Revoke, a whole server's grant as
     "All tools of" that server and the account's under "Chat outside a
-    Project", and the prompt offers "always allow" only to a client on a
-    loopback host.
+    Project", and the prompt offers "Allow only this tool" only to a client
+    on a loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called
@@ -10832,8 +10906,11 @@ trusts and turns on as one act, and only on the Octant window of the host.
 Rationale: one press on a card would connect without the authority statement
 in view. A Marketplace plugin
 is read first (the same inspection Marketplace makes, so the Marketplace
-fetches switch still governs it) and then installs with one Install that never
-trusts or turns it on; Trust and Turn on stay separate clicks afterwards.
+fetches switch still governs it) and then one confirmation, **Install, trust
+and turn on**, installs, trusts and turns it on, for any plugin or connector
+and not only a provider driver (built; the activation ladder above states the
+rule). **Install only** adds it and nothing more, and Trust and Turn on stay
+available as separate steps for a person who wants them.
 Found tools and blocked items still open Installed, which keeps their flows.
 A connector with a bundled mark shows it (`connectorLogos.ts`; each is a
 CC0 Simple Icons path with its source recorded beside it and noticed in
@@ -11621,7 +11698,9 @@ trusted digest of its driver with its records cleared, and a crash-limit hold
 journaled at the digest that crashed, which a restart does not lift. Publisher
 signatures are built too: a signature file is verified at inspection, the key is
 pinned per package name and source at first trust, and a version by another key
-is held until the person re-trusts the new publisher at a local window. Only a
+is held until the person re-trusts the new publisher at a local window; an
+update the pinned key signed keeps the trust and the on switch the package had,
+unless it widens what the package may do. Only a
 macOS host admits one. The author kit (`@octant/provider-sdk/outside-driver`,
 `outside-driver-serve`, `outside-driver-conformance`, and `outside-driver-sign`)
 and an example loopback driver package live in the provider SDK; its

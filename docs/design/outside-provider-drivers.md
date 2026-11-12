@@ -684,7 +684,9 @@ the fail-closed option.
   added from, and the selection's version or digest differs from the bound
   one (`resolveOutsideDriverRebind` in `@octant/plugin-host`). Every install,
   update, and rollback clears trust and holds the package, so none of them
-  moves an instance by itself, and no command, route, or remote client can
+  moves an instance by itself (the one exception is an update the pinned
+  publisher key signed, under [Provenance and updates](#provenance-and-updates),
+  which keeps the trust), and no command, route, or remote client can
   ask for a move. Withdrawn trust moves nothing. A package whose new version
   drops or renames the component, or that is another package, never moves
   the instance; it stays `superseded` until the person removes it.
@@ -748,7 +750,14 @@ the fail-closed option.
   it, so the next use starts a new process, and clears their Verify tools
   records. Rollback uses the existing `rollback-package`, is held the same
   way, and moving back on trust also clears them
-  ([Rebind rules](#rebind-rules)). _Rationale: an earlier draft of this
+  ([Rebind rules](#rebind-rules)). An update signed by the publisher key
+  pinned for the package keeps the trust and the on switch the package had
+  (maintainer decision, 2026-11-12): the host journals the trust, and the on
+  switch when it was on, again after the update's own commit, so the journal
+  shows why the new version runs (`outsideDriverUpdateKeepsTrust` in
+  `@octant/domain`). A new key, a missing signature, a package with no pinned
+  key, and an update that widens what the package may do stay held and ask
+  again. _Rationale: an earlier draft of this
   bullet kept the trusted version serving while an update was held; the
   admission rules built in slice 5 hold the package whenever its selection
   changes, which is the fail-closed reading, and this bullet follows them._

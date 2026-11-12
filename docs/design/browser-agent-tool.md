@@ -293,7 +293,7 @@ the page, the workspace, or the person is reached.
 
 Below Full access a file leaves this computer through a page only after a
 person approves its file authority. Ordinary uploads use the thread's workspace
-and an answer the person may remember for the site; a recurring routine may
+and an answer the person may remember for the site, folder and profile; a recurring routine may
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
@@ -324,12 +324,20 @@ ask still expires instead of waiting.
 - For an ordinary upload below Full access, the person is asked, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once, or, with "Always allow", later uploads
-  to that site from this thread's workspace. The remembered answer is one
-  direction, one site and one workspace folder; it is journaled in the shell
+  to that site from this thread's workspace on a page in the same Browser
+  profile. The remembered answer is one direction, one site, one workspace
+  folder and one profile (maintainer decision, 2026-11-12): the entry
+  records the stored profile the page was in, a later transfer is covered only
+  on a page in that same profile, and an entry with no profile covers Private
+  pages alone, because a site's signed-in session differs by profile and an
+  answer about a Private page says nothing about the same site signed in as
+  the person. It is journaled in the shell
   settings like a remembered site, grows only through the approval answer of a
   window of this computer (a paired device's answer covers one upload), lifts
-  no path or size check, and is listed with a Forget control in Settings ›
-  Permissions › Browser uploads and downloads. An unanswered ask waits in Needs
+  no path or size check, and is listed, with its profile, with a Forget control
+  in Settings › Permissions › Browser uploads and downloads. Not built yet: an
+  answer remembered before the profile was recorded carries none, so it covers
+  Private pages only and a profile page asks once more. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work asks in the thread's
   Browser approval card; Code asks in the thread's tool approval.
 - Only the agent tool can upload: it resolves the files and holds the answer,
@@ -343,7 +351,7 @@ ask still expires instead of waiting.
   explicit recurring manifest. At Full access the same agent already holds an
   unwrapped shell and an open network, so an ask on an upload protects nothing
   the shell does not already reach; below it the ask stays and can be
-  remembered per site.
+  remembered per site, folder and profile.
 
 ### Recurring upload manifests
 
@@ -400,7 +408,7 @@ not establish packaged or personal-account acceptance.
 A file comes from a page into a thread's workspace only while a switch is on.
 At Full access the switch is on by default and a save does not ask; below Full
 access the person turns it on and answers for the file, an answer they may
-remember for the site, or separately reviews the bounded routine download manifest below
+remember for the site, folder and profile, or separately reviews the bounded routine download manifest below
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
 request, 2026-11-12). Not built yet: no control turns holding off for a
 thread at Full access; Code's tool approval offers no "Always allow", so below
