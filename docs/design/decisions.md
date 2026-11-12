@@ -46,7 +46,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
-| [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
+| [Extensions](#extensions)                                                             | 8         | 6       | 2            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 8       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
+| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1524,13 +1524,13 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 
 Octant discovers skills only from the closed Project allow-list, the user-global folder, and the provider and added folders a person turns on, never from the home folder's own tool-configuration folder on its own. A runtime that loads Project code by itself is switched off or denied.
 
-- A discovered skill is never trusted or active because of where it was found. When two skills share a name the Project's copy is used, with a notice (maintainer request, 2026-11-12); not built yet: today same-named skills that share a thread are both turned off until the person chooses.
+- A discovered skill is never trusted or active because of where it was found. When two skills that are both on share a name and a thread, the Project's copy is used over a skill every thread shares, with a notice, unless the person turned the shared one on later by hand (maintainer request, 2026-11-12). Any other same-named pair is turned off until the person chooses.
 - A runtime that loads Project skills, MCP servers, hooks or plugins by itself runs with a proven switch or is denied the file in the OS profile. Instruction files stay readable.
 - Two runtimes are refused at start in a Project holding their settings entries, because their loaders fail on a denied file.
 - Skills from Claude Code's and Codex's own folders, turned on one by one, and folders a person adds in Settings are discoverable roots under the same ladder; Octant adds none on its own.
 - Desktop offers a window-owned purpose receipt folder picker alongside manual paths; it records only the existing skill-folder setting and grants no trust or enablement. Chosen-root diagnostics explain zero discovery. Bounded selected-root/package watching covers later creation and package changes; committed-setting reconciliation works without a mounted Settings view, and host teardown prevents late watcher restart.
 
-Status: Partly built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
+Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
 ### MCP tool approvals
 

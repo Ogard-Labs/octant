@@ -9988,11 +9988,20 @@ that is not yet effective for the thread is refused and never reaches the model.
   extensions, Settings' reconcile) turns off both of any two same-named skills
   that are on and share a thread, and lists the collision for the person to
   choose. When one of the two is the Project's copy, the Project's copy is
-  used instead, with a notice (maintainer request, 2026-11-12; not built yet:
-  today both are turned off). That normalises an activation file written before this rule. It also
+  used instead, with a notice (maintainer request, 2026-11-12). The Project's
+  copy is a skill found at a Project root; the default applies against a skill
+  every thread shares (user-global, built-in, or from a folder a person turned
+  on), which is turned off and named in the snapshot's `projectSkillsInUse`
+  until a person next switches either skill. A thread's own skill against its
+  Project's, and two skills of the same reach, have no default and are both
+  turned off as before. A person's choice outranks the default: turning a
+  skill on by hand stamps `chosenAt` on its activation, and a shared skill
+  chosen later than the Project's copy (or against one never chosen by hand)
+  stays on while the Project's copy is turned off. That normalises an activation file written before this rule. It also
   fires when a skill whose stored "on" was briefly not discovered (an archived
   worktree, a branch switch, a missing root) comes back after another
-  same-named skill was turned on: both stay off, a user-global or built-in one
+  same-named skill was turned on: the pair resolves by the same rule, and where it has no
+  default both stay off, a user-global or built-in one
   for every Project, until the person chooses again. The rule fails safe;
   between reconciles the catalog shows neither as effective. A collision is
   listed only where one thread would see several sources without exactly one

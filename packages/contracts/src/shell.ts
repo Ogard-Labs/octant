@@ -7,7 +7,7 @@ import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
-import { AggregateVersion } from "./events";
+import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -533,6 +533,18 @@ export const StandaloneSkillActivationState = Schema.Struct({
   reviewed: Schema.Boolean,
   trusted: Schema.Boolean,
   desiredEnabled: Schema.Boolean,
+  /**
+   * When a person last turned this skill on by hand. Absent for a skill that
+   * is on by default or by a file written before the field existed, so the
+   * host can tell a person's choice from a default when two same-named skills
+   * are both on.
+   */
+  chosenAt: Schema.optional(UtcTimestamp),
+  /**
+   * The Project's same-named skill the host turned this one off for. Kept
+   * until a person next switches either, so the notice survives a restart.
+   */
+  gaveWayTo: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
 }).annotations(strict);
 export type StandaloneSkillActivationState = typeof StandaloneSkillActivationState.Type;
 
