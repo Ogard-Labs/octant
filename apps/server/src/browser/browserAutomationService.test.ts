@@ -113,6 +113,7 @@ function harness(
     >[0]["recordExternalContentIngestion"];
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
     readonly agentDownloadsEnabled?: boolean;
+    readonly transferLimits?: { readonly maxFileBytes: number; readonly maxHeldDownloads: number };
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
@@ -200,6 +201,9 @@ function harness(
     ...(options.agentDownloadsEnabled === undefined
       ? {}
       : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
+    ...(options.transferLimits === undefined
+      ? {}
+      : { transferLimits: () => options.transferLimits as never }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
@@ -1663,6 +1667,45 @@ describe("BrowserAutomationService", () => {
         expect.not.objectContaining({ downloads: expect.anything() }),
         expect.anything(),
       );
+    });
+
+    it("tells the runtime the limits the person set in Settings for the downloads it holds", async () => {
+      const limits = { maxFileBytes: 100 * 1024 * 1024, maxHeldDownloads: 9 };
+      const on = harness({ agentDownloadsEnabled: true, transferLimits: limits });
+      await on.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await on.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      expect(on.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ downloads: "hold", downloadLimits: limits }),
+        expect.anything(),
+      );
+    });
+
+    it("holds an agent's download at Full access with the switch off, and never a person's own action", async () => {
+      const off = harness({ agentDownloadsEnabled: false });
+      await off.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await off.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+        fullAccess: true,
+      });
+      expect(off.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ downloads: "hold" }),
+        expect.anything(),
+      );
+      await off.service.act({ windowId, request: click(), fullAccess: true });
+      await off.service.act({ windowId, request: click(), capturedBy: "agent", fullAccess: true });
+      for (const call of vi.mocked(off.runtime.act).mock.calls.slice(1)) {
+        expect(call[1]).not.toHaveProperty("downloads");
+      }
     });
 
     it.each(["revoked", "cancelled"])(

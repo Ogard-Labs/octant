@@ -38,11 +38,13 @@ export type BrowserUploadResolution =
  * workspace, or refuse. A file leaves this computer through a page, so only a
  * plain file that is really inside the workspace may go: no absolute path, no
  * path that climbs out, no symbolic link at the file or anywhere between it and
- * the workspace, and nothing over the size limit.
+ * the workspace, and nothing over the size limit (the person's Settings limit
+ * where the caller passes it, the default otherwise).
  */
 export async function resolveBrowserUploadFiles(
   workspaceRoot: string,
   named: ReadonlyArray<string>,
+  maxFileBytes: number = MAX_BROWSER_UPLOAD_FILE_BYTES,
 ): Promise<BrowserUploadResolution> {
   if (named.length < 1 || named.length > MAX_BROWSER_UPLOAD_FILES)
     return { status: "refused", reason: "upload-invalid-files" };
@@ -79,7 +81,7 @@ export async function resolveBrowserUploadFiles(
       return { status: "refused", reason: "upload-not-found" };
     }
     if (canonical !== candidate) return { status: "refused", reason: "upload-symlink" };
-    if (stats.size > BigInt(MAX_BROWSER_UPLOAD_FILE_BYTES)) {
+    if (stats.size > BigInt(maxFileBytes)) {
       return { status: "refused", reason: "upload-too-large" };
     }
     if (files.some((file) => file.path === candidate)) continue;
@@ -96,9 +98,9 @@ export async function resolveBrowserUploadFiles(
 }
 
 /**
- * Resolve an upload's files, copy exactly those, and ask the person about
- * them, each time. An upload is never remembered: the answer covers these
- * files to this origin once.
+ * Resolve an upload's files, copy exactly those, and put `ask` to the caller:
+ * the person's answer below Full access, none at Full access. The path and
+ * size checks run before `ask` at every level.
  *
  * The runtime is handed the copies, never the workspace paths. An agent with a
  * shell in the workspace could otherwise swap a checked file for a link to
@@ -110,6 +112,8 @@ export async function resolveBrowserUploadFiles(
 export async function admitBrowserUpload(input: {
   readonly workspaceRoot: string | undefined;
   readonly files: ReadonlyArray<string>;
+  /** The person's per-file limit; absent, the default. */
+  readonly maxFileBytes?: number;
   readonly ask: (
     files: ReadonlyArray<BrowserUploadFile>,
   ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
@@ -140,6 +144,7 @@ export async function admitBrowserUpload(input: {
 export async function prepareBrowserUpload(input: {
   readonly workspaceRoot: string | undefined;
   readonly files: ReadonlyArray<string>;
+  readonly maxFileBytes?: number;
 }): Promise<
   | {
       readonly status: "prepared";
@@ -150,7 +155,11 @@ export async function prepareBrowserUpload(input: {
   | { readonly status: "refused"; readonly reason: string }
 > {
   if (input.workspaceRoot === undefined) return { status: "refused", reason: "upload-unavailable" };
-  const resolved = await resolveBrowserUploadFiles(input.workspaceRoot, input.files);
+  const resolved = await resolveBrowserUploadFiles(
+    input.workspaceRoot,
+    input.files,
+    input.maxFileBytes,
+  );
   if (resolved.status === "refused") return resolved;
   let staging: string;
   try {
@@ -207,7 +216,9 @@ async function copyCheckedFile(
     const bounded = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.byteLength;
-        if (bytes > file.sizeBytes || bytes > MAX_BROWSER_UPLOAD_FILE_BYTES) {
+        // The size checked at resolution already met the limit, so staying at
+        // or under it keeps the copy within the limit too.
+        if (bytes > file.sizeBytes) {
           callback(new Error("Upload source changed while copying."));
           return;
         }

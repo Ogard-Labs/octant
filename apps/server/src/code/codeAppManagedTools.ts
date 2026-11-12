@@ -545,6 +545,7 @@ export interface CodeAppManagedToolsOptions {
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
+      readonly fullAccess?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /** Saves a download the thread's Browser holds; see the service. */
     readonly saveDownload?: (input: {
@@ -553,6 +554,7 @@ export interface CodeAppManagedToolsOptions {
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
       readonly signal?: AbortSignal;
+      readonly fullAccess?: true;
       readonly ask: (
         facts: {
           readonly name: string;
@@ -609,6 +611,8 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly browserUpload?: {
     readonly root: string;
+    /** The person's per-file upload limit in bytes; absent, the default. */
+    readonly fileLimitBytes?: () => number;
     readonly request: (
       summary: string,
       signal?: AbortSignal,
@@ -1673,13 +1677,18 @@ async function browserToolOne(
     }
     const refusal = download.refusal?.(options.windowId);
     if (refusal !== undefined) return failure(refusal);
+    // At Full access the save is not asked; the checks, the destination
+    // rules and the journal record still apply.
+    const savesUnasked = currentAuthorityFailure(options) === undefined;
     const saved = await browser.saveDownload({
       windowId: options.windowId,
       threadId,
       downloadId: input.downloadId,
       workspaceRoot: download.root,
       ...(signal === undefined ? {} : { signal }),
+      ...(savesUnasked ? { fullAccess: true as const } : {}),
       ask: (facts, pageOrigin) => {
+        if (savesUnasked) return Promise.resolve("approved" as const);
         const question = browserDownloadQuestion(pageOrigin, facts);
         // Code journals bounded approval summaries. Refuse before that layer
         // could truncate the source chain and hide its final origin.
@@ -1696,13 +1705,18 @@ async function browserToolOne(
   let releaseUpload: (() => Promise<void>) | undefined;
   if (input.operation === "upload") {
     const upload = options.browserUpload;
+    // At Full access an upload is not asked; the path checks hold at every level.
+    const uploadsUnasked = currentAuthorityFailure(options) === undefined;
     const admitted = await admitBrowserUpload({
       workspaceRoot: upload?.root,
       files: input.files,
+      ...(upload?.fileLimitBytes === undefined ? {} : { maxFileBytes: upload.fileLimitBytes() }),
       ask: (files) =>
         upload === undefined
           ? Promise.resolve("denied")
-          : upload.request(browserUploadSummary(origin, files), signal),
+          : uploadsUnasked
+            ? Promise.resolve("approved")
+            : upload.request(browserUploadSummary(origin, files), signal),
     });
     if (admitted.status === "refused") return failure(admitted.reason);
     uploadFiles = admitted.paths;
@@ -1737,7 +1751,12 @@ async function browserToolOne(
       ...(options.browserDownload === undefined ||
       options.browserDownload.refusal?.(options.windowId) !== undefined
         ? {}
-        : { holdDownloads: true }),
+        : {
+            holdDownloads: true,
+            ...(currentAuthorityFailure(options) === undefined
+              ? { fullAccess: true as const }
+              : {}),
+          }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(release === undefined ? {} : { releaseUpload: release }),
     }),

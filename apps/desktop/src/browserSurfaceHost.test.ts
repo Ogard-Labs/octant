@@ -1593,6 +1593,54 @@ describe("BrowserSurfaceHost", () => {
     expect(sibling).toHaveBeenCalledWith(contextId);
   });
 
+  it("sends a download to the person's Downloads folder once they drive the pane, and refuses one a page starts on its own", async () => {
+    const created = { ...view() };
+    const contents = { ...created.webContents, id: 7 };
+    const host = createBrowserSurfaceHost({
+      createView: () => ({ ...created, webContents: contents }),
+      personDownloadsFolder: "/people/sam/Downloads",
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const willDownload = vi
+      .mocked(contents.session.on)
+      .mock.calls.find(([event]) => event === "will-download")?.[1];
+    const item = () => ({
+      getFilename: () => "octant-test-report-that-does-not-exist.pdf",
+      getTotalBytes: () => 0,
+      getReceivedBytes: () => 0,
+      setSavePath: vi.fn(),
+      cancel: vi.fn(),
+      on: vi.fn(),
+    });
+
+    const unprompted = item();
+    const refuse = vi.fn();
+    willDownload?.({ preventDefault: refuse }, unprompted, contents);
+    expect(refuse).toHaveBeenCalledOnce();
+    expect(unprompted.setSavePath).not.toHaveBeenCalled();
+
+    const personInput = vi
+      .mocked(contents.on)
+      .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+    personInput?.({}, { type: "mouseDown" });
+    const theirs = item();
+    willDownload?.({ preventDefault: refuse }, theirs, contents);
+    expect(refuse).toHaveBeenCalledOnce();
+    expect(theirs.setSavePath).toHaveBeenCalledWith(
+      "/people/sam/Downloads/octant-test-report-that-does-not-exist.pdf",
+    );
+  });
+
   it("refuses certificate acceptance it cannot bind to this surface's one origin", async () => {
     // Local-certificate acceptance is bounded to the exact origin this tab was
     // opened for.

@@ -789,10 +789,10 @@ download the person starts in the Browser pane saves to the Downloads folder
 at every level. Ordinary uploads do not ask at Full access; below it they ask
 and the answer can be remembered per site. The size and held-file caps are
 Settings defaults, not constants (maintainer request, 2026-11-12). Not built
-yet: today the save and each upload ask every time at every access level,
-agent downloads are off by default at every level, programs and installers
-are refused at every level, a person's own download in the Browser pane is
-blocked, and the caps are constants. A local person may separately review a
+yet: no control turns holding off for a thread at Full access, the count of
+five files per upload is still fixed, Code's tool approval offers no "Always
+allow", an unanswered ask still expires instead of waiting, and the person's
+own download has not been run in a packaged window. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
