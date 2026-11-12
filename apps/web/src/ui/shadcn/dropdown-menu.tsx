@@ -104,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-[var(--oct-z-popup)] min-w-48 rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] min-w-48 max-w-(--available-width) rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"

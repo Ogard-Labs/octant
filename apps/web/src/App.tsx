@@ -1,5 +1,6 @@
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
+import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -395,9 +396,14 @@ import {
   addUtilityTabState,
   changeDisplayedUtilityState,
   closeUtilityTabState,
+  hideUtilityCard,
   hideUtilityTile,
+  minimisedUtilityTabIds,
+  minimiseUtilityTool,
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
+  offeredBrowserStaysMinimised,
+  restoreUtilityTool,
   moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
@@ -824,7 +830,7 @@ function LaunchedShell(
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
-    openDockBrowser: ({ threadId }) => {
+    openDockBrowser: ({ threadId, offered }) => {
       // The dock is thread-scoped: a Browser session belongs in it only when
       // the announcing thread is the subject the dock already describes.
       if (
@@ -834,6 +840,13 @@ function LaunchedShell(
         !dockAvailable
       ) {
         return false;
+      }
+      // A session announced while the person has the Browser minimised leaves
+      // it minimised: its card, or the dock toggle's dot, is the sign. What the
+      // person asked for, such as the page handed over to sign in, restores it.
+      // The narrow window's modal dock draws neither, so there it just opens.
+      if (offeredBrowserStaysMinimised(displayedDockState, { offered, shelfDrawn: !isNarrow })) {
+        return true;
       }
       openDockTab("browser");
       return true;
@@ -3424,6 +3437,15 @@ function LaunchedShell(
     bottomPanelOpen &&
     activeBottomSurface?.id === "browser" &&
     activeBottomTab?.browserContextId === undefined;
+  // The agent's Browser is live, out of sight, and has a tab the dock's card
+  // would stand for: with the dock closed that card is invisible, so the toggle
+  // says so. Only a thread's own Browser tab counts as the card's tab.
+  const agentBrowserContext = useAgentBrowserCard(
+    activeMode === "chat" || dockThreadId === undefined ? undefined : String(dockThreadId),
+  );
+  const dockBrowserActive =
+    agentBrowserContext !== undefined &&
+    displayedDockState.tabs.some((tab) => tab.surface === "browser");
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -4274,6 +4296,15 @@ function LaunchedShell(
   function hideDockTile(tabId: string) {
     changeDockTiles((state) => hideUtilityTile(state, tabId));
   }
+  function hideDockCard(tabId: string) {
+    changeDockTiles((state) => hideUtilityCard(state, tabId));
+  }
+  function restoreDockTool(tabId: string) {
+    changeDockTiles((state) => restoreUtilityTool(state, tabId));
+  }
+  function minimiseDockTool(tabId: string) {
+    changeDockTiles((state) => minimiseUtilityTool(state, tabId));
+  }
   function moveDockTile(tabId: string, direction: DockTileMove) {
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
   }
@@ -4569,6 +4600,14 @@ function LaunchedShell(
       case "close":
         for (const tabId of press.tabIds) closeDockTab(tabId);
         return;
+      case "minimise":
+        // The tool keeps running, now as a card on the shelf.
+        minimiseDockTool(press.tabId);
+        return;
+      case "restore":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        restoreDockTool(press.tabId);
+        return;
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
         // from the tool's button, which keeps it.
@@ -4614,7 +4653,8 @@ function LaunchedShell(
       for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
       return;
     }
-    if (value === "below") {
+    if (value === "minimise") minimiseDockTool(tabId);
+    else if (value === "below") {
       if (!dockOpen) setActivePaneDockVisible(true);
       showDockTabBelow(tabId);
     } else if (value === "alone") showDockTabAlone(tabId);
@@ -5279,7 +5319,10 @@ function LaunchedShell(
       selectChatThread,
       selectCodeThread,
       selectDockTab,
+      hideDockCard,
       hideDockTile,
+      restoreDockTool,
+      minimiseDockTool,
       moveDockTile,
       openDockTabBeside,
       resizeDockTileColumn,
@@ -5468,6 +5511,7 @@ function LaunchedShell(
   // The row of tool buttons in the title band. A tile resize rebuilds the dock
   // presentation but changes nothing a button shows, so the model is kept by
   // value: the memoised chrome re-renders only when a button's state changes.
+  const dockShelfDrawn = !isNarrow && activeMode !== "chat" && dockThreadId !== undefined;
   const dockToolButtonsKey = JSON.stringify(
     dockAvailable
       ? buildDockToolButtons({
@@ -5482,6 +5526,10 @@ function LaunchedShell(
               }),
           tabs: displayedDockState.tabs.map((tab) => ({ id: tab.id, surface: tab.surface })),
           shownTabIds: dockShownTabs.map((tab) => tab.id),
+          // The modal dock draws no shelf, so there a minimised tool is an
+          // ordinary open one; so is a thread with no shelf (Chat has none).
+          minimised: dockShelfDrawn ? minimisedUtilityTabIds(displayedDockState) : [],
+          shelfDrawn: dockShelfDrawn,
           activeTabId: displayedDockState.active,
           lastBrowserTabId: displayedDockState.lastBrowser,
           dockOpen,
@@ -7635,6 +7683,7 @@ function LaunchedShell(
             bottomPanelAvailable={bottomPanelAvailable}
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
+            dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
             dockReferences={dockReferences}
             dockTools={dockToolButtons}

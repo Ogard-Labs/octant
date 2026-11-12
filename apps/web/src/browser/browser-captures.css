@@ -64,7 +64,7 @@
   gap: 2px;
   padding: 1px var(--oct-space-1);
   border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-card, var(--octant-workspace));
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);

@@ -232,7 +232,7 @@
   height: 0.9rem;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: transparent;
   color: inherit;
   cursor: default;

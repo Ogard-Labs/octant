@@ -56,6 +56,8 @@ export interface DockTileContent {
   /** The tool's own panel: its class names and inset marker. */
   readonly bodyClassName: string;
   readonly inset: boolean;
+  /** The tool can stand as a card on the shelf, so its caption offers to minimise it. */
+  readonly minimisable?: boolean;
 }
 
 export interface DockTilesProps {
@@ -68,7 +70,8 @@ export interface DockTilesProps {
   readonly renderTile: (tabId: string) => DockTileContent | undefined;
   readonly onFocusTile: (tabId: string) => void;
   readonly onHideTile: (tabId: string) => void;
-  /** Closes the tool, as its strip tab's close does. */
+  readonly onMinimiseTile?: (tabId: string) => void;
+  /** Closes the tool, as its button's Close does. */
   readonly onCloseTile: (tabId: string) => void;
   readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
   readonly onShowTileAlone: (tabId: string) => void;
@@ -219,6 +222,30 @@ function arrange(
 const percent = (fraction: number) => `${fraction * 100}%`;
 
 /**
+ * The width of a divider's hit area, centred on the edge between two tiles. In
+ * a narrow window a tile is a panel and each edge it shares with a neighbour
+ * is pulled in by half a gap (`--octant-tile-inset`, set in dock.css), so the
+ * pair end up a gap apart; from 681px up the inset is 0 and tiles share the
+ * edge. An edge on the dock's own boundary never moves.
+ */
+const DIVIDER_HIT = 8;
+const EDGE = 1e-4;
+const INSET = "var(--octant-tile-inset, 0px)";
+const along = (start: number, size: number) => {
+  const before = start > EDGE;
+  const after = start + size < 1 - EDGE;
+  return {
+    start: before ? `calc(${percent(start)} + ${INSET})` : `calc(${percent(start)} + 0px)`,
+    size:
+      before && after
+        ? `calc(${percent(size)} - 2 * ${INSET})`
+        : before || after
+          ? `calc(${percent(size)} - ${INSET})`
+          : `calc(${percent(size)} - 0px)`,
+  };
+};
+
+/**
  * Open tools drawn together, each one live. Tiles are keyed by their tool, so
  * choosing another tile, resizing, adding or removing a neighbour never
  * remounts a tool that stays shown: a simulator or a page would lose its
@@ -305,6 +332,9 @@ export function DockTiles(props: DockTilesProps) {
               }}
               onClose={() => props.onCloseTile(tabId)}
               onHide={() => props.onHideTile(tabId)}
+              {...(props.onMinimiseTile === undefined || content.minimisable !== true
+                ? {}
+                : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
               onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
@@ -381,6 +411,7 @@ function Tile(props: {
   readonly onClose: () => void;
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
+  readonly onMinimise?: () => void;
   readonly onMove: (direction: DockTileMove) => void;
   readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
@@ -404,11 +435,13 @@ function Tile(props: {
     };
   }, []);
   const { content, box } = props;
+  const across = along(box.left, box.width);
+  const down = along(box.top, box.height);
   const style: CSSProperties = {
-    left: percent(box.left),
-    top: percent(box.top),
-    width: percent(box.width),
-    height: percent(box.height),
+    left: across.start,
+    top: down.start,
+    width: across.size,
+    height: down.size,
   };
   return (
     <section
@@ -473,6 +506,14 @@ function Tile(props: {
                   >
                     <span>Hide from view</span>
                   </OctantMenuItem>
+                  {props.onMinimise === undefined ? null : (
+                    <OctantMenuItem
+                      className="workspace-disclosure__action window-no-drag"
+                      onClick={props.onMinimise}
+                    >
+                      <span>Minimise to card</span>
+                    </OctantMenuItem>
+                  )}
                 </OctantMenuPopup>
               </OctantMenuPositioner>
             </OctantMenuPortal>
@@ -631,12 +672,17 @@ function TileDivider(props: {
   }
 
   const style: CSSProperties = vertical
-    ? { left: `calc(${percent(props.at)} - 3px)`, top: 0, height: "100%", width: 7 }
+    ? {
+        left: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
+        top: 0,
+        height: "100%",
+        width: DIVIDER_HIT,
+      }
     : {
         left: percent(props.extent?.left ?? 0),
-        top: `calc(${percent(props.at)} - 3px)`,
+        top: `calc(${percent(props.at)} - ${DIVIDER_HIT / 2}px)`,
         width: percent(props.extent?.width ?? 1),
-        height: 7,
+        height: DIVIDER_HIT,
       };
   return (
     <div

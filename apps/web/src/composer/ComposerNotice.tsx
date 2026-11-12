@@ -45,7 +45,7 @@ export function useComposerNotice(): ReactNode {
 
 /**
  * One thing a composer has to say about its thread or about sending. The
- * notice card above the pill draws it with the system's callout, so a surface
+ * notice card above the box draws it with the system's callout, so a surface
  * hands over words, a tone and an action, never markup of its own.
  */
 export interface ComposerNoticeItem {
@@ -112,7 +112,7 @@ interface ComposerNoticeSink {
 const SinkContext = createContext<ComposerNoticeSink | undefined>(undefined);
 
 /**
- * Lets a control inside the pill (the microphone) say a failure in the notice
+ * Lets a control inside the box (the microphone) say a failure in the notice
  * card instead of beside itself, where a long message was cut to fit. Absent
  * outside a thread composer, so the control keeps saying it where it stands.
  */

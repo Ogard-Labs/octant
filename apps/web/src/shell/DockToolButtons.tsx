@@ -114,6 +114,7 @@ export function DockToolButtons(props: DockToolButtonsProps) {
 function describe(button: DockToolButton): string | undefined {
   if (button.disabledReason !== undefined) return button.disabledReason;
   if (button.note !== undefined) return button.note;
+  if (button.minimised === true) return "Minimised to a card";
   return button.open ? "Open" : undefined;
 }
 

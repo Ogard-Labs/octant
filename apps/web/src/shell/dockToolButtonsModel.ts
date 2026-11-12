@@ -1,5 +1,6 @@
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import {
+  MINIMISABLE_DOCK_SURFACES,
   moveUtilityTile,
   showUtilityTabBelow,
   type DockTileLayout,
@@ -52,6 +53,13 @@ export type DockToolPress =
   /** The drawer shows one tool: a press replaces it with an open one. */
   | { readonly kind: "select"; readonly tabId: string }
   | { readonly kind: "close"; readonly tabIds: ReadonlyArray<string> }
+  /**
+   * The Browser or Terminal is shown and pressed again: it becomes a card on
+   * the shelf instead of closing, so its session or shell keeps running in view.
+   */
+  | { readonly kind: "minimise"; readonly tabId: string }
+  /** The tool is a card on the shelf: bring it back as a tile, and the dock with it. */
+  | { readonly kind: "restore"; readonly tabId: string }
   | { readonly kind: "close-bottom" }
   /** The bottom panel holds the tool behind its active one: show it there. */
   | { readonly kind: "select-bottom" }
@@ -78,6 +86,8 @@ export interface DockToolButton {
   readonly pressed: boolean;
   /** Open in the dock but not on screen in it. */
   readonly open: boolean;
+  /** Open, and standing as a card on the shelf; a press brings it back. */
+  readonly minimised?: boolean;
   /** Why pressing does nothing; absent when it does something. */
   readonly disabledReason?: string;
   /** What a press does that the name does not say: it shows in the focused tile's place. */
@@ -121,6 +131,13 @@ export interface DockToolButtonsInput {
     readonly surface: RightUtilityDockSurfaceId;
   }>;
   readonly shownTabIds: ReadonlyArray<string>;
+  /** The open tabs whose tool is a card on the shelf. Empty where no shelf is drawn. */
+  readonly minimised?: ReadonlyArray<string>;
+  /**
+   * The dock draws a shelf, so the Browser and the Terminal can be minimised:
+   * not in the drawer, and not where the thread has no shelf.
+   */
+  readonly shelfDrawn?: boolean;
   readonly activeTabId?: string | undefined;
   readonly lastBrowserTabId?: string | undefined;
   /** The dock is open for this thread, even if a reader is hiding it. */
@@ -166,8 +183,23 @@ function describeButton(
     tabIds,
     ...(tabId === undefined ? {} : { tabId }),
   };
+  const minimisable =
+    input.shelfDrawn === true && !narrow && MINIMISABLE_DOCK_SURFACES.has(tool.id);
+  const cards = input.minimised ?? [];
+  const cardTab = minimisable ? tabs.find((tab) => cards.includes(tab.id)) : undefined;
   const menu = (): ReadonlyArray<DockToolMenuItem> =>
-    toolMenu(tool, input, tabId, firstShown !== undefined);
+    toolMenu(tool, input, tabId, firstShown !== undefined, minimisable, cardTab !== undefined);
+  if (cardTab !== undefined && firstShown === undefined) {
+    // A tool is a card whole, so any of its tabs stands for it.
+    return {
+      ...base,
+      pressed: false,
+      open: true,
+      minimised: true,
+      menu: menu(),
+      press: { kind: "restore", tabId: tabId ?? cardTab.id },
+    };
+  }
   if (firstShown !== undefined) {
     return {
       ...base,
@@ -175,12 +207,14 @@ function describeButton(
       open: false,
       menu: menu(),
       press: input.dockPresentedOpen
-        ? {
-            kind: "close",
-            // The Browser closes every page, as the dock's own close does; a
-            // second shell is closed one at a time.
-            tabIds: tool.id === "browser" ? tabIds : [firstShown.id],
-          }
+        ? minimisable
+          ? { kind: "minimise", tabId: firstShown.id }
+          : {
+              kind: "close",
+              // The Browser closes every page, as the dock's own close does; a
+              // second shell is closed one at a time.
+              tabIds: tool.id === "browser" ? tabIds : [firstShown.id],
+            }
         : { kind: "open-dock" },
     };
   }
@@ -242,7 +276,8 @@ function describeButton(
 
 /**
  * What the tool's button offers on a right click: where to put it among the
- * tiles, a new shell or page for the two repeatable tools, and closing it.
+ * tiles, minimising to a card, a new shell or page for the two repeatable
+ * tools, and closing it.
  * What does not apply is left out; a placement the caps refuse stays listed
  * but disabled, as the dock's own menu did.
  */
@@ -251,10 +286,13 @@ function toolMenu(
   input: DockToolButtonsInput,
   tabId: string | undefined,
   shown: boolean,
+  minimisable: boolean,
+  isCard: boolean,
 ): ReadonlyArray<DockToolMenuItem> {
   const items: DockToolMenuItem[] = [];
   const narrow = input.narrow === true;
-  if (tabId !== undefined && !narrow) {
+  // A card has no tile to arrange; pressing its button shows it.
+  if (tabId !== undefined && !narrow && !isCard) {
     const state: ThreadUtilityDockState = {
       tabs: input.tabs,
       ...(input.activeTabId === undefined ? {} : { active: input.activeTabId }),
@@ -278,6 +316,7 @@ function toolMenu(
       }
     }
   }
+  if (minimisable && shown) items.push({ value: "minimise", label: "Minimise to card" });
   if (tool.id === "terminal") items.push({ value: "new", label: "New Terminal" });
   if (tool.id === "browser") items.push({ value: "new", label: "New Browser page" });
   if (tabId !== undefined) items.push({ value: "close", label: `Close ${tool.label}` });
