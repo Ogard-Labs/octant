@@ -1201,9 +1201,11 @@ document as a future version. Frames follow the
   or one of its own listeners, pins the resolved address for the connection,
   judges every redirect again, attaches no cookie, credential, or Octant
   header, and bounds size, time, and rate per Canvas. Turning it off revokes
-  the token at once, and no share, export, or public link carries it. Built
-  for a browser on the host's machine; not built yet: the desktop prototype
-  host has no route to the proxy, so there the switch is not offered
+  the token at once, and no share, export, or public link carries it. In
+  the desktop app the prototype host keeps no route and no resolver: the
+  page asks an address of the host's private scheme, and the main process
+  relays that one question to the proxy path under a token the host minted
+  for the desktop bridge secret and the page never holds
   ([Canvas: Allow network](design/canvas.md#allow-network)).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a

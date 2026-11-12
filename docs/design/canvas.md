@@ -1604,7 +1604,9 @@ answers every name with not-found among them:
   policy. The host serves it once, under an `octant-prototype:` scheme of its
   session, to an offscreen window sandboxed and context-isolated with no Node.
   Nothing else is served, so the page needs no route to the host's loopback
-  address and the host API is unreachable from it.
+  address and the host API is unreachable from it. The one other thing that
+  scheme answers is a question from a page whose Canvas has **Allow network**
+  on, which is relayed, not routed ([Allow network](#allow-network)).
 - **Drawing and input.** The host paints the page offscreen, at twice its
   pixels on a Retina display, and sends each changed rectangle, one frame at a
   time: the next goes only once the window says it drew the last, and paints
@@ -1682,7 +1684,8 @@ the switch on reaches a prototype when it is run again.
 
 **How a page reaches the proxy.** `design-run` marks a ticket as
 network-capable only when a local window asked for it and the Canvas's switch
-is on. When a browser frame redeems that ticket (`Sec-Fetch-Dest: iframe`) and
+is on. The desktop app's page is covered under "In the desktop app" below. When
+a browser frame redeems that ticket (`Sec-Fetch-Dest: iframe`) and
 the switch is still on, the host mints a network token (32 random bytes, held
 in memory only, at most 8 per Canvas, 12 hours at the longest) and serves the
 page with one directive changed: `connect-src` names
@@ -1802,15 +1805,26 @@ id>/fetch?url=<one address>` for a surface it was told has a network
 What the page gained is one question it can ask ("fetch this public address")
 and nothing else: it still has no socket, no name lookup, no address of the
 host, no token it could send out, and no way to read another surface's
-answers. The containment probe draws a hostile page with its network on and
-checks that it reaches the proxy route alone
-(`bun run smoke:canvas-prototype-containment`).
+answers. The two Chromium privileges the scheme gained so a page's `fetch` of
+it is delivered (`supportFetchAPI`, `corsEnabled`) open no route: the handler
+is still the one thing that answers it.
 
-**Where it works today.** In a browser on the host's own machine. Not built
-yet: the desktop relay above, so in the desktop app the switch is not shown
-and a prototype stays without a connection. A paired device's browser is not
-offered the switch and its pages are served without a token; a Nightly client
-window does not run prototypes.
+The containment probe (`bun run smoke:canvas-prototype-containment`) draws the
+hostile page twice more with its Canvas's network on, once with the page's
+policy removed, against the host's real proxy and destination rule over a
+stand-in for the far side. Measured in Electron 43.7.11 on Linux (2026-11-12):
+no UDP, TCP, or HTTP listener and no other host route was reached and no name
+was looked up; the proxy route was asked only by relayed `GET`s with no added
+header; a public address was fetched with `Accept` alone; loopback, the host's
+own address, and the metadata address were refused by the rule; a `POST`,
+another path, and a second address were refused by the scheme handler;
+another surface's relay and the page address were refused by the page's
+policy, and by the handler once the policy was removed; and a `fetch` from a
+fresh frame reached nothing. Not measured: the packaged macOS app.
+
+**Where it works today.** In a browser on the host's own machine and in the
+desktop app. A paired device's browser is not offered the switch and its pages
+are served without a token; a Nightly client window does not run prototypes.
 
 Rationale: a looser page policy (`connect-src https:`) was rejected because a
 browser would then connect from the person's machine, with its address, to

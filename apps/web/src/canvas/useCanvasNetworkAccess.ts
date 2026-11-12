@@ -19,8 +19,8 @@ export interface CanvasNetworkAccessState {
  *
  * The renderer decides nothing here: it shows what the host says and sends the
  * person's choice, and a refusal is shown in the host's words. `offered` is
- * false where a running page could not use the proxy (the desktop app, whose
- * prototype host has no route to it), so no switch is shown that does nothing.
+ * false for a Canvas with no prototype, which has nothing the switch could
+ * reach, so the host is not asked.
  */
 export function useCanvasNetworkAccess(options: {
   readonly client: Pick<CanvasClient, "networkAccess" | "setNetworkAccess"> | undefined;

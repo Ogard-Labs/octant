@@ -870,6 +870,27 @@ describe("running prototype", () => {
     expect(within(region).getByText(/Network on/)).toBeVisible();
   });
 
+  it("in the desktop app says the network is on, and no longer that the prototype has no connection", async () => {
+    installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    const { runtime } = runRuntime({
+      contained: true,
+      drawnIn: "desktop-surface",
+      networkOn: true,
+    });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Checkout, Phone prototype" });
+    expect(within(region).getByText(/Network on: this prototype can fetch/)).toBeVisible();
+    expect(within(region).queryByText(/no network connection/)).toBeNull();
+    // Still drawn from the prototype host: nothing here warns of a browser's open route.
+    expect(within(region).queryByText(/can still connect to another computer/)).toBeNull();
+  });
+
   it("says nothing about a network on a prototype whose Canvas has it off", () => {
     const { runtime } = runRuntime();
     render(

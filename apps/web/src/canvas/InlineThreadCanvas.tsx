@@ -15,7 +15,7 @@ import { CanvasThreadReferenceCard as CanvasReferenceRow } from "./CanvasThreadR
 import { CanvasView } from "./CanvasView";
 import { canvasDigest } from "./canvasDigest";
 import { useCanvasDefinition } from "./useCanvasDefinition";
-import { designDrawnInHere, designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
@@ -144,7 +144,6 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
     client,
     canvasId: card.canvasId,
     offered:
-      designDrawnInHere() === "frame" &&
       loaded.kind === "ready" &&
       loaded.definition.blocks.some(
         (block) => block.kind === "design" && block.runsScript === true,

@@ -891,8 +891,13 @@ function RunningDesignBlock({
           what this Canvas holds.
         </p>
       ) : null}
+      {/* In the desktop app a page with the network on still has no route of
+          its own, but it is not without a connection: the line above says
+          what it can reach, so this one is not said beside it. */}
       {runtime === undefined ? null : contained ? (
-        <p className="canvas-design__notice">A prototype runs with no network connection.</p>
+        runtime.networkOn === true ? null : (
+          <p className="canvas-design__notice">A prototype runs with no network connection.</p>
+        )
       ) : (
         <p className="canvas-design__notice">
           A prototype&apos;s script can still connect to another computer and send what the

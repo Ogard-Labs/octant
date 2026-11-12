@@ -1257,6 +1257,33 @@ describe("CanvasWorkspaceTab", () => {
       expect(screen.getByText(/Network on: this prototype can fetch/)).toBeVisible();
     });
 
+    it("offers the switch in the desktop app, where a prototype is drawn from the prototype host", async () => {
+      const bridge = () => undefined;
+      (window as { octantHost?: unknown }).octantHost = {
+        setProviderCredential: bridge,
+        providerCredentialStatus: bridge,
+        clearProviderCredential: bridge,
+        listProviderApiKeys: bridge,
+        addProviderApiKey: bridge,
+      };
+      try {
+        const host = switchOf(true);
+        render(
+          <CanvasWorkspaceTab
+            client={createCanvasClient(withPrototype, undefined, host)}
+            tab={canvasTab}
+          />,
+        );
+        await screen.findByRole("region", { name: /Live board/ });
+        expect(await screen.findByRole("button", { name: "Network on" })).toBeVisible();
+        expect(host.networkAccess).toHaveBeenCalledWith(quarterlyCanvasId);
+        await openCanvasTool("Allow network…");
+        expect(await screen.findByRole("switch", { name: "Allow network" })).toBeChecked();
+      } finally {
+        delete (window as { octantHost?: unknown }).octantHost;
+      }
+    });
+
     it("offers no switch on a Canvas with no prototype, or where the host has none", async () => {
       const host = switchOf(true);
       const { unmount } = render(

@@ -81,7 +81,7 @@ import {
   type DesignAssetRuntime,
 } from "./blocks/designDocument";
 import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
-import { designDrawnInHere, designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import { CanvasNetworkPanel } from "./CanvasNetworkPanel";
 import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
@@ -422,17 +422,16 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     };
   }, [props.client, props.tab.canvasId, selectedVersionId]);
 
-  // A Canvas's "Allow network" switch matters only to a prototype, and only
-  // where a prototype is drawn in a frame: the desktop's prototype surface has
-  // no route to the host's proxy, so there the switch would do nothing and is
-  // not offered. The host refuses the read to a client it gives no switch.
+  // A Canvas's "Allow network" switch matters only to a prototype. It is the
+  // same switch in a browser on the host's machine and in the desktop app,
+  // whose main process relays a page's requests to the host's proxy. The host
+  // refuses the read to a client it gives no switch.
   const network = useCanvasNetworkAccess({
     client: props.client,
     canvasId: props.tab.canvasId,
     offered:
-      designDrawnInHere() === "frame" &&
       definition?.blocks.some((block) => block.kind === "design" && block.runsScript === true) ===
-        true,
+      true,
   });
   // The sidebar is where a person goes to use a Canvas, so a prototype here
   // runs as soon as it is shown, for the version on screen.
