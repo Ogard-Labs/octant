@@ -241,6 +241,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                                   registration: {
                                     guideUrl: entry.auth.setupGuide,
                                     requestedScopes: entry.auth.requestedScopes ?? [],
+                                    ...(entry.auth.setupSteps === undefined
+                                      ? {}
+                                      : { setupSteps: entry.auth.setupSteps }),
                                     ...(entry.auth.permissionNotice === undefined
                                       ? {}
                                       : { permissionNotice: entry.auth.permissionNotice }),

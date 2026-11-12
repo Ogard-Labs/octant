@@ -613,6 +613,13 @@
   font-size: var(--oct-text-xs);
 }
 
+.mcp-sign-in__steps {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding-inline-start: var(--oct-space-4);
+}
+
 .mcp-sign-in__account {
   display: grid;
   flex-basis: 100%;

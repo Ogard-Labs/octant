@@ -40,6 +40,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeTurnReviewCapture,
   decodeCodeOperationId,
+  CodeGitOperationId,
   decodeCodeThreadId,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
@@ -70,6 +71,7 @@ import {
   type HarnessRetryNotice,
   type CodeOperationEventFrame,
   type CodeOperationId,
+  type CodeRuntimeWork,
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
@@ -99,7 +101,7 @@ import {
 } from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type {
   ProviderAcquireInput,
   ProviderConnection,
@@ -260,6 +262,14 @@ type Awaitable<T> = T | Promise<T>;
 
 interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
+  /**
+   * A thread's runtime work records, from which a lost push or pull request
+   * is settled. Required: while it was optional the host wiring left it out,
+   * and no Git or pull request tab ever settled one outside tests.
+   */
+  readonly readCodeRuntimeWorks: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<{ readonly work: CodeRuntimeWork }>;
   readonly journal: Journal;
   readonly readCodeCheckout: (
     checkoutId: CodeCheckoutIdentity["id"],
@@ -459,7 +469,7 @@ export interface CodeOperationRuntimeOptions {
     | "restoreWorkingTree"
     | "releaseCheckpoint"
   > &
-    Partial<Pick<GitMutationPort, "applyHunks">>;
+    Partial<Pick<GitMutationPort, "applyHunks" | "remoteHead">>;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly supportsAcpClientCapabilities?: (thread: CodeThread) => boolean;
   /**
@@ -1243,8 +1253,42 @@ export function createCodeOperationRuntime(
       return turns.threadWithActiveTurnPosture(session);
     },
   };
+  const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(readRuntimeWorks === undefined
+      ? {}
+      : {
+          unconfirmedSteps: {
+            list: (threadId: CodeThreadId) =>
+              readRuntimeWorks(threadId)
+                .map((entry) => entry.work)
+                .filter((work) => work.state === "ambiguous"),
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.settleOrphaned({
+                  // A push is recorded under its Git operation, a pull request
+                  // step under its own operation.
+                  id:
+                    work.kind === "git"
+                      ? decodeCodeGitOperationId(String(work.id))
+                      : decodeCodeOperationId(String(work.id)),
+                  threadId: work.threadId,
+                  kind: work.kind,
+                  state,
+                }),
+              ),
+            describe: (threadId, operationId, remoteStep) =>
+              observeRuntimeWorkOutcome(
+                runtimeWork.describeRemoteStep({
+                  id: operationId,
+                  threadId,
+                  kind: "delivery",
+                  remoteStep,
+                }),
+              ),
+          },
+        }),
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
@@ -1282,7 +1326,12 @@ export function createCodeOperationRuntime(
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
-          runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
+          runtimeWork.open({
+            id: started.id,
+            threadId: command.threadId,
+            kind: started.kind,
+            remoteStep: started.remoteStep,
+          }),
         );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
@@ -2612,6 +2661,8 @@ interface ActiveTurn {
   };
   /** Set once the turn has settled; a late chunk is dropped instead of re-arming a timer. */
   closed?: boolean;
+  /** Set when the host's shutdown stopped the turn; it journals no outcome of its own. */
+  shutDown?: boolean;
   /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
   deltaFlushFailure?: { readonly error: unknown };
   /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
@@ -3541,6 +3592,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         id: active.operationId,
         threadId: active.thread.id,
         kind: "provider-turn",
+        remoteStep: undefined,
       }),
     );
     return turnState("running");
@@ -4840,6 +4892,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
+    if (
+      input.turnOperationId !== undefined &&
+      String(active.operationId) !== String(input.turnOperationId)
+    )
+      return turnState("failed", {
+        category: "failed",
+        message: "That turn has already ended, so Stop left the turn running now alone.",
+      });
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =
@@ -4888,11 +4948,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.reviewCapture?.close();
-        // Shutdown loses only the open burst, as a crash would.
+        // Shutdown loses only the open burst, as a crash would. The turn's
+        // record stays running, also as a crash leaves it, so the next start
+        // finds it cut off by the restart and continues it: a reboot quits
+        // Octant cleanly, and its turns are owed the same continuation.
         this.#flushBeforeStop(active);
         active.closed = true;
+        active.shutDown = true;
         active.state = "interrupted";
-        this.#persistRuntimeWork(active, "interrupted");
+        this.settleSpendReservation(active.operationId);
         active.abort.abort();
         if (active.connection === undefined) return;
         await Effect.runPromise(
@@ -6215,6 +6279,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     outcome: CodeTurnOutcome,
     failure?: CodeOperationFailure,
   ): void {
+    // A turn the host's shutdown stopped is journaled as a crash leaves it:
+    // the runner's own `interrupted` would read as a person's Stop, and the
+    // next start would not continue it.
+    if (active.shutDown === true) return;
     if (outcome === "completed" && active.deltaFlushFailure !== undefined) {
       outcome = "failed";
       failure = evidenceCapacityFailure(active.deltaFlushFailure.error);
@@ -6764,8 +6832,11 @@ function baseCheckoutResolver(
   };
 }
 
+const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
+
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
+    remoteHead: (input, signal) => git.remoteHead(input, signal),
     observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
       mapGitObservation(
         await git.observe(

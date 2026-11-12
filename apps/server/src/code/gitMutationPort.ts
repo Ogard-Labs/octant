@@ -76,7 +76,12 @@ export type GitMutationResult =
         | "hunk-offset"
         | "read-only";
     }
-  | { readonly status: "failed"; readonly detail?: string };
+  | {
+      readonly status: "failed";
+      readonly detail?: string;
+      /** A push whose outcome Git never reported; see `failedPush`. */
+      readonly unconfirmed?: true;
+    };
 
 const liveDependencies: GitMutationDependencies = {
   execFile: async (file, args, environment, signal, stdin) => {
@@ -440,12 +445,57 @@ export class GitMutationPort {
         : input.force.mode === "with-lease"
           ? [`--force-with-lease=${input.remoteRef}:${input.force.expectedRemoteOid}`]
           : ["--force"];
-    return this.#apply(
-      input.checkoutRoot,
-      ["push", "--porcelain", ...forceArguments, "--", input.remote, refspec],
+    const result = await this.#run(
+      [
+        "-C",
+        input.checkoutRoot,
+        "push",
+        "--porcelain",
+        ...forceArguments,
+        "--",
+        input.remote,
+        refspec,
+      ],
       signal,
+      undefined,
       input.executionPolicy,
     );
+    return result.exitCode === 0 ? { status: "applied" } : failedPush(result);
+  }
+
+  /**
+   * Where a remote branch points now, read without changing anything. A push
+   * the host lost mid-flight is settled by this: the remote branch pointing at
+   * the pushed commit means the push landed. It reaches the network as a push
+   * does, under the same confinement.
+   */
+  async remoteHead(
+    input: {
+      readonly checkoutRoot: string;
+      readonly remote: string;
+      readonly remoteRef: string;
+    } & GitMutationPolicy,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "found"; readonly oid: string }
+    | { readonly status: "absent" }
+    | { readonly status: "unavailable" }
+  > {
+    if (!/^[A-Za-z0-9._-]+$/.test(input.remote) || !validBranchRef(input.remoteRef))
+      return { status: "unavailable" };
+    const result = await this.#run(
+      ["-C", input.checkoutRoot, "ls-remote", "--refs", "--", input.remote, input.remoteRef],
+      signal,
+      undefined,
+      input.executionPolicy,
+    );
+    if (result.exitCode !== 0) return { status: "unavailable" };
+    for (const line of result.stdout.split("\n")) {
+      const [oid, ref] = line.trim().split(/\s+/);
+      if (ref === input.remoteRef && oid !== undefined && isObjectId(oid))
+        return { status: "found", oid };
+    }
+    return { status: "absent" };
   }
 
   /**
@@ -1298,6 +1348,28 @@ function failedMutation(stderr: string): GitMutationResult {
   return detail === ""
     ? { status: "failed" }
     : { status: "failed", detail: detail.slice(0, 2_048) };
+}
+
+/**
+ * A failed push is a definite failure only when Git said the remote refused
+ * it: a `[rejected]` or `[remote rejected]` porcelain line for the ref (a
+ * non-fast-forward, a stale lease, a hook), or a remote that refused the
+ * connection itself (credentials, a missing repository) before anything could
+ * be sent. Anything else (a dropped connection, a `[remote failure]` the
+ * remote never confirmed, a timeout, no output at all) may have landed, so it
+ * is reported unconfirmed and settled later by reading the remote branch.
+ */
+function failedPush(result: CommandResult): GitMutationResult {
+  const refused =
+    /^!\t[^\t]*\t\[(?:rejected|remote rejected)\]/m.test(result.stdout) ||
+    /Authentication failed|Permission denied|could not read (?:Username|Password)|The requested URL returned error: 40[134]|Repository not found|does not appear to be a git repository/i.test(
+      result.stderr,
+    );
+  if (refused) return failedMutation(result.stderr);
+  const detail = result.stderr.trim();
+  return detail === ""
+    ? { status: "failed", unconfirmed: true }
+    : { status: "failed", detail: detail.slice(0, 2_048), unconfirmed: true };
 }
 
 function validPaths(paths: readonly string[]): boolean {

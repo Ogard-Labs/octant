@@ -1425,8 +1425,13 @@ after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
-`forceStop` unsupported: the command is refused, the UI never offers it, and
-Stop settles the attempt at once as before. For a provider that supports it, a
+`forceStop` unsupported: the command is refused and the UI never offers it. In
+Chat, its Stop still waits for the runtime to confirm the turn ended before the
+attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
+attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
+confirmed. The provider may still be running this response."), which frees the
+thread without claiming the work stopped. While a Stop is unanswered the
+composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
 (`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
@@ -1449,7 +1454,11 @@ paused; with the slice, a Stop issued into that flood settled the turn at p95
 returns `stop-requested` while its exact request-owned supported runtime is
 still ending. Its force command requires the same request/thread/turn and an already-aborted owned controller. Code's force
 command additionally names the original turn operation, rejects replacement
-operations and requires that Stop already reached that controller. Neither path
+operations and requires that Stop already reached that controller. Code's Stop
+names the turn it was pressed for too: a Stop that names a turn no longer current
+is refused and leaves the newer turn running, so a Stop that arrives late cannot
+end a queued message the host sent on. A Stop that names no turn, from a client
+built before the field, still ends the live turn. Neither path
 accepts a PID or kills a shared runtime; the provider owns process verification.
 The normal turn lifecycle records completion/cancellation, preserving queued
 messages and history. A kill failure leaves an explicit recovery error.
@@ -5114,16 +5123,132 @@ or .zip>` write the same files, built by one host command
   provider session cursors, or earlier events. Already settled turns remain settled;
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
+  A clean shutdown, which a reboot performs, leaves a running turn exactly as a
+  crash does: its runtime-work record stays running and no outcome is journaled,
+  so the next start finds it the same way.
+
+  The host then continues, by itself, each Code turn this restart cut off
+  (maintainers decided on 2026-11-12; on by default). A turn qualifies only
+  when this start's reconciliation found its provider-turn record still
+  running: a turn the person stopped or that failed already reads settled, and
+  a turn already waiting before the restart (a usage-limit stop, or an earlier
+  restart's turn) is not this restart's. Only the thread's newest turn is
+  continued. The host settles the cut-off turn interrupted with the restart as
+  its reason, then starts one turn under the routine host scope with the same
+  message a person's Resume sends (inspect first, do not repeat what may
+  already have taken effect, ask again for approvals and answers). Turn
+  admission rechecks Project access, the harness pause, the provider policy
+  and the spend ceiling at that moment, as for any host turn, and the turn
+  resumes the provider session from the journaled `resumeCursor`. Its
+  operation id is derived from the cut-off turn's, so a repeated recovery lands
+  on the record the first one wrote. A thread waits for its person instead,
+  with the reason in the restart notice, when: Settings › Code › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff`);
+  any of its runtime work is `ambiguous` (a push or pull request step whose
+  outcome the restart left unknown); its own automatic continuation was cut
+  off by a restart twice (the crash-loop guard counts per thread in the host
+  store, keyed by the continuation it last started, and survives the restart
+  it counts); its newest provider session on the same provider and model has
+  no resume cursor, or the turn never reached its provider; its native harness
+  session's recovery is blocked; or admission refuses the turn. A held cut-off
+  turn is still settled interrupted, so the thread reads as stopped rather than
+  waiting for a caller that never comes. Messages the person queued behind the
+  cut-off turn follow the continuation: the host lifts only the queue's
+  `host-restart` hold, under its own scope, so the queue still waits for the
+  continuation to end and still holds on a failed or cancelled one; a queue the
+  person paused stays paused. The host scope reaches a queue only to release
+  it behind such a continuation, in Chat, Work and Code alike. Each
+  start keeps what it did as `restartRecovery` on the host control status (the
+  threads continued and held, ids and reasons only), and a window shows it as
+  "Octant restarted. Continued N threads; M need you", naming and linking only
+  threads that window can open. Chat and Work turns are continued by the same
+  rule (Chat and Work restart recovery, below); subagent runs, coordinator
+  wakes and goal loops are not continued yet.
+  Other running Code work has no process left after a restart. A push or pull
+  request step may already have landed on the remote, so it becomes `ambiguous`
+  and keeps the thread Waiting ("could not confirm how the last step ended")
+  rather than letting it read Ready; its runtime-work record keeps the remote step
+  it makes (a push's remote, branch and commit, or the pull request action) when
+  it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
+  reading the remote branch: pointing at the pushed commit it is `completed`,
+  anywhere else or absent it is `failed` and pushing again is safe, and an
+  unreadable remote leaves it unconfirmed. Observing the pull request settles an
+  unconfirmed creation by looking for the thread's pull request, open or closed,
+  and an unconfirmed comment or review reply from the signed-in person's own
+  comments on the pull request it was posted to. Before posting, the record
+  keeps that pull request's repository and number, a SHA-256 of the text (never
+  the text), and how many of the person's comments there already carried it;
+  only a higher count now shows the post landed, so an older identical comment
+  ("Fixed.") never stands in for it. A comment record without that pull request
+  or count, or one whose branch now carries a different pull request, is never
+  judged against another pull request: it stays unconfirmed. An unconfirmed
+  update or merge stays unconfirmed.
+  File, terminal, test, review, and local Git work, whose result is in the
+  checkout, becomes `interrupted`.
+
+  The same uncertainty can arise without a restart. A push that fails without
+  Git reporting the remote's answer (a dropped connection, a `[remote failure]`
+  the remote never confirmed, a timeout) carries `unconfirmed` on its result
+  and is recorded `ambiguous`, to be settled from the remote branch like a lost
+  push; only a refusal Git did report (a `[rejected]` or `[remote rejected]`
+  ref such as a non-fast-forward or stale lease, refused credentials, a missing
+  repository) is `failed`. A comment posted again on the same pull request
+  while an earlier attempt at the same text is unconfirmed is looked for
+  first, by the same count: higher, the earlier attempt is settled `completed`
+  and nothing is posted; not higher, it is settled `failed` and the comment is
+  posted; unreadable, the comment is refused rather than risked twice. Submissions of one push or pull request step under the same
+  operation id run once: a second arriving while the first still runs waits
+  for it and is answered from the journal. A pull request creation is made
+  safe to repeat by its operation id and by locating the thread's pull request
+  first; the older `idempotencyKey` field is accepted and ignored.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed
   with the `interrupted` category, so the header reads Interrupted, the Board
   keeps the thread under Waiting with the interrupted reason, and the thread
-  takes its next message. The settlement is derived on every start and not
-  journaled, so rebuilding twice reads the same. A turn waiting on a provider
-  usage limit keeps waiting for the reset. An approval the lead was blocked on
-  stays `lost-in-restart` in the harness session: only Resume is offered, and
-  the call it guarded never runs.
+  takes its next message. The start journals that settlement as a system
+  `work.turn-updated@1`, so the next start reads the turn as settled and does
+  not count it as cut off again; a stream that moved on in between is left
+  for the next start, and rebuilding reads the same either way. A turn waiting
+  on a provider usage limit keeps waiting for the reset. An approval the lead
+  was blocked on stays `lost-in-restart` in the harness session: only Resume is
+  offered, and the call it guarded never runs.
+
+  Chat and Work restart recovery continues those turns the way Code restart
+  recovery does: once, as the host, with the message a person's Resume sends,
+  through the mode's ordinary send, which rechecks authority, posture, the
+  harness pause and the spend ceiling at that moment. In Chat the turns are the
+  attempts the start's sweep interrupts (`reapStaleProviderSessions`): an
+  attempt still queued or streaming that no process carries. An attempt already
+  interrupted, cancelled, failed, completed or waiting is retained and never
+  continued. In Work they are the turns the start settles above. Only the
+  thread's newest turn qualifies: for Chat, the newest attempt of the active
+  conversation's tail; a Retry, a rewind or a new message since means the
+  person moved on. The continuation is a send-chat-turn whose submission id, or
+  a Work turn whose request id, is derived from the cut-off attempt or turn, so
+  a repeated recovery finds the turn the first one admitted. That send takes up
+  the cut-off turn's provider session as any next message does: a provider that
+  keeps its own conversation resumes from the journaled `resumeCursor`, a
+  harness session continues when the session decision allows it, and a
+  host-owned conversation is rebuilt from the transcript, which keeps the
+  interrupted reply. The thread waits for its person, with the reason in the
+  restart notice, when Settings › Chat or Settings › Work › Continue after
+  restart is off; the thread's own switch is off (`restartContinuationOff` on
+  the Chat or Work thread, set only at a local window); its own continuations
+  were cut off twice (the same per-thread crash-loop store as Code, keyed by
+  thread id, which is unique across modes); its provider keeps its own
+  conversation and the cut-off turn carries no resume cursor; the Work turn was
+  still only accepted, or the Chat answer's provider-owned session had not
+  replied yet, so its message may never have reached the provider; its native
+  harness session's restart recovery is blocked (the host lifts it first,
+  through the same blockers a person's Resume checks, because admission refuses
+  a session still recovery-required); or admission refuses the send. Chat and
+  Work keep no journaled push or pull
+  request step, so the uncertain-external-action hold reads nothing there; the
+  continuation message tells the agent to inspect before repeating. Queued
+  messages follow the continuation under the same release as Code. A Chat
+  attempt already waiting on a question or approval at the restart is retained
+  as before, and answering it still settles it interrupted.
 
 - **Fast thread reads.** A window owns Code navigation bootstrap and the
   follow-up navigation list. Its open thread controllers consume that metadata
@@ -5441,7 +5566,10 @@ or .zip>` write the same files, built by one host command
   request, 2026-11-12). Not built yet: today any cancellation or failure
   holds it, and restart recovery holds pending work until an authenticated
   user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
-  send failed. Closing a composer cannot delete an accepted queued attachment.
+  send failed. The one exception built today is a Chat, Work or Code thread the host
+  continues after the restart cut its turn off: the host lifts that queue's restart hold under its
+  own scope, so its messages follow the continuation through the same
+  dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
@@ -8783,15 +8911,9 @@ the model at another size.
   Turn start and settlement are recorded for every provider so a crash or host
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
   The same server admission holds a recovered session until a person resumes it,
-  unless the setting "Resume interrupted turns after a restart" is on (off by
-  default): then a turn whose last effect is proved settled resumes by itself,
-  and a turn whose last effect is uncertain still waits for the person. The
-  proof is a record the host writes before each tool call takes effect and
-  closes when it has, so after a restart an open record marks the one call
-  whose outcome is unknown; the record is built first and the automatic
-  resume is widened to the turns it proves settled
-  (maintainer decision, 2026-11-12; not built yet: today no such record is
-  written and every recovered session waits for a person);
+  or until the host lifts it to continue a turn a restart cut off (Code restart
+  recovery, on by default): a turn whose last effect is uncertain still waits
+  for the person (maintainer request, 2026-11-12);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -8851,7 +8973,11 @@ the model at another size.
   window's bootstrap revalidates it), and a Work Project's folder still exists
   at the path it was bound to (`not-ready` names what is missing). That resume journals the lost turn as
   `lost-in-restart` and the dead approvals and questions as expired, so the
-  next restart does not raise the recovery again. Also journaled:
+  next restart does not raise the recovery again. For a Code thread whose turn
+  the restart cut off, the host performs that resume itself, with the same
+  checks, after revalidating checkouts as a window's bootstrap would, and then
+  continues the turn (see Code restart recovery under Persistence); a blocked
+  resume holds the thread for its person. Also journaled:
   the questions a lead asked with how each was
   settled, and — on each turn record — the last calls the lead made (tool,
   what it asked for, ok/refused/failed, duration), noted live on the session
@@ -11026,6 +11152,13 @@ preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works from the Octant window on the host or from a paired
 device, like Add MCP server (maintainer decision, 2026-11-12; not built yet:
 today only from the window on the host).
+An entry that needs an app the person registers also carries numbered
+`setupSteps`, shown beside Client setup before sign-in: the vendor's part,
+worded only from what the entry and its linked guide already say, then
+Octant's part (the callback address, the client ID, an optional client secret
+linked from a secret store, Save, Sign in). The steps never name a vendor
+screen the catalog cannot vouch for; the guide link stays the authority for
+those.
 
 **Atlassian and Airtable setup.** Both non-featured entries use the existing
 MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
