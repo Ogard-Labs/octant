@@ -2248,7 +2248,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 /* The composer's frame, placement, input, chips, bottom row,
    controls, and status line are the system's (`.composer`,
-   `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
+   `.thread-composer`, `.composer-row`, `.composer-notices`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
 
 /* Chips and attachments are frameless rows of the frame, so they take the
@@ -2312,23 +2312,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-thread-workspace__row {
   display: grid;
   min-width: 0;
-}
-
-/* The status line under the composer row is the system's `.composer-status`:
-   keyboard hint and receipts on the left, spend and limits trailing. */
-.code-thread-workspace__hint {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-/* The status strip is one truncated line, but this notice is a disclosure the
-   person must be able to read in full before sending, so it wraps. */
-.composer-status:has(> .code-thread-workspace__switch-notice) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.code-thread-workspace__switch-notice {
-  white-space: normal;
 }
 
 /* What a provider switch handed over, under the divider that marks it. */

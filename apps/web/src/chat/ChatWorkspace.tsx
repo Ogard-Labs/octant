@@ -7,7 +7,7 @@ import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { ThreadInfo } from "../composer/ThreadInfo";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
-import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
@@ -1033,6 +1033,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return sent;
   };
 
+  const sideChatNotice = sideChatDraftNotice({
+    count: props.controller.draftSideChatReturns?.length ?? 0,
+    invalid: props.controller.draftSideChatReturnsInvalid === true,
+    onClear: () => props.controller.setPendingDraft(""),
+  });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "chat", threadId: String(view.thread.id) }}>
       <ThreadConnectionLostContext value={connectionLost}>
@@ -1485,12 +1491,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               />
             ) : null}
           </OctantDialogPresence>
-          <SideChatDraftNotice
-            count={props.controller.draftSideChatReturns?.length ?? 0}
-            invalid={props.controller.draftSideChatReturnsInvalid === true}
-            onClear={() => props.controller.setPendingDraft("")}
-          />
           <ChatComposer
+            notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}
             info={
               <ThreadInfo>

@@ -26,7 +26,7 @@ describe("follow-up suggestions in a reply", () => {
       }),
       "```",
     ].join("\n");
-    const set = parseFollowUpSuggestions({ text, turnId, uuid });
+    const set = parseFollowUpSuggestions({ text, turnId, uuid }).followUps;
     expect(set?.suggestions.map((suggestion) => suggestion.title)).toEqual([
       "Add tests",
       "Docs",
@@ -35,16 +35,48 @@ describe("follow-up suggestions in a reply", () => {
   });
 
   it("suggests nothing for a reply without the block, or with a block it cannot read", () => {
-    expect(parseFollowUpSuggestions({ text: "All done.", turnId, uuid })).toBeUndefined();
+    const none = { followUps: undefined, nextMessage: undefined };
+    expect(parseFollowUpSuggestions({ text: "All done.", turnId, uuid })).toEqual(none);
     expect(
       parseFollowUpSuggestions({ text: "```octant-follow-ups\nnot json\n```", turnId, uuid }),
-    ).toBeUndefined();
+    ).toEqual(none);
     expect(
       parseFollowUpSuggestions({
         text: '```octant-follow-ups\n{"suggestions":[{"title":"x","prompt":"y","target":"elsewhere"}]}\n```',
         turnId,
         uuid,
       }),
-    ).toBeUndefined();
+    ).toEqual(none);
+  });
+
+  it("reads the predicted next message even when the reply offers no task", () => {
+    const parsed = parseFollowUpSuggestions({
+      text: '```octant-follow-ups\n{"next":"  yes, move the captures to the NAS  ","suggestions":[]}\n```',
+      turnId,
+      uuid,
+    });
+    expect(parsed).toEqual({
+      followUps: { turnId, suggestions: [] },
+      nextMessage: "yes, move the captures to the NAS",
+    });
+  });
+
+  it("keeps the next message when the task list is unreadable, and drops a next message no one would type", () => {
+    expect(
+      parseFollowUpSuggestions({
+        text: '```octant-follow-ups\n{"next":"run the tests","suggestions":[{"title":"x","prompt":"y","target":"elsewhere"}]}\n```',
+        turnId,
+        uuid,
+      }).nextMessage,
+    ).toBe("run the tests");
+    for (const next of ["two\nlines", "x".repeat(281), "   ", 42]) {
+      expect(
+        parseFollowUpSuggestions({
+          text: `\`\`\`octant-follow-ups\n${JSON.stringify({ next, suggestions: [] })}\n\`\`\``,
+          turnId,
+          uuid,
+        }),
+      ).toEqual({ followUps: undefined, nextMessage: undefined });
+    }
   });
 });

@@ -13,6 +13,7 @@ const turnId = "00000000-0000-4000-8000-000000000131";
 function suggestions(
   target: "same-thread" | "new-thread",
   activated: ReadonlyArray<string> = [],
+  nextMessage?: string,
 ): ThreadFollowUpSuggestions {
   return {
     threadId,
@@ -32,6 +33,7 @@ function suggestions(
         },
       ],
     },
+    ...(nextMessage === undefined ? {} : { nextMessage }),
     activatedFollowUpIds: activated,
   } as never;
 }
@@ -53,10 +55,10 @@ function Composer() {
   );
 }
 
-function renderComposer(target: "same-thread" | "new-thread") {
+function renderComposer(target: "same-thread" | "new-thread", nextMessage?: string) {
   let activated: ReadonlyArray<string> = [];
   const client = {
-    suggestions: vi.fn(async () => suggestions(target, activated)),
+    suggestions: vi.fn(async () => suggestions(target, activated, nextMessage)),
     preview: vi.fn(),
     activate: vi.fn(async () => {
       activated = [suggestionId];
@@ -107,6 +109,18 @@ describe("useComposerSuggestionInput", () => {
     await userEvent.keyboard("{Tab}");
 
     expect(message).toHaveValue("Thanks");
+    expect(client.activate).not.toHaveBeenCalled();
+  });
+
+  it("offers the reply's predicted next message ahead of a next-step card, without activating the card", async () => {
+    const client = renderComposer("same-thread", "yes, and drop the intro");
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await waitFor(() => expect(message).toHaveAttribute("placeholder", "yes, and drop the intro"));
+
+    message.focus();
+    await userEvent.keyboard("{Tab}");
+
+    expect(message).toHaveValue("yes, and drop the intro");
     expect(client.activate).not.toHaveBeenCalled();
   });
 

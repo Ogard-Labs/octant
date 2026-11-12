@@ -877,12 +877,41 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(screen.getByRole("status", { name: "First-turn status" })).toHaveTextContent(
-        "Checking the authoritative receipt",
-      );
+      // The first turn's status is a card above the pill, with its Cancel.
+      // It is shown for the whole first turn (one mount, one unmount per
+      // creation) and carries an action, so it stays a named card.
+      const status = screen.getByRole("status", { name: "First-turn status" });
+      expect(status).toHaveTextContent("Checking the authoritative receipt");
+      const card = status.closest(".composer-notices");
+      expect(card).not.toBeNull();
+      expect(card).toContainElement(screen.getByRole("button", { name: "Cancel first turn" }));
+      expect(card?.nextElementSibling).toHaveClass("thread-composer__surface");
       expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Pending draft");
       await user.click(screen.getByRole("button", { name: "Cancel first turn" }));
       expect(onCancelFirstTurn).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["code", "work"] as const)(
+    "says the first turn is being prepared as a named quiet line for %s when there is nothing to cancel",
+    (mode) => {
+      render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          creating
+          mode={mode}
+          pendingMessage="Checking the authoritative receipt…"
+          projects={projects}
+        />,
+      );
+
+      // Passing by itself and with no action: the line, not a card, and the
+      // status region still carries its name.
+      const status = screen.getByRole("status", { name: "First-turn status" });
+      expect(status).toHaveTextContent("Checking the authoritative receipt…");
+      expect(status.querySelector(".composer-progress__line")).not.toBeNull();
+      expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
+      expect(screen.queryByRole("button", { name: "Cancel first turn" })).toBeNull();
     },
   );
 

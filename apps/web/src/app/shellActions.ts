@@ -306,7 +306,6 @@ export type ShellActions = {
     SetStateAction<CodeProjectPullRequestDetailQuery | undefined>
   >;
   readonly setThreadExportNotice: Dispatch<SetStateAction<string | undefined>>;
-  readonly setThreadStatsVisible: (visible: boolean) => void;
   readonly setUsageOpen: Dispatch<SetStateAction<boolean>>;
   readonly setWorkBoardOpen: Dispatch<SetStateAction<boolean>>;
   readonly setWorkComposerSelection: Dispatch<
