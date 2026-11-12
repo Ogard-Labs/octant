@@ -62,12 +62,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
-| [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
+| [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 5       | 3            | 0                   |
 | [Hubs and Nightly](#hubs-and-nightly)                                                 | 5         | 1       | 4            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **162** | **80**       | **5**               |
+| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
 
 ## Principles and hard lines
 
@@ -3028,12 +3028,12 @@ Status: Built. Since: —. Detail: [Device workbench: input channel](device-work
 
 Open URL, Rotate, Record screen and Repair input are effects, not input. A person or an agent may request them, and Allow input never covers them (maintainer request, 2026-11-12).
 
-- An agent's request is unasked at Full access and approval-gated below it; the host asking on its own is refused. Not built yet: today only a person may request them, an agent or the host asking is refused, and the agent tools do not offer these actions.
+- An agent's request is unasked at Full access and approval-gated below it; the host asking on its own is refused. `octant_apple` and `octant_android` offer them as `open-url`, `rotate`, `start-recording` and `stop-recording`, and `octant_apple` offers `repair-input`. Checks on a real Simulator and emulator are still owed.
 - Plan refuses them, Full access sends them unasked, and an approval-gated thread raises its own confirmation for each.
 - Open URL accepts only a credential-free http or https address of at most 2,048 characters, in parsed form; other schemes are refused at the contract.
 - Evidence for Open URL keeps only the origin, never the path or query.
 
-Status: Partly built. Since: —. Detail: [Device workbench: Open URL](device-workbench.md#open-url).
+Status: Built. Since: —. Detail: [Device workbench: Open URL](device-workbench.md#open-url).
 
 ### Managed device tools and the Android emulator
 
@@ -3042,7 +3042,7 @@ The streaming tools behind the device panes are vendored, pinned and integrity-v
 - Updates are off by default and activate only while idle after a smoke launch; a failed release keeps the previous one.
 - The tools receive no provider keys, tokens or broker credentials.
 - Octant installs only a checkout-relative APK and never stops the shared debug-bridge server.
-- Emulators Octant boots cold boot with no snapshot by default, and snapshot boot is a setting (maintainer request, 2026-11-12); not built yet: today they always cold boot. Shutdown is approval-gated and counts as done only after the emulator stays off the bridge for 15 seconds.
+- Emulators Octant boots cold boot with no snapshot by default, and snapshot boot is a setting, Android snapshot boot in Settings > Code > Devices (maintainer request, 2026-11-12). Shutdown is approval-gated and counts as done only after the emulator stays off the bridge for 15 seconds.
 - A confinement profile for the managed tools does not exist yet (not built yet).
 
 Status: Partly built. Since: —. Detail: [Device workbench: managed device tools](device-workbench.md#managed-device-tools), [Android](device-workbench.md#android) and [boot](device-workbench.md#boot-from-the-android-pane).

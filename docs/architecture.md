@@ -1202,7 +1202,7 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-runs only when a person requests it. **Record screen** starts and stops a time-limited recording a person asked for;
+runs only when a person or an agent requests it, never on the host's own. **Record screen** starts and stops a time-limited recording a person asked for;
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
@@ -1210,8 +1210,8 @@ address (Allow input never covers it), and evidence keeps only the origin. **Rot
 and landscape for a person who asked; it is an effect confirmed on its own
 (Allow input never covers it). An agent may request these device effects too
 (a recording, a URL, a rotation, and the rest): unasked at Full access and
-approval-gated below it (maintainer request, 2026-11-12; not built yet: today
-only a person's request starts these three). An agent can also read a device without a
+approval-gated below it, through `octant_apple` and `octant_android`; the
+host asking on its own is refused (maintainer request, 2026-11-12). An agent can also read a device without a
 picture: `octant_android` `describe-ui` lists the labelled elements on screen
 with centres in tap pixels, and its `tap` takes an element `target` matched
 exactly by resource-id, then content-desc, then text, refusing none or several

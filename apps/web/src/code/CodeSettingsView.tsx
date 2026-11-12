@@ -36,6 +36,8 @@ export interface CodeSettingsUpdate {
   readonly defaultDiffLayout?: CodeDiffLayout;
   readonly bundledLanguageServer?: boolean;
   /** Absent keeps the stored choice. */
+  readonly androidEmulatorSnapshotBoot?: boolean;
+  /** Absent keeps the stored choice. */
   readonly coordinatorStarting?: CoordinatorStartingChoice;
   /** Absent keeps the stored overrides; a present map replaces them. */
   readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
@@ -85,6 +87,7 @@ type CodeSettingsSectionId =
   | "thread-defaults"
   | "coordinators"
   | "editor"
+  | "devices"
   | "external-editor";
 
 /**
@@ -130,6 +133,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [bundledLanguageServer, setBundledLanguageServer] = useState(
     props.settings.bundledLanguageServer !== false,
   );
+  const [androidSnapshotBoot, setAndroidSnapshotBoot] = useState(
+    props.settings.androidEmulatorSnapshotBoot === true,
+  );
   const [executable, setExecutable] = useState(props.settings.externalEditor?.executable ?? "");
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
@@ -174,6 +180,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? props.settings.bundledLanguageServer !== false
         : current,
     );
+    setAndroidSnapshotBoot((current) =>
+      current === (previousSettings.androidEmulatorSnapshotBoot === true)
+        ? props.settings.androidEmulatorSnapshotBoot === true
+        : current,
+    );
     setFullAccessSandbox((current) =>
       current === (previousSettings.defaultFullAccessSandbox === true)
         ? props.settings.defaultFullAccessSandbox === true
@@ -206,6 +217,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   function restoreUnsavedPicks(
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
+      readonly androidEmulatorSnapshotBoot?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
@@ -237,6 +249,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     if (change.bundledLanguageServer !== undefined) {
       setBundledLanguageServer(host.bundledLanguageServer !== false);
     }
+    if (change.androidEmulatorSnapshotBoot !== undefined) {
+      setAndroidSnapshotBoot(host.androidEmulatorSnapshotBoot === true);
+    }
   }
 
   /**
@@ -249,6 +264,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     section: CodeSettingsSectionId,
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
+      readonly androidEmulatorSnapshotBoot?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
@@ -304,6 +320,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.bundledLanguageServer === undefined
           ? {}
           : { bundledLanguageServer: change.bundledLanguageServer }),
+        ...(change.androidEmulatorSnapshotBoot === undefined
+          ? {}
+          : { androidEmulatorSnapshotBoot: change.androidEmulatorSnapshotBoot }),
         ...(change.coordinatorStarting === undefined
           ? {}
           : { coordinatorStarting: change.coordinatorStarting }),
@@ -510,6 +529,27 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           </SettingRow>
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="editor" />
+      </SettingsSection>
+      <SettingsSection title="Devices">
+        <div className="setgroup">
+          <SettingRow
+            description="Let an Android emulator Octant boots start from its saved quickboot snapshot. Off, every boot is cold and takes about a minute; a saved snapshot can leave the emulator offline for minutes after it loads, so the boot times out."
+            label="Android snapshot boot"
+            focused={props.focusedSetting === "code-android-snapshot-boot"}
+            scope="mode"
+            settingId="code-android-snapshot-boot"
+          >
+            <OctantSwitch
+              checked={androidSnapshotBoot}
+              label="Android snapshot boot"
+              onCheckedChange={(checked) => {
+                setAndroidSnapshotBoot(checked);
+                void commit("devices", { androidEmulatorSnapshotBoot: checked });
+              }}
+            />
+          </SettingRow>
+        </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="devices" />
       </SettingsSection>
       <SettingsSection title="External editor">
         <div className="setgroup">

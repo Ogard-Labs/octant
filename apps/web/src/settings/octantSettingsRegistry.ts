@@ -605,6 +605,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "language services language server typescript javascript type errors diagnostics problems go to definition lsp editor bundled",
         },
         {
+          id: settingId("code-android-snapshot-boot"),
+          label: "Android snapshot boot",
+          scope: "mode",
+          keywords: "android emulator snapshot quickboot cold boot avd device start",
+        },
+        {
           id: settingId("code-coordinator-starting"),
           label: "Starting workers",
           scope: "mode",

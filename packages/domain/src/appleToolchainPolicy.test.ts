@@ -537,6 +537,59 @@ describe("Simulator frame input", () => {
     ).toMatchObject({ kind: "denied", reason: "actor-required" });
   });
 
+  it("lets an agent request a device effect unasked at Full access, asked below it, and never in Plan", () => {
+    const agent = {
+      kind: "agent" as const,
+      actorId: "10000000-0000-4000-8000-000000000098" as never,
+      providerInstanceId: authority.providerInstanceId as never,
+      threadId: tap.threadId as never,
+    };
+    const { point: _point, ...base } = tap;
+    const unasked = { kind: "not-required" as const };
+    const effects = [
+      { ...base, kind: "open-url" as const, url: "https://example.com/" as never },
+      { ...base, kind: "rotate" as const },
+      { ...base, kind: "start-recording" as const },
+      { ...base, kind: "repair-input" as const },
+    ];
+    for (const effect of effects) {
+      const asked = { ...effect, requestedBy: agent };
+      expect(
+        evaluateAppleSimulatorRequest(
+          { ...asked, approval: unasked },
+          { ...scope, executionPolicy: "full-access" },
+          [booted],
+        ),
+      ).toEqual({ kind: "allowed" });
+      expect(evaluateAppleSimulatorRequest(asked, scope, [booted])).toEqual({ kind: "allowed" });
+      expect(
+        evaluateAppleSimulatorRequest({ ...asked, approval: unasked }, scope, [booted]),
+      ).toMatchObject({ kind: "denied", reason: "approval-required" });
+      expect(
+        evaluateAppleSimulatorRequest(asked, { ...scope, executionPolicy: "plan" }, [booted]),
+      ).toMatchObject({ kind: "denied", reason: "read-only-policy" });
+    }
+  });
+
+  it("refuses a device effect the host asks for on its own, at Full access too", () => {
+    const host = { kind: "system" as const, actorId: actor.actorId };
+    const { point: _point, ...base } = tap;
+    for (const kind of ["open-url", "rotate", "start-recording", "repair-input"] as const) {
+      expect(
+        evaluateAppleSimulatorRequest(
+          {
+            ...base,
+            kind,
+            requestedBy: host,
+            ...(kind === "open-url" ? { url: "https://example.com/" as never } : {}),
+          },
+          { ...scope, executionPolicy: "full-access" },
+          [booted],
+        ),
+      ).toEqual({ kind: "denied", reason: "person-or-agent-required" });
+    }
+  });
+
   it("redacts typed characters from durable diagnostic copy", () => {
     expect(
       redactedAppleInputDiagnostic({

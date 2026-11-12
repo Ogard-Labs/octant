@@ -928,6 +928,49 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+
+    const untouched = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+    });
+    if (untouched.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(untouched.settings.androidEmulatorSnapshotBoot).toBeUndefined();
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: untouched.settings } as never);
+
+    const turnedOn = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 1,
+      androidEmulatorSnapshotBoot: true,
+    });
+    expect(turnedOn).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (turnedOn.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: turnedOn.settings } as never);
+
+    const kept = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      defaultExecutionPolicy: "plan",
+    });
+    expect(kept).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (kept.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: kept.settings } as never);
+
+    const turnedOff = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      androidEmulatorSnapshotBoot: false,
+    });
+    if (turnedOff.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(turnedOff.settings.androidEmulatorSnapshotBoot).toBeUndefined();
+  });
+
   it("keeps the Auto reviewer and Shield model across later changes, and returns Shield to the thread's provider on null", async () => {
     const fixture = serviceFixture();
     const shieldModel = {

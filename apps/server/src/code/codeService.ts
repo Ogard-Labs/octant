@@ -1936,6 +1936,9 @@ export class CodeService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
+            ? { androidEmulatorSnapshotBoot: true }
+            : {}),
           ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
             ? { defaultAutoApprove: true }
             : {}),

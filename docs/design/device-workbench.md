@@ -159,9 +159,10 @@ through `serve-sim` as before. **Repair input** is a fifth input kind,
 offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input
-reconnects it. It rides the same Allow input grant as a tap, never runs
-automatically, and is refused unless a person (`local-user` or
-`remote-device`) requested it; `octant_apple` does not offer it.
+reconnects it. It rides the same Allow input grant as a tap and never runs
+automatically: a person (`local-user` or `remote-device`) or an agent may ask
+for it, the host asking on its own is refused, and `octant_apple` offers it as
+`repair-input` (maintainer request, 2026-11-12).
 
 ## Open URL
 
@@ -196,8 +197,10 @@ every address raises its own confirmation, which names the whole address and
 is bound to it, and Allow input never covers it. Evidence and its log keep only
 `open-url completed (<origin>; path and query not recorded)`: the tool's own
 output can quote the address, so none of it is kept, for the same reason typed
-text is redacted. Not built yet: today an agent is refused, as with Repair
-input, and the agent tools do not offer Open URL.
+text is redacted. Both agent tools offer it as `open-url`: the tool sends the
+address in the parsed form, so an agent's `https://example.com` reaches the
+confirmation and the device as `https://example.com/`, and an address the
+contract would refuse is refused in the tool.
 
 ## Volume
 
@@ -282,8 +285,8 @@ Rotate is an effect, not input. A person (`local-user` or
 refused (maintainer request, 2026-11-12). Plan refuses it; Full access sends it unasked; on an approval-gated
 thread each Rotate raises its own confirmation, and Allow input never covers
 it. Evidence and its log record `rotate to <orientation> completed` (`rotate completed` when the host chose) and
-nothing from the device. Not built yet: today an agent is refused and the
-agent tools do not offer Rotate.
+nothing from the device. Both agent tools offer it as `rotate`; the emulator
+needs an `orientation`, and a Simulator without one turns the other way.
 
 ## Record screen
 
@@ -316,12 +319,12 @@ outcome. A recording left by a host that stopped is swept with stale captures.
 
 Authority follows Open URL: a person (`local-user` or `remote-device`) or an
 agent may ask for either action, the host is refused, and the contract
-requires `requestedBy` (maintainer request, 2026-11-12). Not built yet: today
-an agent is refused and `octant_apple` does not offer them. Starting is an
+requires `requestedBy` (maintainer request, 2026-11-12). Both agent tools
+offer them as `start-recording` and `stop-recording`. Starting is an
 effect: Plan refuses it, Full access starts it unasked, and an approval-gated
 thread confirms it ("Record this Simulator's screen?"); Allow input never
-covers it. Stopping ends what a person already approved, so it never asks
-again. Serving a saved recording back to the pane is not specified yet; the
+covers it. Stopping ends what was already approved or started unasked, so it
+never asks again. Serving a saved recording back to the pane is not specified yet; the
 pane reports a stopped recording as saved evidence only.
 
 ## Screen and log inspection
@@ -516,14 +519,18 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 
 ### Boot from the Android pane
 
-Snapshot boot is a setting, off by default (maintainer request, 2026-11-12;
-not built yet: today every boot is cold and there is no setting). With it off,
+Snapshot boot is a setting, off by default (maintainer request, 2026-11-12):
+**Android snapshot boot** in Settings > Code > Devices, stored as
+`androidEmulatorSnapshotBoot` in the journaled Code settings and read at each
+boot, so a change needs no restart. With it off,
 Octant starts the emulator as `emulator -avd <name> -no-window -no-audio
 -no-snapshot`: every boot is cold, and the emulator neither loads nor saves a
 quickboot snapshot. A snapshot written at power-off loaded "successfully" on the
 next boot and then left `adb` showing the emulator offline for minutes, so the
 boot timed out; a cold boot reached the first frame in about a minute, and the
-saved state is not worth that risk. The rule covers emulators Octant launches;
+saved state is not worth that risk by default. With the setting on, Octant
+leaves `-no-snapshot` out and the emulator loads and saves its quickboot
+snapshot. The rule covers emulators Octant launches;
 one the person starts themselves keeps its own snapshot behavior.
 
 The emulator runs as the leader of its own process group, because the launcher

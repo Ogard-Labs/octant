@@ -99,6 +99,11 @@ export interface AndroidToolchainServiceOptions {
     readonly cwd: string;
     readonly environment: Readonly<Record<string, string>>;
   }) => Promise<DetachedProcessStart>;
+  /**
+   * Whether the person turned snapshot boot on, read at each boot. Absent or
+   * false boots cold, with no quickboot snapshot loaded or saved.
+   */
+  readonly snapshotBoot?: () => boolean;
   readonly realpath: (path: string) => Promise<string>;
   readonly observeEmulators?: (emulators: ReadonlyArray<AndroidEmulatorRecord>) => void;
   readonly writeArtifact: (
@@ -675,9 +680,10 @@ export class AndroidToolchainService {
           String(request.emulatorId),
           "-no-window",
           "-no-audio",
-          // Every boot is cold. A quickboot snapshot saved at power-off can
-          // load "successfully" and then leave adb offline for minutes.
-          "-no-snapshot",
+          // A boot is cold unless the person turned snapshot boot on. A
+          // quickboot snapshot saved at power-off can load "successfully"
+          // and then leave adb offline for minutes, so the boot times out.
+          ...(this.#options.snapshotBoot?.() === true ? [] : ["-no-snapshot"]),
         ],
         cwd: context.checkoutRoot,
         environment: androidEnv(this.#options.environment?.() ?? {}, this.#sdk),

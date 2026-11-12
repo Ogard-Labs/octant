@@ -512,6 +512,15 @@ export const CodeSettings = Schema.Struct({
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
+   * Whether an Android emulator Octant boots may load and save a quickboot
+   * snapshot. Absent is off: every boot is cold, which is what a store
+   * persisted before the switch existed did. Cold is the default because a
+   * snapshot saved at power-off loaded "successfully" and then left `adb`
+   * showing the emulator offline for minutes, so the boot timed out
+   * (docs/design/device-workbench.md, Boot from the Android pane).
+   */
+  androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
+  /**
    * Who answers prompts at Auto, as an account default a Code Project may
    * override. Absent means the provider's own reviewer where it has one and
    * Octant Shield everywhere else, which is also what "provider" means on a
@@ -757,6 +766,8 @@ export const CodeCommand = Schema.Union(
     defaultAutoApprove: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
     /** Absent keeps the stored choice; null returns to each thread's own provider. */

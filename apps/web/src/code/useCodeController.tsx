@@ -2664,6 +2664,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly requireGitRepository?: boolean;
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
+      readonly androidEmulatorSnapshotBoot?: boolean;
       readonly defaultAutoApprove?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly shieldModel?: ShieldModelChoice | null;

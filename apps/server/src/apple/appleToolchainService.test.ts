@@ -2456,7 +2456,7 @@ describe("AppleToolchainService Open URL", () => {
     );
     expect(planned.outcome).toBe("unauthorized");
 
-    // Only a person asks for an address, never the host, even under Full access.
+    // A person or an agent asks for an address, never the host, even under Full access.
     const byHost = await service.execute(
       openUrlRequest({
         actionId: "30000000-0000-4000-8000-000000000015" as never,
@@ -2641,7 +2641,7 @@ describe("AppleToolchainService screen recording", () => {
     ).toBe(false);
   });
 
-  it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+  it("asks before starting, refuses Plan and the host asking on its own, and never asks again to stop", async () => {
     const { service, execute } = await recordingService();
     const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
     await service.discover(discoveryRequest, gated);
@@ -2658,13 +2658,13 @@ describe("AppleToolchainService screen recording", () => {
     });
     expect(planned.outcome).toBe("unauthorized");
 
-    const byAgent = await service.execute(
+    const byHost = await service.execute(
       recording("start-recording", startId, {
         requestedBy: { kind: "system", actorId: actor.actorId },
       }),
       context,
     );
-    expect(byAgent.outcome).toBe("unauthorized");
+    expect(byHost.outcome).toBe("unauthorized");
     expect(execute.mock.calls.some(([input]) => input.argv.includes("recordVideo"))).toBe(false);
 
     // Stopping ends what a person already approved starting.
@@ -3262,7 +3262,7 @@ describe("AppleToolchainService Simulator input", () => {
     ]);
   });
 
-  it("sends Repair input to the desktop only when a person asks, under the input grant", async () => {
+  it("sends Repair input to the desktop when a person or an agent asks, under the input grant, and never for the host", async () => {
     const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => ({
       kind: "delivered" as const,
     }));
@@ -3295,7 +3295,7 @@ describe("AppleToolchainService Simulator input", () => {
       expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
     ]);
 
-    const byHost = await service.execute(
+    const byAgent = await service.execute(
       simulatorRequest({
         kind: "repair-input",
         actionId: "30000000-0000-4000-8000-000000000031" as never,
@@ -3310,8 +3310,21 @@ describe("AppleToolchainService Simulator input", () => {
       }),
       gated,
     );
+    expect(byAgent.outcome).toBe("succeeded");
+    expect(deliver).toHaveBeenCalledTimes(2);
+
+    const byHost = await service.execute(
+      simulatorRequest({
+        kind: "repair-input",
+        actionId: "30000000-0000-4000-8000-000000000032" as never,
+        bundleIdentifier: undefined,
+        requestedBy: { kind: "system", actorId: actor.actorId },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      gated,
+    );
     expect(byHost.outcome).toBe("unauthorized");
-    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledTimes(2);
   });
 
   it("refuses to re-inject interrupted input under the same actionId", async () => {

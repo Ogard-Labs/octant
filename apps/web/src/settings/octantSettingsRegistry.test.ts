@@ -258,6 +258,7 @@ describe("octantSettingsRegistry", () => {
       "code-require-git",
       "code-default-diff-layout",
       "code-language-services",
+      "code-android-snapshot-boot",
       "code-coordinator-starting",
       "code-coordinator-open-workers",
       "project-view-switcher",
