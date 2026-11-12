@@ -549,6 +549,23 @@
   white-space: nowrap;
 }
 
+/* A delivery head's status line is the one part that can outgrow a narrow dock
+   (280px is the dock's minimum). It drops to a row of its own and wraps there,
+   instead of holding its one-line width and pushing the title's label over
+   itself: measured at 280px, "Local only · GitHub review mutation unavailable"
+   ran 14px past the edge and the "Review" label overlapped it. Wide docks fit
+   both on one line, so nothing moves there. */
+.right-utility-dock__tool .code-delivery-pane__toolbar {
+  flex-wrap: wrap;
+  row-gap: var(--oct-space-1);
+}
+
+.right-utility-dock__tool .code-delivery-pane__toolbar > p {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
   flex: none;
   padding: 0;
