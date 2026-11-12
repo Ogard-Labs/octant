@@ -5692,7 +5692,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .browser-workspace--feedback > .browser-workspace__chrome {
-  flex: 0 0 var(--oct-title-rail-h, 40px);
+  flex: 0 0 auto;
+  min-height: var(--oct-title-rail-h, 40px);
 }
 
 .browser-workspace--feedback > .browser-workspace__message {
