@@ -14,6 +14,7 @@ import {
   type ProjectId,
   type ShieldDecision,
 } from "@octant/contracts";
+import { approvalAnswerUnderPosture } from "@octant/domain/guardrail-policy";
 import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
 import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -52,6 +53,9 @@ export interface NativeHarnessApprovalAnswer {
 
 interface Waiter {
   readonly threadId: string;
+  readonly mode: OctantMode;
+  /** The thread's posture this approval is asked under; re-stamped when it is asked again. */
+  askedUnder: string | undefined;
   readonly approvalClass: string;
   readonly allowRemember: boolean;
   /** Hosts the approval listed, keyed `host port`; absent when it listed none. */
@@ -96,6 +100,13 @@ export interface NativeHarnessApprovalStoreOptions {
    * is asked so the prompt can say why it asks and what the thread read.
    */
   readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
+  /**
+   * The thread's posture now, as `approvalPostureOf` reads it, or undefined
+   * when it cannot be read. An allow answered under a posture other than the
+   * one an approval was asked under is refused and the approval asks again.
+   * Absent, approvals are not tied to a posture.
+   */
+  readonly posture?: (threadId: string, mode: OctantMode) => string | undefined;
   readonly onAsked?: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
@@ -106,8 +117,9 @@ export interface NativeHarnessApprovalStoreOptions {
 /**
  * Tool calls waiting on a person. Asking journals the approval on the
  * session and blocks the call; a decision from any surface settles it. An
- * "always" approval remembers the class for this thread's session only —
- * the thread's posture is untouched, so a restart asks again.
+ * "always" approval remembers the class for this thread's session only, and
+ * only under the posture it was granted under — the thread's posture is
+ * untouched, a restart asks again, and so does a later permissions change.
  *
  * A single-use ask (the thread has taken in outside content) is never
  * answered by a remembered class and never remembers one. Taint lasts for the
@@ -116,7 +128,11 @@ export interface NativeHarnessApprovalStoreOptions {
 export class NativeHarnessApprovalStore {
   readonly #options: NativeHarnessApprovalStoreOptions;
   readonly #waiters = new Map<string, Waiter>();
-  readonly #remembered = new Map<string, Set<string>>();
+  /** Remembered classes per thread, each with the posture it was granted under. */
+  readonly #remembered = new Map<string, Map<string, string | undefined>>();
+
+  /** The mode each remembering thread was asked in, to read its posture again. */
+  readonly #modes = new Map<string, OctantMode>();
 
   constructor(options: NativeHarnessApprovalStoreOptions) {
     this.#options = options;
@@ -132,7 +148,29 @@ export class NativeHarnessApprovalStore {
    * single-use ask is never answered by a remembered class.
    */
   remembers(threadId: string, approvalClass: string, singleUse: boolean): boolean {
-    return !singleUse && this.#remembered.get(threadId)?.has(approvalClass) === true;
+    return !singleUse && this.#grantHolds(threadId, approvalClass);
+  }
+
+  /**
+   * A remembered "always" answers only under the posture it was granted
+   * under. Once the person changes the thread's permissions the grant no
+   * longer applies and the class asks again; a later "always" under the new
+   * posture remembers it afresh.
+   */
+  #grantHolds(threadId: string, approvalClass: string): boolean {
+    const classes = this.#remembered.get(threadId);
+    if (classes === undefined || !classes.has(approvalClass)) return false;
+    const posture = this.#options.posture;
+    if (posture === undefined) return true;
+    const mode = this.#modes.get(threadId);
+    return (
+      mode !== undefined &&
+      approvalAnswerUnderPosture({
+        approved: true,
+        askedUnder: classes.get(approvalClass),
+        current: posture(threadId, mode),
+      }) === "deliver"
+    );
   }
 
   /**
@@ -194,7 +232,7 @@ export class NativeHarnessApprovalStore {
     if (
       input.source === undefined &&
       !singleUse &&
-      this.#remembered.get(input.threadId)?.has(input.approvalClass) === true
+      this.#grantHolds(input.threadId, input.approvalClass)
     ) {
       return settled("approved");
     }
@@ -256,6 +294,8 @@ export class NativeHarnessApprovalStore {
       };
       const waiter: Waiter = {
         threadId: input.threadId,
+        mode: input.mode,
+        askedUnder: this.#options.posture?.(input.threadId, input.mode),
         approvalClass: input.approvalClass,
         allowRemember: input.source === undefined && !singleUse,
         commandHosts:
@@ -316,7 +356,8 @@ export class NativeHarnessApprovalStore {
     | "already-settled"
     | "withdrawn"
     | "host-not-offered"
-    | "lost-in-restart" {
+    | "lost-in-restart"
+    | "posture-changed" {
     this.#expire();
     const waiter = this.#waiters.get(approvalId);
     let confirmed: ToolEgressCallConfirmation | undefined;
@@ -348,11 +389,25 @@ export class NativeHarnessApprovalStore {
       );
       return typeof settled === "object" ? "lost-in-restart" : settled;
     }
+    const posture = this.#options.posture;
+    if (posture !== undefined && decision !== "deny") {
+      // An allow given under a wider posture must not take effect after the
+      // person narrowed it; the approval stays waiting under the current one.
+      const current = posture(threadId, waiter.mode);
+      if (
+        approvalAnswerUnderPosture({ approved: true, askedUnder: waiter.askedUnder, current }) ===
+        "ask-again"
+      ) {
+        waiter.askedUnder = current;
+        return "posture-changed";
+      }
+    }
     const remember = decision === "approve-always" && waiter.allowRemember;
     if (remember) {
-      const classes = this.#remembered.get(threadId) ?? new Set<string>();
-      classes.add(waiter.approvalClass);
+      const classes = this.#remembered.get(threadId) ?? new Map<string, string | undefined>();
+      classes.set(waiter.approvalClass, waiter.askedUnder);
       this.#remembered.set(threadId, classes);
+      this.#modes.set(threadId, waiter.mode);
     }
     waiter.resolve(decision === "deny" ? "denied" : "approved", remember, confirmed);
     return "decided";

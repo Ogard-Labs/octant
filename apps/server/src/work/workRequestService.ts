@@ -19,6 +19,8 @@ import {
   type ProviderSessionId,
 } from "@octant/contracts";
 import {
+  APPROVAL_POSTURE_CHANGED_MESSAGE,
+  approvalAnswerUnderPosture,
   validateQuestionnaireAnswer,
   classifyWorkRequestProviderAuthority,
   classifyWorkRequestTransition,
@@ -35,6 +37,11 @@ export interface WorkRequestProjectPort {
   workCanonicalRoot(projectId: ProjectId): string | undefined;
   threadProjectId(threadId: WorkThreadId): ProjectId | undefined;
   threadProviderInstanceId(threadId: WorkThreadId): ProviderInstanceId | undefined;
+  /**
+   * The thread's posture now, as `approvalPostureOf` reads it, or undefined
+   * when the thread cannot be read.
+   */
+  threadApprovalPosture(threadId: WorkThreadId): string | undefined;
 }
 
 export interface WorkRequestEventStorePort {
@@ -135,6 +142,12 @@ export class WorkRequestService {
   readonly #activeDeliveries = new Set<string>();
   readonly #interruptedSessions = new Set<string>();
   readonly #settlementListeners = new Map<string, Set<() => void>>();
+  /**
+   * The thread's posture when each pending approval in this process was
+   * asked, by request id. A request restored after a restart has none, and
+   * its provider session did not survive to take an allow anyway.
+   */
+  readonly #askedPostures = new Map<string, string | undefined>();
 
   constructor(options: WorkRequestServiceOptions) {
     this.#projects = options.projects;
@@ -168,7 +181,7 @@ export class WorkRequestService {
     if (result.status !== "ok") {
       throw new WorkRequestServiceError(
         "unavailable",
-        "Work request hydration exceeded the journal scan cap; a snapshot rebuild is required.",
+        "Work request hydration exceeded the journal scan cap, so Octant refuses to serve a partial view.",
       );
     }
     for (const frame of result.frames) {
@@ -270,6 +283,12 @@ export class WorkRequestService {
       );
     }
     this.#projection.apply(frame);
+    if (request.detail.kind === "approval") {
+      this.#askedPostures.set(
+        String(request.requestId),
+        this.#projects.threadApprovalPosture(request.threadId),
+      );
+    }
     return ok(request);
   }
 
@@ -309,6 +328,13 @@ export class WorkRequestService {
         "unauthorized",
         "The thread's provider has changed since this request was recorded.",
       );
+    }
+    if (
+      command.resolution.kind === "approval" &&
+      entry.request.delivery === undefined &&
+      this.#approvalAskedAgain(entry.request, command.resolution.approved)
+    ) {
+      return failure("stale", APPROVAL_POSTURE_CHANGED_MESSAGE);
     }
     if (entry.request.detail.kind === "user-input" && command.resolution.kind === "user-input") {
       const questionnaire = entry.request.detail.questionnaire;
@@ -634,6 +660,23 @@ export class WorkRequestService {
     this.#settlementListeners.delete(listenerKey);
     for (const callback of listeners ?? []) callback();
     return ok(nextRequest);
+  }
+
+  /**
+   * Whether an answer to this approval must wait for the person to answer
+   * again: an allow given under a posture the thread no longer holds. The
+   * request stays pending and is now asked under the current posture.
+   */
+  #approvalAskedAgain(request: WorkRequest, approved: boolean): boolean {
+    const current = this.#projects.threadApprovalPosture(request.threadId);
+    const decision = approvalAnswerUnderPosture({
+      approved,
+      askedUnder: this.#askedPostures.get(String(request.requestId)),
+      current,
+    });
+    if (decision === "deliver") return false;
+    this.#askedPostures.set(String(request.requestId), current);
+    return true;
   }
 
   #providerAuthorityDenied(request: WorkRequest): boolean {

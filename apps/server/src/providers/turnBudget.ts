@@ -118,6 +118,41 @@ export function makeTurnTextParagraphs(): (event: ProviderRuntimeEvent) => Provi
   };
 }
 
+/**
+ * How long a turn may process provider events before it hands the event loop
+ * back. A provider that streams faster than the host journals keeps the
+ * event stream non-empty, and each event resumes the turn from a promise, so
+ * the work ran as one unbroken chain of microtasks: timers and incoming
+ * requests, Stop among them, never ran until the provider paused (a Code
+ * turn fed deltas as fast as they could be pulled starved a 50 ms timer for
+ * a whole minute).
+ */
+export const PROVIDER_EVENT_SLICE_MS = 10;
+
+/**
+ * An effect a turn runs once per provider event. It is free until the turn
+ * has held the event loop for `sliceMs`, then waits one `setImmediate` so
+ * timers and pending I/O (a Stop, an approval answer) run before the next
+ * event. Wall time, not the Effect clock: a test clock that never advances
+ * would otherwise turn it off.
+ */
+export function makeEventLoopShare(
+  sliceMs: number = PROVIDER_EVENT_SLICE_MS,
+  now: () => number = () => performance.now(),
+): Effect.Effect<void> {
+  let sliceStartedAt = now();
+  return Effect.suspend(() => {
+    if (now() - sliceStartedAt < sliceMs) return Effect.void;
+    return Effect.async<void>((resume) => {
+      const pending = setImmediate(() => {
+        sliceStartedAt = now();
+        resume(Effect.void);
+      });
+      return Effect.sync(() => clearImmediate(pending));
+    });
+  });
+}
+
 export interface IdleTimeout {
   /** Record activity; the idle clock restarts from now. */
   readonly touch: Effect.Effect<void>;

@@ -271,6 +271,7 @@ export function startOctantServer(
       personMemoryRoutes,
       protectedFilesRoutes,
       processAuthorityNow,
+      processAuthorityTime,
       routineProposalService,
       imageGenerationOffers,
       simulatorInputGrants,
@@ -428,6 +429,7 @@ export function startOctantServer(
       options,
       persistence,
       processAuthorityNow,
+      processAuthorityTime,
       providerRuntimeRegistry,
       validationEventStore,
       windowAuthorityStore,
@@ -558,6 +560,7 @@ export function startOctantServer(
       options,
       persistence,
       processAuthorityNow,
+      processAuthorityTime,
       version,
       windowAuthorityStore,
       workThreadProjection,
@@ -574,6 +577,7 @@ export function startOctantServer(
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
+      liftRestartRecovery,
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
@@ -624,6 +628,7 @@ export function startOctantServer(
       nativeHarnessTranscripts,
       options,
       persistence,
+      processAuthorityTime,
       providerDataDirectory,
       runningWorkTurnAccess,
       runningWorkTurnSandbox,
@@ -780,6 +785,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       options,
       persistence,
+      processAuthorityTime,
       localPluginImportReceipts,
       providerDataDirectory,
       shellService,
@@ -1138,16 +1144,20 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
     });
-    yield* wireContinuation({
+    const { restartRecovery } = yield* wireContinuation({
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
       capacityScheduler,
       chatService,
+      codeBoardEventStore,
+      codeOperationRuntime,
       contextHarness,
       externalContentIngestionStore,
+      liftRestartRecovery,
       persistence,
       routeCodeService,
+      threadMessageQueue,
       workThreadProjection,
       workTurnProjection,
       workTurnService,
@@ -1405,7 +1415,10 @@ export function startOctantServer(
       now: () => new Date().toISOString(),
     });
     const commands = new CommandCredentialBindings({
-      now: () => performance.now(),
+      // A request's three minutes run on the authority clock. The monotonic
+      // timer it used before is CLOCK_MONOTONIC on Linux, which does not
+      // count a suspend, so a suspended Linux host extended them.
+      now: processAuthorityTime,
       uuid: randomUUID,
       canConfigure: (window, project) => {
         try {
@@ -1791,6 +1804,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      restartRecovery,
       agentGrantRouteSlot,
       workRequestRuntime,
       workRequestService,
@@ -2238,5 +2252,9 @@ export function fatalStartupOutput(error: unknown): string {
           category: "startup-failed",
           message: withStartupFailureReason(UNCLASSIFIED_STARTUP_FAILURE, error),
         };
-  return startupFailedOutput(failure.category, failure.message);
+  return startupFailedOutput(
+    failure.category,
+    failure.message,
+    failure instanceof PersistenceStartupFailed ? failure.recovery : undefined,
+  );
 }

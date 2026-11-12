@@ -7,6 +7,7 @@ import {
   type HostControlStatus,
   type HostLifecycleAction,
   type HostMemoryStatus,
+  type HostRestartRecovery,
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
   type SetHostMemoryLimitsOutcome,
@@ -120,6 +121,8 @@ export interface HostControlRouteDependencies {
   readonly backup?: (label: string) => HostControlBackupReceipt;
   /** The memory guard's report; omitting it leaves `memory` off the status. */
   readonly memory?: () => HostMemoryStatus;
+  /** What this start did with the turns a restart cut off; absent when none were. */
+  readonly restartRecovery?: () => HostRestartRecovery | undefined;
   /** The journaled memory limits; omitting it makes the setting unavailable. */
   readonly memoryLimits?: {
     readonly set: (
@@ -420,6 +423,7 @@ async function composeStatus(
   if (serviceMode === undefined) return undefined;
   const policy = await readPolicy(dependencies.servicePolicy);
   const lifecycle = lifecycleControls(dependencies, serviceMode, policy);
+  const restartRecovery = dependencies.restartRecovery?.();
   return {
     identity: {
       hostId: diagnostics.identity.hostId,
@@ -443,6 +447,7 @@ async function composeStatus(
       attentionRequired: diagnostics.work.attentionRequired,
     },
     ...(dependencies.memory === undefined ? {} : { memory: dependencies.memory() }),
+    ...(restartRecovery === undefined ? {} : { restartRecovery }),
     lifecycle,
   };
 }

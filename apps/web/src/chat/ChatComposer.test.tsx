@@ -214,6 +214,13 @@ describe("ChatComposer", () => {
     await user.click(screen.getByRole("button", { name: "Stop response" }));
     expect(onStop).toHaveBeenCalledOnce();
 
+    // Until the host says how the response ended, Stop reads as stopping and
+    // cannot be pressed again.
+    rerender(
+      <ChatComposer {...props} draft="Reply" isSending onSend={onSend} onStop={onStop} stopping />,
+    );
+    expect(screen.getByRole("button", { name: "Stopping response…" })).toBeDisabled();
+
     rerender(
       <ChatComposer {...props} draft="Reply" isSending={false} onSend={onSend} onStop={onStop} />,
     );

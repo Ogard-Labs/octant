@@ -1,6 +1,7 @@
 import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DESKTOP_BACKGROUND_SERVICE_SWITCH,
   DESKTOP_HOST_ONLY_SWITCH,
   launchDesktopApplication,
   resolvePackagedDesktopLaunch,
@@ -161,7 +162,21 @@ it("accepts a host-only role only for Stable without mixed entries or runtime op
     });
     expect(resolvePackagedDesktopLaunch(desktopIdentity("nightly"), args).kind).toBe("refused");
   }
+  // The background service marks its own host-only launch so it is not stopped
+  // like a Nightly client's host when no window arrives.
+  expect(
+    resolvePackagedDesktopLaunch(desktopIdentity("stable"), [
+      DESKTOP_HOST_ONLY_SWITCH,
+      DESKTOP_BACKGROUND_SERVICE_SWITCH,
+    ]),
+  ).toEqual({ kind: "host-only", backgroundService: true });
   for (const args of [
+    [DESKTOP_BACKGROUND_SERVICE_SWITCH],
+    [
+      DESKTOP_HOST_ONLY_SWITCH,
+      DESKTOP_BACKGROUND_SERVICE_SWITCH,
+      DESKTOP_BACKGROUND_SERVICE_SWITCH,
+    ],
     [DESKTOP_HOST_ONLY_SWITCH, DESKTOP_HOST_ONLY_SWITCH],
     [DESKTOP_HOST_ONLY_SWITCH, "--inspect"],
     [DESKTOP_HOST_ONLY_SWITCH, "octant://code/project/123e4567-e89b-42d3-a456-426614174000"],

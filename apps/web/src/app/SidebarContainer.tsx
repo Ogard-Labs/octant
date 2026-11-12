@@ -125,6 +125,7 @@ export interface SidebarContainerProps {
     | "setCodeThreadCoordinator"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
+    | "setCodeThreadRestartContinuation"
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"

@@ -512,6 +512,27 @@ function extensionClient(): ExtensionClient {
   };
 }
 
+describe("Chat Stop", () => {
+  it("lets the person press Stop again when the Stop never reached the host", async () => {
+    const user = userEvent.setup();
+    // A transport failure: the controller reports no result for the command.
+    const execute = vi.fn(async () => undefined);
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: viewWithAttempt("streaming"), execute })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Stop response" }));
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "interrupt-chat-turn" }));
+    // Nothing was asked of the host, so nothing is stopping: Stop stays usable.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled(),
+    );
+  });
+});
+
 describe("Chat host queue", () => {
   it("queues multiple messages without sending on settlement or unmount", async () => {
     const host = queueTestHost();

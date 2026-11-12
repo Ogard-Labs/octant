@@ -53,6 +53,7 @@ import {
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
+  decodeCodeRuntimeWorkId,
   decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
@@ -102,7 +103,16 @@ import {
   readCodeThreadActivity,
   readCodeReviewFinding,
   readCodeReviewFindings,
+  reconcileCodeRestart,
 } from "../persistence/codeProjection";
+import {
+  codeRestartResumability,
+  continueCodeTurnsCutOffByRestart,
+  createCodeRestartContinuationAttempts,
+  type CodeRestartContinuationPorts,
+} from "./codeRestartContinuation";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { AgentMessageService } from "../agentMessage/agentMessageService";
 import { AgentMessageProjection } from "../agentMessage/agentMessageProjection";
 import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
@@ -124,7 +134,11 @@ import {
   type SiblingThreadSource,
 } from "../siblingThreads/siblingThreadTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
-import { defaultWindowWorkspace, contextKeyForProject } from "@octant/domain";
+import {
+  APPROVAL_POSTURE_CHANGED_MESSAGE,
+  defaultWindowWorkspace,
+  contextKeyForProject,
+} from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
@@ -624,6 +638,211 @@ describe("CodeOperationRuntime", () => {
     });
     expect(settle).toHaveBeenCalledOnce();
     fixture.close();
+  });
+
+  it.each([
+    ["points at the pushed commit", { status: "found", oid: "a".repeat(40) }, "completed"],
+    ["points elsewhere", { status: "found", oid: "c".repeat(40) }, "failed"],
+    ["has no such branch", { status: "absent" }, "failed"],
+    ["cannot be read", { status: "unavailable" }, "ambiguous"],
+  ] as const)(
+    "settles a push the host lost when the remote branch %s, on the next look at the checkout",
+    async (_case, remote, settled) => {
+      const remoteHead = vi.fn(async () => remote);
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        const pushId = "90000000-0000-4000-8000-0000000000e1";
+        fixture.appendRuntimeWork({
+          id: pushId,
+          kind: "git",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "push",
+            remote: "origin",
+            remoteRef: "refs/heads/feature",
+            commitOid: "a".repeat(40),
+          },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-git",
+          operationId: operationId(41),
+          threadId,
+          checkoutId,
+          gitOperationId: operationId(42),
+          maxDiffBytes: 1_024,
+        });
+        expect(remoteHead).toHaveBeenCalledWith(
+          expect.objectContaining({ remote: "origin", remoteRef: "refs/heads/feature" }),
+          undefined,
+        );
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === pushId)
+            .at(-1)?.state,
+        ).toBe(settled);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it.each([
+    ["exists", { status: "found" }, "completed"],
+    ["is nowhere", { status: "none" }, "failed"],
+  ] as const)(
+    "settles a pull request the host lost while creating it when the thread's pull request %s",
+    async (_case, located, settled) => {
+      const locate = vi.fn(async () =>
+        located.status === "found"
+          ? {
+              status: "found" as const,
+              pullRequest: {
+                number: 7,
+                url: "https://github.com/octant/octant/pull/7",
+                baseRepository: "octant/octant",
+                baseBranch: "main",
+                headOwner: "octant",
+                headBranch: "feature",
+              },
+            }
+          : located,
+      );
+      const fixture = runtimeFixture({
+        pullRequestPort: {
+          ensure: async () => ({ status: "unavailable" }),
+          locate,
+          observeReview: async () => ({ status: "unavailable" }),
+        },
+      });
+      try {
+        const createId = "90000000-0000-4000-8000-0000000000e2";
+        fixture.appendRuntimeWork({
+          id: createId,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "create" },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          operationId: operationId(43),
+          threadId,
+          checkoutId,
+          maxDiffBytes: 1_024,
+        });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === createId)
+            .at(-1)?.state,
+        ).toBe(settled);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
+    const runs = 10;
+    const latencies: number[] = [];
+    for (let run = 0; run < runs; run += 1) {
+      // A provider streaming as fast as it can: every pull is answered at once.
+      let streamed = 0;
+      const flood = Stream.repeatEffect(
+        Effect.sync(() => {
+          streamed += 1;
+          return providerEvent({ kind: "text-delta", text: "x" });
+        }),
+      );
+      const connection = {
+        ...providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>())),
+        subscribe: Effect.succeed(flood),
+      };
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        const start = operationId(4_000 + run * 2);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: start,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(streamed).toBeGreaterThan(1_000), { interval: 1 });
+        const stopIssued = performance.now();
+        const stopped = await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(4_001 + run * 2),
+          threadId,
+          checkoutId,
+        });
+        expect(stopped).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+        await vi.waitFor(
+          async () => {
+            expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+              kind: "operation-state",
+              state: "interrupted",
+            });
+          },
+          { timeout: 5_000, interval: 5 },
+        );
+        latencies.push(performance.now() - stopIssued);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    }
+    latencies.sort((left, right) => left - right);
+    const p95 = latencies[Math.ceil(runs * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    expect(p95).toBeLessThan(1_000);
+  }, 30_000);
+
+  it("refuses a Stop meant for an earlier turn and leaves the newer turn running", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(23),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      // A Stop the person pressed for a turn that has since been replaced
+      // arrives late, naming that earlier turn.
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(24),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(20),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(25),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(23),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it.each(["restore", "discard"] as const)(
@@ -3344,6 +3563,188 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it.each([
+    ["completed", providerEvent({ kind: "completed" }), undefined],
+    [
+      "interrupted",
+      providerEvent({ kind: "interrupted", message: "The runtime stopped the turn." }),
+      "The runtime stopped the turn.",
+    ],
+  ] as const)(
+    "holds the thread after a Stop the runtime never confirms until the runtime reports the turn %s",
+    async (state, late, reason) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      // A runtime that shares its process: no Force stop, and its interrupt
+      // does not answer until the test ends.
+      const gate = Effect.runSync(Deferred.make<void>());
+      const connection = {
+        ...providerConnection(queue),
+        interrupt: vi.fn(() => Deferred.await(gate)),
+      };
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        stopConfirmationMs: 50,
+      });
+      try {
+        const start = operationId(720);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: start,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+        const stopIssued = performance.now();
+        const stopped = await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(721),
+          threadId,
+          checkoutId,
+        });
+        expect(performance.now() - stopIssued).toBeLessThan(5_000);
+        expect(stopped).toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+          failure: {
+            message: "Stop was not confirmed. The provider may still be running this turn.",
+          },
+        });
+        // The runtime may still be working, so the turn is not recorded as ended.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(terminalStates(await operationEvents(fixture.runtime, start))).toEqual([]);
+        await expect(
+          fixture.runtime.execute(windowId, {
+            kind: "start-provider-turn",
+            operationId: operationId(722),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          }),
+        ).resolves.not.toMatchObject({ kind: "provider-turn-state", state: "running" });
+        // What the runtime does meanwhile is still the turn's, and its own
+        // ending settles the turn once.
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({ kind: "tool-start", toolCallId: "late", toolName: "Bash" }),
+          ),
+        );
+        // The person asked for the turn to end; nothing new is put to them.
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "approval-request",
+              requestId: "after-stop",
+              action: "Bash",
+              description: "Bash · git status",
+            }),
+          ),
+        );
+        await vi.waitFor(() =>
+          expect(connection.answerApproval).toHaveBeenCalledWith({
+            sessionId,
+            requestId: "after-stop",
+            approved: false,
+            scope: "once",
+          }),
+        );
+        await Effect.runPromise(Queue.offer(queue, late));
+        await vi.waitFor(async () =>
+          expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+            kind: "operation-state",
+            state,
+            ...(reason === undefined ? {} : { failure: { message: reason } }),
+          }),
+        );
+        const events = await operationEvents(fixture.runtime, start);
+        expect(terminalStates(events)).toEqual([state]);
+        expect(
+          events.some((event) => event.kind === "tool-activity" && event.toolCallId === "late"),
+        ).toBe(true);
+        expect(events.some((event) => event.kind === "approval-requested")).toBe(false);
+        await expect(
+          fixture.runtime.execute(windowId, {
+            kind: "start-provider-turn",
+            operationId: operationId(723),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          }),
+        ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      } finally {
+        await Effect.runPromise(Deferred.succeed(gate, undefined));
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("answers a Stop the runtime has not confirmed in time and leaves Force stop to the person", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      stopConfirmationMs: 50,
+    });
+    try {
+      const start = operationId(730);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: start,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(731),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+        failure: {
+          message:
+            "Stop was not confirmed. The provider may still be running this turn. Force stop can end it.",
+        },
+      });
+      expect(await lastOperationEvent(fixture.runtime, start)).not.toMatchObject({
+        kind: "operation-state",
+        state: "interrupted",
+      });
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(732),
+          turnOperationId: start,
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each(["Write", "Bash"] as const)(
     "answers a complete live owner %s approval once and refuses a revoked admission before delivery",
     async (tool) => {
@@ -3773,6 +4174,190 @@ describe("CodeOperationRuntime", () => {
       requestId: "provider-approval-narrowed",
       approved: true,
     });
+    fixture.close();
+  });
+
+  it("refuses an allow answered after the thread's posture changed, asks again, and still delivers a denial", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(16);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+        approval = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index];
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected a provider approval");
+      return approval.approvalId;
+    };
+    const answer = (
+      approvalId: Extract<OperationFrame["event"], { kind: "approval-requested" }>["approvalId"],
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    // Asked under Ask first; the person then hands prompts to the reviewer.
+    const first = await ask("provider-approval-before-auto", 0);
+    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+    await expect(answer(first, "approved", 17)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(connection.answerApproval).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
+    // Asked again under the posture the thread holds now, the allow goes through.
+    await expect(answer(first, "approved", 18)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-auto",
+      approved: true,
+    });
+
+    // Narrowed to Plan while asked: the allow is refused, the denial is delivered.
+    const second = await ask("provider-approval-before-plan", 1);
+    fixture.setThread(
+      decodeCodeThread({ ...thread(), autoApprove: true, executionPolicy: "plan" }),
+    );
+    await expect(answer(second, "approved", 19)).resolves.toMatchObject({
+      failure: { message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(connection.answerApproval).toHaveBeenCalledTimes(1);
+    await expect(answer(second, "denied", 20)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerApproval).toHaveBeenLastCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-plan",
+      approved: false,
+    });
+    fixture.close();
+  });
+
+  it("refuses a browser allow answered after the thread's posture changed, opening nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
+    const create = vi.fn(async () => ready);
+    const act = vi.fn(async () => ready);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ready,
+        create,
+        act,
+        releaseThread: vi.fn(async () => ready),
+      },
+    });
+    const operation = operationId(150);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "browser-before-auto",
+          toolName: "octant_browser",
+          inputJson: '{"operation":"navigate","url":"https://example.com"}',
+        }),
+      ),
+    );
+    let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
+      approval = frames
+        .map((frame) => frame.event)
+        .find((event) => event.kind === "approval-requested");
+      expect(approval).toBeDefined();
+    });
+    if (approval === undefined) throw new Error("Expected browser approval");
+    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(151),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({
+      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(act).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(152),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "denied",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(act).not.toHaveBeenCalled();
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();
   });
 
@@ -5665,7 +6250,8 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.boardActivity()).toMatchObject({
       executing: false,
       awaitingInput: true,
-      blockingReason: "Octant could not confirm how the last step ended.",
+      blockingReason:
+        "Octant could not confirm how the last step ended. Opening the thread's Git or pull request tab checks the remote again.",
     });
     fixture.close();
   });
@@ -8975,6 +9561,10 @@ function runtimeFixture(options: {
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
   >;
+  /** Where a remote branch points, for settling a push the host lost. */
+  remoteHead?: NonNullable<
+    NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["remoteHead"]
+  >;
   gitRemotes?: ReadonlyArray<{
     readonly name: string;
     readonly fetchUrl: string;
@@ -9009,6 +9599,7 @@ function runtimeFixture(options: {
   waitProjectAccess?: () => Promise<void>;
   projectAccessCurrent?: () => boolean;
   planner?: Parameters<typeof createCodeOperationRuntime>[0]["planner"];
+  stopConfirmationMs?: number;
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
@@ -9042,7 +9633,12 @@ function runtimeFixture(options: {
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
-  restartOf?: { readonly directory: string; readonly evidenceValues: Map<string, string> };
+  restartOf?: {
+    readonly directory: string;
+    readonly evidenceValues: Map<string, string>;
+    /** Where this host's identities start, so a later restart mints none an earlier one did. */
+    readonly uuidStart?: number;
+  };
   /**
    * How a fork reads its source's conversation: the host's own selector over
    * this journal (the default), a stand-in, or nothing.
@@ -9145,7 +9741,7 @@ function runtimeFixture(options: {
   let gitObservationReadHook: (() => Promise<GitObservationResult>) | undefined;
   let evidenceCounter = 50;
   // A restarted host mints new event identities, never the first host's again.
-  let uuidCounter = options.restartOf === undefined ? 100 : 10_000;
+  let uuidCounter = options.restartOf === undefined ? 100 : (options.restartOf.uuidStart ?? 10_000);
   const feedbackCrop = `data:image/png;base64,${Buffer.from("captured image").toString("base64")}`;
   const feedback = new ProductFeedbackService({
     journal,
@@ -9246,6 +9842,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.stopConfirmationMs === undefined
+      ? {}
+      : { stopConfirmationMs: options.stopConfirmationMs }),
     ...(options.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(directory) }),
@@ -9257,6 +9856,7 @@ function runtimeFixture(options: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
+      readCodeRuntimeWorks: (id) => readCodeRuntimeWorks(connection, id),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: (id) => readCodeReviewFinding(connection, id),
@@ -9501,6 +10101,7 @@ function runtimeFixture(options: {
     },
     gitMutationPort: options.liveGit?.mutation ?? {
       ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
+      ...(options.remoteHead === undefined ? {} : { remoteHead: options.remoteHead }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
@@ -9540,6 +10141,29 @@ function runtimeFixture(options: {
       gitObservationReadHook = hook;
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
+    /** Journal a runtime work record directly, as an earlier process left it. */
+    appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
+      journal.append({
+        aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
+        expectedVersion: readCodeRuntimeWorkAggregateVersion(
+          connection,
+          decodeCodeRuntimeWorkId(work.id),
+        ),
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            eventName: "code.runtime-work-updated@1",
+            eventVersion: 1,
+            correlationId: crypto.randomUUID(),
+            actor: { kind: "system", actorId: "90000000-0000-4000-8000-0000000000ff" },
+            occurredAt: now,
+            payload: {
+              kind: "runtime-work-updated",
+              work: { threadId, updatedAt: now, ...work },
+            },
+          },
+        ],
+      }),
     directory,
     selectConversation,
     selectForkConversation,
@@ -9617,6 +10241,8 @@ function runtimeFixture(options: {
     runtimeWorkFailures,
     /** The journal under the runtime, so a test can make an append fail. */
     journal,
+    /** The store under the journal, as a restarted host's reconciliation reads it. */
+    connection,
     /**
      * The store the service writes a turn's opening frame through, so a test
      * can put a prior turn on the journal the runtime reads.
@@ -9654,6 +10280,39 @@ function providerConnection(
     answerUserInput: vi.fn(() => Effect.void),
     answerTool: vi.fn(() => Effect.void),
   };
+}
+
+/** The newest event journaled for an operation, read page by page. */
+async function lastOperationEvent(
+  runtime: ReturnType<typeof runtimeFixture>["runtime"],
+  operation: CodeOperationId,
+) {
+  return (await operationEvents(runtime, operation)).at(-1);
+}
+
+/** Every event journaled for an operation, read page by page. */
+async function operationEvents(
+  runtime: ReturnType<typeof runtimeFixture>["runtime"],
+  operation: CodeOperationId,
+): Promise<ReadonlyArray<OperationFrame["event"]>> {
+  let cursor = 0;
+  const events: OperationFrame["event"][] = [];
+  for (;;) {
+    const page = await runtime.subscribe(windowId, threadId, operation, cursor, 200);
+    const final = page.at(-1);
+    if (final === undefined) return events;
+    cursor = final.cursor;
+    events.push(...page.map((frame) => frame.event));
+  }
+}
+
+/** The terminal states journaled among an operation's events, in order. */
+function terminalStates(events: ReadonlyArray<OperationFrame["event"]>): ReadonlyArray<string> {
+  return events.flatMap((event) =>
+    event.kind === "operation-state" && event.state !== "running" && event.state !== "waiting"
+      ? [event.state]
+      : [],
+  );
 }
 
 function providerDriver(connection: ProviderConnection): ProviderDriver {
@@ -14318,6 +14977,336 @@ describe("streamed reply text in a Code turn", () => {
       expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
     } finally {
       await turn.finish();
+    }
+  });
+});
+
+describe("continuing a Code turn a restart cut off", () => {
+  type Host = ReturnType<typeof runtimeFixture>;
+  const start = (id: number) =>
+    ({
+      kind: "start-provider-turn",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: evidence(40),
+    }) as const;
+  const continuationPrompt = evidence(42);
+
+  function provider(options: { readonly resumable?: boolean } = {}) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection: ProviderConnection =
+      options.resumable === false
+        ? {
+            ...providerConnection(queue),
+            start: vi.fn(() => Effect.succeed<ProviderSessionHandle>({ sessionId })),
+          }
+        : providerConnection(queue);
+    return { queue, connection };
+  }
+
+  /**
+   * A host over `previous`'s store, started after `previous` stopped without
+   * closing anything, the way a crash leaves it.
+   */
+  let restarts = 0;
+  function restartAfter(previous: Host) {
+    const next = provider();
+    restarts += 1;
+    const host = runtimeFixture({
+      provider: providerDriver(next.connection),
+      restartOf: {
+        directory: previous.directory,
+        evidenceValues: previous.evidenceValues,
+        uuidStart: restarts * 10_000,
+      },
+    });
+    host.evidenceValues.set(continuationPrompt.contentId, RESTART_CONTINUATION_PROMPT);
+    const cutOff = reconcileCodeRestart({
+      connection: host.connection,
+      journal: host.journal,
+      reconciledAt: now,
+    });
+    return { host, ...next, cutOff };
+  }
+
+  /** The recovery as the host wires it, over this host's runtime and store. */
+  function recoveryOn(
+    host: Host,
+    cutOff: CodeRestartContinuationPorts["cutOff"],
+    overrides: Partial<CodeRestartContinuationPorts> = {},
+  ) {
+    const releaseQueue = vi.fn(async (_threadId: CodeThreadId) => {});
+    const ports: CodeRestartContinuationPorts = {
+      cutOff,
+      readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
+      runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
+      enabled: () => true,
+      attempts: createCodeRestartContinuationAttempts(host.connection),
+      resumability: (current, continuation, cutOffOperationId) =>
+        codeRestartResumability(
+          host.operationEvents.providerSessionForThread(current.id, continuation),
+          current,
+          cutOffOperationId,
+        ),
+      recoverCheckouts: async () => {},
+      liftHarnessRecovery: async () => ({ kind: "none" }),
+      settleCutOffTurns: (id) => host.runtime.settleCutOffTurns?.(String(id)),
+      dispatch: async (current, continuation) => {
+        const result = await host.runtime.execute(ROUTINE_HOST_SCOPE_ID, {
+          ...start(0),
+          operationId: continuation,
+          threadId: current.id,
+          sessionId: decodeProviderSessionId(randomUUID()),
+          prompt: continuationPrompt,
+        });
+        return result.kind === "provider-turn-state" && result.state === "running"
+          ? { kind: "dispatched" }
+          : { kind: "refused", detail: "The continuation was not admitted." };
+      },
+      releaseQueue,
+      clock: () => now,
+      ...overrides,
+    };
+    return { ports, releaseQueue };
+  }
+
+  const statuses = (host: Host) =>
+    host.conversation().turns.map((turn) => [String(turn.operationId), turn.status]);
+
+  async function hostRunningTurn(options: { readonly resumable?: boolean } = {}) {
+    const first = provider(options);
+    const host = runtimeFixture({ provider: providerDriver(first.connection) });
+    await expect(host.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    await vi.waitFor(() => expect(first.connection.send).toHaveBeenCalledOnce());
+    return { host, ...first };
+  }
+
+  it("continues the cut-off turn once as the host from its provider session, and the next start continues nothing", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const second = restartAfter(first.host);
+      hosts.push(second.host);
+      expect(second.cutOff).toEqual([{ threadId, operationId: String(operationId(61)) }]);
+      const recovery = recoveryOn(second.host, second.cutOff);
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toEqual({
+        at: now,
+        continued: [{ mode: "code", threadId: String(threadId) }],
+        held: [],
+      });
+      await vi.waitFor(() => expect(second.connection.send).toHaveBeenCalledOnce());
+      expect(second.connection.start).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(second.connection.resume).mock.calls.map(([input]) => input.resumeCursor),
+      ).toEqual([{ driverKind: "codex", value: "native-code-session" }]);
+      expect(recovery.releaseQueue).toHaveBeenCalledExactlyOnceWith(threadId);
+      const [cutOffTurn, continuation] = statuses(second.host);
+      expect(cutOffTurn).toEqual([String(operationId(61)), "interrupted"]);
+      expect(continuation?.[1]).not.toBe("interrupted");
+
+      // Asked again, the thread's newest turn is the continuation, so nothing
+      // more starts.
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(second.host, second.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(second.connection.resume).toHaveBeenCalledOnce();
+      expect(second.connection.send).toHaveBeenCalledOnce();
+
+      // The continuation finishes, and the next start finds nothing cut off.
+      await Effect.runPromise(Queue.offer(second.queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(statuses(second.host).at(-1)?.[1]).toBe("completed"));
+      const third = restartAfter(second.host);
+      hosts.push(third.host);
+      expect(third.cutOff).toEqual([]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(third.host, third.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(third.connection.resume).not.toHaveBeenCalled();
+      expect(third.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose cut-off turn never reached its provider, instead of continuing the previous turn's session", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await Effect.runPromise(Queue.offer(first.queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(statuses(first.host).at(-1)?.[1]).toBe("completed"));
+      // The next turn's launch never returns, so it never records a session of
+      // its own; the thread's newest session is still the previous turn's.
+      vi.mocked(first.connection.resume).mockImplementation(() => Effect.never);
+      vi.mocked(first.connection.start).mockImplementation(() => Effect.never);
+      await first.host.runtime.execute(windowId, start(63));
+      const second = restartAfter(first.host);
+      hosts.push(second.host);
+      expect(second.cutOff).toEqual([{ threadId, operationId: String(operationId(63)) }]);
+      const recovery = recoveryOn(second.host, second.cutOff);
+      const summary = await continueCodeTurnsCutOffByRestart(recovery.ports);
+      // Continuing the old session would drop the person's unsent request.
+      expect(summary?.continued).toEqual([]);
+      expect(summary?.held).toEqual([expect.objectContaining({ threadId: String(threadId) })]);
+      expect(second.connection.resume).not.toHaveBeenCalled();
+      expect(second.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("continues a turn a clean shutdown stopped, as a reboot quits Octant", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await first.host.runtime.close();
+      expect(first.connection.stop).toHaveBeenCalledOnce();
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      expect(next.cutOff).toEqual([{ threadId, operationId: String(operationId(61)) }]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toMatchObject({ continued: [{ threadId: String(threadId) }], held: [] });
+      await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+      expect(next.connection.resume).toHaveBeenCalledOnce();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose own continuation a restart cut off twice", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      let previous = first.host;
+      for (const attempt of [1, 2]) {
+        const next = restartAfter(previous);
+        hosts.push(next.host);
+        await expect(
+          continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+        ).resolves.toMatchObject({ held: [], continued: [{ threadId: String(threadId) }] });
+        await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+        expect(
+          createCodeRestartContinuationAttempts(next.host.connection).read(String(threadId)),
+        ).toMatchObject({ attempts: attempt });
+        previous = next.host;
+      }
+      const last = restartAfter(previous);
+      hosts.push(last.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(last.host, last.cutOff).ports),
+      ).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "crash-loop" }],
+      });
+      expect(last.connection.send).not.toHaveBeenCalled();
+      expect(statuses(last.host).every(([, status]) => status !== "running")).toBe(true);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread with a push whose outcome the restart left unknown", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      first.host.appendRuntimeWork({
+        id: "90000000-0000-4000-8000-0000000007a1",
+        kind: "git",
+        state: "running",
+        remoteStep: {
+          kind: "push",
+          remote: "origin",
+          remoteRef: "refs/heads/feature/runtime",
+          commitOid: "a".repeat(40),
+        },
+      });
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff);
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "uncertain-external-action" }],
+      });
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      // The turn itself reads as ended by the restart rather than waiting forever.
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it.each([
+    {
+      reason: "turned-off",
+      overrides: { enabled: () => false } satisfies Partial<CodeRestartContinuationPorts>,
+    },
+    {
+      reason: "opted-out",
+      overrides: {
+        readThread: () => decodeCodeThread({ ...thread(), restartContinuationOff: true }),
+      } satisfies Partial<CodeRestartContinuationPorts>,
+    },
+  ])("holds the thread when Continue after restart is $reason", async ({ reason, overrides }) => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff, overrides).ports),
+      ).resolves.toMatchObject({ continued: [], held: [{ threadId: String(threadId), reason }] });
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread whose provider gave its session no resume cursor instead of starting over", async () => {
+    const first = await hostRunningTurn({ resumable: false });
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toMatchObject({
+        continued: [],
+        held: [{ threadId: String(threadId), reason: "cannot-resume" }],
+      });
+      expect(next.connection.start).not.toHaveBeenCalled();
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("finds nothing to continue after a turn the person stopped", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await expect(
+        first.host.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(62),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ state: "interrupted" });
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      expect(next.cutOff).toEqual([]);
+      await expect(
+        continueCodeTurnsCutOffByRestart(recoveryOn(next.host, next.cutOff).ports),
+      ).resolves.toBeUndefined();
+      expect(next.connection.send).not.toHaveBeenCalled();
+    } finally {
+      for (const host of hosts) host.close();
     }
   });
 });

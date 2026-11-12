@@ -1,3 +1,4 @@
+import { APPROVAL_POSTURE_CHANGED_MESSAGE } from "@octant/domain";
 import { HubMemberId } from "@octant/contracts";
 import { WorkRequestRuntime } from "./workRequestRuntime";
 import { providerApprovalCall } from "../providers/providerApprovalCall";
@@ -89,6 +90,7 @@ function createService(
     workCanonicalRoot: () => "/work",
     threadProjectId: () => ids.project,
     threadProviderInstanceId: () => ids.provider,
+    threadApprovalPosture: () => "ask-first",
   };
   let sequence = 0;
   const frames = new Map<WorkRequestId, Array<WorkRequestFrame>>();
@@ -282,6 +284,7 @@ describe("WorkRequestService.record", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
     const result = service.record({
@@ -306,6 +309,7 @@ describe("WorkRequestService.record", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
 
@@ -330,6 +334,7 @@ describe("WorkRequestService.record", () => {
         workCanonicalRoot: () => undefined,
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
     const result = service.record({
@@ -354,6 +359,7 @@ describe("WorkRequestService.record", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.otherProvider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
     const result = service.record({
@@ -378,6 +384,7 @@ describe("WorkRequestService.record", () => {
         isActiveWorkProject: () => true,
         workCanonicalRoot: () => "/work",
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
         threadProjectId: () => otherProject,
       },
     });
@@ -402,6 +409,7 @@ describe("WorkRequestService.record", () => {
         isActiveWorkProject: () => true,
         workCanonicalRoot: () => "/work",
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
         threadProjectId: () => undefined,
       },
     });
@@ -728,6 +736,7 @@ describe("WorkRequestService.resolve", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
       projection,
       eventStore,
@@ -880,6 +889,7 @@ describe("WorkRequestService.resolve", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => currentProvider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
     const request = recordOne(service);
@@ -893,6 +903,85 @@ describe("WorkRequestService.resolve", () => {
     expect(result.status).toBe("failure");
     if (result.status !== "failure") return;
     expect(result.failure.code).toBe("unauthorized");
+  });
+
+  it("refuses an allow answered after the thread's posture changed and asks again, while a denial still goes through", async () => {
+    const answers: Array<boolean> = [];
+    let posture = "auto-accept-edits";
+    const { service } = createService({
+      projects: {
+        projectType: (id) => (id === ids.project ? "work" : "unknown"),
+        isActiveWorkProject: (id) => id === ids.project,
+        workCanonicalRoot: () => "/work",
+        threadProjectId: () => ids.project,
+        threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => posture,
+      },
+      providerSessions: {
+        answerApproval: async (input) => {
+          answers.push(input.approved);
+        },
+        answerUserInput: async () => undefined,
+      },
+    });
+    const request = recordOne(service);
+    posture = "ask-first";
+
+    const refused = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+    expect(refused).toEqual({
+      status: "failure",
+      failure: { code: "stale", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    expect(answers).toEqual([]);
+    expect(service.lookup(request.requestId)).toMatchObject({ status: "pending", version: 1 });
+
+    // The ask now stands under the narrower posture; a denial is never wider.
+    const denied = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: false },
+    });
+    expect(denied.status).toBe("ok");
+    expect(answers).toEqual([false]);
+  });
+
+  it("delivers an allow asked again under the posture the thread now holds", async () => {
+    const answers: Array<boolean> = [];
+    let posture = "auto-accept-edits";
+    const { service } = createService({
+      projects: {
+        projectType: (id) => (id === ids.project ? "work" : "unknown"),
+        isActiveWorkProject: (id) => id === ids.project,
+        workCanonicalRoot: () => "/work",
+        threadProjectId: () => ids.project,
+        threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => posture,
+      },
+      providerSessions: {
+        answerApproval: async (input) => {
+          answers.push(input.approved);
+        },
+        answerUserInput: async () => undefined,
+      },
+    });
+    const request = recordOne(service);
+    posture = "ask-first";
+    const resolve = () =>
+      service.resolve({
+        kind: "resolve-work-request",
+        requestId: request.requestId,
+        expectedVersion: request.version,
+        resolution: { kind: "approval", approved: true },
+      });
+    expect((await resolve()).status).toBe("failure");
+    expect((await resolve()).status).toBe("ok");
+    expect(answers).toEqual([true]);
   });
 });
 
@@ -1077,6 +1166,7 @@ describe("WorkRequestService hydration and listing", () => {
       workCanonicalRoot: () => "/work",
       threadProjectId: () => ids.project,
       threadProviderInstanceId: () => ids.provider,
+      threadApprovalPosture: () => "ask-first",
     };
     const frames = new Map<WorkRequestId, Array<WorkRequestFrame>>();
     const eventStore = {
@@ -1189,6 +1279,7 @@ describe("WorkRequestService hydration and listing", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => currentProvider,
+        threadApprovalPosture: () => "ask-first",
       },
     });
     const recorded = service.record({
@@ -1242,6 +1333,7 @@ describe("WorkRequestService hydration and listing", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
       projection: new WorkRequestProjection(),
       eventStore,
@@ -1285,6 +1377,7 @@ describe("WorkRequestService hydration and listing", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
       projection,
       eventStore,
@@ -1323,6 +1416,7 @@ describe("WorkRequestService hydration and listing", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
       projection: new WorkRequestProjection(),
       eventStore,
@@ -1353,6 +1447,7 @@ describe("WorkRequestService hydration and listing", () => {
         workCanonicalRoot: () => "/work",
         threadProjectId: () => ids.project,
         threadProviderInstanceId: () => ids.provider,
+        threadApprovalPosture: () => "ask-first",
       },
       projection: new WorkRequestProjection(),
       eventStore,

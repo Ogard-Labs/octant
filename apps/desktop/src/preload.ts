@@ -9,6 +9,12 @@ import {
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import {
+  decodeBackgroundHostChange,
+  decodeBackgroundHostState,
+  type BackgroundHostChange,
+  type BackgroundHostState,
+} from "./backgroundHost";
+import {
   validateExtensionPopupRequest,
   type ExtensionPopupRequest,
 } from "./browserExtensionPopupRequest";
@@ -283,6 +289,12 @@ export interface OctantHostBridge {
   readonly installNightly?: () => Promise<NightlyInstallState>;
   readonly openNightly?: () => Promise<NightlyInstallState>;
   readonly removeNightly?: () => Promise<NightlyInstallState>;
+  /**
+   * The background service and open-at-login switches. Absent in Nightly; the
+   * desktop main process installs, removes and reads back each one.
+   */
+  readonly readBackgroundHost?: () => Promise<BackgroundHostState>;
+  readonly changeBackgroundHost?: (change: BackgroundHostChange) => Promise<BackgroundHostState>;
   /** Local application display only; never a host or capability identity. */
   readonly applicationIdentity?: Readonly<{
     readonly flavor: "nightly";
@@ -889,6 +901,22 @@ export function createHostBridge(
           removeNightly: async () =>
             decodeNightlyInstallState(await ipc.invoke(IPC_CHANNELS.nightlyInstallRemove)),
         }),
+    // The background service and login item belong to Octant itself, never to
+    // a Nightly client of it.
+    ...(localUpdatePreferences || nightlyClient || applicationIdentity !== undefined
+      ? {}
+      : {
+          readBackgroundHost: async () =>
+            decodeBackgroundHostState(await ipc.invoke(IPC_CHANNELS.backgroundHostState)),
+          changeBackgroundHost: async (change: BackgroundHostChange) => {
+            const decoded = decodeBackgroundHostChange(change);
+            if (decoded === undefined)
+              return Promise.reject(new TypeError("Invalid background setting."));
+            return decodeBackgroundHostState(
+              await ipc.invoke(IPC_CHANNELS.backgroundHostChange, decoded),
+            );
+          },
+        }),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
       let active = true;
@@ -1444,6 +1472,8 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "testComputerUse",
   "readNightlyInstall",
   "installNightly",
+  "readBackgroundHost",
+  "changeBackgroundHost",
   "openNightly",
   "removeNightly",
   "pairWithPairingCode",
