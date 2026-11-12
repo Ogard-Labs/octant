@@ -68,11 +68,14 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet icon button named **Thread info** at the end of the line under the
-follow-up composer, after the plan meters and the model. Its name is its
-tooltip and its accessible name; written out, its two words wrapped the line in
-a split pane and left the button on a line of its own. It opens one menu above
-the line, drawn as every other menu the line opens: the same edge, corner and
+a quiet button named **Thread info** at the leading edge of the row under the
+follow-up composer. Where the surface names the thread's Project in that row
+(Work), the Project's own control is the button: its icon in the leading cell,
+then its name, with "Review required" after the name while a row waits, so the
+row has one control where it had a name and an icon. Elsewhere it is a small
+icon after the Project (or in the leading cell). Its name is its tooltip and
+its accessible name. It opens one menu above the row from its leading edge,
+drawn as every other menu the row opens: the same edge, corner and
 4px inset, 288px wide and never wider than the line, with rows 30px tall that
 answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
@@ -89,8 +92,8 @@ the access level in force and where it came from (Work and Code) with its
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
-from one message to the next (attach, access, model) and had grown to eleven
-controls, several of them bare glyphs. Nothing else about
+from one message to the next (the model, the approval mode) and had grown to
+eleven controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
 composer; these rows had each been added to the page on their own, at four
 places, two of them outside the reading column.
@@ -1393,7 +1396,7 @@ deleted, and the host keeps deriving the board data and status policy
 thread rows, the dock overview, the planner board read, the sibling-thread
 tools and side tasks read the same projections. Turning the plugin on again
 brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
-task's Task actions menu, after a confirmation, and the card moves to Done and
+add menu under attach, after a confirmation, and the card moves to Done and
 stays there; a Code thread reaches Done only by its objectively satisfied
 delivery target
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that

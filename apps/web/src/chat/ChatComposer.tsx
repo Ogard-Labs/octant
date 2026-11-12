@@ -770,12 +770,12 @@ export function ChatComposer(props: ChatComposerProps) {
           aria-pressed={props.research.enabled}
           disabled={settingsLocked}
           onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
-          size="sm"
+          size="icon"
+          title={props.research.enabled ? "Web research is on" : "Web research is off"}
           type="button"
           variant={props.research.enabled ? "secondary" : "ghost"}
         >
-          <Globe2 aria-hidden="true" size={14} />
-          <span>Web</span>
+          <Globe2 aria-hidden="true" size={16} />
         </OctantButton>
         {props.research.enabled ? (
           <label htmlFor={researchRoutingId}>

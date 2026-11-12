@@ -48,6 +48,37 @@ describe("ThreadComposer", () => {
     expect(trailing).not.toContainElement(screen.getByText("Access"));
   });
 
+  it("holds one row under the pill: the Project first, then the model, the approval control and the ring last", () => {
+    const { container } = render(
+      <ThreadComposer
+        presentation="follow-up"
+        context={<span>Project</span>}
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{
+          attach: <button type="button">Attach</button>,
+          trailing: <button type="button">Model name</button>,
+          approval: <button type="button">Approvals: Ask first</button>,
+          actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+        }}
+      />,
+    );
+    const under = container.querySelector(".composer-under");
+    expect(container.querySelectorAll(".composer-under")).toHaveLength(1);
+    const order = [
+      screen.getByText("Project"),
+      screen.getByRole("button", { name: "Model name" }),
+      screen.getByRole("button", { name: "Approvals: Ask first" }),
+    ];
+    for (const element of order) expect(under).toContainElement(element);
+    // Reading order is visual order: tab goes Project, model, approvals.
+    order.forEach((element, index) => {
+      const next = order[index + 1];
+      if (next === undefined) return;
+      expect(element.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    });
+    expect(container.querySelector(".composer-actions")).toContainElement(order[2] as HTMLElement);
+  });
+
   it("draws send as a quiet tile until there is something to send, then as the card's one solid control", () => {
     const { rerender } = render(
       <ThreadComposer

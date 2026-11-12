@@ -6,7 +6,7 @@ import {
 import type { ProviderInstanceId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
@@ -154,17 +154,21 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   return (
     <>
       <OctantMenuRoot>
+        {/* One icon in the composer's row: the mode is its name and tooltip,
+            so the row holds no label and no chevron beside the model's name. */}
         <OctantMenuTrigger
-          aria-label="Mode"
+          aria-label={`Approvals: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
           disabled={props.disabled === true}
-          render={<OctantButton size="sm" variant="ghost" />}
-          title={triggerDetail}
+          render={<OctantButton size="icon" variant="ghost" />}
+          title={
+            triggerDetail === undefined
+              ? `Approvals: ${triggerLabel}`
+              : `Approvals: ${triggerLabel}. ${triggerDetail}`
+          }
         >
-          <ShieldCheck aria-hidden="true" />
-          <span>{triggerLabel}</span>
-          <ChevronDown aria-hidden="true" />
+          <ShieldCheck aria-hidden="true" size={16} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner side="top">

@@ -85,11 +85,11 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
         value="auto"
       />,
     );
-    const trigger = screen.getByRole("button", { name: "Mode" });
-    expect(trigger).toHaveTextContent("Auto");
+    const trigger = screen.getByRole("button", { name: /^Approvals:/ });
+    expect(trigger).toHaveAccessibleName("Approvals: Auto");
     expect(trigger).toHaveAttribute(
       "title",
-      "Octant Shield approves each action and asks you when unsure.",
+      "Approvals: Auto. Octant Shield approves each action and asks you when unsure.",
     );
     await user.click(trigger);
     expect(
@@ -110,8 +110,8 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
         value="auto"
       />,
     );
-    const trigger = screen.getByRole("button", { name: "Mode" });
-    expect(trigger).toHaveTextContent("Ask first");
+    const trigger = screen.getByRole("button", { name: /^Approvals:/ });
+    expect(trigger).toHaveAccessibleName("Approvals: Ask first");
     await user.click(trigger);
     expect(
       await screen.findByText("No Octant Shield model can run for this thread, so it asks first."),

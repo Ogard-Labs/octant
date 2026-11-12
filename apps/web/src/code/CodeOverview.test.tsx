@@ -414,7 +414,9 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Ask first");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Ask first",
+    );
     const message = screen.getByLabelText("First message");
     fireEvent.change(message, { target: { value: "Keep the draft" } });
     expect(message).toHaveValue("Keep the draft");
@@ -855,8 +857,8 @@ describe("CoordinatorProposalCards", () => {
       }),
     );
     expect(onSelectProvider).toHaveBeenCalledTimes(1);
-    const mode = within(review).getByRole("button", { name: "Mode" });
-    expect(mode).toHaveTextContent("Ask first");
+    const mode = within(review).getByRole("button", { name: /^Approvals:/ });
+    expect(mode).toHaveAccessibleName("Approvals: Ask first");
     await userEvent.click(mode);
     const choices = (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
     expect(choices.some((text) => text?.startsWith("Ask first"))).toBe(true);
@@ -889,7 +891,9 @@ describe("CoordinatorProposalCards", () => {
     fireEvent.click(approve);
     await screen.findByRole("dialog", { name: "Approve planner proposal" });
     expect(onSelectProvider).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Full access",
+    );
   });
 
   it("shows nothing on a coordinator with no proposal waiting", async () => {

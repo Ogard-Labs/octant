@@ -1,4 +1,4 @@
-import { GitBranch, GitPullRequest, Network } from "lucide-react";
+import { FolderOpen, GitBranch, GitPullRequest, Network } from "lucide-react";
 import { useCodeCheckout } from "../environment/CodeCheckoutContext";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -28,7 +28,9 @@ export function CodeCheckoutBar(props: {
     return (
       <div aria-label="Checkout" className="code-checkout-bar">
         <span className="code-checkout-bar__identity">
-          <Network aria-hidden="true" size={12} />
+          <span className="composer-place__icon">
+            <Network aria-hidden="true" size={16} />
+          </span>
           <span
             className="code-checkout-bar__project"
             title={`On a server: ${props.serverLocation}`}
@@ -95,6 +97,9 @@ export function CodeCheckoutBar(props: {
         </span>
       )}
       <span className="code-checkout-bar__identity">
+        <span className="composer-place__icon">
+          <FolderOpen aria-hidden="true" size={16} />
+        </span>
         <span
           className="code-checkout-bar__project"
           title={`${checkout.projectName} · ${checkout.repositoryRoot}`}

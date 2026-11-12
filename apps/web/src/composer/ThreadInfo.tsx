@@ -55,9 +55,18 @@ export function useThreadInfoAttention(key: string, needsPerson: boolean): void 
  * one of them holds a review, which must not restart each time the panel
  * opens.
  */
-export function ThreadInfo(props: { readonly children: ReactNode }) {
+export function ThreadInfo(props: {
+  readonly children: ReactNode;
+  /**
+   * Where the thread runs. A surface that names its Project in the row hangs
+   * the panel on that name, so the row has one control where it had a name and
+   * an info icon; without it the panel has its own small icon.
+   */
+  readonly place?: { readonly label: string; readonly content: ReactNode };
+}) {
   const [open, setOpen] = useState(false);
   const [flags, setFlags] = useState<ReadonlySet<string>>(() => new Set());
+  const { place } = props;
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -104,19 +113,25 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
         {/* The button is its icon alone: its two words made the line under
             the card wrap in a split pane, and left the trailing control on a
             line of its own. A waiting review still says so in words. */}
-        <OctantTooltip align="end" label="Thread info" side="top">
+        <OctantTooltip align="start" label="Thread info" side="top">
           <OctantButton
             aria-controls={panelId}
             aria-expanded={open}
-            aria-label={flags.size === 0 ? "Thread info" : "Thread info, review required"}
-            className="thread-info__trigger"
+            aria-label={`${flags.size === 0 ? "Thread info" : "Thread info, review required"}${
+              place === undefined || place.label === "" ? "" : `: ${place.label}`
+            }`}
+            className={
+              place === undefined
+                ? "thread-info__trigger"
+                : "thread-info__trigger composer-place composer-place--control"
+            }
             onClick={() => setOpen((value) => !value)}
             ref={trigger}
-            size={flags.size === 0 ? "icon" : "sm"}
+            size={place === undefined && flags.size === 0 ? "icon" : "sm"}
             type="button"
             variant="ghost"
           >
-            <Info aria-hidden="true" size={14} />
+            {place === undefined ? <Info aria-hidden="true" size={16} /> : place.content}
             {flags.size === 0 ? null : (
               <span className="thread-info__attention">Review required</span>
             )}

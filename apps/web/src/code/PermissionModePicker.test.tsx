@@ -10,6 +10,21 @@ afterEach(cleanup);
 const group = (id: string, driverKind: string) =>
   ({ instance: { id, driverKind } }) as unknown as PickerGroup;
 
+describe("the approval control", () => {
+  it("is one icon whose name and tooltip state the current mode, with no label or chevron", async () => {
+    render(
+      <PermissionModePicker autoSupported={false} onChange={() => undefined} value="ask-first" />,
+    );
+    const trigger = screen.getByRole("button", { name: "Approvals: Ask first" });
+    expect(trigger).toHaveTextContent("");
+    expect(trigger.querySelectorAll("svg")).toHaveLength(1);
+    expect(trigger.getAttribute("title")).toMatch(/^Approvals: Ask first\./);
+    expect(trigger).toHaveAccessibleDescription("Asks before commands and file changes.");
+    await userEvent.click(trigger);
+    expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
+  });
+});
+
 describe("the sandbox at Full access in the mode picker", () => {
   it("offers Keep the sandbox under Full access and saves the choice", async () => {
     const onFullAccessSandboxChange = vi.fn();
@@ -23,7 +38,7 @@ describe("the sandbox at Full access in the mode picker", () => {
         value="full-access"
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Mode" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Approvals:/ }));
     await userEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ }),
     );
@@ -40,8 +55,8 @@ describe("the sandbox at Full access in the mode picker", () => {
         value="full-access"
       />,
     );
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent(
-      "Full access · Sandboxed",
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Full access · Sandboxed",
     );
   });
 
@@ -55,7 +70,7 @@ describe("the sandbox at Full access in the mode picker", () => {
         value="full-access"
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Mode" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Approvals:/ }));
     const item = await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ });
     expect(item).toHaveAttribute("aria-disabled", "true");
     expect(item).toHaveTextContent("can't keep the sandbox");
@@ -73,7 +88,7 @@ describe("the sandbox at Full access in the mode picker", () => {
         value="full-access"
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Mode" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Approvals:/ }));
     const item = await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ });
     expect(item).not.toHaveAttribute("aria-disabled", "true");
     await userEvent.click(item);
@@ -89,7 +104,7 @@ describe("the sandbox at Full access in the mode picker", () => {
         value="ask-first"
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Mode" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Approvals:/ }));
     await screen.findByRole("menuitemradio", { name: /Full access/ });
     expect(screen.queryByRole("menuitemcheckbox", { name: /Keep the sandbox/ })).toBeNull();
   });

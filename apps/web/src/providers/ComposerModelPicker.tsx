@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs, providerAccountAccent } from "@octant/domain";
-import { Check, ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
+import { Check, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   modelFavoriteKey,
@@ -672,7 +672,6 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             {levelOption === undefined || levelIndex === 0 ? null : (
               <span className="composer-model-picker__trigger-level">{levelLabel(levelValue)}</span>
             )}
-            <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
           </>
         }
         triggerClassName={`composer-model-picker__trigger${props.locked === true ? " composer-model-picker__trigger--locked" : ""}`}

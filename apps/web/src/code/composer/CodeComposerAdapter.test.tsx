@@ -373,7 +373,9 @@ describe("CodeComposerAdapter", () => {
         onCreateThread={onCreateThread}
       />,
     );
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Auto");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Auto",
+    );
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
@@ -384,8 +386,10 @@ describe("CodeComposerAdapter", () => {
     rendered.unmount();
 
     render(<CodeComposerAdapter {...defaultProps} defaultPermissionMode="auto" />);
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Ask first");
-    await user.click(screen.getByRole("button", { name: "Mode" }));
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Ask first",
+    );
+    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
     expect(await screen.findByRole("menuitemradio", { name: "Auto" })).toHaveAttribute(
       "aria-disabled",
       "true",
@@ -459,7 +463,7 @@ describe("CodeComposerAdapter", () => {
   it("renders the mode picker at the default mode", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("Ask first");
-    expect(html).toContain('aria-label="Mode"');
+    expect(html).toContain('aria-label="Approvals: Ask first"');
   });
 
   it("renders disabled send button when empty", () => {
@@ -609,7 +613,7 @@ describe("CodeComposerAdapter interactions", () => {
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
-    await user.click(screen.getByRole("button", { name: "Mode" }));
+    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -629,7 +633,7 @@ describe("CodeComposerAdapter interactions", () => {
       <CodeComposerAdapter {...defaultProps} onPermissionModeChange={onPermissionModeChange} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Mode" }));
+    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     expect(onPermissionModeChange).toHaveBeenCalledWith("plan");
 
@@ -641,7 +645,9 @@ describe("CodeComposerAdapter interactions", () => {
         onPermissionModeChange={onPermissionModeChange}
       />,
     );
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Plan",
+    );
   });
 
   it("submits on Enter and cancels on Escape", async () => {
@@ -1140,14 +1146,18 @@ describe("CodeComposerAdapter interactions", () => {
       </NewTaskDraftsContext.Provider>
     );
     const rendered = render(view);
-    await user.click(screen.getByRole("button", { name: "Mode" }));
+    await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Plan",
+    );
 
     rendered.unmount();
     render(view);
 
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+      "Approvals: Plan",
+    );
   });
 
   describe("in a Project on a server", () => {
@@ -1247,8 +1257,10 @@ describe("CodeComposerAdapter interactions", () => {
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("main"),
       );
-      expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
-      await user.click(screen.getByRole("button", { name: "Mode" }));
+      expect(screen.getByRole("button", { name: /^Approvals:/ })).toHaveAccessibleName(
+        "Approvals: Full access",
+      );
+      await user.click(screen.getByRole("button", { name: /^Approvals:/ }));
       const levels = (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
       expect(levels.length).toBeGreaterThan(2);
       await user.keyboard("{Escape}");

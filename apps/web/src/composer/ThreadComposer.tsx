@@ -106,10 +106,16 @@ export interface ThreadComposerRow {
   /** Surface-specific controls: pickers, access policy, profile. */
   readonly leading?: ReactNode;
   /**
-   * The model, right of the context ring. Access and approval choices lead
-   * the row instead.
+   * The model's name, at the row's trailing edge before the approval control
+   * and the context ring.
    */
   readonly trailing?: ReactNode;
+  /**
+   * The approval mode as one icon-only control, between the model and the
+   * context ring: the last two cells of the row are the same size as the
+   * pill's send control, so the ring stands under send.
+   */
+  readonly approval?: ReactNode;
   /**
    * The microphone, in the pill just before send: it writes into the prompt,
    * so it stands with the two other controls that act on the message. In the
@@ -366,19 +372,21 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One line under the pill, in reading order: where the thread runs, the
-  // surface's own row (what the thread may do leading, the model and then the
-  // context ring trailing), the plan's windows, and the thread's info. The
-  // ring ends the run: it is the one figure there, and at the end it does not
-  // shift when the model's name changes length. Only the
-  // surface's controls are inside `.composer-row`: the row restyles every
-  // control in it to one quiet treatment, which the info panel's fields and
-  // the checkout's actions must not take.
+  // One row under the pill, on the pill's own columns: the Project's icon
+  // stands under attach and its name starts where the prompt's text does; at
+  // the other end the model's name, the approval control and the context ring
+  // stand in cells as wide as send, the ring last, under it. The thread's info
+  // is reached from the Project when the surface hangs it there, and from a
+  // small icon after it otherwise. Only the surface's controls are inside
+  // `.composer-row`: the row restyles every control in it to one quiet
+  // treatment, which the info panel's fields and the checkout's actions must
+  // not take.
   const under = (
     <div className="composer-under">
       {held || !followUp || props.context === undefined ? null : (
         <div className="thread-composer__context">{props.context}</div>
       )}
+      {followUp ? props.info : null}
       {held ? null : (
         <div
           {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
@@ -392,13 +400,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {props.row.leading}
           {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
+            {followUp ? <ThreadPlanWindows /> : null}
             {props.row.trailing}
+            {props.row.approval}
             <ComposerContextMeter />
           </div>
         </div>
       )}
-      {held || !followUp ? null : <ThreadPlanWindows />}
-      {followUp ? props.info : null}
     </div>
   );
   // Suggested tasks stand above the composer, as the last thing in the
