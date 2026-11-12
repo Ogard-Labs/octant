@@ -402,7 +402,7 @@
   color: var(--oct-fg-2);
   background: var(--environment-soft-fill);
   border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 20px;
@@ -1270,7 +1270,7 @@ details.thread-move-sheet__section > summary {
   gap: var(--oct-space-3);
   padding: var(--oct-space-4);
   background: var(--octant-card);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow:
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);

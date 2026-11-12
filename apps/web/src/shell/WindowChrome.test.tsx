@@ -601,8 +601,8 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    // 12px now arrives as the system radius token (--oct-radius-lg: 12px).
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-lg)");
+    // 12px now arrives as the system radius token (--oct-radius-md: 12px).
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-md)");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
     // The wash behind a modal is the system scrim token rather than a literal.

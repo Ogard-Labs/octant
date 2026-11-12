@@ -205,7 +205,7 @@
 .usage-workspace__source-status {
   padding: 1px var(--oct-space-2);
   border: 1px solid currentcolor;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   text-transform: none;

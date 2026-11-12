@@ -578,7 +578,7 @@
 @media (max-width: 720px) {
   .zen-surface__bar-anchor .zen-bar {
     flex-wrap: wrap;
-    border-radius: var(--oct-radius-lg);
+    border-radius: var(--oct-radius-md);
     max-width: 100%;
   }
 
@@ -850,7 +850,7 @@ img.zen-appearance__thumb {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--oct-glass-stroke);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
 }
@@ -1151,7 +1151,7 @@ img.zen-appearance__thumb {
 /* A window's corners follow the sheets' larger radius: on a picture the
    floating panes read as objects, and a softer corner is what says so. */
 .zen-el {
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 /* Windows are glass panes over the picture. The recipe is the regular step of
@@ -1254,7 +1254,7 @@ html[data-octant-increased-contrast="true"]
 
 .zen-surface [data-slot="card"][data-variant="glass"],
 .zen-surface .zen-surface__empty {
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 /* The empty space's one line of guidance sits on the picture like any other

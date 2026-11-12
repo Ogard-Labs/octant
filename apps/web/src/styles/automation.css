@@ -307,7 +307,7 @@
   gap: 0.75rem;
   padding: 0.75rem;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: auto;
 }
@@ -425,7 +425,7 @@
   gap: 0.65rem;
   padding: 0.75rem;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: auto;
   font-size: var(--oct-text-base);

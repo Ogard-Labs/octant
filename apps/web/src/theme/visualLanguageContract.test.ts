@@ -208,21 +208,24 @@ describe("the public-block visual language", () => {
     expect(strays).toEqual([]);
   });
 
-  it("gives a card, a menu, and a popover the same corner", () => {
-    // The recipes round cards, menus, and popovers at their `xl` step and the
-    // stylesheets round panels at the medium token. They were 14px and 16px, so
-    // a menu sat beside a popover with a different corner.
-    // The recipes' scale keeps its one root, so the two numbers are
-    // read and compared rather than one aliased to the other.
+  it("gives every control one outline and every container another", () => {
+    // Two numbers: a control's outline is the small token and a container's the
+    // medium one. The recipes' control steps (`rounded-md`, `rounded-lg`) both
+    // land on the control token and their `rounded-xl` on the container token,
+    // so a menu and a popover share a corner and no recipe class is rewritten.
     const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
     const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const control = px(system, /--oct-radius-sm:\s*(\d+)px;/);
-    const card = px(system, /--oct-radius-md:\s*(\d+)px;/);
-    const rootStep = px(theme, /--radius:\s*calc\(var\(--oct-radius-sm\) - (\d+)px\);/);
-    const cardStep = px(tailwind, /--radius-xl:\s*calc\(var\(--radius\) \+ (\d+)px\);/);
-    expect(control - rootStep + cardStep).toBe(card);
+    expect(px(system, /--oct-radius-sm:\s*(\d+)px;/)).toBe(4);
+    expect(px(system, /--oct-radius-md:\s*(\d+)px;/)).toBe(12);
+    expect(theme).toMatch(/--radius:\s*var\(--oct-radius-sm\);/);
+    expect(tailwind).toMatch(/--radius-md:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-lg:\s*var\(--radius\);/);
+    expect(tailwind).toMatch(/--radius-xl:\s*var\(--oct-radius-md\);/);
+    // The dialog and the composer are containers; the third and fourth
+    // container radii (14px and 22px) are gone with their tokens.
+    expect(system).not.toMatch(/--oct-radius-(?:lg|composer):/);
     // The radius scale has one definition; the second, unread set is gone.
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
     expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
@@ -322,7 +325,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    // One line and 12px above and under it: the 44px pill.
+    // One line and 12px above and under it: the 44px box.
     expect(input).toMatch(/padding:\s*12px var\(--oct-composer-gutter\);/);
   });
 
@@ -676,6 +679,9 @@ describe("the public-block visual language", () => {
     expect(tabs).toContain("data-selected:bg-muted");
     expect(tabs).not.toContain("data-selected:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
+    // An item inside the padded track takes the control corner less the
+    // padding, never below 2px.
+    expect(toggles).toContain("gap-1 rounded-sm border");
     expect(activePane).toMatch(/background:\s*transparent/);
     expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
   });

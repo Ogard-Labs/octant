@@ -537,7 +537,7 @@ html[data-octant-native-host="true"]
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -1779,7 +1779,7 @@ html[data-octant-native-host="true"]
   padding: 2px var(--oct-space-2);
   color: var(--oct-muted);
   background: var(--oct-fg-soft);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   line-height: 1.4;
@@ -3374,12 +3374,12 @@ form > .work-composer-adapter__attachments {
   align-items: center;
   gap: 0;
   padding: 2px;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
 
 .browser-workspace__history button {
-  border-radius: var(--oct-radius-pill);
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
 }
 
 .browser-workspace__history button,
@@ -3405,7 +3405,7 @@ form > .work-composer-adapter__attachments {
   height: 30px;
   padding: 0 var(--oct-space-3);
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
   font-size: var(--oct-text-xs);
@@ -3434,7 +3434,7 @@ form > .work-composer-adapter__attachments {
   height: 30px;
   padding: 0 var(--oct-space-3);
   border: 1px solid transparent;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
@@ -4145,7 +4145,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg-2);
   background: var(--octant-control);
   font-size: var(--oct-text-xs);
@@ -4277,7 +4277,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   gap: 4px;
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg-2);
   background: var(--octant-control);
   font-size: var(--oct-text-xs);

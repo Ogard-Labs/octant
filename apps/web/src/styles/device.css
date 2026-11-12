@@ -169,7 +169,7 @@
   height: 22px;
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: var(--oct-bg);
   font-size: calc(11 * var(--oct-text-step));
@@ -453,7 +453,7 @@
   left: 50%;
   padding: 2px var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: var(--oct-bg);
   font-size: calc(11 * var(--oct-text-step));
@@ -478,7 +478,7 @@
   max-height: 100%;
   padding: var(--oct-space-5);
   overflow: auto;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
   box-shadow: var(--oct-elev-subtle);
 }

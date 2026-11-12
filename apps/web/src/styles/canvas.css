@@ -501,7 +501,7 @@
   gap: 2px;
   margin-left: auto;
   padding: 2px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
@@ -1351,7 +1351,7 @@
   display: inline-block;
   margin-top: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--canvas-matrix-ground);
   font-size: var(--oct-text-xs);
@@ -4295,7 +4295,7 @@
 /* A browser frame shows a blank address bar: the mockup names no address. */
 .canvas-mockup--browser .canvas-mockup__chrome-title {
   flex: 1 1 auto;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   padding: 0 var(--oct-space-3);
   font-weight: var(--oct-weight-regular);
@@ -4696,7 +4696,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   padding: 0 var(--oct-space-2);
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
@@ -4745,7 +4745,7 @@
 
 .canvas-mockup__toast {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-1) var(--oct-space-3);
   color: var(--oct-fg);
@@ -4818,7 +4818,7 @@
    accent fills the primary action, the selected tab, and an on control, and a
    tone takes its theme role. It follows light, dark, and any imported theme. */
 .canvas-mockup--styled .canvas-mockup__frame {
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 .canvas-mockup--styled .canvas-mockup__node--card {
