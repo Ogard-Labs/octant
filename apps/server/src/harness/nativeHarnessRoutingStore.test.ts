@@ -612,6 +612,62 @@ describe("native harness session store", () => {
     expect(sessions.read(threadId)?.approvals).toHaveLength(2);
   });
 
+  it("refuses an allow answered after the thread's posture changed, keeps asking, and still takes a denial", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000027";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    let posture = "ask-first";
+    const approvals = new NativeHarnessApprovalStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      posture: (thread, mode) => (thread === threadId && mode === "code" ? posture : undefined),
+    });
+    const ask = (source?: {
+      readonly runId: never;
+      readonly providerInstanceId: never;
+      readonly modelId: never;
+    }) =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+        ...(source === undefined ? {} : { source }),
+      });
+
+    const lead = ask();
+    const leadApproval = sessions.read(threadId)?.approvals?.[0];
+    posture = "plan";
+    expect(approvals.decide(threadId, String(leadApproval?.id), "approve")).toBe("posture-changed");
+    expect(approvals.decide(threadId, String(leadApproval?.id), "approve")).toBe("decided");
+    // Asked again under the posture the thread holds now, the allow goes through.
+    await expect(lead).resolves.toBe("approved");
+
+    // A child's request is asked on its parent thread and follows the parent's posture.
+    const child = ask({
+      runId: "00000000-0000-4000-8000-000000000091" as never,
+      providerInstanceId: candidate("big").providerInstanceId as never,
+      modelId: "big" as never,
+    });
+    const childApproval = sessions.read(threadId)?.approvals?.[1];
+    expect(childApproval).toMatchObject({ status: "pending" });
+    posture = "ask-first";
+    expect(approvals.decide(threadId, String(childApproval?.id), "approve")).toBe(
+      "posture-changed",
+    );
+    expect(sessions.read(threadId)?.approvals?.[1]).toMatchObject({ status: "pending" });
+    expect(approvals.decide(threadId, String(childApproval?.id), "deny")).toBe("decided");
+    await expect(child).resolves.toBe("denied");
+  });
+
   it("expires an approval the clock has passed, though its timer has not fired yet", async () => {
     // A timer fires late behind a busy event loop or across a machine's
     // sleep, so the clock, not the timer, decides when an approval's time is up.

@@ -12208,6 +12208,30 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
+  An approval answered after the thread's posture changed asks again
+  (maintainer decision, 2026-11-12). Each pending approval records the
+  posture it was asked under: the mode, who answers prompts (`autoApprove`),
+  the Full access sandbox, how long grants last (`permissionPersistence`),
+  and the coordinator gate, as `approvalPostureOf` in
+  `packages/domain/src/guardrailPolicy.ts` reads them (a Code turn's posture
+  as the turn holds it, after the window's session grant and the turn's own
+  narrowing; a Work thread's access level and sandbox). The server compares
+  it with the thread's posture when the answer arrives, before anything is
+  delivered: an allow under a different posture is refused with "This
+  thread's permissions changed since this was asked, so it asks again.", the
+  provider is told nothing, and the same approval stays pending, now asked
+  under the current posture, so the person's next answer is judged against
+  it. A denial is delivered whatever the posture became, Plan included. This
+  holds for Code provider and app-managed tool approvals
+  (`answer-provider-approval`, and an owner device's answer), Work requests
+  (`resolve-work-request`), and native-harness approvals in every mode,
+  where a child's request follows its parent thread's posture. Chat declines
+  every provider approval, so nothing there is answered. Rationale:
+  an approval granted under a wider posture must not take effect after the
+  person narrowed it, and an allow given under any other posture was not
+  decided against the one the thread holds now. Re-presenting the same
+  approval rather than minting a new one keeps one identity per provider
+  call and needs no new answer route.
 
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can

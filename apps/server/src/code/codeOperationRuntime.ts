@@ -137,6 +137,9 @@ import {
   type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
 import {
+  APPROVAL_POSTURE_CHANGED_MESSAGE,
+  approvalAnswerUnderPosture,
+  approvalPostureOf,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   isAppleSimulatorInputKind,
@@ -2573,6 +2576,13 @@ interface ActiveTurn {
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
   /**
+   * The thread's posture, as `#approvalPosture` reads it, when each pending
+   * approval (provider or app-managed tool) was asked, by approval id. An
+   * allow answered under a different posture is refused, and the approval
+   * stays pending under the current one.
+   */
+  readonly approvalPostures: Map<string, string | undefined>;
+  /**
    * Each app-managed tool ask's settle function: a Browser session, with the
    * site it waits to open, or a device effect, which has none.
    */
@@ -3501,6 +3511,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
+      approvalPostures: new Map(),
       toolApprovals: new Map(),
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
@@ -4411,6 +4422,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return new Promise((resolve) => {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
         if (!active.toolApprovals.delete(String(approvalId))) return;
+        active.approvalPostures.delete(String(approvalId));
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
@@ -4427,6 +4439,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ...(origin === undefined ? {} : { origin }),
         finish,
       });
+      active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
@@ -4543,10 +4556,34 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             thread: input.thread.executionPolicy,
           });
     const toolApproval = active?.toolApprovals.get(input.approvalId);
+    if (
+      active !== undefined &&
+      (toolApproval !== undefined || providerRequestId !== undefined) &&
+      input.decision === "approved"
+    ) {
+      // An allow given under a wider posture must not take effect after the
+      // person narrowed it, so the ask stands again under the posture the
+      // thread holds now. A denial never widens and is delivered as asked.
+      const current = this.#approvalPosture(active);
+      if (
+        approvalAnswerUnderPosture({
+          approved: true,
+          askedUnder: active.approvalPostures.get(input.approvalId),
+          current,
+        }) === "ask-again"
+      ) {
+        active.approvalPostures.set(input.approvalId, current);
+        return turnState("failed", {
+          category: "failed",
+          message: APPROVAL_POSTURE_CHANGED_MESSAGE,
+        });
+      }
+    }
     if (active !== undefined && toolApproval !== undefined) {
       if (
-        turnPosture === "plan" ||
-        active.thread.permissionPersistence !== input.thread.permissionPersistence
+        input.decision === "approved" &&
+        (turnPosture === "plan" ||
+          active.thread.permissionPersistence !== input.thread.permissionPersistence)
       )
         return turnState("failed");
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
@@ -4557,17 +4594,24 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
     if (
       active.connection === undefined ||
-      turnPosture === "plan" ||
-      active.thread.permissionPersistence !== input.thread.permissionPersistence
+      (input.decision === "approved" &&
+        (turnPosture === "plan" ||
+          active.thread.permissionPersistence !== input.thread.permissionPersistence))
     )
       return turnState("failed");
     const connection = active.connection;
-    if (ownerCurrent === undefined) active.approvals.delete(input.approvalId);
+    if (ownerCurrent === undefined) {
+      active.approvals.delete(input.approvalId);
+      active.approvalPostures.delete(input.approvalId);
+    }
     await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
-        if (ownerCurrent !== undefined) active.approvals.delete(input.approvalId);
+        if (ownerCurrent !== undefined) {
+          active.approvals.delete(input.approvalId);
+          active.approvalPostures.delete(input.approvalId);
+        }
         return connection.answerApproval({
           sessionId: active.sessionId as never,
           requestId: providerRequestId,
@@ -5586,6 +5630,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return threadWithActiveTurnPosture(thread, this.#active);
   }
 
+  /**
+   * What a pending approval is asked under: the thread's posture as its
+   * running turn holds it, after the window's session grant and the turn's own
+   * narrowing. A thread that cannot be read has no posture an allow could match.
+   */
+  #approvalPosture(active: ActiveTurn): string | undefined {
+    const thread = this.#effectiveThread(active.windowId, active.thread.id);
+    return thread === undefined ? undefined : approvalPostureOf(thread);
+  }
+
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {
     const stored = this.#options.persistence.readCodeThread(threadId);
     if (stored === undefined) return undefined;
@@ -5654,6 +5708,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#options.uuid,
     );
     if (operationEvent === undefined) return;
+    if (operationEvent.kind === "approval-requested") {
+      active.approvalPostures.set(String(operationEvent.approvalId), this.#approvalPosture(active));
+    }
     this.#noteHarnessRetry(active, operationEvent);
     // Text that could not be journaled must not sit under a completed turn.
     const lostText = active.deltaFlushFailure;

@@ -14,6 +14,7 @@ import {
   type ProjectId,
   type ShieldDecision,
 } from "@octant/contracts";
+import { approvalAnswerUnderPosture } from "@octant/domain/guardrail-policy";
 import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
 import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -52,6 +53,9 @@ export interface NativeHarnessApprovalAnswer {
 
 interface Waiter {
   readonly threadId: string;
+  readonly mode: OctantMode;
+  /** The thread's posture this approval is asked under; re-stamped when it is asked again. */
+  askedUnder: string | undefined;
   readonly approvalClass: string;
   readonly allowRemember: boolean;
   /** Hosts the approval listed, keyed `host port`; absent when it listed none. */
@@ -96,6 +100,13 @@ export interface NativeHarnessApprovalStoreOptions {
    * is asked so the prompt can say why it asks and what the thread read.
    */
   readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
+  /**
+   * The thread's posture now, as `approvalPostureOf` reads it, or undefined
+   * when it cannot be read. An allow answered under a posture other than the
+   * one an approval was asked under is refused and the approval asks again.
+   * Absent, approvals are not tied to a posture.
+   */
+  readonly posture?: (threadId: string, mode: OctantMode) => string | undefined;
   readonly onAsked?: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
@@ -256,6 +267,8 @@ export class NativeHarnessApprovalStore {
       };
       const waiter: Waiter = {
         threadId: input.threadId,
+        mode: input.mode,
+        askedUnder: this.#options.posture?.(input.threadId, input.mode),
         approvalClass: input.approvalClass,
         allowRemember: input.source === undefined && !singleUse,
         commandHosts:
@@ -316,7 +329,8 @@ export class NativeHarnessApprovalStore {
     | "already-settled"
     | "withdrawn"
     | "host-not-offered"
-    | "lost-in-restart" {
+    | "lost-in-restart"
+    | "posture-changed" {
     this.#expire();
     const waiter = this.#waiters.get(approvalId);
     let confirmed: ToolEgressCallConfirmation | undefined;
@@ -347,6 +361,19 @@ export class NativeHarnessApprovalStore {
         { status: "cancelled" },
       );
       return typeof settled === "object" ? "lost-in-restart" : settled;
+    }
+    const posture = this.#options.posture;
+    if (posture !== undefined && decision !== "deny") {
+      // An allow given under a wider posture must not take effect after the
+      // person narrowed it; the approval stays waiting under the current one.
+      const current = posture(threadId, waiter.mode);
+      if (
+        approvalAnswerUnderPosture({ approved: true, askedUnder: waiter.askedUnder, current }) ===
+        "ask-again"
+      ) {
+        waiter.askedUnder = current;
+        return "posture-changed";
+      }
     }
     const remember = decision === "approve-always" && waiter.allowRemember;
     if (remember) {
