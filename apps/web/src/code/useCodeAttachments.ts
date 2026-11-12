@@ -33,7 +33,8 @@ export interface CodeAttachments {
   readonly message: string | undefined;
   /** Whether an upload is still in flight. Sending waits for it. */
   readonly busy: boolean;
-  readonly attach: (files: ReadonlyArray<File>) => Promise<void>;
+  /** Answers the reason nothing was attached, or undefined when an image was. */
+  readonly attach: (files: ReadonlyArray<File>) => Promise<string | undefined>;
   /** Refuse an attachment the composer itself knows this turn cannot carry. */
   readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
@@ -137,13 +138,16 @@ export function useCodeAttachments(input: {
   }, []);
 
   const attach = useCallback(
-    async (files: ReadonlyArray<File>) => {
-      if (threadId === undefined || files.length === 0) return;
+    async (files: ReadonlyArray<File>): Promise<string | undefined> => {
+      if (threadId === undefined || files.length === 0) return "Image attachments are unavailable.";
       const images = files.filter((file) => supportedMediaType(file) !== undefined);
       if (images.length === 0) {
-        setMessage("Only PNG, JPEG, WebP, and GIF images can be attached.");
-        return;
+        const reason = "Only PNG, JPEG, WebP, and GIF images can be attached.";
+        setMessage(reason);
+        return reason;
       }
+      let attached = false;
+      let refusal: string | undefined;
       setBusy(true);
       inFlight.current += 1;
       try {
@@ -151,11 +155,13 @@ export function useCodeAttachments(input: {
           const mediaType = supportedMediaType(file);
           if (mediaType === undefined) continue;
           if (file.size === 0 || file.size > MAX_CODE_ATTACHMENT_BYTES) {
-            setMessage(`${file.name || "Image"} is too large to attach.`);
+            refusal = `${file.name || "Image"} is too large to attach.`;
+            setMessage(refusal);
             continue;
           }
           if (current.current.length >= MAX_CODE_TURN_ATTACHMENTS) {
-            setMessage(`A turn carries at most ${MAX_CODE_TURN_ATTACHMENTS} images.`);
+            refusal = `A turn carries at most ${MAX_CODE_TURN_ATTACHMENTS} images.`;
+            setMessage(refusal);
             break;
           }
           const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
@@ -171,14 +177,17 @@ export function useCodeAttachments(input: {
           const previewUrl = URL.createObjectURL(file);
           previews.current.add(previewUrl);
           apply((list) => [...list, { reference, previewUrl }]);
+          attached = true;
           setMessage(undefined);
         }
       } catch {
-        setMessage("The image could not be attached.");
+        refusal = "The image could not be attached.";
+        setMessage(refusal);
       } finally {
         inFlight.current = Math.max(0, inFlight.current - 1);
         setBusy(false);
       }
+      return attached ? undefined : refusal;
     },
     [apply, client, threadId],
   );

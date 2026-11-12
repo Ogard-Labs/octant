@@ -2664,9 +2664,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - A thread keeps its newest 32 captures. Captures leave the host only in the local owner's thread or data export.
 - At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the 32 (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
+- The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
+Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
 
 ### Browser for agents
 
