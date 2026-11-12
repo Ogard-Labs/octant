@@ -3,10 +3,13 @@ import type { ExtensionToolGrantRevocationReason } from "@octant/contracts/exten
 /**
  * Where a connected MCP server can reach. `confined-stdio` is a server Octant
  * launched itself with no network and writes limited to its plugin data;
- * `network` is a server Octant only talks to over HTTP, so what it does with a
- * call's arguments is outside the host's view.
+ * `proxied-stdio` is one launched the same way but allowed to reach the hosts
+ * its catalog entry names through the host's own proxy, so it can carry a
+ * call's arguments out and is judged like `network`; `network` is a server
+ * Octant only talks to over HTTP, so what it does with a call's arguments is
+ * outside the host's view.
  */
-export type ExtensionToolReach = "confined-stdio" | "network";
+export type ExtensionToolReach = "confined-stdio" | "proxied-stdio" | "network";
 
 /** What a person saw when they approved a tool: the package and the tool's listing. */
 export interface ExtensionToolBinding {

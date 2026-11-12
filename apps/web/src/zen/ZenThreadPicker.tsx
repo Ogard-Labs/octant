@@ -21,7 +21,7 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
     /* ui-boundary-exception: non-modal-panel */
     <OctantCard
       aria-label="Threads"
-      className="zen-panel zen-thread-picker px-6"
+      className="zen-panel zen-thread-picker px-5"
       role="dialog"
       variant="glass"
     >

@@ -256,7 +256,7 @@ export function BrowserUploadPermissionsSection(props: {
                 : void act({ kind: "grant", reviewId: review.reviewId })
             }
             details={
-              <div className="flex min-w-0 flex-col gap-3">
+              <div className="flex min-w-0 flex-col gap-2">
                 {review === undefined ? (
                   <>
                     <label>

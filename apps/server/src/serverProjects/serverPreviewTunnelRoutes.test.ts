@@ -15,6 +15,7 @@ function setup() {
   const windows = new WindowAuthorityStore();
   windows.register({ windowId: id, capability, now: 0 });
   const tunnels = new ServerPreviewTunnels({
+    now: () => Date.now(),
     address: (key) =>
       key === projectId ? { server: { alias: "web", user: "deploy" }, identity: "one" } : undefined,
     ownerCurrent: () => true,

@@ -115,7 +115,11 @@ import {
   bundledProviderDriverWithheldReason,
 } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -2585,7 +2589,7 @@ export class ProviderService implements ProviderServiceApi {
       return this.#invalid("Provider configuration changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#unavailable();
+      return this.#unavailable(error);
     }
     if (isProviderFailure(error)) return new ProviderServiceError(decodeProviderFailure(error));
     return this.#unavailable();
@@ -2621,10 +2625,10 @@ export class ProviderService implements ProviderServiceApi {
     return new ProviderServiceError({ category: "unsupported", message });
   }
 
-  #unavailable(): ProviderServiceError {
+  #unavailable(error?: unknown): ProviderServiceError {
     return new ProviderServiceError({
       category: "unavailable",
-      message: "Octant Provider service is unavailable.",
+      message: persistenceFailureMessage(error, "Octant Provider service is unavailable."),
     });
   }
 }

@@ -126,7 +126,11 @@ import {
 import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { Effect, Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { WorkTurnFileObserver } from "./workTurnFileObserver";
@@ -3283,7 +3287,10 @@ export class WorkTurnService {
       return this.#failure("stale", "Work turn changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Octant Work turn service is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Octant Work turn service is unavailable."),
+      );
     }
     return this.#failure("unavailable", "Octant Work turn service is unavailable.");
   }

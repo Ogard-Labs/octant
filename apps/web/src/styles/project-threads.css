@@ -629,6 +629,9 @@
 
 .project-dialog h1 {
   margin: 2px 0 0;
+  /* Whole-pixel lines in a dialog, so what stands under them does not sit on
+     a fraction. */
+  line-height: var(--oct-line-tight);
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
@@ -638,7 +641,7 @@
   margin: var(--oct-space-2) 0 var(--oct-space-4);
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-snug);
+  line-height: var(--oct-line-snug);
 }
 
 .project-dialog form,
@@ -808,6 +811,16 @@
   min-width: 0;
   align-items: center;
   gap: var(--oct-space-2);
+  line-height: var(--oct-line-label);
+}
+
+/* A Project's mark is one box whether it is the folder glyph or the picture
+   from its folder: the button recipe sized the glyph to 16 and the picture
+   stayed 14, so names began 2px apart. */
+.move-thread__title > :is(svg, .project-icon) {
+  width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
+  flex: none;
 }
 
 .move-thread__folder,

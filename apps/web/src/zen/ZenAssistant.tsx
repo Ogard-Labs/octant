@@ -34,7 +34,7 @@ export function ZenAssistant(props: ZenAssistantProps) {
 
   return (
     /* ui-boundary-exception: non-modal-panel */
-    <OctantCard className="zen-panel zen-assistant px-6" role="dialog" variant="glass">
+    <OctantCard className="zen-panel zen-assistant px-5" role="dialog" variant="glass">
       <NavigatorPanel
         controller={props.controller}
         onClose={props.onClose}

@@ -134,7 +134,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
             disabled={props.disabled}
             className={cn(
               fieldPaint,
-              "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-(--oct-disabled-opacity) window-no-drag",
+              "flex h-[round(2.154rem,2px)] w-full items-center justify-between gap-2 px-2 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-(--oct-disabled-opacity) window-no-drag",
               props.triggerClassName,
               props.className,
             )}

@@ -408,14 +408,18 @@ html[data-octant-native-host="true"]
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: var(--oct-space-2) 0 var(--oct-space-3);
+  /* The first face centres on the title rail's centreline, as the band's
+     controls do, so it starts (rail − face) / 2 down, and the edge fade ends
+     there instead of dimming the face. */
+  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 32px) / 2);
+  padding: var(--sidebar-rail-top) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none;
   mask-image: linear-gradient(
     to bottom,
     transparent,
-    var(--oct-fg) var(--oct-space-2),
+    var(--oct-fg) var(--sidebar-rail-top),
     var(--oct-fg) calc(100% - var(--oct-space-3)),
     transparent
   );
@@ -447,6 +451,10 @@ html[data-octant-native-host="true"]
   min-height: 0;
   flex: 0 0 auto;
   padding: 0;
+  /* The recipe's transparent 1px border made the button 34px around its 32px
+     face; the margin gives the border back, so the button takes its face's
+     32px in the column. */
+  margin: -1px;
 }
 
 .sidebar-rail__face {
@@ -551,7 +559,9 @@ html[data-octant-native-host="true"]
 .window-chrome__leading--browser {
   position: relative;
   z-index: 8;
-  padding: 2px 4px;
+  /* The band's end inset (8px) at both ends: the trailing controls keep 8px
+     from the right edge, so the leading ones keep 8px from the left. */
+  padding: 2px 4px 2px var(--oct-space-2);
   pointer-events: auto;
 }
 
@@ -610,7 +620,7 @@ html[data-octant-native-host="true"]
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
   pointer-events: auto;
 }
@@ -620,6 +630,13 @@ html[data-octant-native-host="true"]
   display: inline-flex;
   flex: 0 0 auto;
   pointer-events: auto;
+}
+
+/* The two slots are always rendered and filled by a portal only when a Project
+   offers the action. An empty one is a zero-width flex item that still took a
+   gap, so the controls beside it stood two gaps apart. */
+.window-chrome__open-in-action:empty {
+  display: none;
 }
 
 .project-action-buttons {
@@ -1034,7 +1051,7 @@ html[data-octant-native-host="true"]
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 2px;
+  gap: var(--oct-space-1);
 }
 
 .sidebar__primary-actions {
@@ -1425,7 +1442,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-meta);
+  line-height: var(--oct-line-meta);
 }
 
 .sidebar-navigation__thread-project,
@@ -1437,7 +1454,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-meta);
+  line-height: var(--oct-line-meta);
 }
 
 .sidebar-navigation__thread-project > svg,
@@ -1520,6 +1537,8 @@ html[data-octant-native-host="true"]
 /* A name in navigation (`oct-nav-name`); this rule only truncates it. */
 .sidebar-navigation__thread-title {
   min-width: 0;
+  /* Whole-pixel lines, so a two-line row is a whole number of pixels tall. */
+  line-height: var(--oct-line-label);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2024,24 +2043,14 @@ html[data-octant-native-host="true"]
   border-radius: var(--oct-radius-md);
 }
 
-.thread-row-context-menu :is([role="menuitem"], [role="menuitemcheckbox"]) {
-  min-height: 26px;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-detail);
-  line-height: 1.25;
-}
-
-.thread-row-context-menu [role="separator"] {
-  margin: var(--oct-space-1) 0;
-}
-
+/* Its rows and separators are the shared menu recipe: 28px rows and the Menu
+   option type. The icon stands in the same 16px column every menu uses; only
+   its ink is this menu's own. */
 .thread-row-context-menu__icon {
   display: inline-flex;
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
+  width: var(--oct-icon-md);
+  min-width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
   align-items: center;
   justify-content: center;
   color: var(--oct-meta);
@@ -2969,11 +2978,14 @@ form > .work-composer-adapter__attachments {
     padding-block: 0;
   }
 
+  /* The start screen's composer stands the panel's 20px from each edge, as a
+     thread's composer does (its width is the viewport less 40px). A 12px margin
+     and 12px of padding on top of the panel's inset made 44px of it. */
   .draft-thread.chat-welcome .welcome {
     box-sizing: border-box;
-    width: calc(100% - 24px);
+    width: 100%;
     justify-content: flex-start;
-    padding: 12px;
+    padding: 12px 0;
     gap: 16px;
   }
 

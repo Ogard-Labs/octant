@@ -724,6 +724,12 @@ export interface ClaudeDriverOptions {
   readonly makeEnvironmentScope?: ClaudeEnvironmentFactory;
   readonly isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean;
   readonly clock?: () => string;
+  /**
+   * The host's process authority clock, in milliseconds. A pre-tool grant
+   * expires from it, so a wall clock set back cannot extend one. The host
+   * always passes it; a standalone driver falls back to wall time.
+   */
+  readonly authorityNow?: () => number;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
   readonly taskId?: () => string;
@@ -883,6 +889,7 @@ const CLAUDE_COMPACTION_UNCERTAIN = {
 
 interface ConnectionFactories {
   readonly clock: () => string;
+  readonly authorityNow: () => number;
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -1494,6 +1501,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
   const factories: ConnectionFactories = {
     clock: options.clock ?? (() => new Date().toISOString()),
+    authorityNow: options.authorityNow ?? Date.now,
     makeCorrelation: options.correlationId ?? randomUUID,
     makeRequestId: options.requestId ?? randomUUID,
     makeTaskId: options.taskId ?? randomUUID,
@@ -2167,7 +2175,7 @@ function makeConnection(
           if (!admitToolUse(activeState, request.toolUseId)) {
             return deny("Claude tool authority state was exhausted.");
           }
-          expireClaudePreToolGrants(activeState, Date.now());
+          expireClaudePreToolGrants(activeState, factories.authorityNow());
           const digest = claudeAuthorityInputDigest(request.input);
           const grant = activeState?.preToolRequests.get(request.toolUseId);
           if (
@@ -2358,7 +2366,7 @@ function makeConnection(
           if (!admitToolUse(activeState, request.toolUseId)) {
             return deny("Claude tool authority state was exhausted.");
           }
-          expireClaudePreToolGrants(activeState, Date.now());
+          expireClaudePreToolGrants(activeState, factories.authorityNow());
           if (
             !claudeOffersTool(
               {
@@ -2438,7 +2446,7 @@ function makeConnection(
               workingDirectory: request.projectRoot,
               toolName: request.toolName,
               inputDigest: digest,
-              expiresAt: Date.now() + PRE_TOOL_GRANT_TTL_MS,
+              expiresAt: factories.authorityNow() + PRE_TOOL_GRANT_TTL_MS,
             });
             return { behavior: "ask" };
           };

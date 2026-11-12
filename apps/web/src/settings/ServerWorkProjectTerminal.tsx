@@ -122,7 +122,7 @@ export function ServerWorkProjectTerminal(props: {
           {terminalId === undefined ? (
             <p role="status">Opening SSH session…</p>
           ) : (
-            <div className="relative h-80 min-h-0 w-full min-w-0 overflow-hidden">
+            <div className="relative h-[20rem] min-h-0 w-full min-w-0 overflow-hidden">
               <div className="absolute inset-0 min-h-0 min-w-0">
                 <ZenProjectTerminalCard
                   key={terminalId}

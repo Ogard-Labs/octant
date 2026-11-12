@@ -560,8 +560,8 @@ html[data-octant-reduced-motion="true"]
   border: 0;
   border-radius: var(--oct-radius-sm);
   font: inherit;
-  font-size: var(--oct-text-sm);
-  font-weight: 400;
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
   text-align: start;
   white-space: nowrap;
   cursor: default;

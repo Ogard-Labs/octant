@@ -124,12 +124,17 @@ export function runDatabaseCommand(
         output = services.verify();
         if (!output.valid) exitCode = 1;
         break;
-      case "rebuild":
-        output =
+      case "rebuild": {
+        const rebuilt =
           parsed.projectionName === undefined
             ? services.rebuildAll()
             : services.rebuildProjection(parsed.projectionName);
+        // A derived view that still cannot apply an event stays quarantined;
+        // the rest of the store was repaired, but the repair is not complete.
+        if (rebuilt.held !== undefined) exitCode = 1;
+        output = rebuilt;
         break;
+      }
       case "backup":
         output = services.backup();
         break;
@@ -325,8 +330,7 @@ export async function resolveCredentialPurgeAttempt(options: {
   });
 }
 
-async function runCli(): Promise<number> {
-  const args = process.argv.slice(2);
+export async function runDatabaseCli(args: ReadonlyArray<string>): Promise<number> {
   const parsed = parseDatabaseCommand(args);
   if (!parsed.ok) {
     process.stderr.write(`${parsed.message}\n${usage}\n`);
@@ -726,8 +730,4 @@ function buildRecoveryInput(connection: SqliteConnection, clock: () => string) {
     clock,
   });
   return { connection, journal, projections: runtime.projections, clock };
-}
-
-if (import.meta.main) {
-  process.exitCode = await runCli();
 }

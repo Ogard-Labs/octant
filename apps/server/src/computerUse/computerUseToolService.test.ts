@@ -17,6 +17,7 @@ import {
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
   readApprovalOutsideContent,
   readThreadExternalContentTaint,
@@ -81,6 +82,8 @@ function fixture(overrides?: {
     readonly ingested: () => boolean;
     readonly outsideContent: () => ReturnType<typeof readApprovalOutsideContent>;
   };
+  /** The authority clock approval offers expire on; wall time by default. */
+  readonly now?: () => number;
 }) {
   let current = true;
   let tainted = false;
@@ -130,6 +133,7 @@ function fixture(overrides?: {
       (() => (tainted && overrides?.namesSources !== false ? marking : undefined)),
     threadTitle: () => "Fixture task",
     record: async () => {},
+    now: overrides?.now ?? (() => Date.now()),
   });
   const tools = service.toolSet(overrides?.toolOwner ?? owner);
   return {
@@ -156,7 +160,14 @@ describe("Computer use through a provider tool", () => {
   it("keeps an app grant for the thread, with no lapse after five minutes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const approvedAt = Date.now();
-    const f = fixture();
+    // The grant has no clock on either time source: neither the wall clock
+    // nor the authority clock the service reads may lapse it.
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => Date.now(),
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const f = fixture({ now: clock.now() });
     const command = {
       name: "octant_computer",
       inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
@@ -165,6 +176,7 @@ describe("Computer use through a provider tool", () => {
       const first = f.tools.execute(command);
       await approvePending(f);
       await first;
+      elapsedMs += 6 * 60 * 60_000;
       vi.setSystemTime(approvedAt + 6 * 60 * 60_000);
       await f.service.sweep();
       expect(f.release).not.toHaveBeenCalled();
@@ -919,6 +931,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     const recorded: Array<ComputerUseEvidenceEvent> = [];
     const macExecute = vi.fn(async () => decodeComputerControlResult({ kind: "apps", apps: [] }));
     const service = createComputerUseToolService({
+      now: () => Date.now(),
       ...(options.withMac === true
         ? {
             desktop: {

@@ -56,4 +56,11 @@
   --radius-md: var(--radius);
   --radius-lg: var(--radius);
   --radius-xl: var(--oct-radius-md);
+  /* Tailwind's spacing step is a quarter of a rem, and the root is the
+     interface size (13px by default), so `px-2.5` drew 8.125px and `p-1`
+     3.25px. Spacing is pixels on the 4px scale, the same as the stylesheets'
+     `--oct-space-*`; only type and control heights follow the interface size
+     (DESIGN.md, Spacing, shapes, and depth). A recipe never takes a half step:
+     `px-2` is 8, `px-3` is 12. */
+  --spacing: 4px;
 }

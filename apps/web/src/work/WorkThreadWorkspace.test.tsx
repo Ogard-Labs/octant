@@ -13,6 +13,7 @@ import {
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
+import { WorkRequestClientFailure } from "@octant/client-runtime/work-request-client";
 import { decodeProjectSummary, decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -1505,6 +1506,59 @@ describe("WorkThreadWorkspace", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument(),
     );
+  });
+
+  it("shows why the host refused an answer instead of a lost delivery", async () => {
+    const user = userEvent.setup();
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "single",
+          options: [{ id: "pdf", label: "PDF" }],
+        },
+      ],
+    };
+    const requestClient = {
+      list: vi.fn(async () => ({
+        requests: [
+          {
+            requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            threadId,
+            status: "pending",
+            detail: { kind: "user-input", prompt: "Choose formats", options: [], questionnaire },
+            version: 1,
+          },
+        ],
+      })),
+      execute: vi.fn().mockRejectedValueOnce(
+        new WorkRequestClientFailure({
+          code: "stale",
+          message: "This thread's permissions changed since this was asked, so it asks again.",
+        }),
+      ),
+    };
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={
+          { bootstrap: vi.fn(async () => ({ threads: [workThread()] })), execute: vi.fn() } as never
+        }
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(await screen.findByRole("radio", { name: "PDF" }));
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(
+      await screen.findByText(
+        "This thread's permissions changed since this was asked, so it asks again.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("The answer could not be delivered.")).not.toBeInTheDocument();
   });
 
   it("dismisses the owning Work questionnaire without submitting any answer", async () => {

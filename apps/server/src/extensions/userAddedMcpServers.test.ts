@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
 import { normalizeAgentPluginPackage } from "./agentPluginIngestion";
@@ -63,6 +63,34 @@ async function store(
 }
 
 describe("MCP servers added by hand", () => {
+  it("names egress hosts only for the reserved connector folder the host wrote", async () => {
+    const { store: servers, registry } = await store();
+    const lookup = (id: string) => (id === "demo" ? { egress: ["*.example.com"] } : undefined);
+    const connector = await servers.add({
+      name: "Demo",
+      connectorId: "linear",
+      server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
+    });
+    // The catalog's own entry for this id lists no hosts, so the real lookup gives none.
+    expect(servers.egressHosts(connector.source.sourceRef)).toBeUndefined();
+    const folder = registry.get(connector.source.sourceRef)?.absolutePath ?? "";
+    expect(
+      servers.egressHosts(connector.source.sourceRef, () => ({ egress: ["*.example.com"] })),
+    ).toEqual(["*.example.com"]);
+    expect(servers.egressHosts(connector.source.sourceRef, lookup)).toBeUndefined();
+    expect(basename(folder)).toBe("connector-linear");
+    const handAdded = await servers.add({
+      name: "Notes",
+      server: { type: "stdio", command: "/usr/bin/true", args: [], env: [] },
+    });
+    expect(
+      servers.egressHosts(handAdded.source.sourceRef, () => ({ egress: ["*.example.com"] })),
+    ).toBeUndefined();
+    expect(
+      servers.egressHosts("not-a-source", () => ({ egress: ["*.example.com"] })),
+    ).toBeUndefined();
+  });
+
   it("adds Paper as a local HTTP package without running its CLI or requesting OAuth", async () => {
     const { store: servers, registry } = await store();
     const { source } = await servers.add({

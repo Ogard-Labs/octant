@@ -885,6 +885,146 @@ describe("ChatProjection", () => {
     connection.close();
   });
 
+  it("writes no more for a streamed delta late in a long reply than for an early one, and rebuilds the same reply", () => {
+    const connection = openConnection();
+    const { projection } = chatRuntime();
+    const store = journal(connection);
+    // Every string the host binds into a write, so a projection that rewrote
+    // the attempt row and turn JSON per delta shows up as bytes that grow
+    // with the reply.
+    let boundBytes = 0;
+    const prepare = connection.prepare.bind(connection);
+    connection.prepare = (sql) => {
+      const statement = prepare(sql);
+      return {
+        ...statement,
+        run: (...parameters) => {
+          for (const parameter of parameters) {
+            if (typeof parameter === "string") boundBytes += parameter.length;
+          }
+          return statement.run(...parameters);
+        },
+        get: (...parameters) => statement.get(...parameters),
+        all: (...parameters) => statement.all(...parameters),
+      };
+    };
+    const contentId = (index: number) =>
+      `82000000-0000-4000-8000-${(0x100 + index).toString(16).padStart(12, "0")}`;
+    const body = "token";
+    const reference = (id: string) => ({ contentId: id, digest: digest(body), byteLength: 5 });
+    const attempt = {
+      id: ids.attempt,
+      turnId: ids.turn,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      modelId: "model-a",
+      contextManifestId: ids.manifest,
+      outcome: "streaming",
+      responseRefs: [reference(contentId(0))],
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const writeBody = (id: string) => ({
+      beforeEvents(inner: SqliteConnection) {
+        writeChatContent(inner, {
+          contentId: id,
+          threadId: ids.thread,
+          role: "assistant",
+          body,
+          digest: digest(body),
+          byteLength: body.length,
+        });
+      },
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: { contentId: ids.content, digest: digest("ask"), byteLength: 3 },
+              attachmentIds: [],
+              attempts: [attempt],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner: SqliteConnection) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "ask",
+            digest: digest("ask"),
+            byteLength: 3,
+          });
+          writeBody(contentId(0)).beforeEvents(inner);
+        },
+      },
+    );
+    const deltaCount = 400;
+    const bytesPerDelta: Array<number> = [];
+    for (let index = 1; index <= deltaCount; index += 1) {
+      const before = boundBytes;
+      store.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+          expectedVersion: 1 + index,
+          events: [
+            pending("chat.attempt-response-appended@1", {
+              kind: "attempt-response-appended",
+              threadId: ids.thread,
+              turnId: ids.turn,
+              attemptId: ids.attempt,
+              responseRef: reference(contentId(index)),
+              updatedAt: now,
+            }),
+          ],
+        },
+        writeBody(contentId(index)),
+      );
+      bytesPerDelta.push(boundBytes - before);
+    }
+    expect(bytesPerDelta.at(-1)).toBe(bytesPerDelta[1]);
+
+    const streamedIds = Array.from({ length: deltaCount + 1 }, (_, index) => contentId(index));
+    const readAttempt = () =>
+      readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]?.attempts[0];
+    expect(readAttempt()?.responseRefs.map((ref) => ref.contentId)).toEqual(streamedIds);
+
+    // The settling attempt carries every reference; folding it in leaves the
+    // same reply, and so does rebuilding the projection from the journal.
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2 + deltaCount,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: { ...attempt, outcome: "completed", responseRefs: streamedIds.map(reference) },
+        }),
+      ],
+    });
+    expect(readAttempt()?.responseRefs.map((ref) => ref.contentId)).toEqual(streamedIds);
+    rebuildProjection({ connection, journal: store, projection, clock: () => now });
+    expect(readAttempt()?.responseRefs.map((ref) => ref.contentId)).toEqual(streamedIds);
+    expect(readAttempt()?.outcome).toBe("completed");
+    connection.close();
+  });
+
   it("replays the same appended event without duplicating its reference", () => {
     const connection = openConnection();
     const { projection } = chatRuntime();

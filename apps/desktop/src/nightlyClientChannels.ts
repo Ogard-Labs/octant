@@ -50,6 +50,9 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   appUpdateDownload: "local",
   appUpdateInstall: "local",
   appUpdateAutomatic: "local",
+  // The background service and login item belong to the app that owns the host.
+  backgroundHostState: "octant-only",
+  backgroundHostChange: "octant-only",
   computerUseTest: "octant-only",
   computerUseStatus: "brokered",
   computerUsePermissions: "brokered",
