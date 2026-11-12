@@ -537,6 +537,8 @@ p.provider-limits__warning {
   height: auto;
   min-height: 0;
   padding: 0;
+  /* The ring is its 32px face, as the rail's destinations are. */
+  border: 0;
 }
 
 .rail-usage__face {

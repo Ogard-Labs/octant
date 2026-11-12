@@ -60,7 +60,13 @@
   min-width: 0;
   min-height: var(--oct-title-rail-h);
   justify-content: space-between;
-  padding: 4px var(--octant-window-chrome-reserved-width, 96px) var(--oct-rail-pad-end) 8px;
+  /* The reserve is the width of the band's trailing controls, which stand
+     over the dock's own bar. It never exceeds what the bar has beside its
+     8px start inset, so a dock narrower than those controls (300px stored,
+     349px reserved) keeps its column instead of widening it past the window
+     edge. */
+  padding: 4px min(var(--octant-window-chrome-reserved-width, 96px), calc(100% - 8px))
+    var(--oct-rail-pad-end) 8px;
   background: transparent;
   border-bottom: 0;
   font-family: var(--oct-font-display);
@@ -217,6 +223,9 @@
   justify-content: flex-start;
   gap: var(--oct-space-1);
   padding: 0;
+  /* A card's title that is a button has no border of its own: the recipe's
+     transparent 1px one pushed it a pixel right of a title that is not. */
+  border: 0;
   font: inherit;
   text-align: left;
 }
@@ -326,6 +335,9 @@
   flex: none;
   width: 6px;
   height: 6px;
+  /* The 14px slot an icon takes (4 + 6 + 4), so a row's name starts on one
+     column whether its mark is an icon or a dot. */
+  margin-inline: var(--oct-space-1);
   border-radius: 50%;
   background: var(--oct-meta);
 }
@@ -509,10 +521,10 @@
 
 /* The Browser's row takes the tile bar's insets, not the rail's: its first
    glyph stands where a tile's leading icon does (the bar's 12px inset), and its
-   last button ends the 4px the bar's last action does. */
+   last button ends the 8px the bar's last action does. */
 .right-utility-dock__tool .browser-workspace__chrome {
   gap: var(--oct-space-1);
-  padding-inline: var(--browser-row-inset) var(--oct-space-1);
+  padding-inline: var(--browser-row-inset) var(--oct-space-2);
 }
 
 /* A rail holds one line: the title yields before the count and the layout
@@ -581,9 +593,14 @@
 /* The working-tree view's lines and cards were children of a list with no
    padding of their own, while its segmented control and findings head were
    inset, so half the lines sat on the tile's edge. The list owns one gutter
-   and the delivery pane inside it stops adding its own. */
+   and the delivery pane inside it stops adding its own. Its blocks (a line,
+   a callout, a section) had no space between them or under the segmented
+   control, so text started on the control's bottom edge and a callout's edge
+   met the next block's: the list keeps the tile's 12px inset at its top and
+   12px between blocks. */
 .right-utility-dock__tool .git-history__list--changes {
-  padding-inline: var(--oct-space-3);
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3);
 }
 
 .right-utility-dock__tool
@@ -896,10 +913,14 @@
   flex: none;
   align-items: center;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  /* The trailing inset is the title band's end inset (8px), so a tile's last
+     control ends on the same edge as the band's. */
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  border-bottom: 1px solid var(--octant-border-soft);
+  /* The hairline is inside the 32px bar, not a border that takes a pixel
+     off the content box: the controls centre on the whole-pixel row. */
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
 }
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
@@ -976,6 +997,12 @@
   min-height: 24px;
   flex: none;
   padding: 0;
+}
+
+/* One glyph size in a 24px control (14), for Arrange and Close alike. */
+.dock-tile__control > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
 }
 
 /* The hit area is 8px wide, centred on the edge between two tiles; the line

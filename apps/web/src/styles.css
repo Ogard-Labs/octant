@@ -1142,10 +1142,12 @@ h6 {
    short of the icon boxes above it, so it sits two pixels further in and
    its centre lands on the icon column: 10px keeps the 20px avatar centred on
    the 20px column of the 16px navigation icons at the 12px inset, which is
-   why these two values stay off the 4px scale. */
+   why these two values stay off the 4px scale. Only the start is pulled in:
+   the chevron ends on the navigation inset, the edge a thread's status mark
+   ends on above it. */
 .sidebar-profile .sidebar-item {
   min-height: var(--oct-nav-head-h);
-  padding-inline: 10px;
+  padding-inline: 10px var(--oct-nav-inset);
   gap: 6px;
 }
 
