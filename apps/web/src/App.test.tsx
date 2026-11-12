@@ -6107,6 +6107,38 @@ describe("App", () => {
     );
   });
 
+  it("opens a tool from its button in the title band and closes it on the next press", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    const tools = await screen.findByRole("toolbar", { name: "Tools" });
+    const files = within(tools).getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(files);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("tab", { name: "Files" })).toBeVisible();
+    expect(files).toHaveAttribute("aria-pressed", "true");
+    expect(files).toHaveFocus();
+
+    await user.click(files);
+    await waitFor(() => expect(files).toHaveAttribute("aria-pressed", "false"));
+    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull();
+  });
+
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
@@ -6378,7 +6410,19 @@ describe("App", () => {
     const projectTools = within(dock).getByRole("complementary", { name: "Project tools" });
     expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
     expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Terminal" })).toHaveLength(1);
+    // The title band's own Terminal button waits for the thread; the one in
+    // the stage is the dock's, so only that one is counted here.
+    const bandTerminal = within(screen.getByRole("toolbar", { name: "Tools" })).getByRole(
+      "button",
+      { name: "Terminal" },
+    );
+    expect(bandTerminal).toHaveAttribute("aria-disabled", "true");
+    expect(bandTerminal).toHaveAttribute("aria-description", "Available once the task starts");
+    expect(
+      screen
+        .getAllByRole("button", { name: "Terminal" })
+        .filter((button) => button !== bandTerminal),
+    ).toHaveLength(1);
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
     await user.click(screen.getByRole("button", { name: "Create thread" }));

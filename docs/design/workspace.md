@@ -1002,7 +1002,21 @@ beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An 
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
 its title band offers the common tools, Add tool lists the rest, and an open
-dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+dock shows a tool strip. At 961px and wider, a **tool row** sits before the bottom-panel and dock toggles: one
+icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
+then **More tools**, a menu of every other tool the thread can use, grouped as the
+launcher groups them, each a checked item while that tool is shown. A button is present
+only where the thread can use the tool. Pressing one opens the tool as a tile beside the
+focused one (alone when the dock is empty) and widens and shows the dock; pressing it
+again closes the tool (the Browser closes every page). A button reads pressed while its
+tool is on screen, in the dock or in an open bottom panel, and carries a quiet dot while
+the tool is open in the dock but not shown. It is disabled with "Close a tool to make
+room" when both columns are full and the tool is not shown, and, on a new Code task
+before its thread exists, with "Available once the task starts". A press leaves focus
+on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
+movement, and its width is part of the trailing cluster the pane header reserves. The
+tab strip, Add tool, and Show another tool still open tools as well; the row does not
+replace them yet. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
 iOS Simulator, Android emulator, Desktop, and Vitals, as mode and capability allow. Chat

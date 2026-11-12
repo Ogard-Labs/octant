@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
+import { browserPageToShow } from "./dockToolButtonsModel";
 import {
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
@@ -155,10 +156,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const shownBrowserId = shownIds.find((id) => browserTabs.some((tab) => tab.id === id));
   const toolOf = (stripId: string) =>
     stripId === browserRepresentative?.id
-      ? (shownBrowserId ??
-        (browserActive ? activeTabId : undefined) ??
-        browserTabs.find((tab) => tab.id === props.lastBrowserTabId)?.id ??
-        stripId)
+      ? (browserPageToShow({
+          browserTabIds: browserTabs.map((tab) => tab.id),
+          shownTabIds: shownBrowserId === undefined ? [] : [shownBrowserId],
+          activeTabId,
+          lastBrowserTabId: props.lastBrowserTabId,
+        }) ?? stripId)
       : stripId;
   const shownInStrip = new Set(
     shownIds.map((id) =>

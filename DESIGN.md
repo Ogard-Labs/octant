@@ -1872,7 +1872,18 @@ Browser's toolbar groups back, forward, and reload in one rounded capsule
 beside a pill-shaped address field, followed by the driver indicator and a
 quiet ghost **Take over** button (secondary **Hand back** while the person has
 the page), both extra-small, which drop their words below 720px and keep their
-names. Environment is opened from that band or Add tool. Zen
+names. Environment is opened from that band or Add tool. At the right of the
+same band, before the bottom-panel and dock toggles, a **tool row** of icon
+buttons opens and closes tools: Environment, Terminal, Review, Browser, Files,
+then a **More tools** menu of checkbox items for every other tool the thread
+can use (grouped as the launcher groups them), each button only where the
+thread can use the tool. A button is the shell's icon button with the tool's
+own icon and its name as a tooltip, `aria-pressed` while the tool is on screen,
+a quiet 4px dot while the tool is open but not shown, and disabled with its
+reason ("Close a tool to make room", or "Available once the task starts" on a
+new Code task) otherwise. The row is a toolbar named "Tools" with one Tab stop
+and arrow-key movement, and is absent at 960px and under. It adds to the strip
+and menus for now; it does not replace them. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and
@@ -2361,7 +2372,7 @@ once the task has a thread the window's own choice applies again. Restored prese
 chrome visible.
 
 Environment is a right-dock tool, opened from the dock's title band (its
-quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
+quick tools or tab strip), the title band's tool row, or Add tool and nowhere else. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. A card is a faint wash of the ink over the
 dock with no ring (increased contrast adds one), so it never paints the opaque

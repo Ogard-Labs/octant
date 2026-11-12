@@ -395,6 +395,8 @@ import {
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
+  MAX_DOCK_TILE_COLUMNS,
+  MAX_DOCK_TILES_PER_COLUMN,
   moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
@@ -426,6 +428,11 @@ import {
   isDockToolLaunchable,
   isDockToolStillOpenable,
 } from "./shell/dockToolAvailability";
+import {
+  buildDockToolButtons,
+  NO_DOCK_TOOL_BUTTONS,
+  type DockToolButtonsModel,
+} from "./shell/dockToolButtonsModel";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
@@ -3301,9 +3308,27 @@ function LaunchedShell(
             isDockToolLaunchable(surface.id, dockToolCapabilities),
         )
       : undefined;
+    // The tools with a button in the title band: every tool this thread can use
+    // or already has open, including one the bottom panel holds.
+    const bottomHeldSurfaces = bottomPanelOpen ? [...bottomPanelSurfaceIds] : [];
+    const dockToolSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
+      (surface) =>
+        resolveDockSurface(surface.id).kind === "surface" &&
+        (isDockToolLaunchable(surface.id, dockToolCapabilities) ||
+          displayedDockState.tabs.some((tab) => tab.surface === surface.id) ||
+          bottomHeldSurfaces.includes(surface.id)),
+    ).map((surface) => ({ id: surface.id, label: surface.label }));
+    const lastDockColumn = displayedDockState.layout?.columns.at(-1);
+    const dockCapsFull =
+      displayedDockState.layout !== undefined &&
+      displayedDockState.layout.columns.length >= MAX_DOCK_TILE_COLUMNS &&
+      (lastDockColumn?.tiles.length ?? 0) >= MAX_DOCK_TILES_PER_COLUMN;
     return {
       activeBottomSurface,
       activeBottomTab,
+      bottomHeldSurfaces,
+      dockCapsFull,
+      dockToolSurfaces,
       bottomPanelAvailable,
       bottomPanelOpen,
       bottomPanelSurfaces,
@@ -3337,6 +3362,9 @@ function LaunchedShell(
   const {
     activeBottomSurface,
     activeBottomTab,
+    bottomHeldSurfaces,
+    dockCapsFull,
+    dockToolSurfaces,
     bottomPanelAvailable,
     bottomPanelOpen,
     bottomPanelSurfaces,
@@ -4502,6 +4530,47 @@ function LaunchedShell(
     closeDockTab(surface);
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
   }
+  /**
+   * A tool's button in the title band: opens the tool beside the focused tile,
+   * or closes it when it is shown. What a press does is decided by the same
+   * model that draws the button, so the two cannot disagree. Focus stays on the
+   * button: nothing here asks the dock to take it.
+   */
+  function toggleDockTool(surface: RightUtilityDockSurfaceId, _opener: HTMLElement) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined || button.press.kind === "refused") return;
+    // A reader hides the dock and the bottom panel without closing them, so
+    // the press leaves the reader first, as the dock's own toggle does. A
+    // reader that shows the dock beside it (a pull request's review) stays.
+    if (readerOpen && !dockPresentedOpen) closeWorkspaceReaders();
+    const press = button.press;
+    switch (press.kind) {
+      case "open-dock":
+        if (!dockOpen) {
+          markInteraction("renderer", "dock-open-requested");
+          markInteractionAfterPaint("dock-open");
+          setActivePaneDockVisible(true);
+        }
+        return;
+      case "open-beside":
+        openDockTabBeside(surface);
+        return;
+      case "show-beside":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        showDockTabBeside(press.tabId);
+        return;
+      case "close":
+        for (const tabId of press.tabIds) closeDockTab(tabId);
+        return;
+      case "close-bottom":
+        closeBottomPanelTab(surface);
+        return;
+      case "reveal":
+        return;
+    }
+  }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
     // With a reader up the dock is stepped aside, not closed: the toggle
@@ -5235,6 +5304,7 @@ function LaunchedShell(
       startNewThreadDraft,
       toggleBottomPanel,
       toggleDock,
+      toggleDockTool,
       touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
@@ -5323,6 +5393,49 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
+  // Readers hide unrelated thread tools. Selecting a pull request explicitly
+  // opens its Review beside that list, so the detail must remain visible.
+  const dockPresentedOpen =
+    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  // The bottom panel steps aside for the same reason, and it had not been:
+  // a terminal opened on a thread kept a quarter of the viewport on Board,
+  // Inbox, and the pull request list, pages that are about many threads and
+  // show none of them. The panel keeps its tabs and its height and comes back
+  // with the thread; only the presentation is withheld. Ownership stays on
+  // `bottomPanelOpen`, so which tools the dock may still launch does not
+  // change while a reader is up.
+  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
+  // The row of tool buttons in the title band. A tile resize rebuilds the dock
+  // presentation but changes nothing a button shows, so the model is kept by
+  // value: the memoised chrome re-renders only when a button's state changes.
+  const dockToolButtonsKey = JSON.stringify(
+    dockAvailable
+      ? buildDockToolButtons({
+          surfaces: dockToolSurfaces,
+          ...(dockToolsAwaitingThread === undefined
+            ? {}
+            : {
+                awaitingThread: dockToolsAwaitingThread.map((surface) => ({
+                  id: surface.id,
+                  label: surface.label,
+                })),
+              }),
+          tabs: displayedDockState.tabs.map((tab) => ({ id: tab.id, surface: tab.surface })),
+          shownTabIds: dockShownTabs.map((tab) => tab.id),
+          activeTabId: displayedDockState.active,
+          lastBrowserTabId: displayedDockState.lastBrowser,
+          dockOpen,
+          dockPresentedOpen,
+          bottomHeld: bottomHeldSurfaces,
+          bottomPresentedOpen: bottomPanelPresentedOpen,
+          capsFull: dockCapsFull,
+        })
+      : NO_DOCK_TOOL_BUTTONS,
+  );
+  const dockToolButtons = useMemo(
+    () => JSON.parse(dockToolButtonsKey) as DockToolButtonsModel,
+    [dockToolButtonsKey],
+  );
   const homeActive =
     !readerOpen &&
     controller.workspace !== undefined &&
@@ -5870,30 +5983,12 @@ function LaunchedShell(
     }));
   }
 
-  /**
-   * Global workspace destinations are mutually exclusive. A reader may hide
-   * the workspace while it is open, so any navigation that targets a draft or
-   * thread dismisses the reader first instead of opening the destination
-   * invisibly behind it.
-   */
-  // Readers hide unrelated thread tools. Selecting a pull request explicitly
-  // opens its Review beside that list, so the detail must remain visible.
-  const dockPresentedOpen =
-    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
   const dockPresentationWidth = resolveDockPresentationWidth({
     storedWidth: contextSidebarWidth,
     widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
     tileColumns: dockTileColumns,
   });
-  // The bottom panel steps aside for the same reason, and it had not been:
-  // a terminal opened on a thread kept a quarter of the viewport on Board,
-  // Inbox, and the pull request list, pages that are about many threads and
-  // show none of them. The panel keeps its tabs and its height and comes back
-  // with the thread; only the presentation is withheld. Ownership stays on
-  // `bottomPanelOpen`, so which tools the dock may still launch does not
-  // change while a reader is up.
-  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   /** The pages back and forward can return to, by the destination that opens them. */
   function windowPageOpeners(): Partial<Record<WindowPage, () => void>> {
@@ -5913,7 +6008,12 @@ function LaunchedShell(
     };
   }
 
-  function closeWorkspaceReaders() {
+  /**
+   * Global workspace destinations are mutually exclusive. A reader may hide
+   * the workspace while it is open, so any navigation that targets a draft or
+   * thread dismisses the reader first instead of opening the destination
+   * invisibly behind it.
+   */ function closeWorkspaceReaders() {
     setProjectsListOpen(false);
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);
@@ -7472,6 +7572,7 @@ function LaunchedShell(
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
             dockPresentedOpen={dockPresentedOpen}
+            dockTools={dockToolButtons}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
             isNarrow={isNarrow}
