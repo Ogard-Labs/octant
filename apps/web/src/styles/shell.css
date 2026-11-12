@@ -669,6 +669,48 @@ html[data-octant-native-host="true"]
   background: var(--octant-control-pressed);
 }
 
+/* A tool that is on screen. Its own rule beside the expanded look so the two
+   states can change independently; the dot marks a tool that is open in the
+   dock but not on screen. */
+.window-chrome__button[aria-pressed="true"],
+.window-chrome__button[data-dock-tools-shown="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.window-chrome__button[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
+.dock-tool-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tool-buttons__button {
+  position: relative;
+}
+
+/* The context-menu wrapper takes no box of its own, so the buttons keep their
+   spacing in the row. */
+.dock-tool-buttons__item {
+  display: contents;
+}
+
+.dock-tool-buttons__button[data-dock-open="true"]::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  content: "";
+  background: var(--oct-muted);
+  border-radius: 50%;
+}
+
 .window-chrome__overflow {
   position: relative;
 }
