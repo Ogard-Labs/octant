@@ -519,6 +519,31 @@
   border-bottom: 1px solid var(--oct-border);
 }
 
+/* A tool whose controls stand in the tile's bar keeps no header of its own. A
+   field that is content (Files' filter) keeps one row under the bar: 32px, the
+   bar's insets and hairline, so the two read as one header. */
+/* The tree's first glyph stands on the bar's 12px: the row box keeps its 8px
+   inset from the tile and the glyph sits 4px into it. */
+.right-utility-dock__tool .code-file-explorer[data-bar-hosted="true"] {
+  --oct-file-inset: 4px;
+}
+
+.right-utility-dock__tool [data-bar-hosted="true"] > .code-file-explorer__head {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+.right-utility-dock__tool
+  [data-bar-hosted="true"]
+  > .code-file-explorer__head
+  .code-file-explorer__search
+  input {
+  height: 24px;
+}
+
 /* The Browser's row takes the tile bar's insets, not the rail's: its first
    glyph stands where a tile's leading icon does (the bar's 12px inset), and its
    last button ends the 8px the bar's last action does. */
@@ -941,6 +966,27 @@
   flex: 1 1 auto;
   padding: 0;
   border: 0;
+}
+
+/* The tool's own controls, between its name and the tile's Arrange and Close:
+   24px buttons 4px apart, the bar's gap, never a second row. The name gives
+   way last: the controls fold into one menu first (DockBarRow). */
+.dock-tile__tool-controls,
+.dock-tile__choice {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__tool-controls {
+  margin-inline-start: auto;
+}
+
+.dock-tile__choice-option[aria-pressed="true"] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control-pressed);
+  color: var(--oct-fg);
 }
 
 /* A tile's menu is open: the control is pressed into the bar, as the band's

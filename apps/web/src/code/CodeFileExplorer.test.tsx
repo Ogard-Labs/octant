@@ -9,12 +9,29 @@ import {
   MAX_CODE_FILE_EXPLORER_ENTRIES,
   type CodeFileExplorerEntry,
 } from "./CodeFileExplorer";
+import { DockBarContext, type DockBarItem } from "../shell/dockBarControls";
 
 const codeStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 const systemStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/octant.css"), "utf8");
 
 describe("CodeFileExplorer", () => {
+  it("hands Refresh up to its tile's bar and keeps only the filter in its own row", async () => {
+    const onRefresh = vi.fn();
+    const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
+    render(
+      <DockBarContext.Provider value={{ set: (items) => handed.push(items) }}>
+        <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={onRefresh} />
+      </DockBarContext.Provider>,
+    );
+    expect(screen.queryByRole("button", { name: "Refresh files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeInTheDocument();
+    const refresh = handed.at(-1)?.[0];
+    expect(refresh).toMatchObject({ kind: "button", label: "Refresh files" });
+    if (refresh?.kind === "button") refresh.onSelect();
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it("renders authoritative relative paths and opens an available file from the keyboard", async () => {
     const onOpenFile = vi.fn();
     render(

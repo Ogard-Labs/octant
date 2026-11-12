@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
+import { useDockBarControls } from "../shell/dockBarControls";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
@@ -192,8 +193,29 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     event.preventDefault();
   };
 
+  // Refresh is the tool's own control, so it stands in the tile's bar beside
+  // the name; the filter is content and keeps the one row under it.
+  const hosted = useDockBarControls(
+    props.onRefresh === undefined
+      ? []
+      : [
+          {
+            kind: "button",
+            id: "refresh",
+            label: "Refresh files",
+            icon: RefreshCw,
+            onSelect: props.onRefresh,
+            disabled: props.refreshing === true,
+          },
+        ],
+  );
+
   return (
-    <section aria-label="Code file explorer" className="code-file-explorer">
+    <section
+      aria-label="Code file explorer"
+      className="code-file-explorer"
+      data-bar-hosted={hosted ? "true" : undefined}
+    >
       <div className="code-file-explorer__head">
         <label className="code-file-explorer__search">
           <span className="sr-only">Filter files</span>
@@ -223,7 +245,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           )}
         </label>
 
-        {props.onRefresh === undefined ? null : (
+        {props.onRefresh === undefined || hosted ? null : (
           <OctantIconButton
             disabled={props.refreshing === true}
             label="Refresh files"
