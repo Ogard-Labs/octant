@@ -848,7 +848,9 @@ describe("the public-block visual language", () => {
     // redefining it made the same message change shape between the first send
     // and the next. The empty prompt is one line on a start screen and under a
     // thread alike, and no surface or presentation sizes it again.
-    expect(prompt).toMatch(/min-height:\s*calc\(1lh \+ 24px\)/);
+    // One line is a whole-pixel line (`--oct-composer-line`) and 12px above and
+    // under it, so the box lands on whole pixels.
+    expect(prompt).toMatch(/min-height:\s*calc\(var\(--oct-composer-line\) \+ 24px\)/);
     expect(system).not.toMatch(/\.composer--follow-up \.composer-input \{/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {

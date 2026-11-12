@@ -1585,8 +1585,8 @@ each counted at its own width (the extensions button grows a count while the
 agent drives). When only the profile is left and the floor still fails, the
 profile's choices and its sign-out move into More as well. Back, forward and
 reload always stay. The row's inset follows the tile bar: its first glyph
-stands on the bar's 12px lead inset and its last button ends 4px from the edge,
-with 4px between controls. With no page open the row is the history buttons, the
+stands on the bar's 12px lead inset and its last button ends 8px from the edge,
+as the bar's does, with 4px between controls. With no page open the row is the history buttons, the
 empty field and the profile icon.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
@@ -1901,7 +1901,7 @@ thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`
 with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
-and below them (about 56px). Hover-only actions (add, more, pin, archive,
+and below them: 8 + an 18px title line + 1 + a 17px facts line + 8 is 52px, and a row stands 54px from the next with the list's 2px gap. Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. A section heading's add and more controls are the exception: the
 list's view and filter controls share that row, so they keep their width while
@@ -1910,6 +1910,51 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Alignment.** One value does one job, so no edge or gap has to be explained.
+Each of these was measured off by a pixel or more in a render before it was a
+rule:
+
+- _The title band's icon buttons_ are 28px and stand 4px apart wherever the
+  band shows a row of them: the window controls, the tool row, the sidebar's
+  header actions. The band keeps one inset at both of its ends, 8px, so Show
+  sidebar is as far from the left edge as the last toggle is from the right. A
+  slot a Project fills only sometimes (Open in, Project actions) takes no room
+  and no gap while it is empty.
+- _A tile's bar_ ends on the band's 8px, and its Arrange and Close are 24px
+  controls with one 14px glyph, centred on a whole pixel: the bar's hairline is
+  drawn inside its 32px, not as a border that takes one off the controls'
+  centreline. The Browser's row follows the bar's insets.
+- _The icon rail's_ face is its button (32px in the column, 2px
+  apart), and the first face is centred on the title rail's centreline, so it
+  stands level with the band's controls beside it (6px down in the 44px rail).
+- _A dock never clips._ The dock's own bar holds the same 8px at both ends at
+  every width, 280px and up, and reserves nothing for the title band's
+  controls: the tool row lives in the band, a wide dock's bar is an empty
+  spacer under it, and a narrow dock is a dialog that stands away from the
+  band. A reserve for the band's room left no content box at 300px.
+- _A card's inset is exactly 16px_ (a Settings card draws its edge as an
+  outline inside its box, not as a border) and a dock card's title and its rows
+  stand on one edge: a title that is a button has no border, and a row's mark,
+  whether an icon or a dot, takes one 14px slot, so every name starts on one
+  column.
+- _Rows are whole pixels._ A row whose height is the sum of its lines sets
+  them from the role leadings rounded to a pixel (`--oct-line-label`,
+  `--oct-line-detail`, `--oct-line-meta`, `--oct-line-snug`,
+  `--oct-line-tight`): a Settings row, a thread row in the sidebar (two lines,
+  52px) and a dialog's paragraph. The roles keep their sizes.
+- _The composer's columns are the same in every mode._ The row under the box
+  starts on the box's inset, so its first control stands under attach in Chat,
+  Work and Code alike (an empty leading group takes no gap). The prompt's line
+  is the transcript size times the body leading, rounded to the nearest even
+  pixel (`--oct-composer-line`), so the 28px controls centre on whole pixels
+  and the one-line box is 44px at the default 13px (46px at 14px, 48px at
+  16px).
+- _A foot ends where the rows above it end._ The account row's chevron stands
+  on the navigation inset (12px), the edge a thread's status mark ends on.
+- _At a phone's width_ the start screen's composer stands the panel's 20px from
+  each edge, as a thread's composer does (its width is the viewport less 40px),
+  with no margin or padding of its own on top.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on
