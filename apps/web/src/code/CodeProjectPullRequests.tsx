@@ -96,6 +96,12 @@ interface ProjectSetting {
   readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
 }
 
+/** The two agent permissions that sit beside Agents may merge in a Project's menu. */
+interface AgentForgeChoices {
+  readonly comments: ProjectSetting;
+  readonly defaultBranchPush: ProjectSetting;
+}
+
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
   readonly refresh: (
@@ -127,6 +133,13 @@ export interface CodeProjectPullRequestsProps {
    * device.
    */
   readonly agentMerge?: ProjectSetting;
+  /**
+   * Present with `agentMerge`, under the same rule: whether agents below Full
+   * access may comment without asking for each post, and whether an ordinary
+   * push may reach the default branch. The server owns both and refuses a
+   * paired device.
+   */
+  readonly agentForgeChoices?: AgentForgeChoices;
   /** Injectable for tests; defaults to `window.localStorage` when available. */
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
@@ -505,6 +518,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     ? {}
                     : { backgroundRefresh: props.backgroundRefresh })}
                   {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                  {...(props.agentForgeChoices === undefined
+                    ? {}
+                    : { agentForgeChoices: props.agentForgeChoices })}
                   {...settingsNote(view, group.projectId)}
                 />
               ))}
@@ -529,6 +545,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     ? {}
                     : { backgroundRefresh: props.backgroundRefresh })}
                   {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                  {...(props.agentForgeChoices === undefined
+                    ? {}
+                    : { agentForgeChoices: props.agentForgeChoices })}
                   {...settingsNote(view, project.projectId)}
                 />
               ))}
@@ -593,6 +612,9 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                         ? {}
                         : { backgroundRefresh: props.backgroundRefresh })}
                       {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                      {...(props.agentForgeChoices === undefined
+                        ? {}
+                        : { agentForgeChoices: props.agentForgeChoices })}
                     />
                   )}
                   <OctantTooltip label="Refresh all pull requests">
@@ -724,6 +746,7 @@ function ProjectSettingsItems(props: {
   readonly onRefresh: () => void;
   readonly backgroundRefresh?: ProjectSetting;
   readonly agentMerge?: ProjectSetting;
+  readonly agentForgeChoices?: AgentForgeChoices;
 }) {
   const { project } = props;
   return (
@@ -759,6 +782,35 @@ function ProjectSettingsItems(props: {
           Agents may merge
         </OctantMenuCheckboxItem>
       )}
+      {props.agentForgeChoices === undefined ? null : (
+        <>
+          <OctantMenuCheckboxItem
+            aria-label={`Let agents comment on ${project.projectName} pull requests`}
+            checked={props.agentForgeChoices.comments.enabledFor(project.projectId)}
+            // An authority closes on one activation, as Agents may merge does.
+            closeOnClick
+            disabled={props.busy}
+            label="Agents may comment on pull requests"
+            onCheckedChange={(enabled) =>
+              void props.agentForgeChoices?.comments.setEnabled(project.projectId, enabled)
+            }
+          >
+            Agents may comment on pull requests
+          </OctantMenuCheckboxItem>
+          <OctantMenuCheckboxItem
+            aria-label={`Let agents push to the default branch of ${project.projectName}`}
+            checked={props.agentForgeChoices.defaultBranchPush.enabledFor(project.projectId)}
+            closeOnClick
+            disabled={props.busy}
+            label="Agents may push to the default branch"
+            onCheckedChange={(enabled) =>
+              void props.agentForgeChoices?.defaultBranchPush.setEnabled(project.projectId, enabled)
+            }
+          >
+            Agents may push to the default branch
+          </OctantMenuCheckboxItem>
+        </>
+      )}
       <OctantMenuItem
         aria-label={`Refresh ${project.projectName}`}
         disabled={props.busy}
@@ -781,6 +833,7 @@ function RepositorySettingsMenu(props: {
   ) => void;
   readonly backgroundRefresh?: ProjectSetting;
   readonly agentMerge?: ProjectSetting;
+  readonly agentForgeChoices?: AgentForgeChoices;
 }) {
   // A permission someone gave is read off the closed button, not found in the menu.
   const mergeRepositories = props.projects
@@ -821,6 +874,9 @@ function RepositorySettingsMenu(props: {
                       ? {}
                       : { backgroundRefresh: props.backgroundRefresh })}
                     {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                    {...(props.agentForgeChoices === undefined
+                      ? {}
+                      : { agentForgeChoices: props.agentForgeChoices })}
                   />
                 </OctantMenuGroup>
               </div>
@@ -844,6 +900,7 @@ function RepositoryGroup(props: {
   readonly backgroundRefresh?: ProjectSetting;
   readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
   readonly agentMerge?: ProjectSetting;
+  readonly agentForgeChoices?: AgentForgeChoices;
 }) {
   const note = backgroundRefreshCopy(props.backgroundRefreshState);
   // A permission someone gave is read off the header, not found in a menu.
@@ -872,6 +929,9 @@ function RepositoryGroup(props: {
                         ? {}
                         : { backgroundRefresh: props.backgroundRefresh })}
                       {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+                      {...(props.agentForgeChoices === undefined
+                        ? {}
+                        : { agentForgeChoices: props.agentForgeChoices })}
                     />
                   </OctantMenuGroup>
                 </OctantMenuPopup>

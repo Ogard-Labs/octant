@@ -287,6 +287,22 @@ export type CodeProjectPullRequestBackgroundRefresh =
  */
 export const CodeProjectAgentMerge = Schema.Literal("enabled", "disabled");
 export type CodeProjectAgentMerge = typeof CodeProjectAgentMerge.Type;
+/**
+ * Whether a Code agent below Full access may post a comment or a review reply
+ * on the pull request its thread owns without the per-post approval. Absent
+ * means disabled: each post asks. Full access never asks, whatever this says.
+ * Only a window on the host sets it.
+ */
+export const CodeProjectAgentPullRequestComments = Schema.Literal("enabled", "disabled");
+export type CodeProjectAgentPullRequestComments = typeof CodeProjectAgentPullRequestComments.Type;
+/**
+ * Whether a push to the default branch goes ahead on the thread's ordinary
+ * push authority. Absent means disabled: such a push needs the person's
+ * approval for that one act, as a plain force-push always does. Only a window
+ * on the host sets it.
+ */
+export const CodeProjectAgentDefaultBranchPush = Schema.Literal("enabled", "disabled");
+export type CodeProjectAgentDefaultBranchPush = typeof CodeProjectAgentDefaultBranchPush.Type;
 
 export const ProjectActionId = brandedUuid("ProjectActionId");
 export type ProjectActionId = typeof ProjectActionId.Type;
@@ -403,6 +419,8 @@ export const CodeProject = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
+  agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   /**
    * The mode this Project's new threads start in, overriding Settings. Absent
    * follows Settings, except that a Project which remembered Full access
@@ -464,6 +482,8 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
+  agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   defaultPermissionMode: Schema.optional(PermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
@@ -721,6 +741,16 @@ export const ProjectCommand = Schema.Union(
     agentMerge: CodeProjectAgentMerge,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-agent-pull-request-comments"),
+    ...ProjectCommandFields,
+    agentPullRequestComments: CodeProjectAgentPullRequestComments,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-agent-default-branch-push"),
+    ...ProjectCommandFields,
+    agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-actions"),
     ...ProjectCommandFields,
     /** The whole list; an empty list removes every action. */
@@ -839,6 +869,14 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-agent-merge-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-agent-pull-request-comments-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-agent-default-branch-push-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -1105,6 +1143,18 @@ export const CodeProjectAgentMergeChanged = Schema.Struct({ project: CodeProject
   strict,
 );
 export type CodeProjectAgentMergeChanged = typeof CodeProjectAgentMergeChanged.Type;
+/** Journaled once per change, as the merge permission is, so it survives a restart and shows who set it. */
+export const CodeProjectAgentPullRequestCommentsChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAgentPullRequestCommentsChanged =
+  typeof CodeProjectAgentPullRequestCommentsChanged.Type;
+/** Journaled once per change, as the merge permission is, so it survives a restart and shows who set it. */
+export const CodeProjectAgentDefaultBranchPushChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAgentDefaultBranchPushChanged =
+  typeof CodeProjectAgentDefaultBranchPushChanged.Type;
 /** Journaled once per save so every window and a restarted host see the same list. */
 export const CodeProjectActionsChanged = Schema.Struct({ project: CodeProject }).annotations(
   strict,
@@ -1248,6 +1298,12 @@ export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decod
 );
 export const decodeCodeProjectAgentMergeChanged = Schema.decodeUnknownSync(
   CodeProjectAgentMergeChanged,
+);
+export const decodeCodeProjectAgentPullRequestCommentsChanged = Schema.decodeUnknownSync(
+  CodeProjectAgentPullRequestCommentsChanged,
+);
+export const decodeCodeProjectAgentDefaultBranchPushChanged = Schema.decodeUnknownSync(
+  CodeProjectAgentDefaultBranchPushChanged,
 );
 export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(

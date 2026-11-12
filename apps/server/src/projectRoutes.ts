@@ -367,18 +367,26 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
-      // Letting an agent merge without asking each time is the person's
-      // standing permission, so only a window on this host sets it, and a paired
-      // device cannot widen it on their behalf.
+      // Letting an agent merge, comment, or push to the default branch without
+      // asking each time is the person's standing permission, so only a window
+      // on this host sets it, and a paired device cannot widen it on their
+      // behalf.
       if (
-        command.kind === "change-code-project-agent-merge" &&
+        (command.kind === "change-code-project-agent-merge" ||
+          command.kind === "change-code-project-agent-pull-request-comments" ||
+          command.kind === "change-code-project-agent-default-branch-push") &&
         principal !== undefined &&
         principal.kind !== "local-window"
       ) {
         return response(
           {
             category: "unauthorized",
-            message: "Whether agents may merge is set on the host.",
+            message:
+              command.kind === "change-code-project-agent-merge"
+                ? "Whether agents may merge is set on the host."
+                : command.kind === "change-code-project-agent-pull-request-comments"
+                  ? "Whether agents may comment on pull requests is set on the host."
+                  : "Whether agents may push to the default branch is set on the host.",
           },
           403,
           origin,

@@ -14,9 +14,12 @@ export type PushBranchDecision =
 
 /**
  * A push names one remote branch. A thread pushes only its own delivery
- * branch. The default (base) branch and a plain force-push are the person's
- * call, made for this one act: a standing Full access grant does not stand in
- * for it, so `approvedForThisAct` is the only thing that opens them.
+ * branch. A plain force-push is the person's call, made for this one act: a
+ * standing Full access grant does not stand in for it, so
+ * `approvedForThisAct` is the only thing that opens it. The default (base)
+ * branch is the same call unless the Project's stored choice
+ * (`defaultBranchAllowedByProject`) lets an ordinary push reach it; that
+ * choice never covers a force of either kind onto the default branch.
  *
  * A force-with-lease must name the remote head it expects to replace, so a
  * branch someone else moved in the meantime is refused by Git, not overwritten.
@@ -27,6 +30,7 @@ export function decidePushBranch(input: {
   readonly baseBranch: string;
   readonly force?: { readonly mode: ForcePushMode; readonly expectedRemoteOid?: string };
   readonly approvedForThisAct: boolean;
+  readonly defaultBranchAllowedByProject?: boolean;
 }): PushBranchDecision {
   const toBase = input.remoteBranch === input.baseBranch;
   const toOwn = input.remoteBranch === input.ownBranch;
@@ -38,7 +42,12 @@ export function decidePushBranch(input: {
   if (input.force?.mode === "with-lease" && input.force.expectedRemoteOid === undefined) {
     return { decision: "refuse", reason: "lease-missing" };
   }
-  if ((toBase || input.force?.mode === "plain") && !input.approvedForThisAct) {
+  const baseOpenedByProject =
+    input.defaultBranchAllowedByProject === true && input.force === undefined;
+  if (
+    ((toBase && !baseOpenedByProject) || input.force?.mode === "plain") &&
+    !input.approvedForThisAct
+  ) {
     return { decision: "refuse", reason: "needs-the-persons-request" };
   }
   return { decision: "allow" };
@@ -120,13 +129,29 @@ export function decideStackMerge(
 
 /**
  * Pull-request changes that need the person's approval for this one act at
- * every guardrail level, Full access included: merging; a comment, which
- * posts under the person's name; and a watch, which lets the host start turns
- * in the thread later, when nobody may be there to stop them. Ending a watch
- * only takes reach away, so it never asks.
+ * every guardrail level, Full access included: only merging, which cannot be
+ * taken back. A comment follows {@link decidePullRequestComment}. A watch
+ * changes nothing on the forge and is bounded by its own wake and lifetime
+ * limits, so it never asks; neither does ending one.
  */
 export function pullRequestChangeNeedsPerActApproval(
   kind: "merge" | "comment" | "close" | "reopen" | "labels" | "watch" | "unwatch",
 ): boolean {
-  return kind === "merge" || kind === "comment" || kind === "watch";
+  return kind === "merge";
+}
+
+export type PullRequestCommentDecision = "post" | "post-on-project-choice" | "ask";
+
+/**
+ * Whether an agent's comment or review reply, which posts under the person's
+ * name, asks first. Full access never asks. Below it the Project's stored
+ * choice stands in for the ask; without that choice each post asks, and the
+ * approval shows the whole text. Plan is refused before this is reached.
+ */
+export function decidePullRequestComment(input: {
+  readonly fullAccess: boolean;
+  readonly projectAllowsComments: boolean;
+}): PullRequestCommentDecision {
+  if (input.fullAccess) return "post";
+  return input.projectAllowsComments ? "post-on-project-choice" : "ask";
 }

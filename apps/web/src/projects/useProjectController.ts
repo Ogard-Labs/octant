@@ -15,7 +15,9 @@ import {
   type ProjectType,
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
+  type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type ProjectAction,
   type ProjectColor,
@@ -392,6 +394,56 @@ export function useProjectController(options: ProjectControllerOptions) {
       agentMerge === "enabled"
         ? "Agents may now merge this Project's pull requests."
         : "Agents no longer merge this Project's pull requests without asking.",
+    );
+  }
+
+  /**
+   * Let a Code Project's agents below Full access comment on the pull requests
+   * their threads own without asking for each post, or stop that. The server
+   * is the authority and accepts it only from a window on the host.
+   */
+  async function setCodeAgentPullRequestComments(
+    projectId: ProjectId,
+    agentPullRequestComments: CodeProjectAgentPullRequestComments,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if ((project.agentPullRequestComments ?? "disabled") === agentPullRequestComments) return true;
+    return execute(
+      {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId,
+        expectedVersion: project.version,
+        agentPullRequestComments,
+      },
+      agentPullRequestComments === "enabled"
+        ? "Agents may now comment on this Project's pull requests without asking."
+        : "Below Full access, agents now ask before each comment on this Project's pull requests.",
+    );
+  }
+
+  /**
+   * Let an ordinary push reach a Code Project's default branch without the
+   * person's approval for that one push, or stop that. The server is the
+   * authority and accepts it only from a window on the host.
+   */
+  async function setCodeAgentDefaultBranchPush(
+    projectId: ProjectId,
+    agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if ((project.agentDefaultBranchPush ?? "disabled") === agentDefaultBranchPush) return true;
+    return execute(
+      {
+        kind: "change-code-project-agent-default-branch-push",
+        projectId,
+        expectedVersion: project.version,
+        agentDefaultBranchPush,
+      },
+      agentDefaultBranchPush === "enabled"
+        ? "Agents may now push to this Project's default branch."
+        : "A push to this Project's default branch needs your approval each time.",
     );
   }
 
@@ -963,6 +1015,8 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setCodeAgentMerge,
+    setCodeAgentPullRequestComments,
+    setCodeAgentDefaultBranchPush,
     setProviderPolicy,
     setNativeProviders,
     setBrandKit,

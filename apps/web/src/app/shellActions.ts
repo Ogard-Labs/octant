@@ -237,6 +237,8 @@ export type ShellActions = {
   readonly setCodeNewThreadWorkspace: ProjectController["setCodeNewThreadWorkspace"];
   readonly setCodePullRequestBackgroundRefresh: ProjectController["setCodePullRequestBackgroundRefresh"];
   readonly setCodeAgentMerge: ProjectController["setCodeAgentMerge"];
+  readonly setCodeAgentPullRequestComments: ProjectController["setCodeAgentPullRequestComments"];
+  readonly setCodeAgentDefaultBranchPush: ProjectController["setCodeAgentDefaultBranchPush"];
   readonly setCodePullRequestsOpen: Dispatch<SetStateAction<boolean>>;
   readonly setDockSidecarsByThread: Dispatch<
     SetStateAction<ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>>

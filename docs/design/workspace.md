@@ -1417,7 +1417,9 @@ number and linked threads.
 With grouping on, each repository has a slim header: its name, the count and a
 "..." menu. That menu holds what the old Project header held: **Auto-refresh**
 and **Agents may merge**, with the same labels and the same setters as before,
-and Refresh. With grouping off those switches are in the page's **Repository
+then **Agents may comment on pull requests** and **Agents may push to the
+default branch**, which are off until chosen, close the menu on one activation
+as Agents may merge does, and show no chip, and Refresh. With grouping off those switches are in the page's **Repository
 settings** menu, one group per connected repository, because they act on a
 Project and must stay one step from the list; they are never in Filter, which
 only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
@@ -1425,8 +1427,9 @@ on, that repository's group header shows the quiet chip "Agents may merge"
 beside the count, and, with grouping off, the Repository settings button carries
 the same dot as a narrowing filter and its tooltip names those repositories;
 Auto-refresh is not an authority and has no chip, only the check in the menu.
-The server still owns both settings, refuses a
-device that may not set them, and enforces the merge choice at the merge. A
+The server still owns every one of these settings, refuses a
+device that may not set them, and enforces the merge, comment and
+default-branch choices at the act. A
 Project that is not on GitHub is not drawn as an empty block: one quiet line at
 the foot says how many, with their names in a disclosure. A connected Project
 never refreshed is named in one line (flat) or keeps its group with the empty

@@ -3352,6 +3352,7 @@ describe("the pull request as an agent tool", () => {
     threadOverrides: Partial<CodeThread> = {},
     answer: "approved" | "denied" = "approved",
     standingMerge?: () => "project" | "routine" | undefined,
+    projectAllowsComments?: () => boolean,
   ) {
     const request = vi.fn(async () =>
       answer === "approved"
@@ -3385,6 +3386,7 @@ describe("the pull request as an agent tool", () => {
       terminal: { read: async () => ({}) as never },
       pullRequestApproval: { request },
       ...(standingMerge === undefined ? {} : { standingMerge }),
+      ...(projectAllowsComments === undefined ? {} : { projectAllowsComments }),
     });
     return { tools, request, executeOperation };
   }
@@ -3455,7 +3457,7 @@ describe("the pull request as an agent tool", () => {
     expect(result).toMatchObject({ result: { status: "updated", draft: false }, isError: false });
   });
 
-  it("asks for each comment and each merge even in a Full-access thread, but not for a label", async () => {
+  it("asks for each merge even in a Full-access thread, but not for a label, a comment or a review reply", async () => {
     const { tools, request, executeOperation } = pullRequestTools();
 
     await tools.execute({
@@ -3476,16 +3478,14 @@ describe("the pull request as an agent tool", () => {
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
     });
-    expect(request).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
-      undefined,
-    );
+    expect(request).not.toHaveBeenCalled();
     expect(executeOperation).toHaveBeenLastCalledWith(
       windowId,
       expect.objectContaining({
         kind: "comment-pull-request",
+        body: "Fixed.",
         reviewThreadId: "PRRT_1",
-        authorization: { kind: "approved", approvalId },
+        authorization: { kind: "full-access" },
       }),
     );
     expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
@@ -3494,7 +3494,7 @@ describe("the pull request as an agent tool", () => {
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
     });
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(1);
     expect(executeOperation).toHaveBeenLastCalledWith(
       windowId,
       expect.objectContaining({
@@ -3506,8 +3506,72 @@ describe("the pull request as an agent tool", () => {
     expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
   });
 
-  it("merges without asking when a stored choice allows it, but still asks for a comment", async () => {
-    const { tools, request, executeOperation } = pullRequestTools({}, "approved", () => "project");
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "still asks for each comment in a %s thread whose Project has not let agents comment",
+    async (executionPolicy) => {
+      for (const projectAllowsComments of [undefined, () => false]) {
+        const { tools, request, executeOperation } = pullRequestTools(
+          { executionPolicy },
+          "approved",
+          undefined,
+          projectAllowsComments,
+        );
+        const commented = await tools.execute({
+          name: CODE_PULL_REQUEST_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+        });
+        expect(request).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
+          undefined,
+        );
+        expect(executeOperation).toHaveBeenLastCalledWith(
+          windowId,
+          expect.objectContaining({
+            kind: "comment-pull-request",
+            authorization: { kind: "approved", approvalId },
+          }),
+        );
+        expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
+      }
+    },
+  );
+
+  it("comments without asking below Full access when the Project lets agents comment, naming that choice", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "approved",
+      undefined,
+      () => true,
+    );
+    const replied = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        reviewThreadId: "PRRT_1",
+        authorization: { kind: "standing", allowedBy: "project" },
+      }),
+    );
+    expect(replied).toMatchObject({ result: { status: "commented" }, isError: false });
+
+    // The comment choice covers comments alone: a title change still asks.
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "update", title: "Renamed" }),
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges without asking when a stored choice allows it, which lets no comment through below Full access", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "approved",
+      () => "project",
+    );
     const merged = await tools.execute({
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
@@ -3530,7 +3594,10 @@ describe("the pull request as an agent tool", () => {
   });
 
   it("sends nothing to GitHub when the person declines a merge or a comment", async () => {
-    const { tools, executeOperation } = pullRequestTools({}, "denied");
+    const { tools, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "denied",
+    );
     for (const input of [
       { operation: "comment", body: "Hello." },
       { operation: "merge", method: "merge", headSha: "a".repeat(40) },
@@ -3570,8 +3637,13 @@ describe("the pull request as an agent tool", () => {
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
-  it("refuses a comment or merge in Plan mode", async () => {
-    const { tools, request, executeOperation } = pullRequestTools({ executionPolicy: "plan" });
+  it("refuses a comment or merge in Plan mode, whatever the Project lets agents do", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "plan" },
+      "approved",
+      () => "project",
+      () => true,
+    );
     const result = await tools.execute({
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "comment", body: "Hello." }),
@@ -3636,26 +3708,15 @@ describe("watching the thread's own pull request as an agent tool", () => {
     number: 42,
   } as unknown as CodeProjectPullRequestSwitchTarget;
 
-  function watchTools(
-    threadOverrides: Partial<CodeThread> = {},
-    answer: "approved" | "denied" = "approved",
-    scope: WindowId = windowId,
-  ) {
-    const request = vi.fn(async () => answer);
+  function watchTools(threadOverrides: Partial<CodeThread> = {}, scope: WindowId = windowId) {
+    const request = vi.fn();
     const watch = vi.fn(
-      async (
-        ask: (watched: CodeProjectPullRequestSwitchTarget) => Promise<string>,
-      ): Promise<PullRequestWatchOutcome> => {
-        const asked = await ask(target);
-        return asked === "approved"
-          ? {
-              status: "watching",
-              target,
-              until: "2026-11-08T10:00:00.000Z",
-              alreadyWatching: false,
-            }
-          : { status: "declined", answer: "denied" };
-      },
+      async (): Promise<PullRequestWatchOutcome> => ({
+        status: "watching",
+        target,
+        until: "2026-11-08T10:00:00.000Z",
+        alreadyWatching: false,
+      }),
     );
     const unwatch = vi.fn(
       async (): Promise<PullRequestWatchOutcome> => ({
@@ -3671,33 +3732,26 @@ describe("watching the thread's own pull request as an agent tool", () => {
       uuid: uuidFactory(),
       executeOperation,
       terminal: { read: async () => ({}) as never },
-      pullRequestApproval: { request: vi.fn() },
-      pullRequestWatch: { watch, unwatch, request },
+      pullRequestApproval: { request },
+      pullRequestWatch: { watch, unwatch },
     });
     const run = (input: Record<string, unknown>) =>
       tools.execute({ name: CODE_PULL_REQUEST_TOOL_NAME, inputJson: JSON.stringify(input) });
     return { run, request, watch, unwatch, executeOperation };
   }
 
-  it("asks the person before each watch at every access level, then watches the thread's own pull request", async () => {
-    for (const executionPolicy of ["full-access", "approval-gated"] as const) {
-      const { run, request, executeOperation } = watchTools({ executionPolicy });
+  it("watches the thread's own pull request without asking the person at any access level", async () => {
+    for (const executionPolicy of ["full-access", "auto-accept-edits", "approval-gated"] as const) {
+      const { run, request, watch, executeOperation } = watchTools({ executionPolicy });
       const result = await run({ operation: "watch" });
-      expect(request).toHaveBeenCalledWith(target, undefined);
+      expect(request).not.toHaveBeenCalled();
+      expect(watch).toHaveBeenCalledTimes(1);
       expect(executeOperation).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         result: { status: "watching", number: 42, until: "2026-11-08T10:00:00.000Z" },
         isError: false,
       });
     }
-  });
-
-  it("watches nothing when the person declines", async () => {
-    const { run } = watchTools({}, "denied");
-    expect(await run({ operation: "watch" })).toMatchObject({
-      result: { error: "pull-request-watch-denied" },
-      isError: true,
-    });
   });
 
   it("refuses to watch in Plan without asking, but still stops a watch there", async () => {
@@ -3715,8 +3769,8 @@ describe("watching the thread's own pull request as an agent tool", () => {
     expect(unwatch).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses to watch in a turn the host started on its own, where nobody can approve it", async () => {
-    const { run, request, watch } = watchTools({}, "approved", ROUTINE_HOST_SCOPE_ID);
+  it("refuses to watch in a turn the host started on its own, so a wake cannot renew its watch", async () => {
+    const { run, request, watch } = watchTools({}, ROUTINE_HOST_SCOPE_ID);
     expect(await run({ operation: "watch" })).toMatchObject({
       result: { error: "automation-recursion" },
       isError: true,

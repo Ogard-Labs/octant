@@ -63,7 +63,9 @@ import {
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
+  CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
@@ -505,6 +507,16 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register(
+      "project.code-agent-pull-request-comments-changed@1",
+      1,
+      CodeProjectAgentPullRequestCommentsChanged,
+    )
+    .register(
+      "project.code-agent-default-branch-push-changed@1",
+      1,
+      CodeProjectAgentDefaultBranchPushChanged,
+    )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
     .register(PROVIDER_TOOLING_APPLIED, 1, ProviderToolingAppliedRecordSchema)

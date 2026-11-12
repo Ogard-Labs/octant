@@ -5064,6 +5064,8 @@ function LaunchedShell(
       setCodeNewThreadWorkspace: projectController.setCodeNewThreadWorkspace,
       setCodePullRequestBackgroundRefresh: projectController.setCodePullRequestBackgroundRefresh,
       setCodeAgentMerge: projectController.setCodeAgentMerge,
+      setCodeAgentPullRequestComments: projectController.setCodeAgentPullRequestComments,
+      setCodeAgentDefaultBranchPush: projectController.setCodeAgentDefaultBranchPush,
       setCodePullRequestsOpen,
       setDockSidecarsByThread,
       setDockStatesByThread,

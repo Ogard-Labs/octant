@@ -1108,6 +1108,50 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Code Project lets agents comment on pull requests or push to the default branch", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: chatId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: workId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-pull-request-comments-changed",
+      project: { agentPullRequestComments: "enabled", version: 2 },
+    });
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-default-branch-push",
+        projectId: workId,
+        expectedVersion: 2,
+        agentDefaultBranchPush: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-default-branch-push-changed",
+      project: {
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "enabled",
+        version: 3,
+      },
+    });
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.code-agent-pull-request-comments-changed@1",
+      "project.code-agent-default-branch-push-changed@1",
+    ]);
+  });
+
   it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const actions = [

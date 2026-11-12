@@ -171,6 +171,9 @@ function renderWorkspace(
         enabled: boolean,
       ) => Promise<boolean>;
     };
+    readonly agentForgeChoices?: NonNullable<
+      Parameters<typeof CodeProjectPullRequests>[0]["agentForgeChoices"]
+    >;
   } = {},
 ) {
   const load = options.load ?? vi.fn(async () => view());
@@ -187,6 +190,9 @@ function renderWorkspace(
         ? {}
         : { backgroundRefresh: options.backgroundRefresh })}
       {...(options.agentMerge === undefined ? {} : { agentMerge: options.agentMerge })}
+      {...(options.agentForgeChoices === undefined
+        ? {}
+        : { agentForgeChoices: options.agentForgeChoices })}
     />,
   );
   return { load, refresh };
@@ -843,6 +849,43 @@ describe("CodeProjectPullRequests", () => {
     expect(setEnabled).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(trigger).toHaveFocus();
+  });
+
+  it("offers the comment and default-branch permissions beside Agents may merge, each off until chosen", async () => {
+    const user = userEvent.setup();
+    const setComments = vi.fn(async (_projectId: unknown, _enabled: boolean) => true);
+    const setDefaultBranchPush = vi.fn(async (_projectId: unknown, _enabled: boolean) => true);
+    renderWorkspace({
+      agentMerge: { enabledFor: () => false, setEnabled: vi.fn(async () => true) },
+      agentForgeChoices: {
+        comments: { enabledFor: () => false, setEnabled: setComments },
+        defaultBranchPush: { enabledFor: () => false, setEnabled: setDefaultBranchPush },
+      },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+    await screen.findByText("List active pull requests");
+
+    const trigger = screen.getByRole("button", { name: "octant/octant settings" });
+    await user.click(trigger);
+    const comments = await screen.findByRole("menuitemcheckbox", {
+      name: "Let agents comment on Octant pull requests",
+    });
+    expect(comments).toHaveAttribute("aria-checked", "false");
+    expect(comments).toHaveTextContent("Agents may comment on pull requests");
+    await user.click(comments);
+    expect(setComments).toHaveBeenCalledTimes(1);
+    expect(setComments).toHaveBeenCalledWith(expect.anything(), true);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await user.click(trigger);
+    const push = await screen.findByRole("menuitemcheckbox", {
+      name: "Let agents push to the default branch of Octant",
+    });
+    expect(push).toHaveAttribute("aria-checked", "false");
+    await user.click(push);
+    expect(setDefaultBranchPush).toHaveBeenCalledTimes(1);
+    expect(setDefaultBranchPush).toHaveBeenCalledWith(expect.anything(), true);
+    expect(setComments).toHaveBeenCalledTimes(1);
   });
 
   it("renders no row again when the page renders with the same rows", async () => {

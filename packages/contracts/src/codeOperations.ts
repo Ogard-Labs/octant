@@ -272,6 +272,20 @@ const MergeAuthorization = Schema.Union(
     allowedBy: CodeMergeStandingSource,
   }).annotations(strict),
 );
+/**
+ * What allowed a comment or a review reply. Besides the approval for one post
+ * and Full access, the Project's "Agents may comment on pull requests" switch
+ * stands in for the ask below Full access. As for a merge, the command only
+ * names the choice; the host reads it again and refuses a claim it does not
+ * back.
+ */
+const CommentAuthorization = Schema.Union(
+  GitAuthorization,
+  Schema.Struct({
+    kind: Schema.Literal("standing"),
+    allowedBy: Schema.Literal("project"),
+  }).annotations(strict),
+);
 const GitPushConfirmation = Schema.Struct({
   remote: GitRemoteName,
   refspec: boundedNonEmptyText(1_024).pipe(
@@ -900,15 +914,16 @@ const UpdatePullRequest = Schema.Struct({
   );
 /**
  * Post a comment on the thread's own pull request, or reply in one of its
- * review threads. It posts under the person's name, so it is always approved
- * for this one act, and the approval shows the whole text.
+ * review threads, under the person's name. Full access posts without asking;
+ * below it each post is approved for that one act, with the whole text shown,
+ * unless the Project's switch stands in for the ask.
  */
 const CommentPullRequest = Schema.Struct({
   kind: Schema.Literal("comment-pull-request"),
   ...OperationScope,
   body: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES),
   reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
-  authorization: GitAuthorization,
+  authorization: CommentAuthorization,
 }).annotations(strict);
 /**
  * Merge the thread's own open pull request on the person's say. The merge names

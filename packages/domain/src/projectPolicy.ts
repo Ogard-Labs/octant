@@ -13,7 +13,9 @@ import {
   type CanonicalProjectBinding,
   type ChatProject,
   type CodeProject,
+  type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
@@ -534,6 +536,44 @@ export function changeCodeProjectAgentMerge(
     reject("invalid-lifecycle", "Code Project agent merge is already selected");
   }
   return { ...project, agentMerge, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Let a Code agent below Full access comment on the pull request its thread
+ * owns without asking for each post, or stop that. Absence reads as disabled.
+ * Rejects a non-Code Project and a no-op change, as the merge setting does.
+ */
+export function changeCodeProjectAgentPullRequestComments(
+  project: Project,
+  agentPullRequestComments: CodeProjectAgentPullRequestComments,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have an agent comment setting");
+  }
+  if ((project.agentPullRequestComments ?? "disabled") === agentPullRequestComments) {
+    reject("invalid-lifecycle", "Code Project agent comment setting is already selected");
+  }
+  return { ...project, agentPullRequestComments, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Let a push to the default branch go ahead without the person's approval for
+ * that one act, or stop that. Absence reads as disabled. Rejects a non-Code
+ * Project and a no-op change, as the merge setting does.
+ */
+export function changeCodeProjectAgentDefaultBranchPush(
+  project: Project,
+  agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a default-branch push setting");
+  }
+  if ((project.agentDefaultBranchPush ?? "disabled") === agentDefaultBranchPush) {
+    reject("invalid-lifecycle", "Code Project default-branch push setting is already selected");
+  }
+  return { ...project, agentDefaultBranchPush, version: nextVersion(project), updatedAt };
 }
 
 /**
