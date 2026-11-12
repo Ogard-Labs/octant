@@ -29,6 +29,7 @@ import {
   type AgentGrantScope,
   type AgentGrantView,
   type AgentThreadAttribution,
+  type AgentTurnAttribution,
   type AgentPendingClaim,
   type EventActor,
 } from "@octant/contracts";
@@ -42,6 +43,7 @@ import {
   readAgentGrants,
   readAgentThread,
   readAgentThreadAttributions,
+  readAgentTurnAttributions,
   readAgentThreads,
   type AgentThreadRecord,
 } from "../persistence/agentAccessProjection";
@@ -337,6 +339,27 @@ export class AgentAccessService {
   }
 
   /**
+   * Journals a prompt an agent sent a thread, by the id the thread's turn
+   * record keeps, so the transcript names the agent as that turn's sender.
+   */
+  recordTurnSent(input: {
+    readonly grantId: string;
+    readonly threadId: string;
+    readonly mode: AgentGrantMode;
+    readonly turnKey: string;
+  }): void {
+    const record = readAgentGrantRecord(this.#options.connection, input.grantId);
+    if (record === undefined) return;
+    this.#append(input.grantId, record.version, AGENT_ACCESS_EVENT_NAMES.turnSent, systemActor(), {
+      grantId: input.grantId,
+      threadId: input.threadId,
+      mode: input.mode,
+      turnKey: input.turnKey,
+      sentAt: iso(this.#now()),
+    });
+  }
+
+  /**
    * Holds one of a grant's running-turn places from the limit check until the
    * turn has started or failed to. Running turns are read from the threads,
    * which show a turn only once it starts, so two starts checked at the same
@@ -397,6 +420,11 @@ export class AgentAccessService {
   /** Every thread an outside agent started, with its agent's name, for "Started by" labels. */
   attributions(): ReadonlyArray<AgentThreadAttribution> {
     return readAgentThreadAttributions(this.#options.connection);
+  }
+
+  /** The newest turns outside agents sent, with each agent's name, for per-turn sender labels. */
+  turnAttributions(): ReadonlyArray<AgentTurnAttribution> {
+    return readAgentTurnAttributions(this.#options.connection);
   }
 
   /** The grant a product-layer scope id belongs to, for attribution. */

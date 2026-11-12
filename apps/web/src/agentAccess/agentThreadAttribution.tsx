@@ -2,11 +2,21 @@ import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 
-/** Thread id to the name of the outside agent that started it. */
-type AgentThreadNames = ReadonlyMap<string, string>;
+/**
+ * Thread id to the name of the outside agent that started it, and a thread's
+ * turn id (the id its turn record keeps) to the agent that sent that turn.
+ */
+interface AgentNames {
+  readonly threads: ReadonlyMap<string, string>;
+  readonly turns: ReadonlyMap<string, string>;
+  /** The same turns by turn id alone, for prompts copied into a Chat branch. */
+  readonly turnKeys: ReadonlyMap<string, string>;
+}
 
-const NO_NAMES: AgentThreadNames = new Map();
-const AgentThreadNamesContext = createContext<AgentThreadNames>(NO_NAMES);
+const NO_NAMES: AgentNames = { threads: new Map(), turns: new Map(), turnKeys: new Map() };
+const AgentThreadNamesContext = createContext<AgentNames>(NO_NAMES);
+
+const turnName = (threadId: string, turnKey: string) => `${threadId}\u0000${turnKey}`;
 
 /**
  * A thread an outside agent starts lands without warning while the person
@@ -25,14 +35,27 @@ export function AgentThreadAttributionProvider(props: {
   readonly client: AgentGrantClient | undefined;
   readonly children: ReactNode;
 }) {
-  const [names, setNames] = useState<AgentThreadNames>(NO_NAMES);
+  const [names, setNames] = useState<AgentNames>(NO_NAMES);
   const client = props.client;
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (client === undefined) return;
       const answer = await client.threads(signal);
-      const next = new Map(answer.threads.map((thread) => [thread.threadId, thread.agentName]));
-      setNames((previous) => (sameNames(previous, next) ? previous : next));
+      const next: AgentNames = {
+        threads: new Map(answer.threads.map((thread) => [thread.threadId, thread.agentName])),
+        turns: new Map(
+          (answer.turns ?? []).map((turn) => [
+            turnName(turn.threadId, turn.turnKey),
+            turn.agentName,
+          ]),
+        ),
+        turnKeys: new Map((answer.turns ?? []).map((turn) => [turn.turnKey, turn.agentName])),
+      };
+      setNames((previous) =>
+        sameNames(previous.threads, next.threads) && sameNames(previous.turns, next.turns)
+          ? previous
+          : next,
+      );
     },
     [client],
   );
@@ -47,11 +70,54 @@ export function AgentThreadAttributionProvider(props: {
 /** The name of the outside agent that started this thread, if one did. */
 export function useAgentThreadName(threadId: string | undefined): string | undefined {
   const names = useContext(AgentThreadNamesContext);
-  return threadId === undefined ? undefined : names.get(threadId);
+  return threadId === undefined ? undefined : names.threads.get(threadId);
 }
 
-function sameNames(left: AgentThreadNames, right: AgentThreadNames): boolean {
+/**
+ * "Sent by <agent>" under a prompt an outside agent sent, so it is not read as
+ * the person's own words. Renders nothing for the person's prompts.
+ */
+export function AgentTurnSender(props: { readonly agentName: string | undefined }) {
+  if (props.agentName === undefined) return null;
+  return (
+    <span className="oct-meta agent-turn-sender" title={`Sent by ${props.agentName}`}>
+      {`Sent by ${props.agentName}`}
+    </span>
+  );
+}
+
+function sameNames(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>): boolean {
   if (left.size !== right.size) return false;
   for (const [threadId, name] of right) if (left.get(threadId) !== name) return false;
   return true;
+}
+
+/**
+ * A lookup from a thread and a turn id (the id the turn's record keeps: a Code
+ * operation id, a Chat submission id, a Work turn id) to the outside agent that
+ * sent that turn. Read once in a transcript and used for every turn in it; a
+ * fork's inherited turns are looked up under the thread that ran them.
+ *
+ * A prompt copied into a Chat branch keeps its submission id but not the
+ * thread it was sent in (a branch of a branch names only its direct source),
+ * so a `copied` turn is matched by its id alone. Ids are random UUIDs, and the
+ * worst a match can do is name an agent under a prompt, never hide one.
+ */
+export function useAgentTurnSenders(): (
+  threadId: string | undefined,
+  turnKey: string | undefined,
+  copied?: boolean,
+) => string | undefined {
+  const names = useContext(AgentThreadNamesContext);
+  return useCallback(
+    (threadId, turnKey, copied = false) =>
+      turnKey === undefined
+        ? undefined
+        : copied
+          ? names.turnKeys.get(turnKey)
+          : threadId === undefined
+            ? undefined
+            : names.turns.get(turnName(threadId, turnKey)),
+    [names],
+  );
 }
