@@ -552,9 +552,12 @@ is involved at any step.
 Octant running in the background" and, on macOS, "Open Octant at login". Both
 are off by default (maintainer decision, 2026-11-12). The first installs the
 same per-user LaunchAgent or systemd user unit `octant` manages, pointed at the
-installed app's own windowless host (`--octant-host-only`) with no inherited
-environment, so the host starts at login and the service manager restarts it
-after an unexpected exit while a deliberate Quit stays quit. The second is the
+installed app's own windowless host (`--octant-host-only
+--octant-background-service`) with no inherited environment, so the host starts
+at login and the service manager restarts it after an unexpected exit while a
+deliberate Quit stays quit. The second switch marks the launch as the service's:
+unlike a Nightly client's host-only launch, it never arms the first-window
+grace that stops a host no client joined, so it runs until an explicit quit. The second is the
 operating system's login item for the app. Each switch shows what the
 operating system reports after a change, so a service `octant` installed shows
 as on. Only Octant's own top-level desktop windows reach these switches

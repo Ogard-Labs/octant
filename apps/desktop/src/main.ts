@@ -8,7 +8,11 @@ import {
   resolveWindowsDesktopHost,
   requestWindowsDesktopHostStop,
 } from "./windowsDesktopHost";
-import { DESKTOP_HOST_ONLY_SWITCH, resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import {
+  DESKTOP_BACKGROUND_SERVICE_SWITCH,
+  DESKTOP_HOST_ONLY_SWITCH,
+  resolvePackagedDesktopLaunch,
+} from "./desktopLaunch";
 import { createUserServiceManager } from "@octant/cli/service-manager";
 import {
   createBackgroundHostSettings,
@@ -4831,7 +4835,7 @@ function backgroundHost(): BackgroundHostSettings {
           paths: desktopPosixHostPaths(),
           uid: process.getuid?.() ?? 0,
           executable: process.execPath,
-          hostArguments: [DESKTOP_HOST_ONLY_SWITCH],
+          hostArguments: [DESKTOP_HOST_ONLY_SWITCH, DESKTOP_BACKGROUND_SERVICE_SWITCH],
         })
       : undefined,
     loginItem:
@@ -5081,7 +5085,14 @@ function startDesktopInstance(): void {
     .then(async () => {
       const withoutWindow = hostOnly(process.argv.slice(1));
       if (withoutWindow) {
-        const waitForFirstNightlyWindow = desktopClientLifetime.firstNightlyWindowWait();
+        // The background service's host has no Nightly client to wait for: it
+        // runs until an explicit quit. Only a Nightly-owned launch arms the
+        // first-window grace that stops the host when no client arrives.
+        const launch = resolvePackagedDesktopLaunch(applicationIdentity, process.argv.slice(1));
+        const waitForFirstNightlyWindow =
+          launch.kind === "host-only" && launch.backgroundService === true
+            ? () => {}
+            : desktopClientLifetime.firstNightlyWindowWait();
         await startHostFromMenu();
         waitForFirstNightlyWindow();
       }
