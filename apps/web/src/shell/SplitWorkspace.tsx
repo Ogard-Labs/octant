@@ -608,7 +608,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   // Tabs carry the titles, so a surface with no environment
                   // would leave this handle empty and the pane with nothing
                   // to drag it by.
-                  <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <GripVertical aria-hidden="true" size={14} />
                 ) : null}
                 {pullRequest === undefined ? null : (
                   <PullRequestChip
@@ -656,7 +656,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 )}
                 {showTabs ? null : running ? (
                   // The host reports that a turn is executing, not when it
-                  // began, so the pill names the state and no elapsed time.
+                  // began, so the chip names the state and no elapsed time.
                   // With tabs open, each tab carries its own thread's state.
                   <span className="workspace-pane__status">
                     <span aria-hidden="true" className="spinner spinner-sm" />
@@ -790,7 +790,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   onClick={() => props.onClosePane(pane.paneId)}
                   type="button"
                 >
-                  <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={14} />
                 </OctantIconButton>
               )}
             </OctantContextMenuTrigger>

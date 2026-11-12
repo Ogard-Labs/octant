@@ -211,7 +211,7 @@ export function CodeHome(props: CodeHomeProps) {
             </div>
           ) : upNextRows.length === 0 ? (
             <div className="code-home__panel code-home__empty">
-              <CircleCheck aria-hidden="true" size={20} strokeWidth={1.6} />
+              <CircleCheck aria-hidden="true" size={20} />
               <p className="code-home__empty-title">You're all caught up.</p>
               <p className="code-home__note">
                 Nothing is assigned to you or waiting on your review.
@@ -388,7 +388,7 @@ function HomeCard(props: {
     >
       <span className="code-home__card-head">
         <span className="code-home__badge" data-tone={props.tone ?? "plain"}>
-          {Icon === undefined ? null : <Icon aria-hidden="true" size={12} strokeWidth={1.9} />}
+          {Icon === undefined ? null : <Icon aria-hidden="true" size={12} />}
           {props.badge}
         </span>
         {props.detail === undefined ? null : (
@@ -445,7 +445,7 @@ function ContinueFacts(props: {
       {project === undefined ? null : (
         <span className="code-home__fact">
           <ProjectIcon
-            fallback={<FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />}
+            fallback={<FolderOpen aria-hidden="true" size={12} />}
             projectId={String(card.projectId)}
             size={12}
           />
@@ -457,7 +457,7 @@ function ContinueFacts(props: {
           className="code-home__fact code-home__fact--branch"
           title={card.checkoutKind === "managed-worktree" ? "Managed worktree" : undefined}
         >
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
           {branch}
           {card.checkoutKind === "managed-worktree" ? (
             <span className="code-home__fact-note">worktree</span>

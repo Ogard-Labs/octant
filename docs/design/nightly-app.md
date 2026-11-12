@@ -1709,7 +1709,7 @@ before it is ever used as a release gate outside CI.
   value, image size and density. `--check` verifies both the generated and
   committed pixels, including every ICNS representation. Linux packaging uses
   these committed assets without requiring a macOS generator.
-- A small neutral "Nightly" pill sits beside "Octant" in a compact sidebar
+- A small neutral "Nightly" chip sits beside "Octant" in a compact sidebar
   identity row below the native window controls. The existing title rail,
   traffic-light clearance and navigation actions keep their geometry. When the
   sidebar is collapsed, the same label moves to the window's measured leading

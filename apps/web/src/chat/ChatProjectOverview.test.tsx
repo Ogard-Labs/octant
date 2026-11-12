@@ -103,7 +103,7 @@ describe("ChatProjectOverview", () => {
   it("keeps creation unavailable when the Project cannot create a thread", () => {
     render(<ChatProjectOverview model={model} />);
 
-    // A note that stays is a card above the pill.
+    // A note that stays is a card above the box.
     expect(document.querySelector(".composer-notices")).toHaveTextContent(
       "Chat thread creation is unavailable for this Project.",
     );

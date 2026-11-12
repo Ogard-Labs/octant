@@ -127,7 +127,7 @@ const CHECK_ICONS: Readonly<Record<ReviewCheckKind, LucideIcon>> = {
 /** The glyph carries the state beside its words, so no colour has to. */
 function CheckMark(props: { readonly kind: ReviewCheckKind }) {
   const Icon = CHECK_ICONS[props.kind];
-  return <Icon aria-hidden="true" className="review-check__glyph" size={12} strokeWidth={2} />;
+  return <Icon aria-hidden="true" className="review-check__glyph" size={12} />;
 }
 
 const OCTANT_CHECK_WORDS: Readonly<Record<ReviewOctantCheck["verdict"], string>> = {
@@ -491,7 +491,7 @@ export function ReviewPage(props: ReviewPageProps) {
         {selected === undefined ? (
           <SurfaceEmpty
             detail="Finished threads you have not opened will appear here."
-            icon={<ClipboardCheck size={20} strokeWidth={1.5} />}
+            icon={<ClipboardCheck size={20} />}
             title="Nothing waiting for review"
           />
         ) : (
@@ -554,7 +554,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     type="button"
                     variant="outline"
                   >
-                    <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <Check aria-hidden="true" size={14} />
                     Put away <kbd>{chord("review-complete")}</kbd>
                   </OctantButton>
                   <OctantButton
@@ -568,7 +568,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     type="button"
                     variant="outline"
                   >
-                    <CornerUpLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+                    <CornerUpLeft aria-hidden="true" size={14} />
                     Send back <kbd>{chord("review-send-back")}</kbd>
                   </OctantButton>
                   <OctantPopover
@@ -577,7 +577,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     title={`Snooze ${selected.title}`}
                     trigger={
                       <>
-                        <Clock aria-hidden="true" size={14} strokeWidth={1.8} />
+                        <Clock aria-hidden="true" size={14} />
                         Snooze <kbd>{chord("review-snooze")}</kbd>
                       </>
                     }

@@ -159,7 +159,6 @@ function ProfileAction(props: {
     readonly "aria-hidden": true;
     readonly className: string;
     readonly size: number;
-    readonly strokeWidth: number;
   }>;
   readonly label: string;
   readonly onClick: () => void;
@@ -167,7 +166,7 @@ function ProfileAction(props: {
   const Icon = props.icon;
   return (
     <OctantMenuItem onClick={props.onClick}>
-      <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
+      <Icon aria-hidden={true} className="icon" size={16} />
       <span>{props.label}</span>
     </OctantMenuItem>
   );

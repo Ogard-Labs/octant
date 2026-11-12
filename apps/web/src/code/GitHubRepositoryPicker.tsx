@@ -518,12 +518,7 @@ function RepositoryOption(props: {
           </span>
         )}
         {props.selected ? (
-          <Check
-            aria-hidden="true"
-            className="octant-popover-option__check"
-            size={14}
-            strokeWidth={2}
-          />
+          <Check aria-hidden="true" className="octant-popover-option__check" size={14} />
         ) : null}
       </li>
     </>

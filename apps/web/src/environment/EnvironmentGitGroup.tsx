@@ -89,17 +89,12 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
           variant="bare"
         >
           {changesLine}
-          <ChevronRight
-            aria-hidden="true"
-            className="environment-git-group__chevron"
-            size={14}
-            strokeWidth={1.8}
-          />
+          <ChevronRight aria-hidden="true" className="environment-git-group__chevron" size={14} />
         </OctantButton>
       )}
       {observation.branch.kind === "named" ? null : (
         <p className="environment-git-group__fact">
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
           <span>Detached HEAD</span>
           <span
             aria-label={`Full commit ${observation.branch.oid}`}
@@ -112,7 +107,7 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
       )}
       {separateWorktree ? (
         <p className="environment-git-group__fact" title={observation.worktreeRoot}>
-          <Files aria-hidden="true" size={12} strokeWidth={1.8} />
+          <Files aria-hidden="true" size={12} />
           <span>Worktree</span>
           <span className="environment-git-group__mono">
             {pathBasename(observation.worktreeRoot)}

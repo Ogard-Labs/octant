@@ -135,12 +135,7 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
             {pill.label === props.hostName ? null : (
               <OctantBadge variant={pill.tone}>{pill.label}</OctantBadge>
             )}
-            <ChevronRight
-              aria-hidden="true"
-              className="environment-group__chevron"
-              size={14}
-              strokeWidth={1.8}
-            />
+            <ChevronRight aria-hidden="true" className="environment-group__chevron" size={14} />
           </OctantButton>
           {open ? (
             <div className="environment-move__content" id={contentId}>
@@ -305,7 +300,7 @@ function projectOptions(
 /**
  * One word for a member's state. A member that refuses answers every reason
  * (Move in off, Owners off, this computer no longer in its roster) in the same
- * words, so the pill cannot say which; whether this Mac is an owner there is
+ * words, so the badge cannot say which; whether this Mac is an owner there is
  * learned at the unlock, and said then.
  */
 function memberPill(entry: ThreadMoveDestination, mode: MovedThreadReference["mode"]): string {
@@ -752,7 +747,7 @@ function ThreadMoveSheet(props: {
           <EnvironmentTile icon={Laptop} />
           {props.hostName}
         </span>
-        <ArrowRight aria-label="to" size={14} strokeWidth={1.8} />
+        <ArrowRight aria-label="to" size={14} />
         <span className="thread-move-sheet__host">
           <EnvironmentTile icon={member.role === "hub" ? Server : Laptop} />
           {member.name}

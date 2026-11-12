@@ -166,7 +166,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
       onClick={refresh}
       type="button"
     >
-      <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+      <RefreshCw aria-hidden="true" size={14} />
     </OctantIconButton>
   );
 
@@ -200,7 +200,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
 
       {status === "ready" && entries.length === 0 ? (
         <p className="work-files-panel__status" role="status">
-          <FolderOpen aria-hidden="true" size={16} strokeWidth={1.8} />
+          <FolderOpen aria-hidden="true" size={16} />
           This folder is empty.
         </p>
       ) : null}

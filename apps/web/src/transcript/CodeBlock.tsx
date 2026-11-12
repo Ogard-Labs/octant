@@ -47,9 +47,9 @@ export function CodeBlock(props: CodeBlockProps) {
           variant="ghost"
         >
           {state === "copied" ? (
-            <Check aria-hidden="true" className="size-3" strokeWidth={2} />
+            <Check aria-hidden="true" className="size-(--oct-icon-xs)" />
           ) : (
-            <Copy aria-hidden="true" className="size-3" strokeWidth={1.8} />
+            <Copy aria-hidden="true" className="size-(--oct-icon-xs)" />
           )}
           <span>{copyLabel(state)}</span>
         </OctantButton>

@@ -284,7 +284,6 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                             aria-hidden="true"
                             className="octant-popover-option__check"
                             size={14}
-                            strokeWidth={2}
                           />
                         ) : null}
                       </OctantButton>

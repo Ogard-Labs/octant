@@ -47,12 +47,13 @@
   --text-lg: var(--oct-text-lg);
   --text-xl: var(--oct-text-xl);
   --text-2xl: var(--oct-text-2xl);
-  --radius-sm: calc(var(--radius) - 2px);
+  /* Two numbers. The recipes' control steps (rounded-md and rounded-lg) are
+     both the control token, so a button, a field, a tab and a menu row share
+     one outline; rounded-xl is the container token, which a card, a menu and a
+     popover use. rounded-sm is the step for a part inside a control: the
+     control radius less the padding between them, never below 2px. */
+  --radius-sm: max(2px, calc(var(--radius) - 2px));
   --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  /* A card, a menu, and a popover are one role. The recipes round them at this
-     step and the stylesheets round panels at the medium token. At radius + 6px
-     this was 14px beside 16px; radius + 8px lands on the same 16px while the
-     scale still derives from the one root. */
-  --radius-xl: calc(var(--radius) + 6px);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--oct-radius-md);
 }

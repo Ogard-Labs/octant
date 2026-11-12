@@ -60,7 +60,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
     const ModeIcon = iconForVisibleMode(mode, separate);
     return {
       description: modeDescriptions[mode],
-      icon: <ModeIcon size={16} strokeWidth={1.7} />,
+      icon: <ModeIcon size={16} />,
       label: modeLabels[mode],
       value: mode,
     };
@@ -106,7 +106,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
                   variant="bare"
                 >
                   <span aria-hidden="true" className="mode__icon-frame">
-                    <ModeIcon className="icon" size={16} strokeWidth={1.5} />
+                    <ModeIcon className="icon" size={16} />
                   </span>
                   <span className="mode-label">{modeLabels[mode]}</span>
                 </OctantButton>
@@ -126,12 +126,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
           <>
             <span className="mode-switcher__brand">Octant</span>
             <span className="mode-switcher__context">{modeLabels[activeMode]}</span>
-            <ChevronDown
-              aria-hidden="true"
-              className="icon mode-caret"
-              size={16}
-              strokeWidth={1.5}
-            />
+            <ChevronDown aria-hidden="true" className="icon mode-caret" size={16} />
           </>
         }
         triggerClassName="mode-trigger"

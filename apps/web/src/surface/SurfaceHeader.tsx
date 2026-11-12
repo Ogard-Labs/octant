@@ -70,7 +70,7 @@ export function SurfaceHeader(props: SurfaceHeaderProps) {
           onClick={props.onBack}
           type="button"
         >
-          <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.5} />
+          <ArrowLeft aria-hidden="true" size={16} />
         </OctantIconButton>
       )}
       <div className="surface-header__copy">

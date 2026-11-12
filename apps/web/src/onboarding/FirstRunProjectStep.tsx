@@ -141,7 +141,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
           type="button"
           variant={hasProjects ? "ghost" : "outline"}
         >
-          <FolderPlus aria-hidden="true" size={16} strokeWidth={1.8} />
+          <FolderPlus aria-hidden="true" size={16} />
           {hasProjects ? "Add another folder" : "Choose a folder…"}
         </OctantButton>
       </div>

@@ -193,12 +193,12 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
 
   const items: ReadonlyArray<OctantMenuItem> = [
     {
-      icon: <Copy aria-hidden="true" size={14} strokeWidth={1.7} />,
+      icon: <Copy aria-hidden="true" size={14} />,
       label: "Copy conversation",
       value: "copy-conversation",
     },
     {
-      icon: <Download aria-hidden="true" size={14} strokeWidth={1.7} />,
+      icon: <Download aria-hidden="true" size={14} />,
       label: "Save as Markdown",
       value: "save-markdown",
     },
@@ -206,7 +206,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
       ? []
       : [
           {
-            icon: <FileDown aria-hidden="true" size={14} strokeWidth={1.7} />,
+            icon: <FileDown aria-hidden="true" size={14} />,
             label: exporting ? "Exporting…" : "Export…",
             value: "export-thread",
           },
@@ -215,7 +215,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
       ? []
       : [
           {
-            icon: <Handshake aria-hidden="true" size={14} strokeWidth={1.7} />,
+            icon: <Handshake aria-hidden="true" size={14} />,
             label: handingOff ? "Handing off…" : "Hand off…",
             value: "hand-off",
           },
@@ -224,7 +224,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
       ? []
       : [
           {
-            icon: <FolderInput aria-hidden="true" size={14} strokeWidth={1.7} />,
+            icon: <FolderInput aria-hidden="true" size={14} />,
             label: "Move to Project…",
             value: "move-to-project",
           },
@@ -233,7 +233,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
       ? []
       : [
           {
-            icon: <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.7} />,
+            icon: <PanelsTopLeft aria-hidden="true" size={14} />,
             // The label carries the panel's state because a menu item cannot
             // wear the disclosure's aria-expanded the standalone button had.
             label: props.canvas.open ? "Hide canvas" : "Show canvas",
@@ -254,7 +254,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           else if (value === "move-to-project") setMoveOpen(true);
           else if (value === "canvas") props.canvas?.onToggle();
         }}
-        trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
+        trigger={<Ellipsis aria-hidden="true" className="icon" size={16} />}
         triggerClassName="shell-icon-button"
         triggerLabel="Thread actions"
         // No item is a persistent choice: an empty value keeps every click a

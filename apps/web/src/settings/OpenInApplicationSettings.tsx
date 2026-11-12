@@ -84,7 +84,7 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
                     type="button"
                     variant="ghost"
                   >
-                    <ArrowUp aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <ArrowUp aria-hidden="true" size={14} />
                   </OctantButton>
                   <OctantButton
                     aria-label={`Move ${entry.label} down`}
@@ -94,7 +94,7 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
                     type="button"
                     variant="ghost"
                   >
-                    <ArrowDown aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <ArrowDown aria-hidden="true" size={14} />
                   </OctantButton>
                   <OctantSwitch
                     checked={enabled}

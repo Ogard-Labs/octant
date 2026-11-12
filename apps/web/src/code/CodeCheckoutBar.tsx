@@ -28,7 +28,7 @@ export function CodeCheckoutBar(props: {
     return (
       <div aria-label="Checkout" className="code-checkout-bar">
         <span className="code-checkout-bar__identity">
-          <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+          <Network aria-hidden="true" size={12} />
           <span
             className="code-checkout-bar__project"
             title={`On a server: ${props.serverLocation}`}
@@ -45,7 +45,7 @@ export function CodeCheckoutBar(props: {
             type="button"
             variant="ghost"
           >
-            <GitBranch aria-hidden="true" size={14} strokeWidth={1.7} />
+            <GitBranch aria-hidden="true" size={14} />
             <span>Git</span>
           </OctantButton>
         )}
@@ -101,7 +101,7 @@ export function CodeCheckoutBar(props: {
         >
           {repositoryName}
         </span>
-        <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+        <GitBranch aria-hidden="true" size={12} />
         <span className="code-checkout-bar__branch" title={branch}>
           {branch}
         </span>
@@ -151,7 +151,7 @@ function CreatePullRequestAction(props: { readonly onCreatePullRequest: () => vo
       type="button"
       variant="ghost"
     >
-      <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+      <GitPullRequest aria-hidden="true" size={14} />
       <span>Create pull request</span>
     </OctantButton>
   );

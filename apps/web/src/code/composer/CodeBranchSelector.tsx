@@ -56,7 +56,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       title="Choose base branch"
       trigger={
         <>
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
           <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
           <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
         </>
@@ -110,7 +110,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
               >
                 <span className="code-branch-selector__option-name">{ref.name}</span>
                 <span className="code-branch-selector__option-meta">
-                  {selected ? <Check aria-hidden="true" size={12} strokeWidth={2} /> : null}
+                  {selected ? <Check aria-hidden="true" size={12} /> : null}
                   {ref.isCurrent === true ? (
                     <OctantBadge variant="secondary">current</OctantBadge>
                   ) : ref.hasWorktree === true ? (

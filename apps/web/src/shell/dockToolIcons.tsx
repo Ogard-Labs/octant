@@ -49,5 +49,5 @@ export function dockToolIcon(surface: RightUtilityDockSurfaceId): LucideIcon {
 
 export function DockToolIcon(props: { readonly surface: RightUtilityDockSurfaceId }) {
   const Icon = dockToolIcon(props.surface);
-  return <Icon aria-hidden="true" size={14} strokeWidth={1.5} />;
+  return <Icon aria-hidden="true" size={14} />;
 }

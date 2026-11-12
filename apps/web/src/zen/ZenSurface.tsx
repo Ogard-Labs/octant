@@ -351,7 +351,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const laidOut = useMemo(() => {
     if (!wall) return sorted;
     const tiles = planZenWall(props.space.elements.length, surfaceSize, {
-      // The spaces pill floats over the top of the surface and the Navigator
+      // The spaces bar floats over the top of the surface and the Navigator
       // bar over the bottom; a wall that filled the whole area would put its
       // first and last rows underneath them.
       insetTop: ZEN_WALL_INSET_TOP,
@@ -849,9 +849,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     type="button"
                   >
                     {element.minimized ? (
-                      <Maximize2 aria-hidden="true" size={12} strokeWidth={1.75} />
+                      <Maximize2 aria-hidden="true" size={12} />
                     ) : (
-                      <Minus aria-hidden="true" size={14} strokeWidth={1.75} />
+                      <Minus aria-hidden="true" size={14} />
                     )}
                   </OctantIconButton>
                   <OctantIconButton
@@ -863,7 +863,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     }}
                     type="button"
                   >
-                    <X aria-hidden="true" size={14} strokeWidth={1.75} />
+                    <X aria-hidden="true" size={14} />
                   </OctantIconButton>
                 </span>
               </header>
@@ -968,7 +968,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
             type="button"
             variant="ghost"
           >
-            <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.75} />
+            <LayoutGrid aria-hidden="true" size={14} />
             Tidy
           </OctantButton>
         </div>
@@ -1325,8 +1325,8 @@ type ResolvedZenBackground = {
 /* The theme's workspace ground. Used whenever no user choice paints the
    surface, so the safe fallback is the same ground every other surface
    stands on rather than a colour of Zen's own. */
-/* Room the wall leaves for the surface's own floating chrome: the spaces pill
-   above, and the Navigator bar (or its collapsed pill) below. */
+/* Room the wall leaves for the surface's own floating chrome: the spaces bar
+   above, and the Navigator bar (or its collapsed bar) below. */
 const ZEN_WALL_INSET_TOP = 56;
 const ZEN_WALL_INSET_BOTTOM = 88;
 const ZEN_WALL_INSET_BOTTOM_COLLAPSED = 64;
@@ -1527,5 +1527,5 @@ function ZenElementIcon(props: { readonly kind: ZenElementPayload["kind"] }) {
                 : props.kind === "canvas"
                   ? FileText
                   : Sparkles;
-  return <Icon aria-hidden="true" className="zen-el-icon" size={14} strokeWidth={1.75} />;
+  return <Icon aria-hidden="true" className="zen-el-icon" size={14} />;
 }

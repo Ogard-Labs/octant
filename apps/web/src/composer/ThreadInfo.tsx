@@ -116,7 +116,7 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
             type="button"
             variant="ghost"
           >
-            <Info aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Info aria-hidden="true" size={14} />
             {flags.size === 0 ? null : (
               <span className="thread-info__attention">Review required</span>
             )}

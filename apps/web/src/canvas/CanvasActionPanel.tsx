@@ -179,15 +179,15 @@ function CanvasActionItem(props: {
         </OctantButton>
         <span className="canvas-action__effect">
           {availability.capability.effect === "mutate" ? (
-            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Pencil aria-hidden="true" size={14} />
           ) : (
-            <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Eye aria-hidden="true" size={14} />
           )}
           <span>{effectLabel}</span>
         </span>
         {availability.requiresApproval ? (
           <span className="canvas-action__approval">
-            <ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+            <ShieldAlert aria-hidden="true" size={14} />
             <span>Needs approval</span>
           </span>
         ) : null}
@@ -207,9 +207,9 @@ function CanvasActionItem(props: {
       {disabled ? (
         <p className="canvas-action__reason" id={reasonId} role="note">
           {availability.state === "unauthorized" ? (
-            <LockKeyhole aria-hidden="true" size={14} strokeWidth={1.8} />
+            <LockKeyhole aria-hidden="true" size={14} />
           ) : (
-            <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Ban aria-hidden="true" size={14} />
           )}
           <span>{availability.reason}</span>
         </p>
@@ -225,25 +225,18 @@ function ActionEffectIcon(props: {
   readonly running: boolean;
 }) {
   if (props.running) {
-    return (
-      <LoaderCircle
-        aria-hidden="true"
-        className="canvas-action__spinner"
-        size={14}
-        strokeWidth={2}
-      />
-    );
+    return <LoaderCircle aria-hidden="true" className="canvas-action__spinner" size={14} />;
   }
   if (props.availability.state === "unauthorized") {
-    return <LockKeyhole aria-hidden="true" size={14} strokeWidth={1.8} />;
+    return <LockKeyhole aria-hidden="true" size={14} />;
   }
   if (props.availability.state === "unavailable") {
-    return <Ban aria-hidden="true" size={14} strokeWidth={1.8} />;
+    return <Ban aria-hidden="true" size={14} />;
   }
   return props.availability.capability.effect === "mutate" ? (
-    <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
+    <Pencil aria-hidden="true" size={14} />
   ) : (
-    <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+    <Eye aria-hidden="true" size={14} />
   );
 }
 
@@ -274,9 +267,9 @@ function ActionStatus(props: { readonly run: ActionRun; readonly statusId: strin
       data-run={run.kind}
     >
       {run.kind === "completed" ? (
-        <Check aria-hidden="true" size={14} strokeWidth={2} />
+        <Check aria-hidden="true" size={14} />
       ) : isError ? (
-        <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Ban aria-hidden="true" size={14} />
       ) : null}
       <span>{text}</span>
     </p>

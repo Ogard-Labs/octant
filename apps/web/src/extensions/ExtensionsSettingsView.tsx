@@ -1387,7 +1387,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               ) : (
                 <>
                   <div className="extensions-settings__installed-filter">
-                    <Search aria-hidden="true" size={14} strokeWidth={1.75} />
+                    <Search aria-hidden="true" size={14} />
                     <OctantInput
                       aria-label="Filter installed skills"
                       onChange={(event) => {
@@ -1410,7 +1410,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         }}
                         type="button"
                       >
-                        <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                        <X aria-hidden="true" size={14} />
                       </OctantIconButton>
                     )}
                   </div>
@@ -1690,7 +1690,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     return (
                       <li className="extcard" key={entryKey}>
                         <span aria-hidden="true" className="icon-mark">
-                          <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                          <Puzzle aria-hidden="true" className="icon" size={16} />
                         </span>
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
@@ -1845,7 +1845,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               {localPreview !== undefined ? (
                 <div className="extcard">
                   <span aria-hidden="true" className="icon-mark">
-                    <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                    <Puzzle aria-hidden="true" className="icon" size={16} />
                   </span>
                   <span className="extcard-name">{localPreview.entry.displayName}</span>
                   <span className="extcard-src">
@@ -2023,12 +2023,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     return (
                       <li className="extcard" key={entryKey}>
                         <span aria-hidden="true" className="icon-mark">
-                          <BookOpen
-                            aria-hidden="true"
-                            className="icon"
-                            size={16}
-                            strokeWidth={1.5}
-                          />
+                          <BookOpen aria-hidden="true" className="icon" size={16} />
                         </span>
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
@@ -2197,7 +2192,7 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
   return (
     <li className="extcard" data-unavailable={unavailable ? "true" : undefined}>
       <span aria-hidden="true" className="icon-mark">
-        <BookOpen aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        <BookOpen aria-hidden="true" className="icon" size={16} />
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
@@ -2510,7 +2505,7 @@ function BundledPluginCard(props: {
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
-        <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        <Puzzle aria-hidden="true" className="icon" size={16} />
       </span>
       <span className="extcard-name">{name}</span>
       <span className="extcard-right">
@@ -2548,7 +2543,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
-        <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        <Puzzle aria-hidden="true" className="icon" size={16} />
       </span>
       <span className="extcard-name">{installedPackageName(pkg)}</span>
       <span className="extcard-right">

@@ -96,7 +96,7 @@ export function OctantMenu(props: OctantMenuProps) {
   const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
   const itemBody = (item: OctantMenuItem, index: number) => (
     <>
-      <span aria-hidden="true" className="flex size-4 items-center justify-center">
+      <span aria-hidden="true" className="flex size-(--oct-icon-md) items-center justify-center">
         {item.icon}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
@@ -180,7 +180,10 @@ export function OctantMenu(props: OctantMenuProps) {
                     {...(action.disabled === true ? { disabled: true } : {})}
                     onClick={action.onSelect}
                   >
-                    <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                    <span
+                      aria-hidden="true"
+                      className="flex size-(--oct-icon-md) items-center justify-center"
+                    >
                       {action.icon}
                     </span>
                     <span className="truncate font-medium">{action.label}</span>
