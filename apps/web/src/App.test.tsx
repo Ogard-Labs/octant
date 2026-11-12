@@ -6192,6 +6192,46 @@ describe("App", () => {
     expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("shows a tool in the focused tile's place when the tile caps are full, leaving the replaced tool open", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await screen.findByRole("toolbar", { name: "Tools" });
+    // Two columns, the second holding three tiles: nothing more fits beside.
+    for (const tool of ["Files", "Browser", "Environment", "Terminal"]) {
+      await user.click(bandTool(tool));
+    }
+    for (const tool of ["Files", "Browser", "Environment", "Terminal"]) {
+      await waitFor(() => expect(bandTool(tool)).toHaveAttribute("aria-pressed", "true"));
+    }
+
+    const review = bandTool("Review");
+    expect(review).not.toHaveAttribute("aria-disabled");
+    expect(review).toHaveAttribute("aria-description", "Shows in place of Terminal");
+    await user.click(review);
+
+    await screen.findByRole("region", { name: "Review" });
+    await waitFor(() => expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "false"));
+    // The replaced tool is hidden from view, not closed: its button says so.
+    expect(bandTool("Terminal")).toHaveAttribute("data-dock-open", "true");
+    expect(bandTool("Terminal")).toHaveAttribute("aria-description", "Shows in place of Review");
+    expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+  });
+
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();

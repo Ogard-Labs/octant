@@ -18,7 +18,6 @@ export const DOCK_TOOL_BUTTON_ORDER: ReadonlyArray<RightUtilityDockSurfaceId> = 
 
 /** Why a tool in the band cannot open yet while the pane's task has no thread. */
 export const DOCK_TOOLS_AWAIT_TASK_START = "Available once the task starts";
-const DOCK_TOOLS_CAPS_FULL = "Close a tool to make room";
 
 /**
  * The Browser is one tool with pages. Showing it again returns to the page on
@@ -81,6 +80,8 @@ export interface DockToolButton {
   readonly open: boolean;
   /** Why pressing does nothing; absent when it does something. */
   readonly disabledReason?: string;
+  /** What a press does that the name does not say: it shows in the focused tile's place. */
+  readonly note?: string;
   readonly press: DockToolPress;
   /**
    * The open tab the tool stands for: the one shown, else the Browser's page
@@ -204,23 +205,24 @@ function describeButton(
       press: input.bottomPresentedOpen ? { kind: "close-bottom" } : { kind: "reveal" },
     };
   }
-  if (input.capsFull && !narrow) {
-    return {
-      ...base,
-      pressed: false,
-      open: tabs.length > 0,
-      menu: menu(),
-      disabledReason: DOCK_TOOLS_CAPS_FULL,
-      press: { kind: "refused" },
-    };
-  }
+  // The drawer shows one tool, and a full set of tiles has no room for another:
+  // there a press shows the tool in the focused tile's place. The tool it
+  // replaces is hidden from view, not closed.
+  const replacing = narrow || input.capsFull;
+  const focused = input.tabs.find((tab) => tab.id === input.activeTabId);
+  const focusedLabel = input.surfaces.find((candidate) => candidate.id === focused?.surface)?.label;
+  const note =
+    input.capsFull && !narrow
+      ? `Shows in place of ${focusedLabel ?? "the focused tool"}`
+      : undefined;
   if (tabs.length === 0) {
     return {
       ...base,
       pressed: false,
       open: false,
       menu: menu(),
-      press: narrow ? { kind: "open" } : { kind: "open-beside" },
+      ...(note === undefined ? {} : { note }),
+      press: replacing ? { kind: "open" } : { kind: "open-beside" },
     };
   }
   return {
@@ -228,10 +230,11 @@ function describeButton(
     pressed: false,
     open: true,
     menu: menu(),
+    ...(note === undefined ? {} : { note }),
     press:
       tabId === undefined
         ? { kind: "refused" }
-        : narrow
+        : replacing
           ? { kind: "select", tabId }
           : { kind: "show-beside", tabId },
   };

@@ -195,22 +195,29 @@ describe("the title band's tool buttons", () => {
     expect(byId(drawer, "files")?.menu.map((item) => item.label)).toEqual(["Close Files"]);
   });
 
-  it("disables a tool that is not shown once the tile caps are reached", () => {
+  it("shows a tool that is not shown in the focused tile's place once the tile caps are reached", () => {
     const model = buildDockToolButtons(
       input({
         capsFull: true,
-        tabs: [{ id: "files", surface: "files" }],
-        shownTabIds: [],
+        tabs: [
+          { id: "files", surface: "files" },
+          { id: "environment", surface: "environment" },
+        ],
+        shownTabIds: ["environment"],
+        activeTabId: "environment",
       }),
     );
     expect(byId(model, "review")).toMatchObject({
-      disabledReason: "Close a tool to make room",
-      press: { kind: "refused" },
+      note: "Shows in place of Environment",
+      press: { kind: "open" },
     });
+    expect(byId(model, "review")?.disabledReason).toBeUndefined();
     expect(byId(model, "files")).toMatchObject({
       open: true,
-      disabledReason: "Close a tool to make room",
+      note: "Shows in place of Environment",
+      press: { kind: "select", tabId: "files" },
     });
+    expect(byId(model, "plan")?.note).toBe("Shows in place of Environment");
   });
 
   it("keeps a shown tool pressable at the tile caps so it can be closed", () => {

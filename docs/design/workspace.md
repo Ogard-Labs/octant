@@ -1012,17 +1012,22 @@ only where the thread can use the tool. Pressing one opens the tool as a tile be
 focused one (alone when the dock is empty) and widens and shows the dock; pressing it
 again closes the tool (the Browser closes every page). A button reads pressed while its
 tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
-the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). It is disabled with "Close a tool to make room"
-when both columns are full and the tool is not shown, and, on a new Code task
-before its thread exists, with "Available once the task starts". A press leaves focus
+the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
+is not refused: its press shows it in the focused tile's place, the replaced tool stays
+open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
+before its thread exists the buttons are disabled with "Available once the task starts". A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
 movement, and its width is part of the trailing cluster the pane header reserves.
-A tool's button has a context menu (right click, the menu key or Shift+F10): Show
+The five tools with a button of their own (Environment, Terminal, Review, Browser,
+Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
 below for an open tool that is not on screen, Show alone, Hide from view and the
 moves the caps allow for a tile, New Terminal on Terminal and New Browser page on
-Browser, and Close. It is also the drag source: dropped on the dock body, the right third
+Browser, and Close. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
 shows the tool beside, the lower third below, and anywhere else replaces the
-focused tile. At 960px and under the dock is a one-tool drawer, the title band is
+focused tile. A tool opened from More tools has neither: it is shown beside the
+focused tile (in its place at the caps) and is then arranged, hidden and closed
+from its own tile's bar; a tool alone has no bar and is closed by picking it
+again in More tools. At 960px and under the dock is a one-tool drawer, the title band is
 inert behind it, and the same row stands in the drawer's header; there a press
 replaces the tool shown and a tool cannot be dragged. The dock no longer has a tab strip, Add tool, Show another tool,
 or quick tools of its own (the bottom panel keeps its tab strip and Add tool). Direct tools are Side Chat, Browser, Files,

@@ -4562,6 +4562,7 @@ function LaunchedShell(
         openDockTab(surface);
         return;
       case "select":
+        if (!dockOpen) setActivePaneDockVisible(true);
         selectDockTab(press.tabId);
         return;
       case "show-beside":

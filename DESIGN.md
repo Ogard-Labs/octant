@@ -328,7 +328,7 @@ divides its parts with one soft hairline (`--octant-border-soft`); no
 stronger line doubles it, and none runs on through the band or the inset
 below the sheet. The sidebar's side is the workspace colour,
 a step lighter than the stage's application background, so the turn of the
-frame reads. Pane headers and dock tabs stay in the title band. With Glass on,
+frame reads. Pane headers and the tool row stay in the title band. With Glass on,
 the frame and the sheet are the Tint over the window's native material, so
 the desktop frosts behind the whole window rather than a sidebar strip. (The
 frame used to set rounded cards 8px apart on a back of the sidebar's material;
@@ -1875,8 +1875,10 @@ groups them), then the pull requests the thread is about under "Relevant to this
 thread"; each button only where the thread can use the tool. A button is the
 shell's icon button with the tool's own icon and its name as a tooltip,
 `aria-pressed` while the tool is on screen, a quiet 4px dot while the tool is
-open but not shown, and disabled with its reason ("Close a tool to make room",
-or "Available once the task starts" on a new Code task) otherwise. The row is a
+open but not shown. At the tile caps a press shows a tool that is not shown in
+the focused tile's place and the button says "Shows in place of <the focused
+tool>"; on a new Code task the buttons are disabled with "Available once the
+task starts". The row is a
 toolbar named "Tools" with one Tab stop and arrow-key movement. The dock's own
 header is an empty band as tall as the title rail, so its panes start below it
 whatever the width; it holds no strip, Add tool, Show another tool or quick
@@ -2334,11 +2336,16 @@ menu (right click, the menu key or Shift+F10) offers **Show below** for an open
 tool that is not on screen (disabled when the caps refuse it), and, for a tile in
 a layout, **Show alone**, **Hide from view** and the moves that are possible,
 then **New Terminal** on Terminal and **New Browser page** on Browser, then
-**Close <tool>**; what does not apply is absent. Pressing a button shows a
-tool beside the focused tile in one step (opening it first when needed), beside
-it when the columns stand side by side and below it when they stack, and is
-disabled when the tile caps are full. Dragging a tool's button (the open tool,
-not one with no tab) onto the dock body does the same: the right third shows it
+**Close <tool>**; what does not apply is absent. These menus, and dragging,
+belong to the five tools with a button of their own (Environment, Terminal,
+Review, Browser, Files); a tool opened from More tools is shown the same way
+and is then arranged, hidden and closed from its own tile's bar, a tool alone
+having no bar and being closed by picking it again in More tools. Pressing a
+button shows a tool beside the focused tile in one step (opening it first when
+needed), beside it when the columns stand side by side and below it when they
+stack; when the tile caps are full it shows the tool in the focused tile's place
+and the tool it replaces stays open, hidden from view. Dragging an open tool's
+button onto the dock body does the same: the right third shows it
 beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
 has chosen, the dock widens to 840px (not saved), under the ceiling above;
 showing a tool beside, which makes the second column, clears the person's

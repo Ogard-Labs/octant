@@ -113,6 +113,7 @@ export function DockToolButtons(props: DockToolButtonsProps) {
 
 function describe(button: DockToolButton): string | undefined {
   if (button.disabledReason !== undefined) return button.disabledReason;
+  if (button.note !== undefined) return button.note;
   return button.open ? "Open" : undefined;
 }
 
@@ -136,7 +137,15 @@ function ToolButton(props: {
       onValueChange={(value) => props.onMenuAction?.(button.id, value)}
       triggerClassName="dock-tool-buttons__item"
     >
-      <OctantTooltip label={disabled ? `${button.label}. ${button.disabledReason}` : button.label}>
+      <OctantTooltip
+        label={
+          disabled
+            ? `${button.label}. ${button.disabledReason}`
+            : button.note === undefined
+              ? button.label
+              : `${button.label}. ${button.note}`
+        }
+      >
         <IconButton
           aria-pressed={button.pressed}
           // Disabled by aria so the button keeps its place in the arrow-key
@@ -227,9 +236,11 @@ function MoreTools(props: {
                   {group.surfaces.map((tool) => (
                     <OctantMenuCheckboxItem
                       {...(tool.disabledReason === undefined
-                        ? tool.open
-                          ? { "aria-description": "Open" }
-                          : {}
+                        ? tool.note !== undefined
+                          ? { "aria-description": tool.note }
+                          : tool.open
+                            ? { "aria-description": "Open" }
+                            : {}
                         : { "aria-description": tool.disabledReason, disabled: true })}
                       checked={tool.pressed}
                       className="workspace-disclosure__action window-no-drag"

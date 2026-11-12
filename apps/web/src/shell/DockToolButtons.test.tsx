@@ -66,6 +66,30 @@ describe("the title band's tool buttons", () => {
     expect(onPress).toHaveBeenCalledWith("terminal", terminal);
   });
 
+  it("says a tool shows in the focused tile's place at the tile caps, and stays pressable", async () => {
+    const onPress = vi.fn();
+    render(
+      <DockToolButtons
+        model={model({
+          buttons: [
+            button("files", "Files", {
+              open: true,
+              note: "Shows in place of Review",
+              press: { kind: "select", tabId: "files" },
+            }),
+          ],
+          more: [],
+        })}
+        onPress={onPress}
+      />,
+    );
+    const files = screen.getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("aria-description", "Shows in place of Review");
+    expect(files).not.toHaveAttribute("aria-disabled");
+    await userEvent.click(files);
+    expect(onPress).toHaveBeenCalledWith("files", files);
+  });
+
   it("keeps a disabled button focusable, says why, and ignores a press", async () => {
     const onPress = vi.fn();
     render(
