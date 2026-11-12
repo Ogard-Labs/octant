@@ -2889,7 +2889,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: ACP agents](provider-runt
 
 A local-server provider adapter gives each acquired connection its own process and one live session. Below Full access, app tools reach it only when a process receipt proves outside tool sources cannot enter.
 
-- Ordinary inherited configuration gives no such proof, so below Full access the adapter reports app tools unsupported. At Full access a runtime whose inherited configuration cannot prove tool exclusivity is still offered Octant's tools, labelled as mixed (maintainer request, 2026-11-12). Not built yet: today the adapter reports app tools unsupported at every level.
+- Ordinary inherited configuration gives no such proof, so below Full access the adapter reports app tools unsupported. At Full access a runtime whose inherited configuration cannot prove tool exclusivity is still offered Octant's tools, labelled as mixed (maintainer request, 2026-11-12). Built for a Work or Code thread's own turns, where the connection check saw the runtime accept the tool endpoint (macOS): the adapter reports `appManagedToolsAtFullAccess: "mixed"` and the thread's access details show the label. Not built yet: a child agent session, a routine's own Browser target and a saved flow are not offered tools on a mixed runtime, and nothing is reported as mixed on Linux.
 - The private endpoint binds calls to that connection's immutable session and exact offered tool catalogue.
 - Process exit, stream failure, interruption and scope cleanup retire pending tool requests.
 

@@ -863,8 +863,9 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 At Full access a runtime whose inherited configuration cannot prove that
 exclusivity is still offered Octant's tools, labelled as mixed; below Full
-access the rule is unchanged (maintainer request, 2026-11-12; not built yet:
-today such a runtime is offered none at any level).
+access the rule is unchanged (maintainer request, 2026-11-12). Built for a
+Work or Code thread's own turns; what remains is named in
+[Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 
 **Browser and Computer are tools, not mentions.** The host offers them on
 every eligible turn, and the agent uses them when the person's request needs

@@ -92,7 +92,10 @@ export function createTaskAccessSubjectReader(deps: TaskAccessSubjectDependencie
     const access = deps.runningWork(id) ?? thread.access;
     const turnRefusal = deps.workStanding?.(thread);
     return {
-      selected: workThreadAccessOf(thread.access),
+      selected: {
+        ...workThreadAccessOf(thread.access),
+        fullAccessSandbox: thread.fullAccessSandbox,
+      },
       ...(turnRefusal === undefined ? {} : { turnRefusal }),
       standing: thread.completionConfirmed
         ? "completed"

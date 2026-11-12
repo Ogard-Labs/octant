@@ -246,9 +246,11 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                       {CAPABILITY[capability.id]}:{" "}
                       {capability.support === "supported"
                         ? "supported"
-                        : capability.support === "unsupported"
-                          ? "unsupported by this runtime"
-                          : "temporarily unavailable"}
+                        : capability.support === "mixed"
+                          ? "mixed with tools Octant did not supply"
+                          : capability.support === "unsupported"
+                            ? "unsupported by this runtime"
+                            : "temporarily unavailable"}
                     </li>
                   ))}
                 </ul>

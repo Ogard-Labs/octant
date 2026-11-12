@@ -37,7 +37,12 @@ import {
   type DesktopHostTag,
   type DesktopProviderId,
 } from "@octant/contracts";
-import { defaultShellSettings, workThreadAccessOf } from "@octant/domain";
+import {
+  browserToolTransport,
+  defaultShellSettings,
+  workThreadAccessOf,
+  type AppToolThreadLevel,
+} from "@octant/domain";
 import {
   createDesktopLeaseService,
   createLeasedComputerUsePort,
@@ -462,14 +467,13 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
    * Octant's app tools; undefined when the runtime cannot carry it, so the
    * agent is never told about a tool it could not call.
    */
-  const computerToolsFor = (owner: ComputerUseOwner, ask?: ComputerUseThreadAsk) => {
+  const computerToolsFor = (
+    owner: ComputerUseOwner,
+    ask?: ComputerUseThreadAsk,
+    level?: AppToolThreadLevel,
+  ) => {
     const observed = providerRuntimeRegistry.observedState(owner.providerInstanceId);
-    const carriesAppTools =
-      observed?.capabilities.appManagedTools === "supported" ||
-      observed?.verifiedToolModelIds?.some(
-        (candidate) => String(candidate) === String(owner.modelId),
-      ) === true;
-    if (!carriesAppTools) return undefined;
+    if (browserToolTransport(observed, String(owner.modelId), level) !== true) return undefined;
     const model = observed?.models.find(
       (candidate) => String(candidate.id) === String(owner.modelId),
     );
