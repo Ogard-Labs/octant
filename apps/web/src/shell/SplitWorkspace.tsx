@@ -559,6 +559,30 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     if (target instanceof Element && target.closest(".workspace-pane__close") !== null) return;
     props.onActivatePane(pane.paneId);
   };
+  // The title's text stands on the edge of the thread's column, so what could
+  // precede it (the environment mark, the request chip) follows it instead:
+  // the 20px gutter left of the column cannot hold a 20px mark. With tabs open
+  // there is no title, and they lead the bar as before.
+  const gripMark =
+    environment !== undefined ? (
+      <EnvironmentMark {...environment} />
+    ) : showTabs ? (
+      // Tabs carry the titles, so a surface with no environment would leave
+      // this handle empty and the pane with nothing to drag it by.
+      <GripVertical aria-hidden="true" size={14} />
+    ) : null;
+  const pullRequestChip =
+    pullRequest === undefined ? null : (
+      <PullRequestChip
+        className="workspace-pane__pull-request"
+        number={pullRequest.identity.number}
+        state={pullRequest.state}
+        {...(pullRequest.checks === undefined ? {} : { checks: pullRequest.checks })}
+        {...(selectPullRequest === undefined
+          ? {}
+          : { onOpen: () => selectPullRequest(pullRequest.identity) })}
+      />
+    );
   return (
     <WorkspaceContentViewContext.Provider value={contentView}>
       <section
@@ -603,25 +627,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     : "Drag to move or split"
                 }
               >
-                {environment !== undefined ? (
-                  <EnvironmentMark {...environment} />
-                ) : showTabs ? (
-                  // Tabs carry the titles, so a surface with no environment
-                  // would leave this handle empty and the pane with nothing
-                  // to drag it by.
-                  <GripVertical aria-hidden="true" size={14} />
-                ) : null}
-                {pullRequest === undefined ? null : (
-                  <PullRequestChip
-                    className="workspace-pane__pull-request"
-                    number={pullRequest.identity.number}
-                    state={pullRequest.state}
-                    {...(pullRequest.checks === undefined ? {} : { checks: pullRequest.checks })}
-                    {...(selectPullRequest === undefined
-                      ? {}
-                      : { onOpen: () => selectPullRequest(pullRequest.identity) })}
-                  />
-                )}
+                {showTabs ? <>{gripMark}{pullRequestChip}</> : null}
                 {/* A breadcrumb: the Project the pane runs in, then what it
                     shows. With tabs open the bar is tabs alone: a Project name
                     ahead of them read as a tab of its own, so it moves to the
@@ -653,6 +659,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         {`Started by ${startedBy}`}
                       </span>
                     )}
+                    {gripMark}
+                    {pullRequestChip}
                   </>
                 )}
                 {showTabs ? null : running ? (
