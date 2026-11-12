@@ -12,6 +12,7 @@ import {
   type MobileThreadLevelSubject,
 } from "@octant/client-runtime";
 import { useTheme } from "../../../design-system/theme";
+import type { FullAccessWarningStore } from "../../hosts/fullAccessWarningStore";
 import { space as mobileSpacing } from "../../../design-system/tokens";
 
 export interface ThreadLevelPanelProps {
@@ -19,17 +20,10 @@ export interface ThreadLevelPanelProps {
   readonly actsAsHostPerson: boolean;
   readonly subject: MobileThreadLevelSubject;
   readonly transport: MobileRemoteTransport;
+  readonly warnings: FullAccessWarningStore;
   /** The host took a change; the caller reads the thread again. */
   readonly onChanged: () => void;
 }
-
-/**
- * The hosts whose Full access warning this phone has shown since it started.
- * Kept for the app's run only, so the warning comes back after a restart:
- * the phone has no settings store of its own here, and showing it again is
- * the safe side.
- */
-const warnedHosts = new Set<string>();
 
 export interface LevelChoicesProps {
   readonly testID: string;
@@ -39,6 +33,8 @@ export interface LevelChoicesProps {
   readonly current: PermissionMode | undefined;
   readonly choices: ReadonlyArray<PermissionMode>;
   readonly hostId: string;
+  /** Remembers, per host and across app runs, that the Full access warning was accepted. */
+  readonly warnings: FullAccessWarningStore;
   /** Set where no level is a choice of its own: a Project returning to the default. */
   readonly withoutLevelLabel?: string;
   readonly onPick: (level: PermissionMode | undefined) => Promise<MobileThreadLevelChange>;
@@ -65,12 +61,12 @@ export function LevelChoices(props: LevelChoicesProps) {
     if (result.status === "changed") props.onChanged();
     else setMessage(result.message);
   };
-  const choose = (level: PermissionMode) => {
-    if (level === "full-access" && !warnedHosts.has(props.hostId)) {
+  const choose = async (level: PermissionMode) => {
+    if (level === "full-access" && !(await props.warnings.acknowledged(props.hostId))) {
       setConfirming(true);
       return;
     }
-    void apply(level);
+    await apply(level);
   };
   const button = (key: string, label: string, act: () => void) => (
     <Pressable
@@ -104,7 +100,7 @@ export function LevelChoices(props: LevelChoicesProps) {
         <>
           <Text style={{ color: colors.textSecondary }}>{MOBILE_FULL_ACCESS_WARNING}</Text>
           {button("confirm", "Use Full access", () => {
-            warnedHosts.add(props.hostId);
+            void props.warnings.acknowledge(props.hostId);
             void apply("full-access");
           })}
           {button("cancel", "Cancel", () => setConfirming(false))}
@@ -113,7 +109,9 @@ export function LevelChoices(props: LevelChoicesProps) {
         <>
           {props.choices
             .filter((level) => level !== props.current)
-            .map((level) => button(level, MOBILE_THREAD_LEVEL_LABELS[level], () => choose(level)))}
+            .map((level) =>
+              button(level, MOBILE_THREAD_LEVEL_LABELS[level], () => void choose(level)),
+            )}
           {props.withoutLevelLabel === undefined || props.current === undefined
             ? null
             : button("without-level", props.withoutLevelLabel, () => void apply(undefined))}
@@ -149,6 +147,7 @@ export function ThreadLevelPanel(props: ThreadLevelPanelProps) {
       }
       testID="mobile-thread-level"
       title="Mode"
+      warnings={props.warnings}
     />
   );
 }

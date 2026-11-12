@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../../design-system/theme";
+import { createInMemoryMobileHostRegistryStorage } from "../../hosts/HostRegistry";
+import { createFullAccessWarningStore } from "../../hosts/fullAccessWarningStore";
 import { DefaultLevelsPanel, type DefaultLevelsPanelProps } from "./DefaultLevelsPanel";
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -69,7 +71,11 @@ function host(hostId: string) {
   return { sent, read, transport };
 }
 
-function mount(props: DefaultLevelsPanelProps) {
+function mount(input: Omit<DefaultLevelsPanelProps, "warnings">) {
+  const props: DefaultLevelsPanelProps = {
+    ...input,
+    warnings: createFullAccessWarningStore(createInMemoryMobileHostRegistryStorage()),
+  };
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);

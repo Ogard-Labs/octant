@@ -68,7 +68,8 @@ export interface ThreadScreenProps {
 
 export function ThreadScreen(props: ThreadScreenProps) {
   const { colors } = useTheme();
-  const { environment, transportForHost, hosts, health, hub } = useMobileSession();
+  const { environment, transportForHost, hosts, health, hub, fullAccessWarnings } =
+    useMobileSession();
   const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
   const selected = props.selected;
   const hostId = selected?.hostId;
@@ -382,6 +383,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               code.thread !== undefined ? (
               <ThreadLevelPanel
                 actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
                 onChanged={() => void code.refresh({ quiet: true })}
                 subject={{ mode: "code", thread: code.thread }}
                 transport={transport}
@@ -389,6 +391,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ) : selected.mode === "work" && work.thread !== undefined ? (
               <ThreadLevelPanel
                 actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
                 onChanged={() => void work.refresh({ quiet: true })}
                 subject={{ mode: "work", thread: work.thread }}
                 transport={transport}
@@ -400,6 +403,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             routinesProjectId !== undefined ? (
               <DefaultLevelsPanel
                 actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
                 mode={selected.mode}
                 projectId={routinesProjectId}
                 transport={transport}

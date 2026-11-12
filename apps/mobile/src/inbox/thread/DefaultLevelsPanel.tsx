@@ -11,6 +11,7 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import { useTheme } from "../../../design-system/theme";
+import type { FullAccessWarningStore } from "../../hosts/fullAccessWarningStore";
 import { space as mobileSpacing } from "../../../design-system/tokens";
 import { LevelChoices } from "./ThreadLevelPanel";
 
@@ -21,6 +22,7 @@ export interface DefaultLevelsPanelProps {
   /** The Project the open thread belongs to. */
   readonly projectId: string;
   readonly transport: MobileRemoteTransport;
+  readonly warnings: FullAccessWarningStore;
 }
 
 /**
@@ -81,6 +83,7 @@ export function DefaultLevelsPanel(props: DefaultLevelsPanelProps) {
           onPick={(level) => changeMobileProjectLevel({ transport, project, level })}
           testID="mobile-project-level"
           title={project.name}
+          warnings={props.warnings}
           withoutLevelLabel="Follows the default"
         />
       )}
@@ -97,6 +100,7 @@ export function DefaultLevelsPanel(props: DefaultLevelsPanelProps) {
           }
           testID="mobile-default-level"
           title="New threads on this host"
+          warnings={props.warnings}
         />
       )}
     </View>
