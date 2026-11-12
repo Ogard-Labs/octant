@@ -226,7 +226,10 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
   host journals the turn by the id its turn record keeps, which the sender
   chooses before the send: a Code turn's operation id, a Chat turn's submission
   id, a Work turn's id. A turn start without such an id is refused, and a send
-  the host refused records nothing. The names come with the "Started by" list
+  the host refused records nothing. The label follows the prompt when the
+  person forks the Code thread or branches the Chat thread: a fork's inherited
+  turns are named under the thread that ran them, and a Chat branch's copied
+  turns keep their submission ids. The names come with the "Started by" list
   (`GET /api/agent-grants/threads`, the newest 2,000 turns), so a renamed grant
   renames its turns.
 

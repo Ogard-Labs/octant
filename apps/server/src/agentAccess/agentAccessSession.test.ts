@@ -49,6 +49,7 @@ const autoThread = "30000000-0000-4000-8000-000000000004";
 const chatThread = "30000000-0000-4000-8000-000000000005";
 const turnKey = "60000000-0000-4000-8000-000000000001";
 const otherModelThread = "30000000-0000-4000-8000-000000000006";
+const workThread = "30000000-0000-4000-8000-000000000007";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
@@ -83,6 +84,7 @@ function deps() {
     threadId === ownThread ||
     threadId === autoThread ||
     threadId === chatThread ||
+    threadId === workThread ||
     threadId === otherModelThread
       ? { projectId: granted }
       : threadId === strangerThread
@@ -106,7 +108,14 @@ function deps() {
           ? { kind: "chat", modelId: "fake-model" }
           : threadId === otherModelThread
             ? { ...askFirst, modelId: "other-model" }
-            : undefined;
+            : threadId === workThread
+              ? {
+                  kind: "work",
+                  modelId: "fake-model",
+                  access: "ask-first",
+                  fullAccessSandbox: false,
+                }
+              : undefined;
   return { service, threadProject, threadAccess, recorded, turned, sentTurns };
 }
 
@@ -499,6 +508,24 @@ describe("the sender of each turn", () => {
       { threadId: projectThread, turnKey },
       { threadId: chatThread, turnKey },
     ]);
+  });
+
+  it("records a Work turn the host started, and nothing when it cannot tell whether the turn started", async () => {
+    const send = {
+      path: "/api/work/turns",
+      method: "POST" as const,
+      body: { kind: "start-work-thread-turn", turnId: turnKey, threadId: workThread },
+    };
+    const accepted = session(() =>
+      Response.json({ kind: "accepted", turn: { turnId: turnKey, threadId: workThread } }),
+    );
+    await accepted.session.send(send);
+    expect(accepted.sentTurns).toEqual([{ threadId: workThread, turnKey }]);
+    const ambiguous = session(() =>
+      Response.json({ kind: "ambiguous", turnId: turnKey, threadId: workThread }),
+    );
+    await ambiguous.session.send(send);
+    expect(ambiguous.sentTurns).toEqual([]);
   });
 
   it("records nothing for a turn the host refused, even one it answered with HTTP 200, or for an answer", async () => {

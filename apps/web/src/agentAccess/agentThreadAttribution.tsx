@@ -9,9 +9,11 @@ import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 interface AgentNames {
   readonly threads: ReadonlyMap<string, string>;
   readonly turns: ReadonlyMap<string, string>;
+  /** The same turns by turn id alone, for prompts copied into a Chat branch. */
+  readonly turnKeys: ReadonlyMap<string, string>;
 }
 
-const NO_NAMES: AgentNames = { threads: new Map(), turns: new Map() };
+const NO_NAMES: AgentNames = { threads: new Map(), turns: new Map(), turnKeys: new Map() };
 const AgentThreadNamesContext = createContext<AgentNames>(NO_NAMES);
 
 const turnName = (threadId: string, turnKey: string) => `${threadId}\u0000${turnKey}`;
@@ -47,6 +49,7 @@ export function AgentThreadAttributionProvider(props: {
             turn.agentName,
           ]),
         ),
+        turnKeys: new Map((answer.turns ?? []).map((turn) => [turn.turnKey, turn.agentName])),
       };
       setNames((previous) =>
         sameNames(previous.threads, next.threads) && sameNames(previous.turns, next.turns)
@@ -94,17 +97,27 @@ function sameNames(left: ReadonlyMap<string, string>, right: ReadonlyMap<string,
  * operation id, a Chat submission id, a Work turn id) to the outside agent that
  * sent that turn. Read once in a transcript and used for every turn in it; a
  * fork's inherited turns are looked up under the thread that ran them.
+ *
+ * A prompt copied into a Chat branch keeps its submission id but not the
+ * thread it was sent in (a branch of a branch names only its direct source),
+ * so a `copied` turn is matched by its id alone. Ids are random UUIDs, and the
+ * worst a match can do is name an agent under a prompt, never hide one.
  */
 export function useAgentTurnSenders(): (
   threadId: string | undefined,
   turnKey: string | undefined,
+  copied?: boolean,
 ) => string | undefined {
   const names = useContext(AgentThreadNamesContext);
   return useCallback(
-    (threadId, turnKey) =>
-      threadId === undefined || turnKey === undefined
+    (threadId, turnKey, copied = false) =>
+      turnKey === undefined
         ? undefined
-        : names.turns.get(turnName(threadId, turnKey)),
+        : copied
+          ? names.turnKeys.get(turnKey)
+          : threadId === undefined
+            ? undefined
+            : names.turns.get(turnName(threadId, turnKey)),
     [names],
   );
 }

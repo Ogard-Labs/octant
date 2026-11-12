@@ -580,13 +580,16 @@ function startedTurn(mode: AgentGrantMode, turnKey: string, body: unknown): bool
         (answer["kind"] === "provider-turn-state" && answer["admission"] === undefined))
     );
   }
-  if (mode === "work") return answer["kind"] === "turn-accepted" && answer["turnId"] === turnKey;
+  // Work answers `accepted` with the turn it started, and `ambiguous` when it
+  // cannot tell whether the turn started; only the first names a turn.
+  // Chat answers `turn-created` with the turn, also when replaying one.
   const turn = answer["turn"];
   return (
-    answer["kind"] === "turn-created" &&
+    answer["kind"] === (mode === "work" ? "accepted" : "turn-created") &&
     typeof turn === "object" &&
     turn !== null &&
-    (turn as Readonly<Record<string, unknown>>)["submissionId"] === turnKey
+    (turn as Readonly<Record<string, unknown>>)[mode === "work" ? "turnId" : "submissionId"] ===
+      turnKey
   );
 }
 

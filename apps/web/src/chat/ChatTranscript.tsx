@@ -557,7 +557,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
 
         const sentBy =
           delivery === undefined && turn.submissionId !== undefined
-            ? agentTurnSender(String(props.view.thread.id), String(turn.submissionId))
+            ? agentTurnSender(
+                String(props.view.thread.id),
+                String(turn.submissionId),
+                turn.sequence <= (props.view.thread.branchedFrom?.carriedTurnCount ?? 0),
+              )
             : undefined;
         return (
           <div className="chat-transcript__turn">

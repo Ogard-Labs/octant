@@ -144,12 +144,16 @@ describe("Started by", () => {
 });
 
 describe("Sent by", () => {
-  function Prompt(props: { readonly threadId: string; readonly turnKey: string }) {
+  function Prompt(props: {
+    readonly threadId: string;
+    readonly turnKey: string;
+    readonly copied?: boolean;
+  }) {
     const sender = useAgentTurnSenders();
-    return <AgentTurnSender agentName={sender(props.threadId, props.turnKey)} />;
+    return <AgentTurnSender agentName={sender(props.threadId, props.turnKey, props.copied)} />;
   }
 
-  it("names the outside agent under each turn it sent, by the id the turn keeps, and nothing under others", async () => {
+  it("names the outside agent under each turn it sent, by the id the turn keeps, also once copied into a branch, and nothing under others", async () => {
     const agentTurn = "64000000-0000-4000-8000-000000000001";
     const personTurn = "64000000-0000-4000-8000-000000000002";
     const client: AgentGrantClient = {
@@ -165,9 +169,11 @@ describe("Sent by", () => {
         <Prompt threadId="t-project" turnKey={agentTurn} />
         <Prompt threadId="t-project" turnKey={personTurn} />
         <Prompt threadId="t-other" turnKey={agentTurn} />
+        <Prompt threadId="t-branch" turnKey={agentTurn} copied />
+        <Prompt threadId="t-branch" turnKey={personTurn} copied />
       </AgentThreadAttributionProvider>,
     );
-    expect(await screen.findByText("Sent by Home bot")).toBeTruthy();
-    expect(screen.getAllByText(/Sent by/)).toHaveLength(1);
+    expect(await screen.findAllByText("Sent by Home bot")).toHaveLength(2);
+    expect(screen.getAllByText(/Sent by/)).toHaveLength(2);
   });
 });
