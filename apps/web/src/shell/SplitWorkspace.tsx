@@ -1,3 +1,4 @@
+import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
@@ -548,6 +549,9 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.waitingThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
+  const startedBy = useAgentThreadName(
+    "threadId" in surface && surface.threadId !== undefined ? String(surface.threadId) : undefined,
+  );
   const activateUnlessClosing = (target: EventTarget | null) => {
     // Activating can open another dock and resize the pane between pointer
     // down and click, moving its close button away from the pointer.
@@ -640,6 +644,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     >
                       {title}
                     </span>
+                    {startedBy === undefined ? null : (
+                      <span
+                        className="workspace-pane__started-by"
+                        title={`Started by ${startedBy}`}
+                      >
+                        {`Started by ${startedBy}`}
+                      </span>
+                    )}
                   </>
                 )}
                 {showTabs ? null : running ? (

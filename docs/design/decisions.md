@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 6       | 2            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 7       | 2            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **234**   | **198** | **32**       | **4**               |
+| **All areas**                                                                         | **235**   | **199** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2035,6 +2035,19 @@ A paired device may ask for a grant to open one dev server from its own computer
 - A paired device may stop only a server Octant owns, and a server outside active Code Project roots gets no row and no health probe.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Proxy sessions and server grants](../architecture.md#security-and-authority) and [Local servers and Running services](../architecture.md#security-and-authority).
+
+### Agents on other machines reach Octant through an agent grant
+
+An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
+
+- A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
+- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent.
+- Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
+- Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
+
+Status: Built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
 ## Credentials and sign-in
 

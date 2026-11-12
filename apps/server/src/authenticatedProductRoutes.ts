@@ -251,6 +251,14 @@ export function classifyProductAction(request: Request): string | undefined {
     // paired device never dumps the host.
     return method === "POST" ? "project.overview.read" : undefined;
   }
+  if (path === "/api/agent-grants" || path === "/api/agent-grants/threads") {
+    // What each outside agent may do and which threads it started.
+    return method === "GET" ? "settings.read-non-secret" : undefined;
+  }
+  if (path === "/api/agent-grants/revoke") {
+    // Ending a grant only takes authority away, so a paired device may do it.
+    return method === "POST" ? "agent-access.revoke" : undefined;
+  }
   if (path.startsWith("/api/automations")) {
     // Ordinary Automation Center mutations are remote-approvable per the
     // design's per-command policy; the route still re-checks host, Project,

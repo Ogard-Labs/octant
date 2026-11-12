@@ -103,6 +103,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     workSettings,
   } = props;
   const {
+    agentGrantClient,
     agentRunSettingsClient,
     automationNotificationClient,
     canvasClient,
@@ -290,6 +291,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(shieldServersClient === undefined ? {} : { shieldServersClient })}
       {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
+      agentGrantClient={agentGrantClient}
       codeProjectId={controller.workspace?.contextByMode.code.projectId ?? undefined}
       workProjectId={controller.workspace?.contextByMode.work.projectId ?? undefined}
       {...(props.onOpenServerProject === undefined
