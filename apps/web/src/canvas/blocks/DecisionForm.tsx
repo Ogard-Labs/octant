@@ -80,17 +80,33 @@ export function DecisionForm(props: DecisionFormProps) {
     | { readonly kind: "sent" }
     | { readonly kind: "refused"; readonly message: string }
   >({ kind: "idle" });
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // A text edit waits briefly before it saves. Each wait keeps the save it will
+  // run, so leaving the field or the form can run it now instead of losing it.
+  const pendingSaves = useRef(
+    new Map<string, { readonly timer: ReturnType<typeof setTimeout>; readonly run: () => void }>(),
+  );
   // Questions with a write the host has not settled. An emptied selection must
   // still queue a clear behind such a write, or the write lands afterwards and
   // brings back the option the person just took away.
   const inFlight = useRef(new Map<string, number>());
   useEffect(() => {
-    const pending = timers.current;
+    const pending = pendingSaves.current;
     return () => {
-      for (const timer of pending.values()) clearTimeout(timer);
+      // Closing the Canvas inside the wait must not discard the last edit.
+      for (const entry of [...pending.values()]) {
+        clearTimeout(entry.timer);
+        entry.run();
+      }
+      pending.clear();
     };
   }, []);
+  const flush = (questionId: string) => {
+    const entry = pendingSaves.current.get(questionId);
+    if (entry === undefined) return;
+    clearTimeout(entry.timer);
+    pendingSaves.current.delete(questionId);
+    entry.run();
+  };
 
   const setStatus = (questionId: string, status: QuestionStatus | undefined) =>
     setStatuses((current) => {
@@ -148,7 +164,16 @@ export function DecisionForm(props: DecisionFormProps) {
     if (change === undefined) {
       // Nothing to save, and nothing displayed that the host lacks: a blank
       // choice with no saved answer is not an unsaved edit.
-      if (!draft.custom && draft.selected.length === 0 && saved === undefined) dropIfUnchanged();
+      // A note typed before any option is chosen is displayed and not saved, so
+      // it stays until an answer exists to carry it.
+      if (
+        !draft.custom &&
+        draft.selected.length === 0 &&
+        saved === undefined &&
+        draft.note.trim() === ""
+      ) {
+        dropIfUnchanged();
+      }
       return;
     }
     setStatus(question.id, { kind: "saving" });
@@ -165,16 +190,21 @@ export function DecisionForm(props: DecisionFormProps) {
 
   const edit = (question: Question, draft: Draft, delay: boolean) => {
     setDrafts((current) => ({ ...current, [question.id]: draft }));
-    const timer = timers.current.get(question.id);
-    if (timer !== undefined) clearTimeout(timer);
+    const waiting = pendingSaves.current.get(question.id);
+    if (waiting !== undefined) clearTimeout(waiting.timer);
+    pendingSaves.current.delete(question.id);
     if (!delay) {
       void commit(question, draft);
       return;
     }
-    timers.current.set(
-      question.id,
-      setTimeout(() => void commit(question, draft), SAVE_DELAY_MS),
-    );
+    const run = () => void commit(question, draft);
+    pendingSaves.current.set(question.id, {
+      timer: setTimeout(() => {
+        pendingSaves.current.delete(question.id);
+        run();
+      }, SAVE_DELAY_MS),
+      run,
+    });
   };
 
   const eligible = form.questions.filter(
@@ -342,6 +372,7 @@ export function DecisionForm(props: DecisionFormProps) {
                     status={statuses[question.id]}
                     editable={props.editable}
                     onEdit={(draft, delay) => edit(question, draft, delay)}
+                    onFlush={() => flush(question.id)}
                   />,
                 ];
           })}
@@ -359,6 +390,8 @@ function DecisionQuestion(props: {
   readonly status: QuestionStatus | undefined;
   readonly editable: boolean;
   readonly onEdit: (draft: Draft, delayed: boolean) => void;
+  /** Run a text edit's waiting save now, as the field loses focus. */
+  readonly onFlush: () => void;
 }) {
   const { question, draft, editable } = props;
   const id = useId();
@@ -481,6 +514,7 @@ function DecisionQuestion(props: {
                   rows={2}
                   value={draft.text}
                   onChange={(event) => props.onEdit({ ...draft, text: event.target.value }, true)}
+                  onBlur={props.onFlush}
                 />
               </label>
             ) : null}
@@ -495,6 +529,7 @@ function DecisionQuestion(props: {
             rows={2}
             value={draft.note}
             onChange={(event) => props.onEdit({ ...draft, note: event.target.value }, true)}
+            onBlur={props.onFlush}
           />
         </label>
       )}

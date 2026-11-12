@@ -313,6 +313,68 @@ describe("decision form", () => {
     );
   });
 
+  it("keeps a note typed before any option is chosen and saves it with the first pick", async () => {
+    const user = userEvent.setup();
+    const { port, revise } = host();
+    render(<ChoiceBlock block={form} runtime={sendable(port)} />);
+    const note = (await screen.findAllByLabelText(/^Note/))[0] as HTMLTextAreaElement;
+    await user.type(note, "Matches a local window");
+    // Past the save wait, with no answer to attach it to, the note is still there.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(note).toHaveValue("Matches a local window");
+    expect(revise).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole("radiogroup", { name: "Who may set it?" })).getByRole("radio", {
+        name: /Yes/,
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("1 of 4 answered")).toBeInTheDocument());
+    expect(revise.mock.calls[0]?.[0].changes[0]).toMatchObject({
+      kind: "set",
+      questionId: "who",
+      note: "Matches a local window",
+    });
+  });
+
+  it("saves a text edit when the field loses focus, before the wait is over", async () => {
+    const user = userEvent.setup();
+    const { port, revise } = host();
+    render(<ChoiceBlock block={form} runtime={sendable(port)} />);
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /Yes/,
+        },
+      ),
+    );
+    await waitFor(() => expect(revise).toHaveBeenCalledTimes(1));
+    await user.type((await screen.findAllByLabelText(/^Note/))[0] as HTMLElement, "Quick note");
+    await user.tab();
+    // The 600 ms wait has not run out; leaving the field saves it now.
+    await waitFor(() => expect(revise).toHaveBeenCalledTimes(2), { timeout: 400 });
+    expect(revise.mock.calls[1]?.[0].changes[0]).toMatchObject({ note: "Quick note" });
+  });
+
+  it("saves the last text edit when the form closes inside the wait", async () => {
+    const user = userEvent.setup();
+    const { port, revise } = host();
+    const view = render(<ChoiceBlock block={form} runtime={sendable(port)} />);
+    await user.click(
+      within(await screen.findByRole("radiogroup", { name: "Who may set it?" })).getByRole(
+        "radio",
+        {
+          name: /Yes/,
+        },
+      ),
+    );
+    await waitFor(() => expect(revise).toHaveBeenCalledTimes(1));
+    await user.type((await screen.findAllByLabelText(/^Note/))[0] as HTMLElement, "Last words");
+    view.unmount();
+    await waitFor(() => expect(revise).toHaveBeenCalledTimes(2));
+    expect(revise.mock.calls[1]?.[0].changes[0]).toMatchObject({ note: "Last words" });
+  });
+
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {
     const user = userEvent.setup();
     const { port } = host({ refuse: "The thread is archived." });
