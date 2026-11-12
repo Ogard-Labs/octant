@@ -1380,10 +1380,16 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 }
 
 /* A narrow card that has a word to say (Exited, Preview ended) gives that word
-   the room the icon had; the name still labels the card for assistive technology. */
+   the room the icon and the name had; the name still labels the card for
+   assistive technology, and the buttons stay where they are. */
 @container (max-width: 200px) {
-  .dock-mini-card[data-detail="true"] .dock-card__icon {
+  .dock-mini-card[data-detail="true"] .dock-card__icon,
+  .dock-mini-card[data-detail="true"] .dock-mini-card__title {
     display: none;
+  }
+
+  .dock-mini-card[data-detail="true"] .dock-mini-card__head {
+    gap: 2px;
   }
 }
 
