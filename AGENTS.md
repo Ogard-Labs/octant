@@ -359,6 +359,14 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 ## Issue Closeout
 
 These rules govern Linear issues, not the product's Work/Code thread lifecycle.
+
+- One issue is one outcome a person would notice (a story), not one slice, PR,
+  or step. Slices, phases, and stacked PRs are a checklist inside that issue,
+  and several PRs may close one issue. Before filing, add the work to the open
+  issue that owns the outcome; file a new issue only for a different outcome.
+  (In November 2026 a backlog of 47 issues held about 12 outcomes; one feature
+  alone had 13 slice issues.)
+
 Implementing a tracked issue includes keeping its evidence and status current.
 An instruction to validate or finish an issue includes closing it when the
 conditions below are met; it does not authorize merging or releasing.
