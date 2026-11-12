@@ -19,7 +19,10 @@ const BODY_LIMIT = 4_096;
 export type AgentGrantRoutes = (request: Request) => Promise<Response | undefined>;
 
 export interface AgentGrantRouteOptions {
-  readonly service: Pick<AgentAccessService, "list" | "execute" | "attributions">;
+  readonly service: Pick<
+    AgentAccessService,
+    "list" | "execute" | "attributions" | "turnAttributions"
+  >;
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Stops the turns a revoked grant's threads are running, when the person asks. */
   readonly stopRunningTurns: (grantId: string) => Promise<void>;
@@ -75,7 +78,10 @@ export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): A
       return json(
         path === AGENT_GRANT_ROUTES.grants
           ? ({ kind: "grants", grants: options.service.list() } satisfies AgentAccessResult)
-          : ({ threads: options.service.attributions() } satisfies AgentThreadAttributions),
+          : ({
+              threads: options.service.attributions(),
+              turns: options.service.turnAttributions(),
+            } satisfies AgentThreadAttributions),
         200,
         origin,
       );

@@ -23,10 +23,6 @@ import type { CodeController } from "../code/useCodeController";
 import { composerContextOccupancy } from "../context/ComposerContextMeter";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
-import {
-  parseRepository,
-  type useRepositoryPullRequests,
-} from "../environment/useRepositoryPullRequests";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
@@ -38,6 +34,8 @@ import { dismissLiveBrowserCard, useAgentBrowserCard } from "../threadActivity/b
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
 import { runningNowThreads } from "../shell/dockThreadOverviewModel";
 import { remoteAccessAdministrationOf, type OctantHostBridge } from "../shell/hostBridge";
+import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
+import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
 import { RightUtilityDock } from "../shell/RightUtilityDock";
 import type {
   RightUtilityDockResolution,
@@ -80,6 +78,8 @@ export interface DockContainerProps {
     | "hideDockTile"
     | "minimiseDockTool"
     | "restoreDockTool"
+    | "runDockToolMenu"
+    | "toggleDockTool"
     | "moveDockTile"
     | "openDockTabBeside"
     | "loadCodeBoard"
@@ -152,7 +152,10 @@ export interface DockContainerProps {
   readonly displayedDockState: ThreadUtilityDockState;
   readonly dockPresentationWidth: number;
   readonly dockPresentedOpen: boolean;
-  readonly dockPullRequests: ReturnType<typeof useRepositoryPullRequests>;
+  /** The pull requests the thread is about, listed in More tools. */
+  readonly dockReferences: ReadonlyArray<DockUtilityLauncherReference>;
+  /** What the row of tool buttons shows and does; see `buildDockToolButtons`. */
+  readonly dockToolButtons: DockToolButtonsModel;
   readonly dockResolution: RightUtilityDockResolution;
   /** Whether one tool could be shown for the pane, so each tile answers for itself. */
   readonly dockResolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
@@ -167,8 +170,6 @@ export interface DockContainerProps {
   /** Whether the dock's thread runs on this computer rather than a paired one. */
   readonly dockThreadOnThisComputer: boolean;
   readonly dockThreadKey?: ThreadUtilityDockKey;
-  readonly dockThreadProjectId?: ProjectId;
-  readonly dockThreadRepository?: string;
   /**
    * Present while the active pane is a new Code task with no thread yet: the
    * tools its title band shows disabled until the task starts.
@@ -176,7 +177,6 @@ export interface DockContainerProps {
   readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
-  readonly launchableDockSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly navigation: ShellNavigationModel;
   readonly now: number;
   readonly overviewThread?: DockOverviewThread;
@@ -202,8 +202,6 @@ export interface DockContainerProps {
   readonly windowCapability: string;
   readonly writtenDocumentsByThread: ReadonlyMap<ThreadUtilityDockKey, WrittenDocumentOffers>;
 }
-
-const NO_DOCK_REFERENCES: ReadonlyArray<never> = [];
 
 /**
  * The right utility dock and the bottom utility panel: the thread's tools,
@@ -238,7 +236,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     displayedDockState,
     dockPresentationWidth,
     dockPresentedOpen,
-    dockPullRequests,
+    dockReferences,
+    dockToolButtons,
     dockResolution,
     dockResolveSurface,
     dockSidecarsByThread,
@@ -247,11 +246,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThreadHost,
     dockThreadKey,
     dockThreadOnThisComputer,
-    dockThreadProjectId,
-    dockThreadRepository,
     dockToolsAwaitingThread,
     isNarrow,
-    launchableDockSurfaces,
     navigation,
     now,
     overviewThread,
@@ -292,29 +288,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     () => remoteAccessAdministrationOf(hostBridge),
     [hostBridge],
   );
-
-  const launchableDockReferences = useMemo(() => {
-    const dockRepository = parseRepository(dockThreadRepository);
-    if (
-      dockPullRequests.status !== "ready" ||
-      dockRepository === undefined ||
-      dockThreadProjectId === undefined
-    ) {
-      return NO_DOCK_REFERENCES;
-    }
-    return dockPullRequests.rows.slice(0, 5).map((row) => ({
-      id: String(row.url),
-      label: `#${String(row.number)} ${row.title}`,
-      detail: `${dockRepository.owner}/${dockRepository.name}`,
-      onOpen: () =>
-        actions.selectProjectPullRequestIdentity({
-          projectId: dockThreadProjectId,
-          repositoryOwner: dockRepository.owner,
-          repositoryName: dockRepository.name,
-          number: row.number,
-        }),
-    }));
-  }, [actions, dockPullRequests, dockThreadProjectId, dockThreadRepository]);
 
   // A coordinator's workers, from the thread list this window already holds:
   // the Agents tool lists them and asks the host only for their runs.
@@ -614,7 +587,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   }
 
   function hideCard(entry: DockShelfEntry) {
-    // The card goes and nothing else: the tool stays an open tab in the strip,
+    // The card goes and nothing else: the tool stays open, its button in the row,
     // and no page or shell is closed or stopped. A card that showed because the
     // agent's session is live is also dismissed for that session.
     actions.hideDockCard(entry.tabId);
@@ -678,9 +651,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("delivery")
         }
         isNarrow={isNarrow}
-        {...(displayedDockState.lastBrowser === undefined
-          ? {}
-          : { lastBrowserTabId: displayedDockState.lastBrowser })}
         files={
           bottomPanelOpen && activeBottomSurface?.id === "files"
             ? undefined
@@ -699,8 +669,17 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         desktop={threadUtility("desktop")}
         debug={threadUtility("debug")}
         vitals={threadUtility("vitals")}
-        launchableSurfaces={launchableDockSurfaces}
-        launchableReferences={launchableDockReferences}
+        {...(isNarrow
+          ? {
+              toolRow: {
+                dragSource: false,
+                model: dockToolButtons,
+                onMenuAction: actions.runDockToolMenu,
+                onPress: actions.toggleDockTool,
+                references: dockReferences,
+              },
+            }
+          : {})}
         onClose={actions.closeDock}
         onCloseTab={(tabId) => {
           // Closing the Browser tab dismisses the live session's card too, so
@@ -817,7 +796,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           onHideTile: actions.hideDockTile,
           onMinimise: actions.minimiseDockTool,
           onMove: actions.moveDockTile,
-          onOpenBeside: actions.openDockTabBeside,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,
           onShowAlone: actions.showDockTabAlone,

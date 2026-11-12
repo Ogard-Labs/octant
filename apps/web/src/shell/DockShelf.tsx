@@ -76,7 +76,7 @@ export function DockMiniCard(props: {
   readonly detail?: string | undefined;
   /** Output arrived while nobody was looking; a quiet dot says so to every reader. */
   readonly newOutput?: boolean;
-  /** Takes the card away; the tool stays open, in the strip, and nothing is closed or stopped. */
+  /** Takes the card away; the tool stays open, its button in the row, and nothing is closed or stopped. */
   readonly onHide: () => void;
   /**
    * Whether the pointer or the keyboard is on the card, so what it shows is

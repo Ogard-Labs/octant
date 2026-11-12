@@ -854,8 +854,8 @@ rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
 Thread utilities live in the Right Utility Dock outside the split tree. The dock
 shows one open tool, or several together as tiles (at most two columns of three;
-[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the strip
-menu). One tool at a time meant choosing between a simulator and the page it
+[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the tool
+buttons' menu). One tool at a time meant choosing between a simulator and the page it
 was testing, so a thread keeps, beside its open tools and the selected one, which
 tools are shown. A shown tile is live and stays mounted while it is shown;
 a tool that is open but not shown is not mounted, as a hidden tab never was.
@@ -865,9 +865,10 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
 with an Arrange menu (Move left, right, up and down where the caps allow, Show
-alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at
-its trailing edge; the strip lists only the tools that are not shown (a minimised tool is
-not a tile and not a strip tab: its card stands for it). Stacked, a page showed four bars and named the tool
+alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
+trailing edge; a tool that is open but not shown is marked on its button in the title band's
+tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
+Stacked, a page showed four bars and named the tool
 three times. A divider is a hairline that shows a quiet strong role while hovered
 or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
@@ -1002,8 +1003,38 @@ Terminal only); they never stand as a column
 beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
-its title band offers the common tools, Add tool lists the rest, and an open
-dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+its header is an empty band as tall as the title rail, and the tools are opened
+from the title band's **tool row**. At 961px and wider the row sits before the
+bottom-panel and dock toggles: one
+icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
+then **More tools**, a menu of every other tool the thread can use, grouped as the
+launcher groups them, each a checked item while that tool is shown, and after the
+tools the pull requests the thread is already about under "Relevant to this thread". A button is present
+only where the thread can use the tool. Pressing one opens the tool as a tile beside the
+focused one (alone when the dock is empty) and widens and shows the dock; pressing it
+again closes the tool (the Browser closes every page), except that a pressed Browser or Terminal button
+minimises its tool to a card on the dock's shelf instead (see **Minimised tools**), so the page or
+shell stays running and in view. A button reads pressed while its
+tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
+the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
+is not refused: its press shows it in the focused tile's place, the replaced tool stays
+open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
+before its thread exists the buttons are disabled with "Available once the task starts". A press leaves focus
+on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
+movement, and its width is part of the trailing cluster the pane header reserves.
+The five tools with a button of their own (Environment, Terminal, Review, Browser,
+Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
+below for an open tool that is not on screen, Show alone, Hide from view and the
+moves the caps allow for a tile, Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
+Browser, and Close. A minimised tool's button is not pressed, carries the dot, and reads "Minimised to a card"; pressing it restores the tool. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
+shows the tool beside, the lower third below, and anywhere else replaces the
+focused tile. A tool opened from More tools has neither: it is shown beside the
+focused tile (in its place at the caps) and is then arranged, hidden and closed
+from its own tile's bar; a tool alone has no bar and is closed by picking it
+again in More tools. At 960px and under the dock is a one-tool drawer, the title band is
+inert behind it, and the same row stands in the drawer's header; there a press
+replaces the tool shown and a tool cannot be dragged. The dock no longer has a tab strip, Add tool, Show another tool,
+or quick tools of its own (the bottom panel keeps its tab strip and Add tool). Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
 iOS Simulator, Android emulator, Desktop, and Vitals, as mode and capability allow. Chat
@@ -1102,21 +1133,34 @@ thread's one shell, so minimising either takes the whole tool and leaves one
 card, never one for each tab. A minimised tool is an open tab that is in no
 tile and is nobody's selected tab; if it was the only tool shown the overview
 returns, and with tiles focus moves as it does when a tile is hidden. Choosing
-any of its tabs, from the strip, **Show another tool** or a drop, brings the
+any of its tabs, from a drop, brings the
 whole tool back as the focused tile's tool, as any hidden tool comes back; its
 card brings it back as a tile of its own (see **A card**). The state, with the
 place each minimised tool stood in, is window-local presentation stored with the
 thread's open tools; the bottom panel never has one.
 
 - **Ways in.** A tile's **Arrange <tool>** menu offers **Minimise to card** for the
-  Browser and the Terminal only, after **Hide from view**. A Browser or Terminal
-  tab's context menu (the menu key and Shift+F10 included) offers the same item
-  where it offers arranging a tool. The tile bar has no button of its own for it,
-  so a tile still has one bar and one name. Minimising never closes or stops the
-  tool and never sends anything to a page or a shell. Focus goes to the card's
-  expand control, since the control it was on has left; it is taken only while
-  focus is still on the page body or in the closing menu, so a person who has
-  since moved it keeps it where they put it.
+  Browser and the Terminal only, after **Hide from view**. The Browser and
+  Terminal buttons in the title band's tool row offer the same item on their
+  context menu (right click, the menu key or Shift+F10), after the placements
+  and before New Terminal or New Browser page. Pressing a pressed Browser or
+  Terminal button minimises it instead of closing it, so the page or shell keeps
+  running in view on the shelf; closing stays the tile bar's **Close** and
+  **Close <tool>** on the button's menu, and every other tool keeps its rule
+  that a press on a pressed button closes it. The tile bar has no button of its
+  own for it, so a tile still has one bar and one name. Minimising never closes
+  or stops the tool and never sends anything to a page or a shell. Where the
+  tile's Arrange menu minimised it, focus goes to the card's expand control,
+  since the control it was on has left; it is taken only while focus is still on
+  the page body or in the closing menu, so a person who has since moved it keeps
+  it where they put it.
+- **The button of a minimised tool** is not pressed, carries the open dot, and
+  its description reads "Minimised to a card". Pressing it shows the tool
+  (see **A card**) and shows the dock when it was closed; it never replaces a
+  shown tool unless both columns are full. Its context menu offers New Terminal
+  or New Browser page and Close, with no placements, since it has no tile. In
+  the drawer (960px and under) no tool is minimised: a press there replaces the
+  tool shown, as for any tool, and never minimises.
 - **The shelf.** A group named **Minimised tools** at the foot of the dock body,
   under the overview when no tool is shown and under the tiles when tools are
   shown. It takes its natural height and holds at most two cards (Browser,
@@ -1130,14 +1174,13 @@ thread's open tools; the bottom panel never has one.
   short dock, or two stacked cards in a dock under about 820px tall, reaches; the
   tiles above keep their floors and measure the space that is left. The modal dock
   (960px and below) has no room for it and draws none; the state is kept, and
-  there the minimised tool's tab stays in the strip so nothing leads nowhere.
-  Otherwise a minimised tool leaves the strip, since its card stands for it.
+  there the tool's button reads as any open tool's, so nothing leads nowhere.
 - **A card** is one of the dock's cards: the tool's icon, a title, **Show
   <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
   Show brings the tool back as a tile of its own (the Browser as the page it
-  last showed), focused, and puts the keyboard in it. It returns to the place it
+  last showed), focused, and returns the keyboard to the tool's button in the row. It returns to the place it
   was minimised from while that place still exists: the same row of a column it
   shared, or a column of its own again at the same position, when there is room
   under the caps. Otherwise it becomes the last tile: a new column while there is
@@ -1146,12 +1189,14 @@ thread's open tools; the bottom panel never has one.
   tool shown. It never takes over a shown tool's tile, so no shown tool remounts;
   only when both columns are full does it take the focused tile's, as choosing
   its tab would. A tool that was the only one shown leaves no place. Hide card removes the card and
-  nothing else: the tool goes back to being an ordinary open tab in the strip,
-  not shown, and no page or shell is closed or stopped (closing a tab with its
+  nothing else: the tool goes back to being an ordinary open tool, its button
+  reading open but not shown (the dot and "Open"), and no page or shell is closed or stopped (closing a tab with its
   own browser context ends that context, which a card that only previews must
   never do; the floating preview it replaces only hid itself). The keyboard goes
-  to the strip, the selected tab, the strip's overflow count, else Add tool (or Show another tool where Add tool is absent), looked for again as the strip measures its room so focus never falls to the page. Closing the tool stays the strip
-  tab's own close. A card never starts a process, never writes to the journal and never sends input
+  to the tool's button in the row, else the dock toggle, looked for again as the
+  row re-renders so focus never falls to the page. Pressing the button shows the
+  tool. Closing the tool stays the tile bar's close and **Close** on its button's
+  menu. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
 - **The Browser card** shows the page's title, or its host, with the profile's
@@ -1400,7 +1445,7 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 ### Subagents
 
 Environment belongs to a
-thread as a context-aware dock tab opened from the dock tab strip or Add tool. Its
+thread as a context-aware dock tab opened from the title band's tool row. Its
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every

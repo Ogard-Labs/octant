@@ -863,10 +863,26 @@ describe("BrowserWorkspace", () => {
         return browser;
       }
 
+      // The drawing bar appears after the capture is taken, read and decoded.
+      // On a slow runner that chain outlasted the one-second default and a
+      // different test of this group failed on each run. Stay under the
+      // package's 15 s test timeout.
+      const DRAWING_OPENS_WITHIN_MS = 8_000;
+
       async function openDrawing(browser: BrowserAutomationClient) {
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
-        return screen.findByRole("toolbar", { name: "Drawing tools" });
+        fireEvent.click(
+          await screen.findByRole(
+            "button",
+            { name: "Draw on page" },
+            { timeout: DRAWING_OPENS_WITHIN_MS },
+          ),
+        );
+        return screen.findByRole(
+          "toolbar",
+          { name: "Drawing tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
       }
 
       function drag(layer: Element, from: [number, number], to: [number, number]) {
@@ -905,7 +921,9 @@ describe("BrowserWorkspace", () => {
         const layer = screen.getByRole("application", { name: "Page capture to draw on" });
         expect(layer).toBeVisible();
         // Drawing opens ready for keys, not with focus left on the page body.
-        expect(layer).toHaveFocus();
+        // Focus lands a frame after the layer mounts, so a slow runner read it
+        // before it arrived.
+        await waitFor(() => expect(layer).toHaveFocus());
         // The page's own click-through preview is not mounted while the picture is drawn on.
         expect(
           screen.queryByRole("article", { name: "Interactive headless Browser preview" }),
@@ -1029,7 +1047,7 @@ describe("BrowserWorkspace", () => {
           expect(screen.queryByText("Added to the message")).toBeNull();
           // The refusal is announced, and the keys still work: focus is back on the layer.
           expect(screen.getByRole("alert")).toHaveTextContent("The picture was not added");
-          expect(layer).toHaveFocus();
+          await waitFor(() => expect(layer).toHaveFocus());
           // It sits in the stage, so it does not move the still.
           expect(screen.getByRole("alert").closest(".browser-markup")).not.toBeNull();
           await waitFor(() =>

@@ -71,7 +71,7 @@ export interface DockTilesProps {
   readonly onFocusTile: (tabId: string) => void;
   readonly onHideTile: (tabId: string) => void;
   readonly onMinimiseTile?: (tabId: string) => void;
-  /** Closes the tool, as its strip tab's close does. */
+  /** Closes the tool, as its button's Close does. */
   readonly onCloseTile: (tabId: string) => void;
   readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
   readonly onShowTileAlone: (tabId: string) => void;

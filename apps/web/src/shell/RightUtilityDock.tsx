@@ -7,7 +7,7 @@ import {
   type RightUtilityDockSurfaceProps,
 } from "./RightUtilityDockSurface";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
+import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import {
   dockWidthCeiling,
@@ -32,9 +32,6 @@ export interface RightUtilityDockProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly isNarrow: boolean;
-  readonly lastBrowserTabId?: string;
-  readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
@@ -55,6 +52,8 @@ export interface RightUtilityDockProps {
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
   readonly tiles?: DockTileControls;
+  /** The row of tool buttons the drawer's header carries; absent when docked. */
+  readonly toolRow?: DockToolButtonsProps;
   readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
@@ -113,13 +112,6 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.desktop === undefined ? {} : { desktop: props.desktop })}
       {...(props.debug === undefined ? {} : { debug: props.debug })}
       {...(props.vitals === undefined ? {} : { vitals: props.vitals })}
-      {...(props.lastBrowserTabId === undefined
-        ? {}
-        : { lastBrowserTabId: props.lastBrowserTabId })}
-      launchableSurfaces={props.launchableSurfaces}
-      {...(props.launchableReferences === undefined
-        ? {}
-        : { launchableReferences: props.launchableReferences })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
@@ -133,6 +125,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
       {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
+      {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
         : { toolsAwaitingThread: props.toolsAwaitingThread })}

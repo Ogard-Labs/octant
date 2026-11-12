@@ -942,7 +942,7 @@ describe("minimised dock tools", () => {
     expect(hideUtilityCard(hidden, pageOne)).toBe(hidden);
     expect(hideUtilityCard(state, "files")).toBe(state);
 
-    // With nothing shown the overview stays, and the tool waits in the strip.
+    // With nothing shown the overview stays, and the tool waits, open but not shown.
     const overview = minimiseUtilityTool(opened("files", "terminal"), "terminal");
     const away = hideUtilityCard(overview, "terminal");
     expect(away.active).toBeUndefined();

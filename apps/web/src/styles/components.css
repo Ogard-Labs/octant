@@ -2011,6 +2011,14 @@ html[data-octant-reduced-motion="true"] .turn-activity__status-icon {
   pointer-events: none;
 }
 
+/* An outside agent sent this prompt. Unlike the time it is always shown, so the
+   prompt is never read as the person's own words. */
+.agent-turn-sender {
+  display: block;
+  align-self: flex-end;
+  text-align: end;
+}
+
 .turn-user:hover .turn-message-meta,
 .turn-user:focus-within .turn-message-meta,
 .turn-agent:hover .turn-message-meta,

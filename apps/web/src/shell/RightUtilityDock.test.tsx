@@ -19,9 +19,6 @@ const browser = dockSurface("browser");
 function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDockProps {
   return {
     isNarrow: false,
-    launchableSurfaces: RIGHT_UTILITY_DOCK_SURFACES.filter(
-      (surface) => surface.id === "browser" || surface.id === "terminal",
-    ),
     onClose: vi.fn(),
     onCloseTab: vi.fn(),
     onCancelWidthPreview: vi.fn(),
@@ -197,7 +194,6 @@ describe("RightUtilityDock", () => {
                 onHideTile: vi.fn(),
                 onMinimise: vi.fn(),
                 onMove: vi.fn(),
-                onOpenBeside: vi.fn(),
                 onResizeColumn: vi.fn(),
                 onResizeColumns: vi.fn(),
                 onShowAlone: vi.fn(),

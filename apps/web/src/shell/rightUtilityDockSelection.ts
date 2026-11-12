@@ -77,7 +77,7 @@ export interface ThreadUtilityDockState {
   readonly minimisedPlaces?: ReadonlyArray<DockToolPlace>;
   /**
    * The Browser page that was last shown. The Browser is one tool with pages,
-   * so showing "the Browser" again (from its strip entry, a menu, a drag or its
+   * so showing "the Browser" again (from its button, a menu, a drag or its
    * card) returns to this page rather than to whichever page is first.
    */
   readonly lastBrowser?: string;
@@ -294,7 +294,7 @@ export function showUtilityTabBelow(
   return place(state, tabId, "below");
 }
 
-/** Shows one tool again, leaving every other tool open in the strip. */
+/** Shows one tool again, leaving every other tool open. */
 export function showUtilityTabAlone(
   state: ThreadUtilityDockState,
   tabId: string,
@@ -309,8 +309,8 @@ export function showUtilityTabAlone(
 }
 
 /**
- * Takes a tile out of view without closing its tool: the tab stays in the
- * strip, so the tool can be shown again and keeps its place.
+ * Takes a tile out of view without closing its tool: the tab stays open, its button in the row,
+ * so the tool can be shown again and keeps its place.
  */
 export function hideUtilityTile(
   state: ThreadUtilityDockState,
@@ -422,7 +422,7 @@ export function isUtilityToolMinimised(
 
 /**
  * Takes a minimised tool's card away and nothing else: the tool goes back to
- * being an ordinary open tab in the strip, not shown, and nothing is closed or
+ * being an ordinary open tab in the row, not shown, and nothing is closed or
  * stopped. What was shown stays shown.
  */
 export function hideUtilityCard(
@@ -666,8 +666,8 @@ export function openUtilityTabBesideState(
     existing ?? (repeatable ? { id: instanceId, surface } : singletonUtilityTab(surface));
   const tabs = existing === undefined ? [...state.tabs, tab] : state.tabs;
   // A new Browser page or Terminal joins its tool, which a card would otherwise
-  // keep half minimised. A cap refusing the tile leaves the tool open in the
-  // strip, not shown.
+  // keep half minimised. A cap refusing the tile leaves the tool open, its button in the
+  // row, not shown.
   const base = withMinimised(
     { ...state, tabs },
     repeatable ? withoutMinimisedTool({ ...state, tabs }, surface) : state.minimised,

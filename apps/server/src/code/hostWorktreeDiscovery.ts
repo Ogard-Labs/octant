@@ -1,7 +1,8 @@
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { measureFolder, type FolderSize } from "./archivedWorktrees";
+import { hostPathKey, sameHostPath } from "./hostPaths";
 import { parseWorktreeList, runHostGit, type ListedWorktree } from "./hostGitReads";
 
 /**
@@ -125,7 +126,8 @@ export async function scanHostWorktrees(
   }
 
   const owned = await dependencies.ownedWorktreePaths();
-  const ownedCanonical = new Set([...owned].map((path) => resolve(path)));
+  const platform = dependencies.platform;
+  const ownedCanonical = new Set([...owned].map((path) => hostPathKey(path, platform)));
   const repositories: DiscoveredRepository[] = [];
   for (const common of commons.values()) {
     signal.throwIfAborted();
@@ -146,7 +148,7 @@ export async function scanHostWorktrees(
     if (linked.length === 0) continue;
     const worktrees: DiscoveredWorktree[] = [];
     for (const entry of linked) {
-      worktrees.push(await describe(common, entry, ownedCanonical, limits, signal));
+      worktrees.push(await describe(common, entry, ownedCanonical, limits, platform, signal));
     }
     repositories.push({ path: main.path, commonDirectory: common, worktrees });
   }
@@ -159,10 +161,11 @@ async function describe(
   entry: ListedWorktree,
   owned: ReadonlySet<string>,
   limits: ScanLimits,
+  platform: NodeJS.Platform,
   signal: AbortSignal,
 ): Promise<DiscoveredWorktree> {
   const missing = !(await isDirectory(entry.path));
-  const admin = await worktreeAdminDirectory(common, entry.path);
+  const admin = await worktreeAdminDirectory(common, entry.path, platform);
   const activity = admin === undefined ? undefined : await newestChange(admin);
   return {
     path: entry.path,
@@ -177,7 +180,7 @@ async function describe(
         : await isDelivered(common, entry.head, entry.branch, signal),
     lastActivityMs: activity,
     size: missing ? undefined : await measureFolder(entry.path, limits.sizeEntries),
-    ownedByOctant: owned.has(resolve(entry.path)),
+    ownedByOctant: owned.has(hostPathKey(entry.path, platform)),
   };
 }
 
@@ -221,6 +224,7 @@ export async function isDelivered(
 export async function worktreeAdminDirectory(
   common: string,
   worktreePath: string,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string | undefined> {
   const root = join(common, "worktrees");
   let names: ReadonlyArray<string>;
@@ -229,14 +233,15 @@ export async function worktreeAdminDirectory(
   } catch {
     return undefined;
   }
-  const expected = resolve(worktreePath, ".git");
+  const paths = platform === "win32" ? win32 : posix;
+  const expected = paths.join(worktreePath, ".git");
   for (const name of names) {
     const admin = join(root, name);
     const gitdir = await readSmall(join(admin, "gitdir"));
     if (gitdir === undefined) continue;
     const named = gitdir.trim();
-    const target = isAbsolute(named) ? resolve(named) : resolve(admin, named);
-    if (target === expected) return admin;
+    const target = paths.isAbsolute(named) ? named : paths.join(admin, named);
+    if (sameHostPath(target, expected, platform)) return admin;
   }
   return undefined;
 }

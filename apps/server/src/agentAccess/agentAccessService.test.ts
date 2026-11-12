@@ -254,6 +254,56 @@ describe("agent grants", () => {
     expect(service.read(grantId)?.state).toBe("revoked");
   });
 
+  it("names the agent on each turn it sent, by the id the turn keeps, under its current name", () => {
+    const { service } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Home bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const turnKey = "62000000-0000-4000-8000-000000000001";
+    service.recordTurnSent({ grantId, threadId: "thread-1", mode: "code", turnKey });
+    expect(service.turnAttributions()).toEqual([
+      { threadId: "thread-1", turnKey, agentName: "Home bot" },
+    ]);
+    const grant = service.read(grantId);
+    if (grant === undefined) throw new Error("grant missing");
+    service.execute(
+      {
+        kind: "change",
+        grantId: grantId as never,
+        expectedGeneration: grant.generation,
+        name: "Studio bot",
+        scope: grant.scope,
+      },
+      AGENT_ACCESS_LOCAL_ACTOR,
+    );
+    expect(service.turnAttributions()[0]?.agentName).toBe("Studio bot");
+  });
+
+  it("keeps the first sender of a turn when another grant records the same turn", () => {
+    const { service } = harness();
+    const first = created(
+      service.execute(
+        { kind: "create", draft: { name: "Home bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const second = created(
+      service.execute(
+        { kind: "create", draft: { name: "Other bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const turnKey = "62000000-0000-4000-8000-000000000002";
+    service.recordTurnSent({ grantId: first, threadId: "thread-1", mode: "code", turnKey });
+    service.recordTurnSent({ grantId: second, threadId: "thread-1", mode: "code", turnKey });
+    expect(service.turnAttributions()).toEqual([
+      { threadId: "thread-1", turnKey, agentName: "Home bot" },
+    ]);
+  });
+
   it("holds a grant's turn starts until each is released, once", () => {
     const { service } = harness();
     const first = service.holdTurnStart("g");
