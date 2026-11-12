@@ -138,6 +138,15 @@ describe("importing a Mermaid flowchart", () => {
     });
   });
 
+  it("refuses two ampersand lists whose pairs outnumber a diagram's links, without building them", () => {
+    const many = (prefix: string) =>
+      Array.from({ length: 200 }, (_, index) => `${prefix}${String(index)}`).join(" & ");
+    expect(refusal(`flowchart TD\n ${many("a")} --> ${many("b")}`)).toMatchObject({
+      reason: "unsupported-construct",
+      line: 2,
+    });
+  });
+
   it("reads thick and longer links as arrows, and fans an ampersand list out into one edge per pair", () => {
     const block = imported(
       "flowchart LR\n a ==> b\n b == heavy ==> c\n c ---> d\n d -.-> e\n a & b --> x & y",

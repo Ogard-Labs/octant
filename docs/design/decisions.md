@@ -2558,7 +2558,7 @@ An agent delivers anything the person will keep, share or return to as a Canvas,
 - The delivery test is the answer, not the verb. When in doubt the agent makes the Canvas rather than asking.
 - A document that declares an older schema version but carries a newer block is refused as a future version.
 - A diagram holds at most 512 nodes and 1,024 edges, re-checked by domain policy before it persists or renders. Boards embed no third-party canvas engine and run no markup or script. _Here only._
-- A bounded subset of Mermaid is translated into typed blocks. A diagram outside that subset renders with a bundled renderer inside the existing sandboxed no-network frame, and raw source shows only when rendering fails (maintainer request, 2026-11-12). Not built yet: today Mermaid is never rendered and a diagram outside the subset is refused with a typed reason.
+- A bounded subset of Mermaid is translated into typed blocks, widened for the constructs models write most (more flowchart directions, shapes, links and nested subgraphs; more sequence arrows and the activation shorthand; state descriptions) instead of bundling a renderer. A diagram outside the subset is refused with a typed reason and stays a code block (maintainer decision, 2026-11-12). Still refused: styling lines, sequence loops and alternatives, class diagrams.
 
 Status: Partly built. Since: —. Detail: [Canvas: Agent tool and recipes](canvas.md#agent-tool-and-recipes) and [Presentation and schema versions](canvas.md#presentation-and-schema-versions).
 

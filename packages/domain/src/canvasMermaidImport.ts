@@ -1,4 +1,5 @@
 import {
+  CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
@@ -394,6 +395,11 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
       const nodeText = link === null ? rest : rest.slice(0, link.index);
       const to = ampersandList(nodeText).map((part) => reference(part, statement));
       if (from !== undefined && pending !== undefined) {
+        // Refused before the pairs exist: two long `&` lists multiply, and a
+        // source inside the size bound could otherwise build millions of
+        // edges only for the block catalog to refuse them.
+        if (edges.length + from.length * to.length > CANVAS_MAX_DIAGRAM_EDGES)
+          throw unsupported(statement, "More links than a diagram holds");
         for (const source of from) {
           for (const target of to) {
             edges.push({

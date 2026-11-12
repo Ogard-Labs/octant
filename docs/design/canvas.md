@@ -1042,23 +1042,28 @@ that board), the artifact SVG sidecar and thumbnail (the layout scaled into the
 band), and the HTML export (the layout drawn inline as plain SVG elements with
 no script, id, or external reference) place the same nodes; the Markdown
 export names a shaped node by its role.
-Mermaid outside the translated subset is drawn by a bundled renderer inside
-the existing sandboxed, no-network frame, and its raw source shows only when
-that rendering fails (maintainer request, 2026-11-12). Not built yet: today
-Mermaid is never rendered and such a source stays a code block. The pure `importCanvasMermaid` translates a bounded
-subset into the typed blocks above: a `flowchart` or `graph` (TD/TB or LR;
-`[ ]` process, `{ }` decision, `([ ])` terminator, `( )` the plain box;
-`-->`, `---`, and `-.->` links with a piped or inline label; one level of
-`subgraph`) into a `diagram`; a `sequenceDiagram` (participants and actors
-with aliases, `->>`, `-->>`, `->`, `-->` messages, notes beside or over one
-participant, activate and deactivate) into a `sequence`; a `stateDiagram`
+Mermaid is never rendered: the translator is widened for the constructs models
+write most instead of bundling a renderer, and a source outside the subset
+stays a code block (maintainer decision, 2026-11-12). The pure `importCanvasMermaid` translates a bounded
+subset into the typed blocks above: a `flowchart` or `graph` (TD/TB, LR, and
+BT and RL, which keep their links and are drawn down and right; a `direction`
+line is read past; `[ ]` process, `{ }` decision, `([ ])` and `(( ))`
+terminator, `( )` the plain box, `[( )]` the plain box with the database icon;
+`-->`, `---`, `-.->`, `==>` and their longer forms with a piped or inline
+label; `a & b --> c & d` as one link per pair, refused before the pairs are
+built when they would exceed the block's link limit; `subgraph` nested up to
+three levels, with a quoted title) into a `diagram`; a `sequenceDiagram`
+(participants and actors with aliases, `->>`, `-->>`, `->`, `-->`, `-x`,
+`--x`, `-)`, `--)` messages, the `+`/`-` activation shorthand, notes beside or
+over one participant, activate and deactivate; `autonumber` is read past) into
+a `sequence`; a `stateDiagram`
 (transitions, `[*]` as a start and an end with their own ids, `state "…" as`,
-composite states) into a `state`; an `erDiagram` (relationships with
+`id : description` as the label, composite states) into a `state`; an `erDiagram` (relationships with
 cardinalities, attribute blocks, `PK`) into an `er`; and a
 `mindmap` (tree by indentation; a square, rounded, or circle topic keeps
 its text and drops its id and shape) into a `mindmap`. Anything else — another
 diagram type, styling, classes, `click`, loops and alternatives, other shapes
-and links, a nested subgraph, a note spanning two participants, an `FK` or
+and links, a subgraph nested deeper than three levels, a note spanning two participants, an `FK` or
 `UK` key, a non-identifying (`..`) relationship, two ids that would collide, a source over 32,768
 characters, or a translation the block catalog refuses — returns a typed
 refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,
