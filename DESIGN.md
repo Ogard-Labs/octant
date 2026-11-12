@@ -233,6 +233,13 @@ warning is wrong.
 
 ### Shapes and depth
 
+A divider handle (the sidebar's, the dock's, the bottom panel's, a pane split's)
+is a hairline in the border at rest, the strong border under the pointer, and
+the meta ink at double width while it is grabbed; keyboard focus draws the shared
+focus edge, on the visible handle when the focusable element is an invisible
+input (a pane split). None of it is the accent: a clicked divider kept a bright
+accent line lit, and a split showed no keyboard mark at all.
+
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
@@ -246,6 +253,22 @@ this document names the token, not the number.
 | `--oct-radius-pill`     | 9999px | Compact chips, meters, and circular icon controls only                                 |
 | `--radius` (`md`)       | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
 | `--radius-lg` / `-xl`   | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
+
+A corner that sits within one radius of a rounded parent's corner is concentric
+with it: the parent's radius less the gap between them, or square when the gap
+is at least the radius, never the same token again. Two equal radii one inset
+apart leave a frame that swells at the corner (the sheet's bottom corners, 8px
+in from the window's own, did). So the sheet's bottom corners are the window's
+radius (`--octant-window-radius`, the card radius, as the OS rounds a window
+about that much) less the sheet inset, `--octant-sheet-corner-outer`, written
+once with `calc()` in `shell.css`; the corners where the frame turns, under the
+title band and beside the rail, keep the card radius, since the window's corner
+is far from them; and a sheet edge that meets the window's edge, with no rail
+beside it, is square, as is a corner that meets an inner seam (the bottom
+panel's right corner while the dock is open, where it meets the dock and not the
+window). `--octant-window-radius` is an assumed 12px: nothing in the desktop app
+reads the OS's real corner, so it is to be confirmed there, and one token change
+corrects every corner.
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -322,8 +345,9 @@ The window is a frame and one sheet. The rail and the title band form one
 L-shaped frame in the window surface (the sidebar colour), with no line where
 they meet. The sidebar, the stage (the primary workspace), the right dock, and
 the bottom panel sit inside it as one sheet: it starts under the title band,
-stops 8px short of the window's right and bottom edges, rounds its outer
-corners (`--oct-radius-md`) where the frame turns and along the bottom, and
+stops 8px short of the window's right and bottom edges, rounds its corners
+where the frame turns (`--oct-radius-md`) and its bottom corners concentric with
+the window's (see the radius rule above), and
 divides its parts with one soft hairline (`--octant-border-soft`); no
 stronger line doubles it, and none runs on through the band or the inset
 below the sheet. The sidebar's side is the workspace colour,
@@ -1146,7 +1170,11 @@ its own.
 The rest of the thread view is one set of recipes in `octant.css` and the
 reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
 them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
-between rows. A person's message is a right-aligned bubble (`turn-user`,
+between rows and fades its content out over 12px at both edges, in every mode:
+text scrolling under the title band's hairline or into the composer ended in half
+a line cut flat, and only Code had a fade, at the top. At rest the first line
+sits below it. The find bar sits just below the top fade so it is never dimmed;
+the fade also dims the scrollbar thumb at the two extremes, which is accepted. A person's message is a right-aligned bubble (`turn-user`,
 `bubble`: control fill, hairline, `--oct-radius-md`, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
@@ -1601,6 +1629,11 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Icon rail foot.** The rail's destinations scroll, with the same short fade at
+their edges and no scrollbar, above a foot (usage, Settings) that stays on
+screen. One column that scrolled as a whole put Settings out of reach in a short
+window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
@@ -2719,6 +2752,12 @@ and Tooltip. Composition rules:
   fill, not a solid one: a red slab reads as the page's subject rather than one
   action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
   Icon-only buttons always have an accessible label and tooltip/title.
+  A control in the title band is one shape whatever it holds: 28px
+  (`--oct-rail-button-h`) with the control corner (`--oct-radius-sm`), icon-only
+  controls square, a label or a label with a chevron the same height. The compact
+  24px, 6px step drew the dock's tools and the Project actions beside 28px, 8px
+  window buttons as three shapes. Open in is outlined, the one band control that
+  keeps an edge, in the same 28px and control corner, not a card-radius pill.
   A standalone icon-only control has two sizes and nothing between: the 28px
   rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
   panel head, or toolbar, and a 24px square for an action inside a row. The

@@ -1455,9 +1455,18 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
   height: 1px;
 }
 
-.workspace-split__resize:hover::before,
-.workspace-split__resize:focus-visible::before {
-  background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
+.workspace-split__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.workspace-split[data-orientation="horizontal"] > .workspace-split__resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
+}
+
+.workspace-split[data-orientation="vertical"] > .workspace-split__resize:active::before {
+  height: 2px;
+  background: var(--oct-meta);
 }
 
 .workspace-split__resize-input {
