@@ -1537,12 +1537,12 @@ function ActiveSectionContent({
             }
           />
           <SettingsSection
-            description="Off, every download in the agent's Browser is blocked."
-            title="Browser downloads"
+            description="Files an agent sends to a page or saves from one. A thread at Full access downloads and uploads without asking; a download you start yourself goes to your Downloads folder."
+            title="Browser uploads and downloads"
           >
             <div className="setgroup">
               <SettingRow
-                description="Octant asks before saving a file a page starts downloading while an agent drives it, every time. Downloads you start yourself stay blocked."
+                description="Below Full access, lets a page an agent drives start a download, and Octant asks before saving it. Off, those downloads are blocked."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1556,6 +1556,71 @@ function ActiveSectionContent({
                   }
                 />
               </SettingRow>
+              <SettingRow
+                description="The largest file an agent may upload through a page or save from one."
+                focused={focusedSetting === settingId("browser-transfer-file-limit")}
+                label="Largest file"
+                scope="host"
+                settingId="browser-transfer-file-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_TRANSFER_FILE_LIMIT_CHOICES}
+                  id="browser-transfer-file-limit"
+                  label="Largest file"
+                  onChange={(megabytes) =>
+                    props.onSettingsChange({ browserTransferFileLimitMegabytes: megabytes })
+                  }
+                  optionLabel={(megabytes) =>
+                    megabytes >= 1024 ? `${String(megabytes / 1024)} GB` : `${String(megabytes)} MB`
+                  }
+                  value={props.settings.browserTransferFileLimitMegabytes}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How many downloads a page keeps waiting for an agent to save. A newer one replaces the oldest."
+                focused={focusedSetting === settingId("browser-held-download-limit")}
+                label="Downloads kept waiting"
+                scope="host"
+                settingId="browser-held-download-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES}
+                  id="browser-held-download-limit"
+                  label="Downloads kept waiting"
+                  onChange={(count) => props.onSettingsChange({ browserHeldDownloadLimit: count })}
+                  optionLabel={(count) => `${String(count)} per page`}
+                  value={props.settings.browserHeldDownloadLimit}
+                />
+              </SettingRow>
+              {props.settings.rememberedBrowserTransfers.map((transfer) => (
+                <SettingRow
+                  description={
+                    transfer.direction === "upload"
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
+                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                  }
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
+                  scope="host"
+                  settingId="browser-agent-downloads"
+                >
+                  <OctantButton
+                    onClick={() =>
+                      void props.onSettingsChange({
+                        rememberedBrowserTransfers:
+                          props.settings.rememberedBrowserTransfers.filter(
+                            (entry) => entry !== transfer,
+                          ),
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Forget
+                  </OctantButton>
+                </SettingRow>
+              ))}
             </div>
           </SettingsSection>
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
@@ -2174,6 +2239,34 @@ function AutoCompactIdleSelect(props: {
         ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
       ]}
       value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
+  10, 25, 50, 100, 250, 500, 1024,
+];
+const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 50];
+
+/** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+function BrowserTransferLimitSelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly choices: ReadonlyArray<number>;
+  readonly value: number;
+  readonly optionLabel: (value: number) => string;
+  readonly onChange: (value: number) => void;
+}) {
+  const choices = props.choices.includes(props.value)
+    ? props.choices
+    : [...props.choices, props.value].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label={props.label}
+      id={props.id}
+      onValueChange={(value) => props.onChange(Number(value))}
+      options={choices.map((choice) => ({ id: String(choice), label: props.optionLabel(choice) }))}
+      value={String(props.value)}
     />
   );
 }

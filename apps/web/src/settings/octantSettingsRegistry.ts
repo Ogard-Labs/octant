@@ -1151,6 +1151,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser downloads agents download files save workspace downloads folder allow block switch",
         },
         {
+          id: settingId("browser-transfer-file-limit"),
+          label: "Largest file",
+          scope: "host",
+          keywords: "browser upload download largest file size limit megabytes cap agents transfer",
+        },
+        {
+          id: settingId("browser-held-download-limit"),
+          label: "Downloads kept waiting",
+          scope: "host",
+          keywords: "browser downloads kept waiting held files limit count cap agents page",
+        },
+        {
           id: settingId("tool-approvals"),
           label: "Remembered tool approvals",
           scope: "host",

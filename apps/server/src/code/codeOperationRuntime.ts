@@ -539,6 +539,8 @@ export interface CodeOperationRuntimeOptions {
    * live so a grant forgotten in Settings stops satisfying it at once.
    */
   readonly isBrowserOriginRemembered?: (origin: string) => boolean;
+  /** The person's per-file Browser upload limit in bytes, read for each upload. */
+  readonly browserUploadFileLimitBytes?: () => number;
   /** The Browser approvals a sign-in handoff asks through; see the Code tools. */
   readonly browserSignIn?: CodeAppManagedToolsOptions["browserSignIn"];
   /** Who may not be asked to save a download: a paired device. */
@@ -4903,11 +4905,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
-          // An upload sends files from this thread's checkout only, and asks
-          // every time, at every access level, as the first Browser action on
-          // a site does.
+          // An upload sends files from this thread's checkout only. The tool
+          // asks through `request` below Full access and not at all at it.
           browserUpload: {
             root: active.checkoutRoot,
+            ...(this.#options.browserUploadFileLimitBytes === undefined
+              ? {}
+              : { fileLimitBytes: this.#options.browserUploadFileLimitBytes }),
             request: (summary, signal) => {
               const bounded = boundProviderSummary(summary);
               return bounded === undefined
@@ -4916,7 +4920,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             },
           },
           // A saved download lands in this thread's checkout only, and the
-          // person is asked every time, as for an upload.
+          // person is asked below Full access, as for an upload.
           browserDownload: {
             root: active.checkoutRoot,
             ...(this.#options.browserDownloadRefusal === undefined

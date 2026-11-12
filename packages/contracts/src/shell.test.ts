@@ -108,6 +108,9 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  browserTransferFileLimitMegabytes: 25,
+  browserHeldDownloadLimit: 5,
+  rememberedBrowserTransfers: [],
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
@@ -196,6 +199,29 @@ describe("shell bootstrap contracts", () => {
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
+  it("reads settings saved before the Browser transfer limits as the former fixed limits", () => {
+    const {
+      browserTransferFileLimitMegabytes: _megabytes,
+      browserHeldDownloadLimit: _held,
+      ...before
+    } = settings;
+    expect(decodeShellSettings(before)).toMatchObject({
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+    });
+    expect(
+      decodeShellSettings({
+        ...settings,
+        browserTransferFileLimitMegabytes: 1024,
+        browserHeldDownloadLimit: 50,
+      }),
+    ).toMatchObject({ browserTransferFileLimitMegabytes: 1024, browserHeldDownloadLimit: 50 });
+    expect(() =>
+      decodeShellSettings({ ...settings, browserTransferFileLimitMegabytes: 1025 }),
+    ).toThrow();
+    expect(() => decodeShellSettings({ ...settings, browserHeldDownloadLimit: 0 })).toThrow();
   });
 
   it("draws the usage bars smooth unless someone chose the pixelated cells", () => {

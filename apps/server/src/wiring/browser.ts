@@ -24,6 +24,7 @@ import {
   decodeCodeThreadId,
   LOCAL_HOST_ID,
   type ProjectId,
+  type RememberedBrowserTransfer,
   type StoredBrowserProfile,
   sameToolActionAuthority,
   type WindowId,
@@ -63,6 +64,8 @@ import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBr
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
   isToolAllowedByAllowlist,
+  browserTransferLimits,
+  browserTransferRemembered,
   defaultShellSettings,
   enabledModes,
   browserProfileSiteListed,
@@ -198,6 +201,32 @@ export function wireBrowser(deps: BrowserDependencies) {
         }
       }
     };
+    // The same journaled path again, for an "Always allow" answer to an upload
+    // or a download save.
+    const rememberBrowserTransfer = (windowId: WindowId, transfer: RememberedBrowserTransfer) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored = persistence.readShellSettings();
+        const current = stored?.settings ?? defaultShellSettings();
+        if (browserTransferRemembered(current.rememberedBrowserTransfers, transfer)) return;
+        try {
+          shellService.rememberBrowserTransfers({
+            windowId,
+            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+            transfers: [transfer],
+          });
+          return;
+        } catch (error) {
+          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+            console.warn(
+              `Octant could not remember a Browser ${transfer.direction} approval: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return;
+          }
+        }
+      }
+    };
     const browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
@@ -220,6 +249,13 @@ export function wireBrowser(deps: BrowserDependencies) {
         profile === undefined
           ? rememberedBrowserOrigins().includes(origin)
           : isBrowserProfileSiteRemembered(rememberedProfileSites(), origin, profile),
+      rememberTransfer: (transfer, windowId) => rememberBrowserTransfer(windowId, transfer),
+      isTransferRemembered: (transfer) =>
+        browserTransferRemembered(
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .rememberedBrowserTransfers,
+          transfer,
+        ),
       isHostScope: isRoutineHostScope,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
@@ -700,6 +736,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       // lives in shell settings, which only a local window writes.
       agentDownloadsEnabled: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      transferLimits: () =>
+        browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,

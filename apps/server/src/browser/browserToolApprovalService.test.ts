@@ -630,11 +630,12 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
   const phone = "60000000-0000-4000-8000-0000000000aa" as never;
   const personal = { kind: "personal" } as const;
 
-  function service() {
+  function service(rememberTransfer?: (transfer: unknown, windowId: unknown) => void) {
     return new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-000000000009",
       now: () => Date.parse("2026-10-31T10:00:00.000Z"),
       authorityIsCurrent: () => true,
+      ...(rememberTransfer === undefined ? {} : { rememberTransfer }),
       isHostScope: isRoutineHostScope,
       // Only the one window is a window of this computer; any other scope that is
       // not the host is a paired device.
@@ -664,6 +665,60 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
     expect(approvals.decide(windowId, decision)).toBe(true);
     await expect(pending).resolves.toBe("approved");
   });
+
+  it.each([
+    ["upload", { upload: [{ name: "notes.txt", sizeBytes: 5 }] }],
+    ["download", { download: { name: "report.pdf", sizeBytes: 4, mediaType: "application/pdf" } }],
+  ] as const)(
+    "remembers an Always allow answer to an %s for that site and workspace when a local window gives it, and never when a paired device does",
+    async (direction, ask) => {
+      const rememberTransfer = vi.fn();
+      const rememberOrigin = vi.fn();
+      const approvals = new BrowserToolApprovalService({
+        uuid: () => "40000000-0000-4000-8000-000000000009",
+        now: () => Date.parse("2026-10-31T10:00:00.000Z"),
+        authorityIsCurrent: () => true,
+        rememberTransfer,
+        rememberOrigin,
+        isHostScope: isRoutineHostScope,
+        isLocalWindow: (scope) => String(scope) === String(windowId),
+      });
+      const decision = {
+        approvalId: "40000000-0000-4000-8000-000000000009" as never,
+        decision: "approved" as const,
+        remember: true,
+      };
+      const request = (scope: never) =>
+        approvals.request({
+          windowId: scope,
+          threadId,
+          authority,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          ...ask,
+        });
+
+      const fromPhone = request(phone);
+      expect(approvals.decide(phone, decision)).toBe(true);
+      await expect(fromPhone).resolves.toBe("approved");
+      expect(rememberTransfer).not.toHaveBeenCalled();
+
+      const once = request(windowId);
+      expect(approvals.decide(windowId, { ...decision, remember: false })).toBe(true);
+      await expect(once).resolves.toBe("approved");
+      expect(rememberTransfer).not.toHaveBeenCalled();
+
+      const always = request(windowId);
+      expect(approvals.decide(windowId, decision)).toBe(true);
+      await expect(always).resolves.toBe("approved");
+      expect(rememberTransfer).toHaveBeenCalledExactlyOnceWith(
+        { direction, origin: "https://example.com", workspaceRoot: "/projects/brief" },
+        windowId,
+      );
+      // The answer is about files, never a grant to open the site.
+      expect(rememberOrigin).not.toHaveBeenCalled();
+    },
+  );
 
   it("still lets the phone answer an approval for a page with no stored profile", () => {
     const approvals = service();

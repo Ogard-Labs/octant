@@ -117,6 +117,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
+      /** The turn runs at Full access, where a download is held whatever the switch says. */
+      readonly fullAccess?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /**
      * Saves a download the thread's Browser holds into the workspace once
@@ -134,6 +136,8 @@ export interface BrowserAppManagedToolsOptions {
       ) => BrowserDownloadSaveDecision;
       readonly workspaceRoot: string | undefined;
       readonly signal?: AbortSignal;
+      /** The turn runs at Full access, where a program or installer may be saved. */
+      readonly fullAccess?: true;
       readonly ask: (
         facts: {
           readonly name: string;
@@ -167,7 +171,10 @@ export interface BrowserAppManagedToolsOptions {
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
-      Pick<BrowserToolApprovalService, "isRemembered" | "isUnattendedScope" | "isPairedDevice">
+      Pick<
+        BrowserToolApprovalService,
+        "isRemembered" | "isTransferRemembered" | "isUnattendedScope" | "isPairedDevice"
+      >
     >;
   /**
    * Set for a CLI the person typed into a thread terminal. It may drive the
@@ -190,6 +197,8 @@ export interface BrowserAppManagedToolsOptions {
    * folder. Absent, both are refused.
    */
   readonly uploadRoot?: () => string | undefined;
+  /** The person's per-file upload limit in bytes, read for each upload; absent, the default. */
+  readonly uploadFileLimitBytes?: () => number;
   readonly downloadPermission?: (input: {
     readonly permissionId: string;
     readonly profile: StoredBrowserProfile;
@@ -201,6 +210,23 @@ export interface BrowserAppManagedToolsOptions {
     readonly files: ReadonlyArray<string>;
   }) => ReturnType<BrowserUploadPermissions["prepare"]>;
   readonly uuid: () => string;
+}
+
+/** Whether the person answered "Always allow" for this direction, site and workspace. */
+function transferRemembered(
+  options: BrowserAppManagedToolsOptions,
+  direction: "upload" | "download",
+  origin: string,
+  workspaceRoot: string | undefined,
+): boolean {
+  return (
+    workspaceRoot !== undefined &&
+    options.approvals?.isTransferRemembered?.({ direction, origin, workspaceRoot }) === true
+  );
+}
+
+function workspaceOf(workspaceRoot: string | undefined): { readonly workspaceRoot?: string } {
+  return workspaceRoot === undefined ? {} : { workspaceRoot };
 }
 
 export interface BrowserModelBinding {
@@ -514,7 +540,10 @@ export function createBrowserAppManagedTools(
             });
       if (input.downloadPermissionId !== undefined && permission === undefined)
         return failure("download-permission-unavailable");
-      if (permission === undefined && approvals === undefined)
+      // At Full access an ordinary save is not asked; a routine's manifest
+      // keeps its own review at every level.
+      const savesUnasked = fullAccess && permission === undefined;
+      if (permission === undefined && approvals === undefined && !savesUnasked)
         return failure("browser-approval-required");
       if (options.browser.saveDownload === undefined) return failure("download-unavailable");
       if (signal?.aborted) return failure("tool-interrupted");
@@ -523,6 +552,7 @@ export function createBrowserAppManagedTools(
         threadId: options.threadId,
         downloadId: input.downloadId,
         workspaceRoot: permission === undefined ? options.uploadRoot?.() : undefined,
+        ...(savesUnasked ? { fullAccess: true as const } : {}),
         ...(permission === undefined
           ? signal === undefined
             ? {}
@@ -537,17 +567,22 @@ export function createBrowserAppManagedTools(
               finalAdmission: permission.reserve,
             }),
         ask: async (facts, pageOrigin) =>
-          permission === undefined
-            ? (approvals?.request({
-                windowId: options.windowId,
-                threadId: String(options.threadId),
-                authority,
-                origin: pageOrigin,
-                ...(profile === undefined ? {} : { profile }),
-                download: facts,
-                ...(signal === undefined ? {} : { signal }),
-              }) ?? "denied")
-            : permission.inspect(facts, pageOrigin),
+          savesUnasked ||
+          (permission === undefined &&
+            transferRemembered(options, "download", pageOrigin, options.uploadRoot?.()))
+            ? "approved"
+            : permission === undefined
+              ? (approvals?.request({
+                  windowId: options.windowId,
+                  threadId: String(options.threadId),
+                  authority,
+                  origin: pageOrigin,
+                  ...(profile === undefined ? {} : { profile }),
+                  download: facts,
+                  ...workspaceOf(options.uploadRoot?.()),
+                  ...(signal === undefined ? {} : { signal }),
+                }) ?? "denied")
+              : permission.inspect(facts, pageOrigin),
       });
       return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
     }
@@ -562,7 +597,6 @@ export function createBrowserAppManagedTools(
       // A CLI in a terminal is not the person who would be asked.
       if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
       const approvals = options.approvals;
-      if (approvals === undefined) return failure("browser-approval-required");
       const permission =
         input.uploadPermissionId === undefined || profile === undefined
           ? undefined
@@ -574,22 +608,36 @@ export function createBrowserAppManagedTools(
             });
       if (input.uploadPermissionId !== undefined && permission === undefined)
         return failure("upload-permission-required");
+      // At Full access an ordinary upload is not asked; the path checks in
+      // the admission below hold at every level, and a routine's manifest
+      // keeps its own review.
+      const uploadsUnasked = fullAccess && permission === undefined;
+      if (approvals === undefined && !uploadsUnasked) return failure("browser-approval-required");
       uploadSignal = permission?.signal;
       uploadIsCurrent = permission?.isCurrent;
       const admitted = await admitBrowserUpload({
         workspaceRoot: permission?.workspaceRoot ?? options.uploadRoot?.(),
         files: input.files,
+        // A routine's manifest keeps the default limit it was reviewed under.
+        ...(permission !== undefined || options.uploadFileLimitBytes === undefined
+          ? {}
+          : { maxFileBytes: options.uploadFileLimitBytes() }),
         ask: (files) =>
           permission?.approve(files) ??
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin,
-            ...(profile === undefined ? {} : { profile }),
-            upload: files,
-            ...(signal === undefined ? {} : { signal }),
-          }),
+          (uploadsUnasked || transferRemembered(options, "upload", origin, options.uploadRoot?.())
+            ? Promise.resolve("approved" as const)
+            : approvals === undefined
+              ? Promise.resolve("denied" as const)
+              : approvals.request({
+                  windowId: options.windowId,
+                  threadId: String(options.threadId),
+                  authority,
+                  origin,
+                  ...(profile === undefined ? {} : { profile }),
+                  upload: files,
+                  ...workspaceOf(options.uploadRoot?.()),
+                  ...(signal === undefined ? {} : { signal }),
+                })),
       });
       if (admitted.status === "refused") return failure(admitted.reason);
       uploadFiles = admitted.paths;
@@ -638,7 +686,7 @@ export function createBrowserAppManagedTools(
       options.approvals?.isPairedDevice?.(options.windowId) === true ||
       (options.uploadRoot?.() === undefined && options.downloadPermission === undefined)
         ? {}
-        : { holdDownloads: true }),
+        : { holdDownloads: true, ...(fullAccess ? { fullAccess: true as const } : {}) }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(uploadSignal === undefined ? {} : { uploadSignal }),
       ...(uploadIsCurrent === undefined ? {} : { uploadIsCurrent }),

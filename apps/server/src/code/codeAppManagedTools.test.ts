@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserAgentAvailability } from "@octant/domain";
@@ -1635,7 +1638,7 @@ describe("Code app-managed tools", () => {
 
   describe("saving a download", () => {
     function downloadTools(options: {
-      readonly executionPolicy?: "plan";
+      readonly executionPolicy?: "plan" | "approval-gated";
       readonly source?: BrowserDownloadSource;
       readonly refusal?: string;
       readonly request?: ReturnType<typeof vi.fn>;
@@ -1645,6 +1648,7 @@ describe("Code app-managed tools", () => {
       );
       const saveDownload = vi.fn(
         async (input: {
+          readonly fullAccess?: true;
           readonly ask: (
             facts: { name: string; sizeBytes: number; mediaType: string },
             origin: string,
@@ -1706,7 +1710,7 @@ describe("Code app-managed tools", () => {
       });
 
     it("asks the thread's tool approval, naming the file, its size, its type and the site", async () => {
-      const { tools, saveDownload, request } = downloadTools({});
+      const { tools, saveDownload, request } = downloadTools({ executionPolicy: "approval-gated" });
       const result = await save(tools);
       expect(result).toMatchObject({ isError: false, result: { saved: "downloads/report.pdf" } });
       expect(saveDownload).toHaveBeenCalledWith(
@@ -1716,6 +1720,20 @@ describe("Code app-managed tools", () => {
         "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
         undefined,
       );
+      // Below Full access the service keeps refusing a program or installer.
+      expect(saveDownload.mock.calls[0]?.[0].fullAccess).toBeUndefined();
+    });
+
+    it("saves a download unasked at Full access, where the service may save a program", async () => {
+      const { tools, saveDownload, request } = downloadTools({});
+      expect(await save(tools)).toMatchObject({
+        isError: false,
+        result: { saved: "downloads/report.pdf" },
+      });
+      expect(request).not.toHaveBeenCalled();
+      expect(saveDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceRoot: "/checkout", fullAccess: true }),
+      );
     });
 
     it("refuses a source chain that cannot be reviewed in full without asking or saving", async () => {
@@ -1723,7 +1741,10 @@ describe("Code app-managed tools", () => {
         { length: 16 },
         (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
       );
-      const { tools, request } = downloadTools({ source: { kind: "https-origin-chain", origins } });
+      const { tools, request } = downloadTools({
+        executionPolicy: "approval-gated",
+        source: { kind: "https-origin-chain", origins },
+      });
       expect(await save(tools)).toEqual({
         result: { error: "browser-download-cancelled" },
         isError: true,
@@ -1732,7 +1753,7 @@ describe("Code app-managed tools", () => {
     });
 
     it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
-      const { tools, saveDownload, request } = downloadTools({});
+      const { tools, saveDownload, request } = downloadTools({ executionPolicy: "approval-gated" });
       const abort = new AbortController();
       await tools.execute({
         name: CODE_BROWSER_TOOL_NAME,
@@ -1750,12 +1771,103 @@ describe("Code app-managed tools", () => {
         isError: true,
       });
       expect(paired.saveDownload).not.toHaveBeenCalled();
+      expect(paired.request).not.toHaveBeenCalled();
       const plan = downloadTools({ executionPolicy: "plan" });
       expect(await save(plan.tools)).toEqual({
         result: { error: "plan-mode-read-only" },
         isError: true,
       });
       expect(plan.saveDownload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("uploading a file", () => {
+    async function uploadTools(executionPolicy: "full-access" | "approval-gated") {
+      const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-code-upload-")));
+      const workspace = join(folder, "workspace");
+      await mkdir(workspace);
+      await writeFile(join(workspace, "report.txt"), "report");
+      await writeFile(join(folder, "outside.txt"), "outside");
+      const current = thread({ executionPolicy });
+      const act = vi.fn(async (_input: { readonly uploadFiles?: ReadonlyArray<string> }) =>
+        browserSnapshot(browserAuthority()),
+      );
+      const request = vi.fn(async () => "approved" as const);
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => true,
+          request: vi.fn(),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browserUpload: { root: workspace, request },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => browserSnapshot(browserAuthority()),
+          create: vi.fn(),
+          act: act as never,
+          releaseThread: vi.fn(),
+        },
+      });
+      const upload = (files: ReadonlyArray<string>) =>
+        tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "upload", ref: "e1", files }),
+        });
+      return { folder, act, request, upload };
+    }
+
+    it("uploads a file from the thread's workspace unasked at Full access", async () => {
+      const { folder, act, request, upload } = await uploadTools("full-access");
+      try {
+        expect(await upload(["report.txt"])).toMatchObject({ isError: false });
+        expect(request).not.toHaveBeenCalled();
+        expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a file outside the thread's workspace at Full access without asking or sending", async () => {
+      const { folder, act, request, upload } = await uploadTools("full-access");
+      try {
+        expect(await upload(["../outside.txt"])).toEqual({
+          result: { error: "upload-outside-workspace" },
+          isError: true,
+        });
+        expect(await upload([join(folder, "outside.txt")])).toEqual({
+          result: { error: "upload-outside-workspace" },
+          isError: true,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("still asks the thread's tool approval below Full access, and sends nothing a person denies", async () => {
+      const { folder, act, request, upload } = await uploadTools("approval-gated");
+      try {
+        request.mockResolvedValueOnce("denied" as never);
+        expect(await upload(["report.txt"])).toEqual({
+          result: { error: "browser-upload-denied" },
+          isError: true,
+        });
+        expect(request).toHaveBeenCalledWith(
+          "Let the agent upload report.txt (6 B) to https://example.com?",
+          undefined,
+        );
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
     });
   });
 

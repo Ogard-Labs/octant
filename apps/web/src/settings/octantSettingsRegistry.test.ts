@@ -128,6 +128,8 @@ describe("octantSettingsRegistry", () => {
       "public-link-service",
       "browser-site-approvals",
       "browser-agent-downloads",
+      "browser-transfer-file-limit",
+      "browser-held-download-limit",
       "tool-approvals",
       "network-limits",
       "safe-networks",

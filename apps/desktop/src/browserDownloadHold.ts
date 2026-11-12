@@ -1,11 +1,13 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { open, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BROWSER_DOWNLOAD_SNIFF_BYTES,
   browserDownloadSource,
+  numberedBrowserDownloadName,
   safeBrowserDownloadName,
   sniffBrowserDownload,
+  type BrowserTransferLimits,
 } from "@octant/domain";
 import {
   MAX_BROWSER_DOWNLOAD_FILE_BYTES,
@@ -35,18 +37,28 @@ interface Held {
 
 interface Pending {
   readonly item: DesktopDownloadItemPort;
+  /** The cap this download was started under. */
+  readonly maxFileBytes: number;
   cancelledFor: "too-large" | "unfinished" | undefined;
 }
 
 /** How long an action waits for a download it started to finish. */
 const FINISH_WAIT_MS = 10_000;
+const DEFAULT_LIMITS: BrowserTransferLimits = {
+  maxFileBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+  maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
+};
+
+/** How many taken names a person's download steps past before it is refused. */
+const MAX_PERSON_DOWNLOAD_COPIES = 1_000;
 
 /**
  * The files one desktop Browser context holds for the agent. A download is held
- * only while an agent action that was allowed to download runs; at any other
- * time, including whenever the person drives the pane, it is refused. A held
- * file lives in the host's private download folder, never the workspace, and is
- * cancelled the moment more than the cap has arrived.
+ * only while an agent action that was allowed to download runs. At any other
+ * time a download the person started saves to their Downloads folder, and one
+ * a page started on its own is refused. A held file lives in the host's private
+ * download folder, never the workspace, and is cancelled the moment more than
+ * the cap has arrived.
  */
 export class DesktopDownloadHold {
   readonly #root: string | undefined;
@@ -54,6 +66,7 @@ export class DesktopDownloadHold {
   readonly #held: Held[] = [];
   #reports: BrowserDownloadReport[] = [];
   #holding = false;
+  #limits: BrowserTransferLimits = DEFAULT_LIMITS;
   #nextOrdinal = 1;
 
   /** `root` is the host's private download folder; absent, every download is refused. */
@@ -61,18 +74,42 @@ export class DesktopDownloadHold {
     this.#root = root;
   }
 
-  begin(): void {
+  /** Hold for one agent action, under the person's limits (the defaults when none are passed). */
+  begin(limits: BrowserTransferLimits = DEFAULT_LIMITS): void {
     this.#holding = true;
+    this.#limits = limits;
   }
 
-  /** Electron's `will-download`: take the download for the agent, or refuse it. */
-  accept(event: { preventDefault?: () => void }, item: DesktopDownloadItemPort): void {
-    if (!this.#holding || this.#root === undefined) {
+  /**
+   * Electron's `will-download`: take the download for the agent, let the
+   * person's own go to their Downloads folder, or refuse it.
+   *
+   * `personDownloads` is that folder, named only when the person was the last
+   * to drive the pane. Their download is theirs: it is not capped, held or
+   * reported to the agent, and it never enters the workspace.
+   */
+  accept(
+    event: { preventDefault?: () => void },
+    item: DesktopDownloadItemPort,
+    personDownloads?: string,
+  ): void {
+    if (!this.#holding) {
+      const path =
+        personDownloads === undefined
+          ? undefined
+          : freePersonDownloadPath(personDownloads, item.getFilename());
+      if (path === undefined) event.preventDefault?.();
+      // Without a save path Electron would open a save dialog over the pane.
+      else item.setSavePath(path);
+      return;
+    }
+    if (this.#root === undefined) {
       event.preventDefault?.();
       return;
     }
     const name = safeBrowserDownloadName(item.getFilename());
-    if (item.getTotalBytes() > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
+    const maxFileBytes = this.#limits.maxFileBytes;
+    if (item.getTotalBytes() > maxFileBytes) {
       // The page said how large it is, and it is too large: nothing is written.
       event.preventDefault?.();
       this.#reports.push({ state: "refused", name, reason: "too-large" });
@@ -90,10 +127,9 @@ export class DesktopDownloadHold {
     }
     const path = join(folder, "file");
     item.setSavePath(path);
-    const entry: Pending = { item, cancelledFor: undefined };
+    const entry: Pending = { item, maxFileBytes, cancelledFor: undefined };
     item.on("updated", () => {
-      if (item.getReceivedBytes() > MAX_BROWSER_DOWNLOAD_FILE_BYTES)
-        this.#cancel(entry, "too-large");
+      if (item.getReceivedBytes() > maxFileBytes) this.#cancel(entry, "too-large");
     });
     const task = new Promise<void>((resolve) => {
       item.on("done", (_event, state) => {
@@ -180,15 +216,15 @@ export class DesktopDownloadHold {
     let head: Uint8Array;
     try {
       sizeBytes = (await stat(path)).size;
-      head = sizeBytes > MAX_BROWSER_DOWNLOAD_FILE_BYTES ? new Uint8Array() : await readHead(path);
+      head = sizeBytes > entry.maxFileBytes ? new Uint8Array() : await readHead(path);
     } catch {
       return refuse("failed");
     }
-    if (sizeBytes > MAX_BROWSER_DOWNLOAD_FILE_BYTES) return refuse("too-large");
+    if (sizeBytes > entry.maxFileBytes) return refuse("too-large");
     const id = `d${String(this.#nextOrdinal)}`;
     this.#nextOrdinal += 1;
     this.#held.push({ id, folder, path });
-    while (this.#held.length > MAX_BROWSER_HELD_DOWNLOADS) {
+    while (this.#held.length > this.#limits.maxHeldDownloads) {
       const oldest = this.#held.shift();
       if (oldest !== undefined) void rm(oldest.folder, { recursive: true, force: true });
     }
@@ -207,6 +243,19 @@ export class DesktopDownloadHold {
       ...(source === undefined ? {} : { source }),
     });
   }
+}
+
+/**
+ * Where a person's download lands: the page's suggested name reduced to a safe
+ * basename, numbered past any file already there so nothing is overwritten.
+ */
+function freePersonDownloadPath(folder: string, suggested: string): string | undefined {
+  const name = safeBrowserDownloadName(suggested);
+  for (let copy = 1; copy <= MAX_PERSON_DOWNLOAD_COPIES; copy += 1) {
+    const path = join(folder, numberedBrowserDownloadName(name, copy));
+    if (!existsSync(path)) return path;
+  }
+  return undefined;
 }
 
 async function readHead(path: string): Promise<Uint8Array> {

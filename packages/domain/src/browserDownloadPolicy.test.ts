@@ -3,6 +3,7 @@ import {
   browserDownloadNameIsExecutable,
   browserDownloadQuestion,
   browserDownloadSource,
+  browserTransferLimits,
   numberedBrowserDownloadName,
   refuseBrowserDownloadType,
   safeBrowserDownloadName,
@@ -130,4 +131,10 @@ it("shows the attested redirect origins separately from the requesting page", ()
   expect(question).toContain(
     "Download source: https://start.example.com → https://files.example.com.",
   );
+});
+
+it("reads the transfer limits a person set in megabytes as the bytes the host enforces", () => {
+  expect(
+    browserTransferLimits({ browserTransferFileLimitMegabytes: 100, browserHeldDownloadLimit: 8 }),
+  ).toEqual({ maxFileBytes: 100 * 1024 * 1024, maxHeldDownloads: 8 });
 });

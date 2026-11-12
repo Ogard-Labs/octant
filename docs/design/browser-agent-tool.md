@@ -297,8 +297,9 @@ and an answer the person may remember for the site; a recurring routine may
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: today every upload asks at every level
-and the answer is never remembered.
+request, 2026-11-12). Not built yet: Code's tool approval offers no "Always
+allow", so below Full access a Code upload asks every time, and an unanswered
+ask still expires instead of waiting.
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -306,8 +307,12 @@ and the answer is never remembered.
   plain file are refused before anyone is asked.
 - A symbolic link is refused, at the file and anywhere between the workspace
   and the file: the file's canonical path must be the path named.
-- At most 5 files, each at most 25 MB. Both are Settings defaults the person
-  can change, not constants. Not built yet: today both are fixed.
+- At most 5 files, each at most 25 MB. The size is a Settings default the
+  person can change (Settings › Permissions › Browser uploads and downloads ›
+  Largest file, 1 MB to 1 GB; the ceiling is fixed because a save reads the
+  whole held file into memory and journaled receipts bound their size by it).
+  A recurring manifest keeps 25 MB whatever the setting says. Not built yet:
+  the count of 5 files per upload is still fixed.
 - The host copies each checked file into a private temporary folder before it
   asks, reading it through a descriptor that does not follow a link and that
   must still be the file it checked, and the page receives the copies. A file
@@ -319,7 +324,12 @@ and the answer is never remembered.
 - For an ordinary upload below Full access, the person is asked, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once, or, with "Always allow", later uploads
-  to that site from this thread's workspace. An unanswered ask waits in Needs
+  to that site from this thread's workspace. The remembered answer is one
+  direction, one site and one workspace folder; it is journaled in the shell
+  settings like a remembered site, grows only through the approval answer of a
+  window of this computer (a paired device's answer covers one upload), lifts
+  no path or size check, and is listed with a Forget control in Settings ›
+  Permissions › Browser uploads and downloads. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work asks in the thread's
   Browser approval card; Code asks in the thread's tool approval.
 - Only the agent tool can upload: it resolves the files and holds the answer,
@@ -392,10 +402,11 @@ At Full access the switch is on by default and a save does not ask; below Full
 access the person turns it on and answers for the file, an answer they may
 remember for the site, or separately reviews the bounded routine download manifest below
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: today the switch is off by default at
-every level, every save asks at every level and is never remembered, the
-caps are constants, programs are refused at every level, and a person's own
-download in the pane is cancelled.
+request, 2026-11-12). Not built yet: no control turns holding off for a
+thread at Full access; Code's tool approval offers no "Always allow", so below
+Full access a Code save asks every time; an unanswered ask still expires
+instead of waiting; and the person's own download, built in the desktop pane's
+download handler, has not been run in a packaged window.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
@@ -403,19 +414,28 @@ download in the pane is cancelled.
   of this computer writes: the shell route is local-only, so a paired device, a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
-  every download on every page stays blocked, as before: the runtime cancels
-  it, and the action's answer says nothing about it.
+  every download on every page of a thread below Full access stays blocked, as
+  before: the runtime cancels it, and the action's answer says nothing about
+  it. For a thread at Full access a download is held whatever the switch says.
 - **Holding.** With the switch on, a download a page starts while an agent
   action of the agent tool runs (the action and the settling after it) is held:
   the runtime keeps the file in a private temporary folder of the host (never
   the workspace) and cancels it as soon as more than 25 MB has arrived. At
   most 5 files are held per browsing context, the oldest discarded first. Both
-  caps are Settings defaults the person can change. A download a page
+  caps are Settings defaults the person can change (Settings › Permissions ›
+  Browser uploads and downloads: Largest file, 1 MB to 1 GB, shared with
+  uploads; Downloads kept waiting, 1 to 50). The server sends the current
+  limits to the runtime with each action that may hold. A download a page
   starts on its own between actions is cancelled as it is with the switch off.
 - **The person's own download.** A download the person starts in the Browser
   pane saves to the person's Downloads folder at every level, whatever the
   switch says; it never enters the workspace and the agent is told nothing
-  about it.
+  about it. The desktop pane treats a download as the person's when no agent
+  action is holding and the person was the last to drive the pane (a key or a
+  click since the agent's last action). It is saved under the page's suggested
+  name reduced to a safe basename, numbered past any file already there, with
+  no size cap and no type refusal. A download a page starts on its own after an
+  agent action, with no such input, is cancelled.
 - **The report.** The answer to that action carries `downloads`: for each held
   file a `downloadId` (`d1`, `d2`, and so on), its name (the page's suggestion
   reduced to a safe basename), its size, and its media type sniffed from the
@@ -439,7 +459,7 @@ download in the pane is cancelled.
   Code refuses a save whose complete review exceeds its approval-summary byte
   limit; it never offers approval of a truncated source chain. The answer covers that file
   once, or, with "Always allow", later saves from that site into this thread's
-  workspace. At Full access the save is not asked and the checks, the
+  workspace, remembered and forgotten as an upload's is. At Full access the save is not asked and the checks, the
   destination rules and the journal record still apply. Work asks in the thread's
   Browser approval card ("Save once", "Always allow" or "Deny"); Code asks in the thread's tool
   approval.

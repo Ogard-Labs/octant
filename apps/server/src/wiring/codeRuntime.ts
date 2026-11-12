@@ -90,6 +90,7 @@ import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
+  browserTransferLimits,
   defaultShellSettings,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
@@ -1070,6 +1071,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           },
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        browserUploadFileLimitBytes: () =>
+          browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .maxFileBytes,
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>
           browserToolApprovalService.isPairedDevice(windowId)

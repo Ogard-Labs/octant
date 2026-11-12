@@ -2,7 +2,10 @@ import type {
   BrowserDownloadDestination,
   BrowserDownloadSaveDecision,
 } from "./browserDownloadSave";
-import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
+import {
+  MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+  type BrowserDownloadDestinationReceipt,
+} from "@octant/contracts/browser-download";
 import {
   decodeOwnerBrowserTarget,
   type OwnerBrowserControlId,
@@ -75,6 +78,7 @@ import {
   type BrowserCaptureTaker,
   type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
+  type BrowserTransferLimits,
 } from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
@@ -200,6 +204,11 @@ export interface BrowserAutomationServiceOptions {
    * no download is ever held.
    */
   readonly agentDownloadsEnabled?: () => boolean;
+  /**
+   * The person's size and held-file limits for an agent's downloads, read each
+   * time. Absent, the defaults.
+   */
+  readonly transferLimits?: () => BrowserTransferLimits;
   /** Where a saved, refused, or denied download is journaled. */
   readonly downloads?: BrowserDownloadRecorder;
   readonly uuid: () => string;
@@ -400,6 +409,7 @@ export class BrowserAutomationService {
   readonly #captures: BrowserAutomationServiceOptions["captures"];
   readonly #isUnattendedScope: (windowId: WindowId) => boolean;
   readonly #agentDownloadsEnabled: () => boolean;
+  readonly #transferLimits: () => BrowserTransferLimits;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -448,6 +458,12 @@ export class BrowserAutomationService {
         ? (options.isUnattendedScope ?? (() => false))
         : () => true;
     this.#agentDownloadsEnabled = options.agentDownloadsEnabled ?? (() => false);
+    this.#transferLimits =
+      options.transferLimits ??
+      (() => ({
+        maxFileBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+        maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
+      }));
     this.#downloads = options.downloads;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -1171,9 +1187,12 @@ export class BrowserAutomationService {
     readonly refuseStaleRevision?: boolean;
     /**
      * Set by the agent tool when this turn may have downloads held for it. The
-     * runtime holds them only if the person's switch is also on.
+     * runtime holds them only if the person's switch is also on, or the turn
+     * runs at Full access.
      */
     readonly holdDownloads?: boolean;
+    /** Set by the agent tool for a turn at Full access; no route can name it. */
+    readonly fullAccess?: true;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -1316,6 +1335,7 @@ export class BrowserAutomationService {
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
+      readonly fullAccess?: true;
     },
   ): Promise<BrowserAutomationSnapshot> {
     const activityBy = input.activityBy ?? input.capturedBy;
@@ -1524,11 +1544,12 @@ export class BrowserAutomationService {
             ...(input.request.kind === "upload" && input.uploadFiles !== undefined
               ? { files: input.uploadFiles }
               : {}),
-            // Only an agent action, only while the person's switch is on.
+            // Only an agent action, and below Full access only while the
+            // person's switch is on.
             ...(input.holdDownloads === true &&
             input.capturedBy === "agent" &&
-            this.#agentDownloadsEnabled()
-              ? { downloads: "hold" as const }
+            (input.fullAccess === true || this.#agentDownloadsEnabled())
+              ? { downloads: "hold" as const, downloadLimits: this.#transferLimits() }
               : {}),
           },
           owned.abort.signal,
@@ -2008,7 +2029,7 @@ export class BrowserAutomationService {
           mediaType: report.mediaType,
           ...(report.source === undefined ? {} : { source: report.source }),
         });
-        while (owned.heldDownloads.size > MAX_BROWSER_HELD_DOWNLOADS) {
+        while (owned.heldDownloads.size > this.#transferLimits().maxHeldDownloads) {
           const oldest = owned.heldDownloads.keys().next().value;
           if (oldest === undefined) break;
           owned.heldDownloads.delete(oldest);
@@ -2064,6 +2085,8 @@ export class BrowserAutomationService {
     readonly downloadId: string;
     readonly workspaceRoot: string | undefined;
     readonly signal?: AbortSignal;
+    /** The turn runs at Full access, where a program or installer may be saved. */
+    readonly fullAccess?: true;
     readonly destination?: BrowserDownloadDestination;
     readonly permissionSignal?: AbortSignal;
     readonly finalAdmission?: (
@@ -2129,6 +2152,8 @@ export class BrowserAutomationService {
       workspaceRoot: input.workspaceRoot,
       name: held.name,
       signal,
+      ...(input.fullAccess === true ? { programsAllowed: true as const } : {}),
+      maxFileBytes: this.#transferLimits().maxFileBytes,
       ...(input.destination === undefined ? {} : { destination: input.destination }),
       finalAdmission: (facts) =>
         current()

@@ -2735,10 +2735,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? "Approve once"
                         : "Upload once"}
                 </OctantButton>
-                {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
-                {pendingBrowserApproval.upload === undefined &&
-                pendingBrowserApproval.download === undefined &&
-                pendingBrowserApproval.signIn === undefined &&
+                {/*
+                  A sign-in's or a script's answer is never remembered. An upload's
+                  or a download's is remembered for that site and this thread's
+                  workspace, never for a whole profile.
+                */}
+                {pendingBrowserApproval.signIn === undefined &&
                 pendingBrowserApproval.script === undefined ? (
                   <>
                     <OctantButton
@@ -2750,7 +2752,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     >
                       Always allow
                     </OctantButton>
-                    {pendingBrowserApproval.profile === undefined ? null : (
+                    {pendingBrowserApproval.profile === undefined ||
+                    pendingBrowserApproval.upload !== undefined ||
+                    pendingBrowserApproval.download !== undefined ? null : (
                       <OctantButton
                         disabled={browserApprovalBusy}
                         onClick={() => void decideBrowserApproval("approved", "profile")}

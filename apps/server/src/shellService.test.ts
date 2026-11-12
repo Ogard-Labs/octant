@@ -1820,6 +1820,75 @@ describe("ShellService", () => {
     });
   });
 
+  it("refuses remembered Browser transfers added through replace-settings, journals one through the host path for a registered window only, and lets a person forget it", () => {
+    const { persistence, append } = persistenceStub();
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const transfer = {
+      direction: "upload" as const,
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+    };
+    const remembered = { ...defaultShellSettings(), rememberedBrowserTransfers: [transfer] };
+
+    expect(() =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: remembered,
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    // A scope that is not a window of this server session journals nothing.
+    expect(() =>
+      service.rememberBrowserTransfers({
+        windowId: "60000000-0000-4000-8000-0000000000aa" as never,
+        expectedVersion: 0 as never,
+        transfers: [transfer],
+      }),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(
+      service.rememberBrowserTransfers({
+        windowId: ids.window,
+        expectedVersion: 0 as never,
+        transfers: [transfer],
+      }),
+    ).toEqual({ kind: "settings-replaced", settings: remembered, version: 1 });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            payload: { settings: remembered },
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 1,
+          settings: { ...remembered, rememberedBrowserTransfers: [] },
+        }),
+      ),
+    ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserTransfers: [] } });
+  });
+
   it("keeps reporting a folder stored under Documents after the host default moved", () => {
     const stored = decodeShellSettings({
       ...defaultShellSettings(),

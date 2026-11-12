@@ -213,11 +213,29 @@ export type BrowserTabId = typeof BrowserTabId.Type;
 
 /** How many files one upload may send. */
 export const MAX_BROWSER_UPLOAD_FILES = 5;
-/** The largest file an upload may send. */
-export const MAX_BROWSER_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+/**
+ * The largest file an upload or an agent's download may carry unless the
+ * person chose another limit in Settings (`browserTransferFileLimitMegabytes`).
+ * A recurring manifest keeps this bound whatever the setting says.
+ */
+export const DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES = 25;
+export const MAX_BROWSER_UPLOAD_FILE_BYTES =
+  DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES * 1024 * 1024;
+/**
+ * The largest per-file limit a person may choose. It is fixed because a save
+ * reads the whole held file into memory to digest it, and journaled receipts
+ * bound their size by it.
+ */
+export const MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES = 1024;
 
-/** How many downloads one browsing context holds at once; the oldest is discarded. */
+/**
+ * How many downloads one browsing context holds at once, the oldest discarded
+ * first, unless the person chose another limit in Settings
+ * (`browserHeldDownloadLimit`).
+ */
 export const MAX_BROWSER_HELD_DOWNLOADS = 5;
+/** The most held downloads a person may choose; each is a file on the host's disk. */
+export const MAX_BROWSER_HELD_DOWNLOAD_LIMIT = 50;
 
 /** The longest any wait may last; a wait names its own limit up to this. */
 export const MAX_BROWSER_WAIT_MS = 30_000;

@@ -14,6 +14,7 @@ import {
   decodeShellCommand,
   type ProjectId,
   type RememberedBrowserProfileSite,
+  type RememberedBrowserTransfer,
   type ShellBootstrap,
   type ShellCommandResult,
   type ShellFailure,
@@ -35,6 +36,7 @@ import {
   defaultWindowWorkspace,
   enabledModes,
   browserProfileSiteListed,
+  browserTransferRemembered,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -197,6 +199,47 @@ export class ShellService implements ShellServiceApi {
       );
       const settings = this.#withJudgedDefaultFolder(
         { ...current, rememberedBrowserOrigins: merged },
+        current,
+      );
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * The upload and download counterpart of {@link rememberBrowserOrigins}:
+   * remembers an "Always allow" answer for one direction, site and workspace.
+   */
+  rememberBrowserTransfers(input: {
+    readonly windowId: WindowId;
+    readonly expectedVersion: AggregateVersion;
+    readonly transfers: ReadonlyArray<RememberedBrowserTransfer>;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      if (!this.#registeredWindowIds.has(input.windowId)) {
+        throw new ShellServiceError({
+          category: "invalid",
+          message: "Shell command window is not registered with this server session.",
+        });
+      }
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = current.rememberedBrowserTransfers.concat(
+        input.transfers.filter(
+          (transfer) => !browserTransferRemembered(current.rememberedBrowserTransfers, transfer),
+        ),
+      );
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedBrowserTransfers: merged },
         current,
       );
       const committed = this.#persistence.journal.append({

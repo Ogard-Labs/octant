@@ -88,6 +88,7 @@ import { createRoutineProposalTools } from "../automation/routineProposalTools";
 import { createRoutineTools } from "../automation/routineTools";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
+  browserTransferLimits,
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
@@ -531,6 +532,10 @@ export function wireWork(deps: WorkDependencies) {
               flows: browserFlows,
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
+              uploadFileLimitBytes: () =>
+                browserTransferLimits(
+                  persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                ).maxFileBytes,
               uuid: randomUUID,
             });
         const browser =
