@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   BENCHMARK_FAILURE_REASON_CHARS,
   BENCHMARK_JUDGE_REASON_CHARS,
@@ -218,8 +219,8 @@ export class BenchmarkRunner {
   }
 
   /** Stops a run: running turns are interrupted, queued cells are cancelled, and the run ends. */
-  cancel(runId: string): Promise<BenchmarkRun | undefined> {
-    return this.#exclusive(() => this.#cancel(runId));
+  cancel(runId: string, actor?: EventActor): Promise<BenchmarkRun | undefined> {
+    return this.#exclusive(() => this.#cancel(runId, actor));
   }
 
   /**
@@ -1011,7 +1012,12 @@ export class BenchmarkRunner {
     });
   }
 
-  async #cancel(runId: string): Promise<BenchmarkRun | undefined> {
+  /**
+   * `actor` is who cancelled, as the route resolved it: the cells this stops
+   * and the run's end are journaled as theirs. A cell that had already
+   * finished is settled as the runner settles any other.
+   */
+  async #cancel(runId: string, actor?: EventActor): Promise<BenchmarkRun | undefined> {
     const run = this.#options.projection.run(runId);
     if (run === undefined || run.status !== "running") return run;
     for (const cell of run.cells) {
@@ -1042,7 +1048,7 @@ export class BenchmarkRunner {
         }
         await this.#options.chat.archiveThread(live.threadId);
       }
-      this.#settle(current, live, "cancelled", "Cancelled by a person.");
+      this.#settle(current, live, "cancelled", "Cancelled by a person.", [], actor);
     }
     // A judge turn in flight for an answered cell keeps spending unless it is stopped.
     for (const cell of benchmarkCellsOwingJudgement(run)) {
@@ -1058,15 +1064,18 @@ export class BenchmarkRunner {
     if (latest !== undefined) {
       for (const cell of latest.cells) {
         if (cell.state === "queued")
-          this.#settle(latest, cell, "cancelled", "Cancelled by a person.");
+          this.#settle(latest, cell, "cancelled", "Cancelled by a person.", [], actor);
       }
     }
-    this.#options.store.runEnded({
-      runId: run.runId,
-      status: "cancelled",
-      endReason: "Cancelled by a person.",
-      endedAt: decodeUtcTimestamp(this.#options.clock()),
-    });
+    this.#options.store.runEnded(
+      {
+        runId: run.runId,
+        status: "cancelled",
+        endReason: "Cancelled by a person.",
+        endedAt: decodeUtcTimestamp(this.#options.clock()),
+      },
+      actor,
+    );
     return this.#options.projection.run(runId);
   }
 
@@ -1076,17 +1085,23 @@ export class BenchmarkRunner {
     state: BenchmarkSettledCellState,
     failureReason?: string,
     checks: BenchmarkCell["checks"] = [],
+    actor?: EventActor,
   ): void {
-    this.#options.store.cellSettled({
-      runId: run.runId,
-      cellId: cell.cellId,
-      state,
-      ...(failureReason === undefined
-        ? {}
-        : { failureReason: boundedBenchmarkReason(failureReason, BENCHMARK_FAILURE_REASON_CHARS) }),
-      checks,
-      settledAt: decodeUtcTimestamp(this.#options.clock()),
-    });
+    this.#options.store.cellSettled(
+      {
+        runId: run.runId,
+        cellId: cell.cellId,
+        state,
+        ...(failureReason === undefined
+          ? {}
+          : {
+              failureReason: boundedBenchmarkReason(failureReason, BENCHMARK_FAILURE_REASON_CHARS),
+            }),
+        checks,
+        settledAt: decodeUtcTimestamp(this.#options.clock()),
+      },
+      actor,
+    );
   }
 }
 

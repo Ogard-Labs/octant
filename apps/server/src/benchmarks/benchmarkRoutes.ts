@@ -215,7 +215,7 @@ async function dispatch(
       const request = parse(decodeBenchmarkRunCancelRequest);
       return request === undefined
         ? invalid()
-        : answer(await service.cancelRun(request), (run) => ({ run }));
+        : answer(await service.cancelRun(request, actor), (run) => ({ run }));
     }
     case BENCHMARK_ROUTE_PATHS.cellsRate: {
       const request = parse(decodeBenchmarkCellRateRequest);

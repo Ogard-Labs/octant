@@ -59,7 +59,7 @@ export interface BenchmarkServiceOptions {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
   };
   readonly runner: {
-    readonly cancel: (runId: string) => Promise<BenchmarkRun | undefined>;
+    readonly cancel: (runId: string, actor?: EventActor) => Promise<BenchmarkRun | undefined>;
     readonly kick: () => void;
   };
   /** Whether the provider instance exists, is enabled, and offers the model. */
@@ -397,8 +397,11 @@ export class BenchmarkService {
     return { status: "ok", commits };
   }
 
-  async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
-    const run = await this.#options.runner.cancel(runKey(request.runId));
+  async cancelRun(
+    request: BenchmarkRunCancelRequest,
+    actor?: EventActor,
+  ): Promise<BenchmarkOutcome<BenchmarkRun>> {
+    const run = await this.#options.runner.cancel(runKey(request.runId), actor);
     return run === undefined ? refused("not-found", "That run does not exist.") : ok(run);
   }
 
