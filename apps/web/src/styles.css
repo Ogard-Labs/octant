@@ -81,7 +81,7 @@
      where the surface crosses something lighter. A card and a popup drew
      the theme's one floating colour, a hair off the page, and both read as
      flat outlines. */
-  --octant-card: color-mix(in oklab, var(--octant-floating) 95%, var(--octant-text-primary));
+  --octant-card: color-mix(in oklab, var(--octant-workspace) 95.5%, var(--octant-text-primary));
   --octant-float: color-mix(in oklab, var(--octant-floating) 91%, var(--octant-text-primary));
   --octant-bevel: rgb(255 255 255 / 8%);
   --octant-bevel-strong: rgb(255 255 255 / 13%);
@@ -105,48 +105,128 @@
   --octant-divider-strong: #8a8a8a;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
+  /* One material, five levels (see DESIGN.md, "Shapes and depth"). Every
+     surface takes a fill one step lighter than what it sits on, a rim that is
+     brighter along its top edge (an inset line, then an inset ring), and a
+     shadow that seats it. On a near-black page a shadow cannot show, so the
+     lift is the fill and the rim; the shadow helps where a surface crosses
+     something lighter. Light is a token, not a colour in a recipe, so a
+     preset or a custom accent changes it in one place. */
+  --octant-rim: rgb(255 255 255 / 10%);
+  --octant-rim-top: rgb(255 255 255 / 30%);
+  /* Glass lets light out along its lower edge too: a fainter line inside the
+     bottom of a panel, a card and a floating surface. */
+  --octant-rim-low: rgb(255 255 255 / 7%);
+  --octant-rim-float: rgb(255 255 255 / 44%);
+  --octant-sheen: rgb(255 255 255 / 4.5%);
+  --octant-edge-light: rgb(255 255 255 / 10%);
+  --octant-control-top: rgb(255 255 255 / 32%);
+  --octant-control-low: rgb(0 0 0 / 36%);
+  --octant-control-rim: rgb(255 255 255 / 8%);
+  --octant-control-drop: 0 1px 2px rgb(0 0 0 / 65%), 0 3px 8px -3px rgb(0 0 0 / 60%);
+  /* The control's vertical gradient (lighter on top) drawn as an inset shadow,
+     so a recipe that sets its own fill still gets it. */
+  --octant-control-lift: inset 0 12px 10px -8px rgb(255 255 255 / 13%);
+  --octant-card-lift: inset 0 16px 14px -12px var(--octant-sheen);
+  --octant-card-drop: 0 1px 2px rgb(0 0 0 / 28%), 0 10px 22px -14px rgb(0 0 0 / 55%);
+  /* A well is cut in: darker, an inner top shadow, a light line under it. */
+  --octant-well: rgb(0 0 0 / 34%);
+  --octant-shadow-well:
+    inset 0 1px 2px rgb(0 0 0 / 70%), inset 0 0 0 1px rgb(0 0 0 / 40%),
+    0 1px 0 rgb(255 255 255 / 7%);
+  /* Level 1: a narrow window's tile panel (a wide window's panes are flat, see
+     shell.css). Its top is lit twice: a bright band as deep as the
+     slab's edge, which ends above the first line of anything a panel holds,
+     over a long, soft fall of the sheen. Both are fills under the panel's
+     content, never over its text. */
+  --octant-panel-band: linear-gradient(180deg, var(--octant-edge-light), transparent 7px);
+  --octant-panel-sheen: linear-gradient(180deg, var(--octant-sheen), transparent 96px);
+  /* The seat stays inside the 8px gap between two panels (its soft edge ends
+     within 8px of the box), so a panel looks the same whatever its neighbour's
+     order, and no tile's shadow darkens the top of the one beneath it. */
+  /* The rim and the seat are two tokens: a panel's own content paints over
+     an inset shadow, so the rim is also drawn by a pseudo-element above the
+     content (see shell.css), and the seat stays on the panel's box. */
+  --octant-shadow-panel-rim:
+    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim);
+  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 5px 8px -7px #000;
+  --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
+  /* Level 2: a card on a panel. A card is a hair smaller in shadow than a
+     control's tile: it lies on the panel instead of standing on it. */
   --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 30%);
+    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim), 0 1px 2px rgb(0 0 0 / 30%);
   --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border-strong),
-    0 1px 2px rgb(0 0 0 / 36%), 0 8px 20px -10px rgb(0 0 0 / 64%);
+    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift), var(--octant-card-drop);
+  /* Level 3: a control, and the composer's box, which is a container with a
+     longer shadow. */
+  --octant-shadow-control:
+    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
+    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
+    var(--octant-control-drop);
+  --octant-shadow-control-pressed:
+    inset 0 1px 2px rgb(0 0 0 / 55%), inset 0 0 0 1px var(--octant-control-rim);
+  --octant-shadow-selected: var(--octant-shadow-control);
   --octant-shadow-md:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border),
-    0 2px 5px -2px rgb(0 0 0 / 44%), 0 12px 24px -8px rgb(0 0 0 / 64%);
+    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
+    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
+    0 1px 2px rgb(0 0 0 / 40%), 0 14px 30px -14px rgb(0 0 0 / 70%);
   --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border),
-    0 10px 18px -8px rgb(0 0 0 / 54%), 0 24px 48px -16px rgb(0 0 0 / 70%);
-  /* A control that is a filled tile: light on its top edge, a short shadow
-     under it; pressed, the light goes and the tile sinks. */
-  /* A raised card on the window's glass: the opaque border is near black
-     and drew a heavy outline on the grey a desktop shows through, so its
-     edge is a light rim there, and the shadow under it can be seen. */
-  --octant-shadow-raised-glass:
-    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(255 255 255 / 9%),
-    0 1px 2px rgb(0 0 0 / 18%), 0 10px 24px -14px rgb(0 0 0 / 36%);
-  --octant-shadow-control: inset 0 1px 0 var(--octant-bevel), 0 1px 2px rgb(0 0 0 / 44%);
-  /* The row a list is showing is a tile raised out of the list: a light rim,
-     brighter along its top, and a short shadow. As a flat wash it was told
-     from the row under the pointer only by being a little darker. */
-  --octant-shadow-selected:
-    inset 0 1px 0 var(--octant-bevel-strong), inset 0 0 0 1px var(--octant-bevel),
-    0 1px 2px rgb(0 0 0 / 30%);
-  --octant-shadow-control-pressed: inset 0 1px 2px rgb(0 0 0 / 46%);
-  /* Something that floats: a light rim inside the edge and brighter along
-     the top, a dark line outside it, and two shadows (a short one that seats
-     it, a long one that lifts it). The overlay's own edge is drawn here, so a
-     popup that also set a border showed two. */
+    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim), 0 10px 18px -8px rgb(0 0 0 / 54%),
+    0 24px 48px -16px rgb(0 0 0 / 70%);
+  /* A raised card on the window's glass: its edge is a light rim, since the
+     opaque border is near black on the grey a desktop shows through. */
+  --octant-shadow-raised-glass: var(--octant-shadow-sm);
+  /* Level 4: something that floats. A light rim along the top and around, a
+     dark line outside it, and two shadows: a short one that seats it and a
+     long one that lifts it. */
   --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-bevel-strong), inset 0 0 0 1px var(--octant-bevel),
-    0 0 0 1px rgb(0 0 0 / 72%), 0 8px 16px -6px rgb(0 0 0 / 56%), 0 24px 56px -12px rgb(0 0 0 / 76%);
+    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
+    0 6px 14px -4px rgb(0 0 0 / 60%), 0 30px 60px -18px rgb(0 0 0 / 80%);
   --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(0 0 0 / 72%),
+    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
+    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
     0 12px 24px -8px rgb(0 0 0 / 60%), 0 40px 96px -24px rgb(0 0 0 / 80%);
+  /* A floating surface is frosted: the lifted fill at 66% over a blur of what
+     is behind it, with a sheen at its top. The blur also dims what is behind
+     to under half. That is what lets the fill be this clear: a white page
+     behind a dark menu lands the fill about where the old 88% fill did, and
+     over the app's own dark page the meta ink reads better than it did
+     (4.54:1 from 4.04:1). Light has its own pair below. Where the person asks
+     for less transparency, or more contrast, the fill is the opaque float. */
+  /* The sheen is a strip along the lit top edge only. It ends above the first
+     line of anything a surface holds, so the meta ink on a menu's top row or a
+     dialog's title band sits on the plain float fill, as it did before. */
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 8px);
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 66%, transparent);
+  --octant-float-blur: blur(40px) saturate(180%) brightness(0.45);
+  /* The primary action: the accent as a gradient with a soft glow under it.
+     The gradient only ever moves the fill AWAY from the label's colour, for
+     any accent and any label, so no stop is less legible than the flat accent.
+     The colour away from the label is the label's own lightness turned over
+     (white for a dark label, black for a light one), taken from the theme's
+     published `--octant-primary-foreground` rather than guessed from the mode.
+     Its strength follows the same lightness: a white overlay is strongest at
+     the top (the tile is lit from above) and a black one at the bottom. */
+  --octant-accent-away: oklch(from var(--octant-primary-foreground) calc((0.5 - l) * 1000) 0 0);
+  --octant-accent-sheen: linear-gradient(
+    180deg,
+    oklch(from var(--octant-accent-away) l c h / calc(0.04 + 0.14 * l)),
+    oklch(from var(--octant-accent-away) l c h / calc(0.18 - 0.14 * l))
+  );
+  --octant-shadow-primary:
+    inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 22%),
+    inset 0 0 0 1px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 45%),
+    0 6px 16px -6px color-mix(in srgb, var(--octant-accent) 75%, transparent);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
-  --octant-glass-border: rgb(255 255 255 / 9%);
-  --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 7%);
+  --octant-glass-border: rgb(255 255 255 / 13%);
+  --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 18%);
   --octant-space-1: 4px;
   --octant-space-2: 8px;
   --octant-space-3: 12px;
@@ -258,30 +338,59 @@ html[data-octant-theme-mode="light"] {
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
   --octant-scrim: #000000;
+  --octant-rim: rgb(16 24 40 / 8%);
+  --octant-rim-top: #ffffff;
+  --octant-rim-low: transparent;
+  --octant-rim-float: #ffffff;
+  --octant-sheen: rgb(255 255 255 / 0%);
+  --octant-edge-light: transparent;
+  --octant-control-top: #ffffff;
+  --octant-control-low: rgb(16 24 40 / 10%);
+  --octant-control-rim: rgb(16 24 40 / 13%);
+  --octant-control-drop: 0 1px 1.5px rgb(16 24 40 / 14%), 0 3px 8px -4px rgb(16 24 40 / 20%);
+  --octant-control-lift: inset 0 10px 8px -8px #ffffff;
+  --octant-card-lift: inset 0 14px 12px -12px #ffffff;
+  --octant-card-drop: 0 1px 2px rgb(16 24 40 / 8%), 0 10px 20px -14px rgb(16 24 40 / 26%);
+  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
+  /* A light menu keeps a fuller fill, and the blur draws what is behind it
+     toward a pale grey first (lower contrast, then brighter): a black page
+     behind a white menu cannot be dimmed out of the way. */
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
+  --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
+  --octant-well: rgb(16 24 40 / 5%);
+  --octant-shadow-well:
+    inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
+  --octant-shadow-panel-seat:
+    0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
+    0 6px 10px -8px rgb(16 24 40 / 34%);
   --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 10%), 0 1px 2px rgb(16 24 40 / 6%);
+    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
+    0 1px 2px rgb(16 24 40 / 8%);
   --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 8%),
-    0 8px 20px -10px rgb(16 24 40 / 18%);
-  --octant-shadow-md:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%),
-    0 2px 5px -2px rgb(16 24 40 / 12%), 0 12px 24px -8px rgb(16 24 40 / 14%);
-  --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%),
-    0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
-  --octant-shadow-raised-glass:
-    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 8%),
-    0 1px 2px rgb(16 24 40 / 8%), 0 10px 24px -14px rgb(16 24 40 / 18%);
+    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift),
+    var(--octant-card-drop);
   --octant-shadow-control:
-    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 10%);
-  --octant-shadow-control-pressed: inset 0 1px 2px rgb(16 24 40 / 16%);
-  --octant-shadow-selected: inset 0 0 0 1px rgb(16 24 40 / 7%), 0 1px 2px rgb(16 24 40 / 8%);
+    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
+    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
+    var(--octant-control-drop);
+  --octant-shadow-control-pressed:
+    inset 0 1px 2px rgb(16 24 40 / 22%), inset 0 0 0 1px var(--octant-control-rim);
+  --octant-shadow-selected: var(--octant-shadow-control);
+  --octant-shadow-md:
+    inset 0 1px 0 #ffffff, inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
+    0 1px 2px rgb(16 24 40 / 10%), 0 14px 28px -16px rgb(16 24 40 / 36%);
+  --octant-shadow-lg:
+    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
+    0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
+  --octant-shadow-raised-glass: var(--octant-shadow-sm);
   --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 10%),
-    0 6px 14px -6px rgb(16 24 40 / 14%), 0 24px 56px -14px rgb(16 24 40 / 24%);
+    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
+    0 0 0 0.5px rgb(16 24 40 / 20%), 0 6px 14px -4px rgb(16 24 40 / 16%),
+    0 30px 60px -18px rgb(16 24 40 / 40%);
   --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 10%),
-    0 12px 24px -8px rgb(16 24 40 / 16%), 0 40px 96px -24px rgb(16 24 40 / 28%);
+    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
+    0 0 0 0.5px rgb(16 24 40 / 20%), 0 12px 24px -8px rgb(16 24 40 / 16%),
+    0 40px 96px -24px rgb(16 24 40 / 40%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
@@ -4727,6 +4836,22 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --octant-text-primary: var(--octant-text-primary-high-contrast);
   --octant-text-secondary: var(--octant-text-secondary-high-contrast);
   --octant-text-muted: var(--octant-text-muted-high-contrast);
+  /* A gradient or a sheen only lowers the contrast between a label and its
+     fill, so increased contrast keeps the flat fill and keeps the rims. */
+  --octant-control-lift: 0 0 0 0 transparent;
+  --octant-card-lift: 0 0 0 0 transparent;
+  --octant-sheen: transparent;
+  --octant-edge-light: transparent;
+  --octant-accent-sheen: linear-gradient(transparent, transparent);
+  /* The rims are the edges a surface has when its fill is flat, so they take
+     the strong border: a 7% line was the edge of a panel that main drew with
+     the soft hairline and of a card that it drew with a border. */
+  --octant-rim: var(--octant-border-strong);
+  --octant-rim-top: var(--octant-border-strong);
+  --octant-rim-low: var(--octant-border-strong);
+  --octant-rim-float: var(--octant-border-strong);
+  --octant-control-top: var(--octant-border-strong);
+  --octant-control-rim: var(--octant-border-strong);
 }
 
 html[data-octant-increased-contrast="true"] .workspace-pane__header {
