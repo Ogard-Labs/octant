@@ -33,6 +33,7 @@ import {
   type CodeDebugConfiguration,
   type CodeDebugConfigurationApproved,
   type CodeDebugConfigurationDigest,
+  type CodeDebugConfigurationName,
   type CodeDebugConfigurationsRequest,
   type CodeDebugConfigurationsResult,
   type CodeDebugExceptionFilter,
@@ -40,6 +41,7 @@ import {
   type CodeDebugLaunchFileReading,
   type CodeDebugOutputEntry,
   type CodeDebugRefusalReason,
+  type CodeDebugRunningSession,
   type CodeDebugSessionCall,
   type CodeDebugSessionEndReason,
   type CodeDebugSessionId,
@@ -73,7 +75,7 @@ import type {
   DebugAdapterProcess,
   DebugChildEndpoint,
 } from "./debugAdapterProcess";
-import type { DebugSessionRecords } from "./debugSessionRecords";
+import type { DebugSessionAgent, DebugSessionRecords } from "./debugSessionRecords";
 import {
   adapterText,
   boundText,
@@ -95,12 +97,13 @@ import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
  * Debug sessions for Code threads. Canonical:
  * docs/design/language-services.md § Debugger addendum.
  *
- * Only the person at a local window whose Project binding holds the thread
- * lists configurations, confirms one, starts a session, controls it, or
- * stops it; every request is authorized when it runs, a paired device and an
- * agent never are. A session starts only from a configuration an approval on
- * record covers, as the configuration and the adapter stand now, and runs
- * the adapter and the program in one capsule. It ends when the person stops
+ * The person at a local window whose Project binding holds the thread lists
+ * configurations, confirms one, starts a session, controls it, or stops it,
+ * and the thread's agent does all of that but confirming, through its tool
+ * (decision DB8); every request is authorized when it runs, and a paired
+ * device never is. Below Full access a session starts only from a
+ * configuration an approval on record covers, as the configuration and the
+ * adapter stand now. It runs the adapter and the program in one capsule. It ends when the person stops
  * it, when the program or the adapter ends, and at once when the thread stops
  * being active, moves to Plan, changes its session's network level, loses its
  * checkout, or no approval covers the configuration and adapter any more, when
@@ -144,8 +147,19 @@ export interface CodeDebugAuthority {
 
 export interface CodeDebugCaller {
   readonly scopeId: WindowId;
-  readonly principal: PrincipalKind;
+  /**
+   * `agent` is the thread's own agent, through its debug tool, on the window
+   * its turn runs for. It lists, starts, controls, and reads as a local
+   * window does and never confirms a configuration.
+   */
+  readonly principal: PrincipalKind | "agent";
 }
+
+/** The thread's running session, or that it has none. */
+export type CodeDebugThreadSession =
+  | { readonly status: "running"; readonly session: CodeDebugRunningSession }
+  | { readonly status: "none" }
+  | { readonly status: "refused"; readonly reason: CodeDebugRefusalReason };
 
 export interface CodeDebugApprovals {
   readonly approvals: (projectId: ProjectId) => ReadonlyArray<CodeDebugConfigurationApproved>;
@@ -229,6 +243,8 @@ interface SessionRecord extends DebugTarget {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
   readonly configurationDigest: CodeDebugConfigurationDigest;
+  /** The configuration's name, which a listing shows for the running session. */
+  readonly name: CodeDebugConfigurationName;
   readonly adapter: CodeDebugAdapterComponent;
   readonly network: "proxied" | "allow";
   readonly checkoutRoot: string;
@@ -249,6 +265,8 @@ interface SessionRecord extends DebugTarget {
   /** The host-chosen port a child's announcement must name; absent when no children are declared. */
   childPort: number | undefined;
   /** Children attached over the session's life. */
+  /** The thread's agent, when its Stop is what ends the session. */
+  stoppedBy?: DebugSessionAgent | undefined;
   childrenAttached: number;
   /** Announcements dropped or refused; those children ran undebugged. */
   undebuggedChildren: number;
@@ -322,7 +340,7 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugConfigurationsRequest,
   ): Promise<CodeDebugConfigurationsResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (caller.principal === "remote-device") return refused("local-host-required");
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const adapters = this.#adapters();
@@ -333,6 +351,7 @@ export class CodeDebugService {
       adapters,
       request.currentFile,
     );
+    const running = this.#runningFor(request.threadId);
     return {
       status: "listed",
       adapters: adapters.slice(0, 64).map((adapter) => ({
@@ -344,7 +363,33 @@ export class CodeDebugService {
       })),
       approved,
       launchFile,
+      ...(running === undefined ? {} : { session: runningSession(running) }),
     };
+  }
+
+  /**
+   * Whether a session could start on this host at all: a platform sessions
+   * run on, with an adapter effective in Code. The agent's tool is offered
+   * only where this holds.
+   */
+  get offersSessions(): boolean {
+    return (
+      (this.#platform === "macos" || this.#platform === "linux") && this.#adapters().length > 0
+    );
+  }
+
+  /** The thread's one running session, for a caller that may reach the thread. */
+  threadSession(
+    caller: CodeDebugCaller,
+    scope: { readonly threadId: CodeThreadId; readonly checkoutId: CodeCheckoutId },
+  ): CodeDebugThreadSession {
+    if (caller.principal === "remote-device") return refused("local-host-required");
+    const authorized = this.#authorize(caller, scope.threadId, scope.checkoutId);
+    if (authorized.status === "refused") return authorized;
+    const running = this.#runningFor(scope.threadId);
+    return running === undefined
+      ? { status: "none" }
+      : { status: "running", session: runningSession(running) };
   }
 
   /**
@@ -385,7 +430,10 @@ export class CodeDebugService {
     return { status: "approved", configurationDigest, scope: request.scope };
   }
 
-  /** A person's Start at a local window. Nothing launches until every check passes. */
+  /**
+   * A person's Start at a local window, or the thread's agent's through its
+   * tool. Nothing launches until every check passes.
+   */
   async start(
     caller: CodeDebugCaller,
     request: CodeDebugStartRequest,
@@ -430,6 +478,7 @@ export class CodeDebugService {
       threadId: thread.id,
       checkoutId: checkout.id,
       configurationDigest,
+      name: request.configuration.name,
       adapter,
       network,
       checkoutRoot: paths.checkoutRoot,
@@ -447,14 +496,17 @@ export class CodeDebugService {
     // Ended while the binary was verified (the thread moved to Plan, the host
     // is stopping): nothing is journaled as started and nothing launches.
     if (record.ending !== undefined) return { status: "failed", reason: "launch-failed" };
-    const started = this.#records.started({
-      sessionId,
-      projectId: thread.projectId,
-      threadId: thread.id,
-      checkoutId: checkout.id,
-      configurationDigest,
-      network,
-    });
+    const started = this.#records.started(
+      {
+        sessionId,
+        projectId: thread.projectId,
+        threadId: thread.id,
+        checkoutId: checkout.id,
+        configurationDigest,
+        network,
+      },
+      agentOf(caller, thread),
+    );
     if (started !== "recorded") {
       this.#sessions.delete(String(sessionId));
       return { status: "failed", reason: "launch-failed" };
@@ -530,7 +582,7 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     call: CodeDebugSessionCall,
   ): Promise<CodeDebugSessionResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (caller.principal === "remote-device") return refused("local-host-required");
     const authorized = this.#authorize(caller, call.threadId, call.checkoutId);
     if (authorized.status === "refused") return authorized;
     const record = this.#sessions.get(String(call.sessionId));
@@ -563,6 +615,7 @@ export class CodeDebugService {
         if ("child" in target) {
           await this.#endChild(record, target, "stopped");
         } else {
+          record.stoppedBy = agentOf(caller, authorized.thread);
           await this.#end(record, "stopped");
         }
         return { status: "ended", endReason: "stopped" };
@@ -761,6 +814,13 @@ export class CodeDebugService {
       return refused("checkout-unavailable");
     }
     return { status: "authorized", thread: effective, checkout };
+  }
+
+  /** The thread's session that is running and not already ending. */
+  #runningFor(threadId: CodeThreadId): SessionRecord | undefined {
+    return [...this.#sessions.values()].find(
+      (record) => sameThread(record, threadId) && record.ending === undefined,
+    );
   }
 
   #adapterFor(configuration: CodeDebugConfiguration): CodeDebugAdapterComponent | undefined {
@@ -1465,14 +1525,17 @@ export class CodeDebugService {
       }
       connection?.close();
       await process?.kill().catch(() => undefined);
-      this.#records.ended({
-        sessionId: record.sessionId,
-        projectId: record.projectId,
-        threadId: record.threadId,
-        configurationDigest: record.configurationDigest,
-        endReason: reason,
-        ...(record.childPort === undefined ? {} : { childSessions: record.childrenAttached }),
-      });
+      this.#records.ended(
+        {
+          sessionId: record.sessionId,
+          projectId: record.projectId,
+          threadId: record.threadId,
+          configurationDigest: record.configurationDigest,
+          endReason: reason,
+          ...(record.childPort === undefined ? {} : { childSessions: record.childrenAttached }),
+        },
+        reason === "stopped" ? record.stoppedBy : undefined,
+      );
       record.output.entries.length = 0;
       this.#sessions.delete(String(record.sessionId));
       this.#endings.delete(String(record.threadId));
@@ -1513,6 +1576,8 @@ function newRecord(input: {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
   readonly configurationDigest: CodeDebugConfigurationDigest;
+  /** The configuration's name, which a listing shows for the running session. */
+  readonly name: CodeDebugConfigurationName;
   readonly adapter: CodeDebugAdapterComponent;
   readonly network: "proxied" | "allow";
   readonly checkoutRoot: string;
@@ -1746,6 +1811,17 @@ function samePackageState(
     String(left.packageDigest) === String(right.packageDigest) &&
     left.lifecycleVersion === right.lifecycleVersion
   );
+}
+
+/** The journal names the thread's agent for what its tool did, and the person otherwise. */
+function agentOf(caller: CodeDebugCaller, thread: CodeThread): DebugSessionAgent | undefined {
+  return caller.principal === "agent"
+    ? { providerInstanceId: String(thread.providerInstanceId) }
+    : undefined;
+}
+
+function runningSession(record: SessionRecord): CodeDebugRunningSession {
+  return { sessionId: record.sessionId, name: record.name };
 }
 
 function sameThread(record: SessionRecord, threadId: CodeThreadId): boolean {

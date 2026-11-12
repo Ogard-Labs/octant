@@ -11,6 +11,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeThread,
   decodeEventActor,
+  decodeToolActionAuthority,
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
@@ -48,6 +49,11 @@ import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import type { RecordExternalContentIngestionInput } from "../context/externalContentIngestionStore";
+import {
+  createCodeDebugAgentSessionApprovals,
+  createCodeDebugAgentTools,
+} from "./codeDebugAgentTools";
 import { deriveCodeFileId } from "./codeFileIdentity";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
 import { CodeDebugService } from "./codeDebugService";
@@ -1398,4 +1404,404 @@ describe("a debug session under confinement", () => {
     },
     60_000,
   );
+});
+
+const agentAuthority = decodeToolActionAuthority({
+  hostId: "11111111-1111-4111-8111-111111111111",
+  mode: "code",
+  projectId: "40000000-0000-4000-8000-000000000001",
+  rootId: "70000000-0000-4000-8000-000000000001",
+  worktreeId: "30000000-0000-4000-8000-000000000001",
+  providerInstanceId: "60000000-0000-4000-8000-000000000001",
+  extension: { kind: "core" },
+});
+
+/**
+ * The agent's tool for one turn of the fixture thread, with the person's
+ * answers scripted. `turn` is the posture the turn runs at when it is
+ * narrower than the thread's.
+ */
+function agentTools(
+  test: Host,
+  options: {
+    readonly answer?: "approved" | "denied";
+    readonly turn?: CodeThread["executionPolicy"];
+    readonly approvals?: ReturnType<typeof createCodeDebugAgentSessionApprovals>;
+  } = {},
+) {
+  const asked: string[] = [];
+  const marks: RecordExternalContentIngestionInput[] = [];
+  const turnThread = (): CodeThread => {
+    const effective = test.windowGrant.fullAccess
+      ? { ...test.thread(), executionPolicy: "full-access" as const }
+      : test.thread();
+    return options.turn === undefined ? effective : { ...effective, executionPolicy: options.turn };
+  };
+  const set = createCodeDebugAgentTools({
+    windowId: scopeId,
+    thread: turnThread(),
+    readThread: turnThread,
+    authority: () => agentAuthority,
+    externalContentIngested: () => marks.length > 0,
+    recordExternalContentIngestion: (mark) => {
+      marks.push(mark);
+      return { kind: "ignored", reason: "not-tainting" };
+    },
+    debug: test.service,
+    approvals: options.approvals ?? createCodeDebugAgentSessionApprovals(),
+    askPerson: async (summary) => {
+      asked.push(summary);
+      return options.answer ?? "approved";
+    },
+    uuid: randomUUID,
+  });
+  const call = async (value: unknown) => {
+    if (set === undefined) throw new Error("the debug tool is not offered");
+    const outcome = await set.execute({ name: "octant_debug", inputJson: JSON.stringify(value) });
+    return { ...outcome, result: outcome.result as Record<string, unknown> };
+  };
+  return { set, call, asked, marks };
+}
+
+/** The digest the tool lists for the configuration named `name`. */
+async function listedDigest(
+  tools: ReturnType<typeof agentTools>,
+  name = "Run the fixture",
+): Promise<string> {
+  const listed = await tools.call({ operation: "configurations" });
+  const found = (
+    listed.result.configurations as ReadonlyArray<{ name: string; configuration: string }>
+  ).find((candidate) => candidate.name === name);
+  if (found === undefined) throw new Error(`not listed: ${JSON.stringify(listed.result)}`);
+  return found.configuration;
+}
+
+describe("the agent's debug tool", () => {
+  it("is offered only outside Plan, where an adapter is effective and a profile allows it", async () => {
+    const test = await host(passthrough);
+    // No adapter is installed: nothing could start, so nothing is offered.
+    expect(agentTools(test).set).toBeUndefined();
+    await test.install(adapterFolder(test.root));
+    // Installed but not trusted or switched on.
+    expect(agentTools(test).set).toBeUndefined();
+    await test.enable();
+    expect(agentTools(test).set?.definitions.map((definition) => definition.name)).toEqual([
+      "octant_debug",
+    ]);
+    // A turn narrowed to Plan on a thread that is not in Plan.
+    expect(agentTools(test, { turn: "plan" }).set).toBeUndefined();
+    test.threads[0] = { ...test.thread(), toolConstraints: ["octant_code"] };
+    expect(agentTools(test).set).toBeUndefined();
+    test.threads[0] = { ...test.thread(), toolConstraints: ["octant_debug"] };
+    expect(agentTools(test).set).toBeDefined();
+  });
+
+  it("refuses every operation once the turn's thread is in Plan, and launches nothing", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    expect(await test.approve(test.configuration())).toMatchObject({ status: "approved" });
+    const tools = agentTools(test);
+    const digest = await listedDigest(tools);
+    test.threads[0] = { ...test.thread(), executionPolicy: "plan" };
+    for (const operation of [
+      { operation: "configurations" },
+      { operation: "start", configuration: digest },
+      { operation: "state" },
+      { operation: "evaluate", expression: "count" },
+    ]) {
+      expect(await tools.call(operation)).toMatchObject({
+        isError: true,
+        result: { error: "plan-read-only" },
+      });
+    }
+    expect(tools.asked).toEqual([]);
+    expect(test.launches()).toBe(0);
+  });
+
+  it("below Full access starts only a configuration the person confirmed, and only once the person allows the session", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    mkdirSync(join(test.checkout, ".vscode"));
+    writeFileSync(
+      join(test.checkout, ".vscode", "launch.json"),
+      JSON.stringify({
+        configurations: [
+          {
+            type: "fixture",
+            request: "launch",
+            name: "From the repository",
+            program: `\${workspaceFolder}/src/main.js`,
+          },
+        ],
+      }),
+    );
+    // What a turn at Full access could start from the repository's file.
+    test.windowGrant.fullAccess = true;
+    const proposed = await listedDigest(agentTools(test), "From the repository");
+    test.windowGrant.fullAccess = false;
+    // Nothing is confirmed, and the repository's proposal is not startable here.
+    const unconfirmed = agentTools(test);
+    expect((await unconfirmed.call({ operation: "configurations" })).result).toEqual({
+      configurations: [],
+    });
+    expect(await unconfirmed.call({ operation: "start", configuration: proposed })).toMatchObject({
+      isError: true,
+      result: { error: "unknown-configuration" },
+    });
+    // A turn narrowed below a Full-access thread starts no proposal either.
+    test.windowGrant.fullAccess = true;
+    expect(
+      await agentTools(test, { turn: "approval-gated" }).call({
+        operation: "start",
+        configuration: proposed,
+      }),
+    ).toMatchObject({ isError: true, result: { error: "unknown-configuration" } });
+    test.windowGrant.fullAccess = false;
+    expect(unconfirmed.asked).toEqual([]);
+    expect(test.launches()).toBe(0);
+
+    const value = test.configuration();
+    expect(await test.approve(value)).toMatchObject({ status: "approved" });
+    const denied = agentTools(test, { answer: "denied" });
+    const digest = await listedDigest(denied);
+    // The listing names the environment's keys and never its values.
+    expect((await denied.call({ operation: "configurations" })).result).toMatchObject({
+      configurations: [
+        {
+          name: "Run the fixture",
+          program: "src/main.js",
+          env: ["FIXTURE_MODE"],
+          source: "confirmed",
+        },
+      ],
+    });
+    expect(await denied.call({ operation: "start", configuration: digest })).toMatchObject({
+      isError: true,
+      result: { error: "approval-denied" },
+    });
+    expect(denied.asked).toHaveLength(1);
+    expect(denied.asked[0]).toContain("Run the fixture");
+    expect(denied.asked[0]).toContain("src/main.js --verbose");
+    expect(test.launches()).toBe(0);
+
+    const tools = agentTools(test);
+    const started = await tools.call({
+      operation: "start",
+      configuration: digest,
+      breakpoints: [{ path: "src/main.js", lines: [42] }],
+    });
+    // The breakpoint is hit before the start answers.
+    expect(started).toMatchObject({
+      isError: false,
+      result: { started: "Run the fixture", session: "stopped", reason: "breakpoint" },
+    });
+    expect(tools.asked).toHaveLength(1);
+    expect(test.launches()).toBe(1);
+    // Control and reads of the approved session ask nothing more.
+    const stack = await tools.call({ operation: "stack" });
+    expect((stack.result.frames as ReadonlyArray<unknown>)[0]).toMatchObject({
+      path: "src/main.js",
+      line: 42,
+    });
+    expect(
+      await tools.call({ operation: "breakpoints", path: "src/main.js", lines: [] }),
+    ).toMatchObject({ isError: false, result: { breakpoints: [] } });
+    expect((await tools.call({ operation: "step-over" })).result).toMatchObject({
+      session: "stopped",
+      reason: "step",
+    });
+    expect(tools.asked).toHaveLength(1);
+    // A second start is refused while the thread holds a session, unasked.
+    expect(await tools.call({ operation: "start", configuration: digest })).toMatchObject({
+      isError: true,
+      result: { error: "thread-has-session" },
+    });
+    expect(tools.asked).toHaveLength(1);
+
+    // The person's window lists the session the agent started, and stops it.
+    const listed = await test.configurations();
+    if (listed.status !== "listed" || listed.session === undefined) {
+      throw new Error(`no session listed: ${JSON.stringify(listed)}`);
+    }
+    expect(listed.session.name).toBe("Run the fixture");
+    expect(await test.ask(listed.session.sessionId, { kind: "stop" })).toEqual({
+      status: "ended",
+      endReason: "stopped",
+    });
+    expect(await tools.call({ operation: "state" })).toMatchObject({
+      isError: true,
+      result: { error: "no-session" },
+    });
+    expect((await test.configurations()) as { session?: unknown }).not.toHaveProperty("session");
+  });
+
+  it("at Full access starts the repository's proposal unasked, reads bounded variables as outside content, and stops", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const program = readFileSync(join(test.checkout, "src", "main.js"), "utf8");
+    const locals = 'nested: { inner: "deep" } }';
+    expect(program).toContain(locals);
+    // More locals than one read lists, one longer than a value may be, and a key.
+    writeFileSync(
+      join(test.checkout, "src", "main.js"),
+      program.replace(
+        locals,
+        'nested: { inner: "deep" }, long: "x".repeat(5000), key: "AKIAIOSFODNN7EXAMPLE", ...Object.fromEntries(Array.from({ length: 80 }, (_, index) => ["v" + index, index])) }',
+      ),
+    );
+    mkdirSync(join(test.checkout, ".vscode"));
+    writeFileSync(
+      join(test.checkout, ".vscode", "launch.json"),
+      JSON.stringify({
+        configurations: [
+          {
+            type: "fixture",
+            request: "launch",
+            name: "From the repository",
+            program: `\${workspaceFolder}/src/main.js`,
+          },
+        ],
+      }),
+    );
+    test.threads[0] = { ...test.thread(), executionPolicy: "full-access" };
+    const tools = agentTools(test);
+    const digest = await listedDigest(tools, "From the repository");
+    const started = await tools.call({
+      operation: "start",
+      configuration: digest,
+      breakpoints: [{ path: "src/main.js", lines: [42, 50] }],
+    });
+    expect(started).toMatchObject({
+      isError: false,
+      result: { session: "stopped", reason: "breakpoint" },
+    });
+    expect(started.outsideContent).toBeDefined();
+    expect(test.journal.approvals()).toHaveLength(0);
+
+    const scopes = await tools.call({ operation: "scopes", frame: 1 });
+    expect(scopes.result).toMatchObject({ scopes: [{ name: "Locals", reference: 1000 }] });
+    const marksBefore = tools.marks.length;
+    const variables = await tools.call({ operation: "variables", reference: 1000 });
+    expect(variables.isError).toBe(false);
+    expect(variables.outsideContent).toBeDefined();
+    expect(tools.marks.length).toBeGreaterThan(marksBefore);
+    expect(tools.marks.at(-1)).toMatchObject({
+      threadId: test.thread().id,
+      provenance: { origin: "tool-result", sourceLabel: "octant_debug" },
+    });
+    const listed = variables.result.variables as ReadonlyArray<{
+      name: string;
+      value: string;
+      truncated?: boolean;
+      reference?: number;
+    }>;
+    expect(listed).toHaveLength(50);
+    expect(variables.result).toMatchObject({ truncated: true, next: 50 });
+    const long = listed.find((entry) => entry.name === "long");
+    expect(long?.value).toHaveLength(1024);
+    expect(long?.truncated).toBe(true);
+    // One level per read: a nested value is a reference, not its contents.
+    expect(listed.find((entry) => entry.name === "nested")).toMatchObject({ reference: 1003 });
+    expect(JSON.stringify(variables.result)).not.toContain("deep");
+    // A key in a variable is redacted as it is in a command's output.
+    expect(JSON.stringify(variables.result)).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(Buffer.byteLength(JSON.stringify(variables.result))).toBeLessThan(64 * 1024);
+
+    expect((await tools.call({ operation: "evaluate", expression: "count" })).result).toMatchObject(
+      {
+        result: { value: "42" },
+      },
+    );
+    const continued = await tools.call({ operation: "continue" });
+    expect(continued.result).toMatchObject({ session: "stopped", reason: "breakpoint" });
+    const stack = await tools.call({ operation: "stack" });
+    expect((stack.result.frames as ReadonlyArray<unknown>)[0]).toMatchObject({
+      path: "src/main.js",
+      line: 50,
+    });
+    // The program's output is read as the session's state, marked like the rest.
+    const output = await tools.call({ operation: "state" });
+    expect(JSON.stringify(output.result.output)).toContain("counted 42");
+    expect(output.outsideContent).toBeDefined();
+    expect(await tools.call({ operation: "stop" })).toMatchObject({
+      isError: false,
+      result: { session: "ended", endReason: "stopped" },
+    });
+    expect(tools.asked).toEqual([]);
+    expect(test.service.running).toBe(0);
+    // The journal names the thread's agent, not the person, for both acts.
+    const actors = test.journalStore
+      .replayAggregateType({
+        aggregateType: CODE_DEBUG_SESSION_AGGREGATE,
+        afterSequence: 0,
+        limit: 10,
+      })
+      .map((event) => [String(event.eventName), event.actor.kind]);
+    expect(actors).toEqual([
+      ["code.debug-session-started@1", "agent"],
+      ["code.debug-session-ended@1", "agent"],
+    ]);
+    // Nothing the session showed was journaled.
+    const everything = JSON.stringify(test.journal.all());
+    expect(everything).not.toContain("hunter2-session-value");
+    expect(everything).not.toContain("counted 42");
+  });
+
+  it("asks once before touching a session the person started, and again for each expression once the thread read outside content", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const sessionId = await startedSession(test);
+    await stoppedAt(42)(test, sessionId);
+
+    const approvals = createCodeDebugAgentSessionApprovals();
+    const tools = agentTools(test, { approvals });
+    expect((await tools.call({ operation: "state" })).result).toMatchObject({ session: "stopped" });
+    expect(tools.asked).toHaveLength(1);
+    expect(tools.asked[0]).toContain("Run the fixture");
+    // The answer holds for the session on the thread's next turn too.
+    const next = agentTools(test, { approvals });
+    expect((await next.call({ operation: "threads" })).isError).toBe(false);
+    expect(next.asked).toEqual([]);
+    // That read marked the thread, so an expression is confirmed by itself.
+    for (const expression of ["count", "secret"]) {
+      expect((await next.call({ operation: "evaluate", expression })).isError).toBe(false);
+    }
+    expect(next.asked).toHaveLength(2);
+    expect(next.asked[1]).toContain("secret");
+    expect((await next.call({ operation: "stack" })).isError).toBe(false);
+    expect(next.asked).toHaveLength(2);
+
+    const declined = agentTools(test, { approvals, answer: "denied" });
+    // Marked by its own turn's read first.
+    expect((await declined.call({ operation: "threads" })).isError).toBe(false);
+    expect(await declined.call({ operation: "evaluate", expression: "count" })).toMatchObject({
+      isError: true,
+      result: { error: "approval-denied" },
+    });
+  });
+
+  it("refuses input outside its closed operations before anything is read or asked", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const tools = agentTools(test);
+    for (const input of [
+      { operation: "attach", pid: 1 },
+      { operation: "start", configuration: { program: "/bin/sh", args: ["-c", "id"] } },
+      { operation: "start", configuration: `sha256:${"a".repeat(64)}`, command: "id" },
+      { operation: "variables", reference: 1000, depth: 9 },
+      { operation: "evaluate" },
+    ]) {
+      expect(await tools.call(input)).toMatchObject({
+        isError: true,
+        result: { error: "invalid-tool-input" },
+      });
+    }
+    expect(tools.asked).toEqual([]);
+    expect(test.launches()).toBe(0);
+  });
 });

@@ -156,6 +156,15 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       });
       if (!mounted.current || currentAdmission.current !== admission) return;
       listingAdmission.current = admission;
+      // A session this window did not start (the thread's agent did, or
+      // another window): show it, so the person can watch and stop it.
+      if (
+        result.status === "listed" &&
+        result.session !== undefined &&
+        store.read(key).session === undefined
+      ) {
+        store.setSession(key, result.session);
+      }
       setListing(
         result.status === "listed"
           ? { kind: "listed", result }
@@ -170,7 +179,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
       listingAdmission.current = admission;
       setListing({ kind: "unreachable" });
     }
-  }, [admission, checkoutId, client, currentFile, threadId]);
+  }, [admission, checkoutId, client, currentFile, key, store, threadId]);
 
   // Read again when the editor's current file changes, since a launch file's
   // `${file}` entries propose from it.

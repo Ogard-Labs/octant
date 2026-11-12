@@ -41,6 +41,10 @@ import {
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
+import {
+  createCodeDebugAgentSessionApprovals,
+  createCodeDebugAgentTools,
+} from "../code/codeDebugAgentTools";
 import { CodeDebugService } from "../code/codeDebugService";
 import { DebugAdapterProcessPort } from "../code/debugAdapterProcess";
 import { DebugConfigurationApprovalStore } from "../code/debugConfigurationApprovals";
@@ -673,7 +677,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.addFinalizer(() => Effect.promise(() => languageService.close()));
     // Debug sessions (docs/design/language-services.md, Debugger addendum):
     // adapters a person installed and reviewed, configurations a person at a
-    // local window confirmed, and sessions only that person starts. Below Full
+    // local window confirmed, and sessions that person or the thread's agent
+    // starts. Below Full
     // access a session's program reaches the network through its own proxy
     // under its thread's rules, the proxy harness commands use; a host with
     // no proxy refuses such a session.
@@ -772,6 +777,28 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             .externalContentIngested,
         recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         language: languageService,
+        uuid: randomUUID,
+      }),
+    );
+    // The debugger as one app-managed tool on each Code turn outside Plan
+    // whose provider carries them, on a host where a session could start
+    // (decision DB8). It reaches the debug service through the same calls a
+    // window's routes make, as the thread's agent, and asks the person in the
+    // thread below Full access.
+    const debugAgentSessionApprovals = createCodeDebugAgentSessionApprovals();
+    contributeCodeTools(({ windowId, thread, readThread, askPerson }) =>
+      createCodeDebugAgentTools({
+        windowId,
+        thread,
+        readThread,
+        authority: () => browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
+        externalContentIngested: () =>
+          readThreadExternalContentTaint(persistence.connection, String(thread.id))
+            .externalContentIngested,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        debug: debugService,
+        approvals: debugAgentSessionApprovals,
+        askPerson,
         uuid: randomUUID,
       }),
     );

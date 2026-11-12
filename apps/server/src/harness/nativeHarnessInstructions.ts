@@ -81,6 +81,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
     "generate a picture with an image model instead of drawing it as SVG; the person picks the model and confirms first",
   octant_credential:
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
+  octant_debug:
+    "run a program of the checkout under the debugger: breakpoints, stepping, the stopped program's stack and variables",
   octant_github:
     "read the repository's issues, pull requests, and projects, one issue in full, or search them",
   octant_memory:

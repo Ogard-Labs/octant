@@ -651,13 +651,18 @@ configuration digest and adapter package state) and starts it; the adapter and
 the program run in one capsule confined as a terminal, on the session's own
 `proxied` egress under the thread's rules below Full access, and the session
 ends at once when the thread, its posture, its checkout, the confirmation, or
-the Project goes. An agent may also start, control and read a debug session:
-unasked at Full access, approval-gated per configuration below it, and refused
-in Plan; a paired device that is not an owner device stays refused (maintainer
-request, 2026-11-12). The host's start decision follows this rule and skips
-the confirmation at Full access. Not built yet: today the routes under
-`/api/code/debug/` are local-window only with no remote action and no agent
-tool reaches a session. Nothing a session
+the Project goes. An agent may also start, control and read a debug session,
+through one app-managed tool, `octant_debug` (`code-debug` and
+`code-debug-evaluate` in the closed catalog): unasked at Full access,
+approval-gated below it (a configuration the person confirmed, then one
+answer in the thread per session), and refused in Plan; a paired device that
+is not an owner device stays refused (maintainer decision, 2026-11-12). The
+tool starts only a configuration the Project already holds, is offered only
+outside Plan where a debug adapter is effective, and returns bounded,
+redacted results marked as outside content
+([Agent debug tool rules](design/language-services.md#agent-debug-tool-rules)).
+The routes under `/api/code/debug/` stay local-window only with no remote
+action. Nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
 breakpoints (configuration saved locally per endpoint/window/thread/checkout,

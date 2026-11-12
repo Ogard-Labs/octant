@@ -613,6 +613,14 @@ export interface CodeOperationRuntimeOptions {
     readonly folders: ReadonlyArray<string>;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
+    /**
+     * Asks the person, in the thread, to allow what `summary` names, as the
+     * built-in tools ask. A set decides when to ask and what an answer covers.
+     */
+    readonly askPerson: (
+      summary: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -5187,6 +5195,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
+          askPerson: (summary, signal) => {
+            const bounded = boundProviderSummary(summary);
+            return bounded === undefined
+              ? Promise.resolve("cancelled" as const)
+              : this.#askToolApproval(active, bounded, undefined, signal);
+          },
         }),
         this.#options.sideTasks?.({
           windowId: active.windowId,
