@@ -25,7 +25,10 @@ import type {
   BrowserViewportPoint,
 } from "@octant/contracts/browser-automation";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
-import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import {
+  decodeBrowserProfileChoice,
+  type BrowserProfileChoice,
+} from "@octant/contracts/project-browser";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ToolActionRequest } from "@octant/contracts/tool-actions";
 import { decodeCodeThreadId } from "@octant/contracts/code";
@@ -45,6 +48,7 @@ import {
   Laptop,
   LoaderCircle,
   LockKeyhole,
+  LogOut,
   PanelRight,
   PenLine,
   RotateCw,
@@ -74,14 +78,20 @@ import {
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
-import { BrowserProfileControl } from "./BrowserProfileControl";
+import { BrowserProfileControl, browserProfileMenuItems } from "./BrowserProfileControl";
 import {
   BrowserExtensionsButton,
   extensionMenuItems,
   openBrowserExtension,
   useBrowserExtensions,
 } from "./BrowserExtensionsButton";
-import { foldedTrailing, type BrowserToolbarTrailing } from "./browserToolbarFold";
+import {
+  BROWSER_BUTTON_WIDTH,
+  BROWSER_COUNTED_BUTTON_WIDTH,
+  foldedTrailing,
+  type BrowserToolbarTrailing,
+  type BrowserToolbarTrailingItem,
+} from "./browserToolbarFold";
 import {
   profileChoiceOf,
   readRememberedProfileChoice,
@@ -202,6 +212,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     [],
   );
   const [credentialRequest, setCredentialRequest] = useState(0);
+  const [signOutRequest, setSignOutRequest] = useState(0);
   const focusDrawButton = useRef(false);
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
@@ -1169,8 +1180,18 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   ]
     .filter((part) => part !== undefined)
     .join(" ");
-  const holdAction =
-    activeContext && personHasPage && props.client.handBack !== undefined
+  // While a remote owner controls the page, handing it back is refused until
+  // local input or this action reclaims it, so Reclaim locally is the action the
+  // person needs; Hand back moves into the more menu.
+  const ownerHolds =
+    activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
+  const holdAction = ownerHolds
+    ? ({
+        hold: "reclaim",
+        label: "Reclaim locally",
+        title: "Stop remote owner control and keep the page held locally",
+      } as const)
+    : activeContext && personHasPage && props.client.handBack !== undefined
       ? ({
           hold: "hand-back",
           label: "Hand back",
@@ -1185,6 +1206,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             title: "Hold the agent's Browser calls while you use the page",
           } as const)
         : undefined;
+  const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
+    hold === "hand-back" ? (
+      <Undo2 aria-hidden="true" size={16} />
+    ) : hold === "reclaim" ? (
+      <Laptop aria-hidden="true" size={16} />
+    ) : (
+      <Hand aria-hidden="true" size={16} />
+    );
   const showStatus =
     activeContext || nativeState?.loading === true || agentNote.omission !== undefined;
   const storedProfile = storedProfileOf(snapshot?.context?.policy.profile);
@@ -1200,16 +1229,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.client.manageCredentialUse !== undefined &&
     (snapshot?.context?.authority.mode === "work" || snapshot?.context?.authority.mode === "code");
   const baseMoreItems: ReadonlyArray<OctantMenuItem> = [
-    ...(activeContext &&
-    snapshot?.ownerController !== undefined &&
-    props.client.takeOver !== undefined
-      ? [
-          {
-            icon: <Laptop aria-hidden="true" size={16} />,
-            label: "Reclaim locally",
-            value: "reclaim",
-          },
-        ]
+    ...(ownerHolds && personHasPage && props.client.handBack !== undefined
+      ? [{ icon: holdIcon("hand-back"), label: "Hand back", value: "hand-back" }]
       : []),
     ...(activeContext && props.client.takeCapture !== undefined
       ? [
@@ -1291,17 +1312,39 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   ];
   // Trailing icons that do not fit move into the More menu, from the left of
   // the list; the profile is last and stays.
-  const trailing: ReadonlyArray<BrowserToolbarTrailing> = [
-    ...(showStatus ? (["status"] as const) : []),
-    ...(holdAction === undefined ? [] : (["hold"] as const)),
-    ...(extensions.length > 0 && storedProfile !== undefined ? (["extensions"] as const) : []),
-    "profile",
+  const trailing: ReadonlyArray<BrowserToolbarTrailingItem> = [
+    ...(showStatus ? [{ id: "status" as const, width: BROWSER_BUTTON_WIDTH }] : []),
+    ...(holdAction === undefined ? [] : [{ id: "hold" as const, width: BROWSER_BUTTON_WIDTH }]),
+    ...(extensions.length > 0 && storedProfile !== undefined
+      ? [
+          {
+            id: "extensions" as const,
+            width: agentDriving ? BROWSER_COUNTED_BUTTON_WIDTH : BROWSER_BUTTON_WIDTH,
+          },
+        ]
+      : []),
+    { id: "profile" as const, width: BROWSER_BUTTON_WIDTH },
   ];
   const folded = foldedTrailing({
     rowWidth: chromeWidth,
     visible: trailing,
     moreHasItems: baseMoreItems.length > 0,
   });
+  const showsTrailing = (id: BrowserToolbarTrailing) =>
+    trailing.some((item) => item.id === id) && !folded.has(id);
+  const shownProfile = taskProfileApplies
+    ? (taskProfile?.profile ?? "private")
+    : activeContext
+      ? profileChoiceOf(storedProfile)
+      : profileChoice;
+  const profileInputs = {
+    profile: shownProfile,
+    accounts,
+    projectProfileAvailable: true,
+    signedInPagesAvailable: nativeSupported,
+  };
+  const canSignOut =
+    !taskProfileApplies && props.client.manageProfiles !== undefined && shownProfile !== "private";
   const moreItems: ReadonlyArray<OctantMenuItem> = [
     ...(folded.has("status")
       ? [
@@ -1315,20 +1358,27 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         ]
       : []),
     ...(holdAction !== undefined && folded.has("hold")
-      ? [
-          {
-            icon:
-              holdAction.hold === "hand-back" ? (
-                <Undo2 aria-hidden="true" size={16} />
-              ) : (
-                <Hand aria-hidden="true" size={16} />
-              ),
-            label: holdAction.label,
-            value: holdAction.hold,
-          },
-        ]
+      ? [{ icon: holdIcon(holdAction.hold), label: holdAction.label, value: holdAction.hold }]
       : []),
     ...(folded.has("extensions") ? extensionMenuItems(extensions) : []),
+    ...(folded.has("profile")
+      ? [
+          ...browserProfileMenuItems(profileInputs).map((item) => ({
+            ...item,
+            label: `Profile: ${item.label}${item.value === shownProfile ? " (current)" : ""}`,
+            value: `profile:${item.value}`,
+          })),
+          ...(canSignOut
+            ? [
+                {
+                  icon: <LogOut aria-hidden="true" size={16} />,
+                  label: "Sign out of this profile…",
+                  value: "profile-sign-out",
+                },
+              ]
+            : []),
+        ]
+      : []),
     ...baseMoreItems,
   ];
   function runMoreItem(value: string): void {
@@ -1341,7 +1391,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       });
       return;
     }
+    if (value.startsWith("profile:")) {
+      void chooseProfile(decodeBrowserProfileChoice(value.slice("profile:".length)));
+      return;
+    }
     switch (value) {
+      case "profile-sign-out":
+        setSignOutRequest((count) => count + 1);
+        return;
       case "take-over":
       case "hand-back":
       case "reclaim":
@@ -1482,7 +1539,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </span>
           </form>
         </div>
-        {!trailing.includes("status") || folded.has("status") ? null : (
+        {!showsTrailing("status") ? null : (
           <span
             aria-label={statusText}
             className="browser-workspace__status"
@@ -1500,21 +1557,19 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             )}
           </span>
         )}
-        {holdAction === undefined || folded.has("hold") ? null : (
+        {holdAction === undefined || !showsTrailing("hold") ? null : (
           <OctantIconButton
             label={holdAction.label}
-            onClick={() => void holdPage(holdAction.hold)}
+            onClick={() =>
+              void holdPage(holdAction.hold === "hand-back" ? "hand-back" : "take-over")
+            }
             title={holdAction.title}
             type="button"
           >
-            {holdAction.hold === "hand-back" ? (
-              <Undo2 aria-hidden="true" size={16} />
-            ) : (
-              <Hand aria-hidden="true" size={16} />
-            )}
+            {holdIcon(holdAction.hold)}
           </OctantIconButton>
         )}
-        {folded.has("extensions") || !trailing.includes("extensions") ? null : (
+        {!showsTrailing("extensions") ? null : (
           <BrowserExtensionsButton
             agentDriving={agentDriving}
             client={props.client}
@@ -1537,17 +1592,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             selectingTaskProfile ||
             (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
           }
+          folded={folded.has("profile")}
           iconOnly
           {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
           onChange={(choice) => void chooseProfile(choice)}
-          profile={
-            taskProfileApplies
-              ? (taskProfile?.profile ?? "private")
-              : activeContext
-                ? profileChoiceOf(storedProfile)
-                : profileChoice
-          }
+          profile={shownProfile}
           projectProfileAvailable
+          signOutRequest={signOutRequest}
           signedInPagesAvailable={nativeSupported}
           {...(taskProfileApplies || props.client.manageProfiles === undefined
             ? {}

@@ -3394,6 +3394,29 @@ form > .work-composer-adapter__attachments {
   flex: 0 0 auto;
 }
 
+/* A signed-in profile (anything but Private) names itself beside its icon, in
+   the meta ink and size the dock's cards use for the same fact. The button
+   gives up its words before the address gives up width: they shorten with an
+   ellipsis and the icon stays. */
+.browser-workspace__chrome > .browser-workspace__profile--named {
+  display: inline-flex;
+  width: auto;
+  flex: 0 1 auto;
+  gap: var(--oct-space-1);
+  align-items: center;
+  padding: 0 var(--oct-space-2);
+  overflow: hidden;
+}
+
+.browser-workspace__profile-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .browser-workspace h2,
 .browser-workspace h3,
 .browser-workspace p {

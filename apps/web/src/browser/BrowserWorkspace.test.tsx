@@ -24,9 +24,15 @@ async function chooseMoreAction(name: string): Promise<void> {
 /** What the more menu offers now; the menu is closed again afterwards. */
 async function moreActionNames(): Promise<ReadonlyArray<string>> {
   await openMore();
-  const names = (await screen.findAllByRole("menuitem")).map(
-    (item) => item.getAttribute("aria-label") ?? item.textContent ?? "",
-  );
+  const names = (await screen.findAllByRole("menuitem")).map((item) => {
+    const labelled = item.getAttribute("aria-labelledby");
+    return (
+      (labelled === null ? null : document.getElementById(labelled)?.textContent) ??
+      item.getAttribute("aria-label") ??
+      item.textContent ??
+      ""
+    );
+  });
   await userEvent.keyboard("{Escape}");
   return names;
 }
@@ -1841,6 +1847,24 @@ describe("BrowserWorkspace", () => {
       }
     });
 
+    it("keeps the profile choices reachable from the more menu at the narrowest page-open row", async () => {
+      const restore = widthOfToolbar(288);
+      try {
+        await renderHeadless(holdingClient());
+        expect(screen.queryByRole("button", { name: /^Browser profile/ })).toBeNull();
+        expect(await moreActionNames()).toEqual(
+          expect.arrayContaining([
+            "Profile: Private (current)",
+            "Profile: Project",
+            "Profile: Personal",
+          ]),
+        );
+        expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeVisible();
+      } finally {
+        restore();
+      }
+    });
+
     it("takes the page on one click, says so, and hands it back on one click", async () => {
       const browser = holdingClient();
       await renderHeadless(browser);
@@ -1898,7 +1922,11 @@ describe("BrowserWorkspace", () => {
       expect(
         await screen.findByRole("img", { name: /Owner: Synthetic owner phone/ }),
       ).toBeInTheDocument();
-      await chooseMoreAction("Reclaim locally");
+      // The one action the person needs while a remote owner holds the page is
+      // the trailing button; Hand back is in the more menu.
+      expect(screen.queryByRole("button", { name: "Hand back" })).toBeNull();
+      expect(await moreActionNames()).toContain("Hand back");
+      await userEvent.click(screen.getByRole("button", { name: "Reclaim locally" }));
       expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
       expect(await screen.findByRole("img", { name: /You have the page/ })).toBeInTheDocument();
       expect(browser.handBack).not.toHaveBeenCalled();

@@ -1475,14 +1475,24 @@ extensions button (when an extension is on in the page's profile), and the
 of a stored profile. The status icon is not drawn at rest; the availability
 sentence is then part of the profile icon's tooltip. The last button is **More
 Browser actions**, which holds Screenshot, Draw on page (only in a Work or Code
-thread's Browser), Open in default browser (desktop), Login permission, Reclaim
-locally, the agent-availability recovery action, Dock in the focus zone and Stop
-this Browser session, each only when it applies; the menu is absent when it
-would be empty. No more than three icons trail the field besides More: when
-there would be more, the left-most move into More (status as a non-interactive
-first line, then Take over, then the extensions), and they move the same way when
-the address would otherwise be narrower than 120px. Back, forward, reload and the
-profile icon always stay. The row's inset follows the tile bar: its first glyph
+thread's Browser), Open in default browser (desktop), Login permission, Hand
+back while a remote owner holds the page, the agent-availability recovery
+action, Dock in the focus zone and Stop this Browser session, each only when it
+applies; the menu is absent when it would be empty. While a remote owner holds
+the page, **Reclaim locally** replaces Take over and Hand back as the trailing
+button, because a hand back is refused until the page is reclaimed. The profile
+icon names a signed-in profile (Project, Personal or a named account) beside
+itself in the meta ink and extra-small size the dock's cards use, so a page that
+acts as the person's own account is named at rest as it is everywhere else; a
+Private page, which signs nothing in, stays an icon. The name shortens with an
+ellipsis before the address gives up width, and the icon and tooltip stay. No
+more than three icons trail the field besides More. When there would be more, or
+the address would otherwise be narrower than 120px, the left-most move into More
+(status as a non-interactive first line, then Take over, then the extensions),
+each counted at its own width (the extensions button grows a count while the
+agent drives). When only the profile is left and the floor still fails, the
+profile's choices and its sign-out move into More as well. Back, forward and
+reload always stay. The row's inset follows the tile bar: its first glyph
 stands on the bar's 12px lead inset and its last button ends 4px from the edge,
 with 4px between controls. With no page open the row is the history buttons, the
 empty field and the profile icon.

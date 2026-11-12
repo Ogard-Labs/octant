@@ -1293,7 +1293,8 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the profile icon after the address field, whose menu also signs out of a
+the profile icon after the address field, which names a signed-in profile beside
+itself (a Private page stays an icon) and whose menu also signs out of a
 stored profile. A puzzle-piece extensions button precedes it when an extension is
 enabled in the page's profile: it lists them, opens a popup or options page, and
 carries a count while the agent drives the page; the status icon and the
@@ -1302,7 +1303,8 @@ While a page is open, the toolbar carries a **Take over** icon button after the
 address field (in the More menu when the trailing icons do not fit). One click
 holds every agent Browser call on the page; the status icon then reads "You have
 the page" and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
-neither shows. The person's typing and clicking in the page while the agent
+neither shows. While a remote owner holds the page, **Reclaim locally** is the trailing
+button in place of Take over and Hand back, which moves into the More menu. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".
 The rules are in [Browser for agents](browser-agent-tool.md#person-and-agent-together). The Project
 browser dock has the same controls. The rules are in
