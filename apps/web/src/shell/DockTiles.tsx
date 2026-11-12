@@ -1,4 +1,4 @@
-import { Minimize2, X } from "lucide-react";
+import { LayoutPanelLeft, X } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -11,9 +11,21 @@ import {
   type Ref,
 } from "react";
 import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
-import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
-import { MIN_DOCK_TILE_SHARE, type DockTileLayout } from "./rightUtilityDockSelection";
+import {
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
+import {
+  MIN_DOCK_TILE_SHARE,
+  type DockTileLayout,
+  type DockTileMove,
+} from "./rightUtilityDockSelection";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 /** A tile is never shorter than this while the dock has the room. */
@@ -33,6 +45,13 @@ export interface DockTileContent {
   readonly key: string;
   readonly label: string;
   readonly surface: RightUtilityDockSurfaceId;
+  /**
+   * What the tile's one bar shows at its leading edge: the tool's icon and
+   * name, or for the Browser its row of pages. The tool is named here once.
+   */
+  readonly barLeading: ReactNode;
+  /** Which moves the caps and edges allow from here. */
+  readonly moves: Readonly<Record<DockTileMove, boolean>>;
   readonly children: ReactNode;
   /** The tool's own panel: its class names and inset marker. */
   readonly bodyClassName: string;
@@ -52,6 +71,10 @@ export interface DockTilesProps {
   readonly onFocusTile: (tabId: string) => void;
   readonly onHideTile: (tabId: string) => void;
   readonly onMinimiseTile?: (tabId: string) => void;
+  /** Closes the tool, as its strip tab's close does. */
+  readonly onCloseTile: (tabId: string) => void;
+  readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
+  readonly onShowTileAlone: (tabId: string) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
 }
@@ -283,10 +306,13 @@ export function DockTiles(props: DockTilesProps) {
               onFocusTile={() => {
                 if (tabId !== props.focusedTabId) props.onFocusTile(tabId);
               }}
+              onClose={() => props.onCloseTile(tabId)}
               onHide={() => props.onHideTile(tabId)}
               {...(props.onMinimiseTile === undefined || content.minimisable !== true
                 ? {}
                 : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
+              onMove={(direction) => props.onMoveTile(tabId, direction)}
+              onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
               single={tileCount === 1}
             />
@@ -358,9 +384,12 @@ function Tile(props: {
   readonly box: Box;
   readonly content: DockTileContent;
   readonly focused: boolean;
+  readonly onClose: () => void;
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
   readonly onMinimise?: () => void;
+  readonly onMove: (direction: DockTileMove) => void;
+  readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
   readonly single: boolean;
 }) {
@@ -404,22 +433,70 @@ function Tile(props: {
       tabIndex={-1}
     >
       {props.single ? null : (
-        <div className="dock-tile__caption">
-          <DockToolIcon surface={content.surface} />
-          <span className="dock-tile__name">{content.label}</span>
-          {props.onMinimise === undefined ? null : (
-            <IconButton
-              className="dock-tile__minimise text-muted-foreground"
-              icon={Minimize2}
-              label={`Minimise ${content.label}`}
-              onClick={props.onMinimise}
-            />
-          )}
+        // One bar per tile, the tool's own header: its name (or the Browser's
+        // pages) leads, the tile's controls trail, and every bar is one height
+        // so neighbouring tiles line up.
+        <div className="dock-tile__bar">
+          <div className="dock-tile__lead">{content.barLeading}</div>
+          <OctantMenuRoot>
+            <OctantMenuTrigger
+              aria-label={`Arrange ${content.label}`}
+              className="shell-icon-button dock-tile__control window-no-drag"
+              title={`Arrange ${content.label}`}
+            >
+              <LayoutPanelLeft aria-hidden="true" size={14} strokeWidth={1.5} />
+            </OctantMenuTrigger>
+            <OctantMenuPortal>
+              <OctantMenuPositioner>
+                <OctantMenuPopup aria-label={`Arrange ${content.label}`}>
+                  {(
+                    [
+                      ["left", "Move left"],
+                      ["right", "Move right"],
+                      ["up", "Move up"],
+                      ["down", "Move down"],
+                    ] as const
+                  ).map(([direction, label]) =>
+                    content.moves[direction] ? (
+                      <OctantMenuItem
+                        className="workspace-disclosure__action window-no-drag"
+                        key={direction}
+                        onClick={() => props.onMove(direction)}
+                      >
+                        <span>{label}</span>
+                      </OctantMenuItem>
+                    ) : null,
+                  )}
+                  <OctantMenuSeparator />
+                  <OctantMenuItem
+                    className="workspace-disclosure__action window-no-drag"
+                    onClick={props.onShowAlone}
+                  >
+                    <span>Show alone</span>
+                  </OctantMenuItem>
+                  <OctantMenuItem
+                    className="workspace-disclosure__action window-no-drag"
+                    onClick={props.onHide}
+                  >
+                    <span>Hide from view</span>
+                  </OctantMenuItem>
+                  {props.onMinimise === undefined ? null : (
+                    <OctantMenuItem
+                      className="workspace-disclosure__action window-no-drag"
+                      onClick={props.onMinimise}
+                    >
+                      <span>Minimise to card</span>
+                    </OctantMenuItem>
+                  )}
+                </OctantMenuPopup>
+              </OctantMenuPositioner>
+            </OctantMenuPortal>
+          </OctantMenuRoot>
           <IconButton
-            className="dock-tile__hide text-muted-foreground"
+            className="dock-tile__control text-muted-foreground"
             icon={X}
-            label={`Hide ${content.label} from view`}
-            onClick={props.onHide}
+            label={`Close ${content.label}`}
+            onClick={props.onClose}
           />
         </div>
       )}

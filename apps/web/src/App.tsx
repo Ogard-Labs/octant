@@ -354,6 +354,7 @@ import {
 } from "./onboarding/useFirstRunOnboardingController";
 import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
+import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import {
@@ -397,7 +398,9 @@ import {
   hideUtilityCard,
   hideUtilityTile,
   isUtilityToolMinimised,
+  restoreUtilityTool,
   minimiseUtilityTool,
+  moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -414,6 +417,7 @@ import {
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
+  type DockTileMove,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
@@ -4265,8 +4269,14 @@ function LaunchedShell(
   function hideDockCard(tabId: string) {
     changeDockTiles((state) => hideUtilityCard(state, tabId));
   }
+  function restoreDockTool(tabId: string) {
+    changeDockTiles((state) => restoreUtilityTool(state, tabId));
+  }
   function minimiseDockTool(tabId: string) {
     changeDockTiles((state) => minimiseUtilityTool(state, tabId));
+  }
+  function moveDockTile(tabId: string, direction: DockTileMove) {
+    changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
   }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
@@ -5176,7 +5186,9 @@ function LaunchedShell(
       selectDockTab,
       hideDockCard,
       hideDockTile,
+      restoreDockTool,
       minimiseDockTool,
+      moveDockTile,
       openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
@@ -5227,6 +5239,7 @@ function LaunchedShell(
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectBrandKit: projectController.setBrandKit,
+      setProjectDesignSystem: projectController.setDesignSystem,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
@@ -8095,46 +8108,52 @@ function LaunchedShell(
               settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
             >
               <OctantCommandProvider commands={octantCommands}>
-                {projectActionRun === undefined ? null : (
-                  <ProjectActionRunDialog
-                    key={JSON.stringify(projectActionRun.target)}
-                    client={projectTerminalClient}
-                    target={projectActionRun.target}
-                    storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                    open={projectActionRun.open}
-                    onClose={() =>
-                      setProjectActionRun((current) =>
-                        current === undefined ? undefined : { ...current, open: false },
+                <OctantDialogPresence>
+                  {projectActionRun === undefined ? null : (
+                    <ProjectActionRunDialog
+                      key={JSON.stringify(projectActionRun.target)}
+                      client={projectTerminalClient}
+                      target={projectActionRun.target}
+                      storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                      open={projectActionRun.open}
+                      onClose={() =>
+                        setProjectActionRun((current) =>
+                          current === undefined ? undefined : { ...current, open: false },
+                        )
+                      }
+                      {...(zen.enabled &&
+                      !serverCodeProjects.workProjects.some(
+                        (project) => project.projectId === projectActionRun.target.projectId,
                       )
-                    }
-                    {...(zen.enabled &&
-                    !serverCodeProjects.workProjects.some(
-                      (project) => project.projectId === projectActionRun.target.projectId,
-                    )
-                      ? {
-                          onOpenTerminal: (terminalId: ReturnType<typeof decodeCodeTerminalId>) => {
-                            void (async () => {
-                              if (!zen.active) await zen.enterZen();
-                              await zen.pinProjectTerminal({
-                                projectId: projectActionRun.target.projectId,
-                                terminalId,
-                              });
-                            })();
-                          },
-                        }
-                      : {})}
-                  />
-                )}
+                        ? {
+                            onOpenTerminal: (
+                              terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                            ) => {
+                              void (async () => {
+                                if (!zen.active) await zen.enterZen();
+                                await zen.pinProjectTerminal({
+                                  projectId: projectActionRun.target.projectId,
+                                  terminalId,
+                                });
+                              })();
+                            },
+                          }
+                        : {})}
+                    />
+                  )}
+                </OctantDialogPresence>
 
-                {preparationTarget === undefined ? null : (
-                  <WorktreePreparationDialog
-                    key={JSON.stringify(preparationTarget)}
-                    client={projectTerminalClient}
-                    runs={agentRunClient}
-                    target={preparationTarget}
-                    onClose={() => setPreparationTarget(undefined)}
-                  />
-                )}
+                <OctantDialogPresence>
+                  {preparationTarget === undefined ? null : (
+                    <WorktreePreparationDialog
+                      key={JSON.stringify(preparationTarget)}
+                      client={projectTerminalClient}
+                      runs={agentRunClient}
+                      target={preparationTarget}
+                      onClose={() => setPreparationTarget(undefined)}
+                    />
+                  )}
+                </OctantDialogPresence>
                 {actionsProject === undefined ? null : (
                   <ProjectActionButtons
                     actions={activeProjectActions}

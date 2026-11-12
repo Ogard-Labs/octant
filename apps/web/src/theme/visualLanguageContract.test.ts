@@ -407,6 +407,41 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps the light theme's faint controls and dimmed text readable", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      css.match(new RegExp(`${selector}\\s*\\{[^}]+\\}`))?.[0] ?? "";
+
+    // The chosen segment is a stronger tint than its tray, not the tray itself.
+    expect(rule(system, '\\.modeswitch__tray > \\.mode\\[aria-current="page"\\]')).toMatch(
+      /background:\s*color-mix\(in srgb, var\(--oct-fg\) 12%, transparent\)/,
+    );
+    // Dimming a muted role with opacity fell under 4.5:1 on the page.
+    for (const selector of [
+      "\\.project-threads__more",
+      "\\.draft-thread__hint,\\s*\\.work-composer-adapter__hint",
+    ]) {
+      expect(rule(shell, selector)).not.toMatch(/opacity/);
+    }
+    // An off switch's edge and an unchecked checkbox are found at a glance.
+    expect(rule(system, '\\.octant-switch\\[data-slot="switch"\\]')).toMatch(
+      /border:\s*1px solid var\(--octant-divider-strong\)/,
+    );
+    expect(readFileSync(join(webRoot, "ui/shadcn/checkbox.tsx"), "utf8")).toContain(
+      "border-(--octant-divider-strong)",
+    );
+    // The inverse tooltip takes no inset bevel: its white line drew on the dark pill.
+    expect(rule(system, "\\.octant-tooltip").match(/box-shadow:[^;]+;/)?.[0]).not.toContain(
+      "inset",
+    );
+    // Only a locked model's picker keeps full ink.
+    expect(system).toMatch(
+      /\.composer-model-picker__trigger--locked:disabled\s*\{\s*opacity:\s*1;/,
+    );
+    expect(system).not.toMatch(/\.composer-model-picker__trigger:disabled\s*\{/);
+  });
+
   it("does not add a wrapper focus halo around the Issues search", () => {
     const github = readFileSync(join(webRoot, "styles/github.css"), "utf8");
     const input =
@@ -848,6 +883,22 @@ describe("the public-block visual language", () => {
     const tray = rule("\\.sidebar__chrome \\.modeswitch");
     expect(tray).toMatch(/flex:\s*1 0 auto/);
     expect(tray).toMatch(/min-width:\s*min-content/);
+    // The row sits in a scrolling column: a long thread list shrank it to its
+    // min-height and left the wrapped second row of buttons under the list.
+    expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("lets the dock's labelled quick tool ellipsize instead of clipping mid-word", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const rule = (selector: string) =>
+      dock.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+    const tool = rule('\\.dock-quick-tools > \\.dock-quick-tools__tool\\[data-labelled="true"\\]');
+    expect(tool).toMatch(/min-width:\s*0/);
+    expect(tool).toMatch(/flex:\s*0 1 auto/);
+    expect(rule('\\.dock-quick-tools__tool\\[data-labelled="true"\\] > span')).toMatch(
+      /text-overflow:\s*ellipsis/,
+    );
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {
@@ -1103,6 +1154,32 @@ describe("the public-block visual language", () => {
       expect(
         body('.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > *'),
       ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
+    });
+
+    it("stands the narrow dock sheet at a definite height, so the tool fills it and scrolls inside", () => {
+      const sheet = body(".octant-dialog__popup:has(> .right-utility-dock__surface)");
+      expect(sheet).toMatch(
+        /height:\s*min\(var\(--octant-dialog-height, 640px\), calc\(100vh - 48px\)\)/,
+      );
+    });
+
+    it("draws a divider as a hairline that never keeps an accent line after a click", () => {
+      const rule = (selector: string) => body(selector);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*var\(--oct-border\)/);
+      const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
+      expect(held).toMatch(/--octant-border-strong/);
+      const dividerRules = dock.slice(
+        dock.indexOf(".dock-tiles__divider {"),
+        dock.indexOf(".dock-tiles__drag-shield"),
+      );
+      // Keyboard focus is the app's own outline, not a line of this rule's.
+      expect(dividerRules).not.toMatch(/accent/);
+      expect(dividerRules).not.toMatch(/focus-visible/);
+    });
+
+    it("gives every tile bar one height, so neighbouring tiles line up", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+      expect(dock).not.toContain("dock-tile__caption");
     });
 
     it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {

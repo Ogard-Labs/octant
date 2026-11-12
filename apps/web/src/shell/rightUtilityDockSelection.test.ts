@@ -11,6 +11,7 @@ import {
   minimiseUtilityTool,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
+  moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -363,6 +364,13 @@ describe("dock tool tiles", () => {
     state = showUtilityTabBeside(state, "files");
     state = selectUtilityTabState(state, "plan");
     return showUtilityTabBeside(state, "canvas");
+  }
+  /** Files and Plan stacked on the right, Canvas on the left; Plan focused. */
+  function twoColumnsForMoves() {
+    let state = opened("canvas", "files", "plan");
+    state = showUtilityTabBeside(selectUtilityTabState(state, "canvas"), "files");
+    state = selectUtilityTabState(state, "files");
+    return showUtilityTabBelow(state, "plan");
   }
   function sharesAddUp(state: ThreadUtilityDockState) {
     const columns = state.layout?.columns ?? [];
@@ -736,6 +744,74 @@ describe("dock tool tiles", () => {
     expect(read({ tabs: ["files"], active: "files", lastBrowser: 7 }).lastBrowser).toBeUndefined();
   });
 
+  it("moves a tile up and down within its column, keeping each tile's share", () => {
+    let state = showUtilityTabBelow(opened("files", "canvas", "plan"), "files");
+    state = showUtilityTabBelow(selectUtilityTabState(state, "plan"), "canvas");
+    expect(columnsOf(state)).toEqual([["plan", "canvas", "files"]]);
+    expect(columnsOf(moveUtilityTile(state, "canvas", "up"))).toEqual([
+      ["canvas", "plan", "files"],
+    ]);
+    expect(columnsOf(moveUtilityTile(state, "canvas", "down"))).toEqual([
+      ["plan", "files", "canvas"],
+    ]);
+    expect(moveUtilityTile(state, "plan", "up")).toBe(state);
+    expect(moveUtilityTile(state, "files", "down")).toBe(state);
+  });
+
+  it("moves a tile to the other column, or makes the second column from a one-column layout", () => {
+    const two = showUtilityTabBelow(opened("files", "canvas"), "files");
+    expect(columnsOf(moveUtilityTile(two, "files", "right"))).toEqual([["canvas"], ["files"]]);
+    // The second column is an even split, as showing a tool beside makes it.
+    expect(
+      moveUtilityTile(two, "files", "right").layout?.columns.map((column) => column.share),
+    ).toEqual([0.5, 0.5]);
+    expect(
+      moveUtilityTile(two, "files", "left").layout?.columns.map((column) => column.share),
+    ).toEqual([0.5, 0.5]);
+    expect(columnsOf(moveUtilityTile(two, "files", "left"))).toEqual([["files"], ["canvas"]]);
+    sharesAddUp(moveUtilityTile(two, "files", "right"));
+    const sided = twoColumnsForMoves();
+    expect(columnsOf(moveUtilityTile(sided, "files", "left"))).toEqual([
+      ["files", "canvas"],
+      ["plan"],
+    ]);
+    expect(moveUtilityTile(sided, "plan", "right")).toBe(sided);
+    expect(moveUtilityTile(sided, "files", "up")).toBe(sided);
+  });
+
+  it("collapses to one column when the only tile of a column moves across", () => {
+    const sided = showUtilityTabBeside(opened("files", "canvas"), "files");
+    expect(columnsOf(sided)).toEqual([["canvas"], ["files"]]);
+    const moved = moveUtilityTile(sided, "files", "left");
+    expect(columnsOf(moved)).toEqual([["files", "canvas"]]);
+    expect(moved.layout?.columns).toHaveLength(1);
+    // A single tile in a one-column layout has nowhere to go sideways.
+    expect(
+      moveUtilityTile(hideUtilityTile(sided, "files"), "canvas", "right").layout,
+    ).toBeUndefined();
+  });
+
+  it("refuses a move into a full column, and moves the Browser tile like any other", () => {
+    let full = opened("ios-simulator", "canvas", "files", "plan");
+    full = showUtilityTabBelow(full, "files");
+    full = showUtilityTabBelow(full, "canvas");
+    full = showUtilityTabBeside(full, "ios-simulator");
+    expect(columnsOf(full)[0]).toHaveLength(3);
+    expect(columnsOf(full)[1]).toEqual(["ios-simulator"]);
+    // The right column holds one, the left three: a move left is refused.
+    expect(moveUtilityTile(full, "ios-simulator", "left")).toBe(full);
+    const pageId = "10000000-0000-4000-8000-000000000001";
+    const withBrowser = showUtilityTabBeside(
+      addUtilityTabState(opened("files"), "browser", pageId),
+      "files",
+    );
+    const moved = moveUtilityTile(withBrowser, pageId, "right");
+    // Its column had nothing else, so moving across joins the other and one column remains.
+    expect(columnsOf(moved)).toEqual([[pageId, "files"]]);
+    expect(moved.lastBrowser).toBe(pageId);
+    expect(columnsOf(moveUtilityTile(moved, pageId, "down"))).toEqual([["files", pageId]]);
+  });
+
   it("counts the columns a state shows", () => {
     expect(shownTileColumns(opened("files"))).toBe(1);
     expect(shownTileColumns(showUtilityTabBeside(opened("files", "canvas"), "files"))).toBe(2);
@@ -889,22 +965,114 @@ describe("minimised dock tools", () => {
     expect(restoreUtilityTool(parked, parked.lastBrowser ?? pageOne).active).toBe(pageTwo);
   });
 
-  it("restores a tool as the one tool shown, or as the focused tile's tool", () => {
+  it("restores a tool as the one tool shown when nothing else is shown", () => {
     const alone = minimiseUtilityTool(opened("files", "browser"), "browser");
     const restoredAlone = restoreUtilityTool(alone, "browser");
     expect(restoredAlone.active).toBe("browser");
     expect(minimisedUtilityTabIds(restoredAlone)).toEqual([]);
     expect(restoredAlone.minimised).toBeUndefined();
+    expect(restoreUtilityTool(restoredAlone, "browser")).toBe(restoredAlone);
+  });
 
-    let tiled = showUtilityTabBeside(opened("canvas", "browser", "files"), "browser");
-    tiled = selectUtilityTabState(tiled, "files");
-    const parked = minimiseUtilityTool(tiled, "browser");
+  it("restores a tool to the place it was minimised from without taking a shown tool's tile", () => {
+    // Browser left, Files right and focused; Canvas open but hidden.
+    let state = showUtilityTabBeside(opened("canvas", "files", "browser"), "files");
+    state = showUtilityTabBeside(selectUtilityTabState(state, "browser"), "files");
+    expect(columnsOf(state)).toEqual([["browser"], ["files"]]);
+    const parked = minimiseUtilityTool(state, "browser");
+    expect(parked.minimisedPlaces).toEqual([
+      { surface: "browser", column: 0, row: 0, alone: true },
+    ]);
     const back = restoreUtilityTool(parked, "browser");
+    expect(columnsOf(back)).toEqual([["browser"], ["files"]]);
     expect(back.active).toBe("browser");
-    expect(shownUtilityTabIds(back)).toEqual(["browser"]);
-    expect(minimisedUtilityTabIds(back)).toEqual([]);
-    expect(restoreUtilityTool(back, "browser")).toBe(back);
+    expect(back.minimised).toBeUndefined();
+    expect(back.minimisedPlaces).toBeUndefined();
     holdsInvariants(back);
+  });
+
+  it("restores a tool to its row in a column it shared while that column has room", () => {
+    const stacked = showUtilityTabBelow(
+      showUtilityTabBelow(opened("canvas", "browser", "files", "plan"), "files"),
+      "browser",
+    );
+    const before = columnsOf(stacked);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toHaveLength(3);
+    const state = selectUtilityTabState(stacked, before[0]?.[0] ?? "");
+    const parked = minimiseUtilityTool(state, "files");
+    expect(columnsOf(restoreUtilityTool(parked, "files"))).toEqual(before);
+  });
+
+  it("restores a tool as the last tile when the place it stood in is gone", () => {
+    const parked = minimiseUtilityTool(
+      showUtilityTabBeside(opened("terminal", "files"), "terminal"),
+      "terminal",
+    );
+    const gone: ThreadUtilityDockState = {
+      ...parked,
+      minimisedPlaces: [{ surface: "terminal", column: 1, row: 2, alone: false }],
+    };
+    const back = restoreUtilityTool(gone, "terminal");
+    expect(columnsOf(back)).toEqual([["files"], ["terminal"]]);
+    expect(back.active).toBe("terminal");
+    holdsInvariants(back);
+  });
+
+  it("restores a tool as a new column when the single tool shown leaves room beside it", () => {
+    const state = showUtilityTabBeside(opened("browser", "files"), "browser");
+    const parked = minimiseUtilityTool(state, "browser");
+    expect(shownUtilityTabIds(parked)).toEqual(["files"]);
+    const back = restoreUtilityTool(parked, "browser");
+    expect(columnsOf(back)).toEqual([["files"], ["browser"]]);
+  });
+
+  it("remembers no place for a tool that was the one shown, and puts it beside whatever is shown later", () => {
+    const parked = minimiseUtilityTool(opened("files", "terminal"), "terminal");
+    expect(parked.minimisedPlaces).toBeUndefined();
+    const other = selectUtilityTabState(parked, "files");
+    expect(columnsOf(restoreUtilityTool(other, "terminal"))).toEqual([["files"], ["terminal"]]);
+  });
+
+  it("forgets where a tool stood when its card is hidden or the tool is shown again another way", () => {
+    const state = showUtilityTabBeside(opened("browser", "files"), "browser");
+    const parked = minimiseUtilityTool(state, "browser");
+    expect(hideUtilityCard(parked, "browser").minimisedPlaces).toBeUndefined();
+    expect(showUtilityTabAlone(parked, "browser").minimisedPlaces).toBeUndefined();
+  });
+
+  it("keeps a remembered place through a stored round trip and drops one that is invalid or has no card", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    const parked = minimiseUtilityTool(
+      showUtilityTabBeside(opened("browser", "files"), "browser"),
+      "browser",
+    );
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
+      open: true,
+      threads: new Map([[key, parked]]),
+    });
+    const read = (state: unknown) => {
+      localStorage.setItem(
+        "octant.shell.utility-dock.window-a.v1",
+        JSON.stringify({ open: true, threads: { [key]: state } }),
+      );
+      return threadUtilityDockState(
+        readUtilityDockPresentation({ localStorage }, "window-a").threads,
+        key,
+      );
+    };
+    const stored = JSON.parse(localStorage.getItem("octant.shell.utility-dock.window-a.v1") ?? "{}")
+      .threads[key];
+    expect(read(stored)).toEqual(parked);
+    const place = (column: unknown, row: unknown, surface = "browser") => ({
+      ...stored,
+      minimisedPlaces: [{ surface, column, row, alone: true }],
+    });
+    expect(read(place(5, 0)).minimisedPlaces).toBeUndefined();
+    expect(read(place(0, 1.5)).minimisedPlaces).toBeUndefined();
+    expect(read(place(0, 0, "files")).minimisedPlaces).toBeUndefined();
+    expect(read({ ...stored, minimised: undefined }).minimisedPlaces).toBeUndefined();
   });
 
   it("restores every page of a minimised Browser when any of its tabs is selected or opened", () => {

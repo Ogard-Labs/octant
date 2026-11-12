@@ -226,7 +226,14 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
               role="tab"
               title={tool.label}
               size="sm"
-              tabIndex={tool.id === props.active ? 0 : -1}
+              tabIndex={
+                tool.id ===
+                (props.tabs.some((tab) => tab.id === props.active)
+                  ? props.active
+                  : props.tabs[0]?.id)
+                  ? 0
+                  : -1
+              }
               type="button"
               variant="ghost"
             >

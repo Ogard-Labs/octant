@@ -80,6 +80,20 @@
   gap: 2px;
 }
 
+/* A lone labelled tool wider than the band cannot wrap away, so the row's
+   clip cut "Environment" mid-glyph. It gives way and its name ellipsizes. */
+.dock-quick-tools > .dock-quick-tools__tool[data-labelled="true"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dock-quick-tools__tool[data-labelled="true"] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dock-quick-tools__tool > svg {
   width: var(--oct-icon-sm);
   height: var(--oct-icon-sm);
@@ -761,9 +775,11 @@
   flex: 1 1 0;
 }
 
-.dock-tile__caption {
+/* One bar per tile: the tool's own header. Every bar is the same height, so
+   neighbouring tiles line up, and the tile's controls trail it. */
+.dock-tile__bar {
   display: flex;
-  height: 26px;
+  height: 32px;
   flex: none;
   align-items: center;
   gap: var(--oct-space-1);
@@ -773,11 +789,20 @@
   border-bottom: 1px solid var(--oct-border);
 }
 
-.dock-tile[data-focused="true"] > .dock-tile__caption {
+.dock-tile[data-focused="true"] > .dock-tile__bar {
   color: var(--oct-fg);
 }
 
-.dock-tile__caption > svg {
+.dock-tile__lead {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  overflow: hidden;
+}
+
+.dock-tile__lead > svg {
   width: var(--oct-icon-sm);
   height: var(--oct-icon-sm);
   flex: none;
@@ -785,33 +810,30 @@
 
 .dock-tile__name {
   min-width: 0;
-  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dock-tile__hide,
-.dock-tile__minimise {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  min-height: 22px;
+/* The Browser's pages are the bar: no row of their own and no second name. */
+.dock-tile__lead > .dock-browser-pages {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
   padding: 0;
-  opacity: 0;
+  border: 0;
 }
 
-.dock-tile:hover .dock-tile__hide,
-.dock-tile:focus-within .dock-tile__hide,
-.dock-tile[data-focused="true"] .dock-tile__hide,
-.dock-tile:hover .dock-tile__minimise,
-.dock-tile:focus-within .dock-tile__minimise,
-.dock-tile[data-focused="true"] .dock-tile__minimise {
-  opacity: 1;
+.dock-tile__control {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  padding: 0;
 }
 
-/* The hit area is the dock's own 7px edge; the line inside it is a hairline
-   that takes the accent ink while grabbed, as the dock's edge does. */
+/* The hit area is the dock's own 7px edge; the line inside it is a hairline. */
 .dock-tiles__divider {
   position: absolute;
   z-index: 1;
@@ -846,9 +868,12 @@
   height: 1px;
 }
 
+/* At rest a hairline. It takes the quiet strong-divider role while hovered or
+   held, and nothing stays after a click. Keyboard focus is marked by the
+   app's own outline recipe, not by a line drawn here. */
 .dock-tiles__divider:hover::before,
-.dock-tiles__divider:focus-visible::before {
-  background: var(--oct-accent-fg);
+.dock-tiles__divider:active::before {
+  background: var(--octant-border-strong);
 }
 
 /* Covers the dock body while a divider or a tab is being dragged: it keeps a
@@ -1130,10 +1155,18 @@
   overflow-wrap: anywhere;
 }
 
-/* With a Canvas open, the narrow dock sheet stands at its full height, as the
-   docked column does, so the document scrolls inside itself. Sized to its
-   content instead, the sheet scrolled as a whole: the comments drawer
-   scrolled away with the document and its Comment button with it. */
+/* The narrow dock sheet stands at its full height, as the docked column does,
+   so the tool scrolls inside itself. Tiles are positioned by percentages of
+   the tile area, and a sheet sized to its content gave them no height at all
+   (a 78px dialog holding only the tab strip). A Canvas had the same need, so
+   the document scrolls inside itself and its comments drawer stays put. */
+.octant-dialog__popup:has(> .right-utility-dock__surface) {
+  height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
+}
+
+/* A Canvas pins its own rule: the general one above gives every sheet this
+   height, and a Canvas depends on it so its sticky table header stays inside
+   the document, under the comments drawer. */
 .octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab) {
   height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
 }
@@ -1321,7 +1354,8 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   max-height: 40%;
   flex: none;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  /* Inline padding matches the tiles' own inset, so a card's edge is the edge of the tile above it. */
+  padding: var(--oct-space-2);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1384,7 +1418,8 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   min-width: 0;
   overflow: hidden;
   background: var(--octant-surface-inset);
-  border-radius: var(--oct-radius-sm);
+  /* Concentric with the card: its 12px corner minus the card's 8px inset. */
+  border-radius: 4px;
 }
 
 .dock-mini-card__picture,

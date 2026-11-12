@@ -208,9 +208,9 @@ html[data-octant-theme-mode="light"] {
   --octant-surface-raised: #fdfdfc;
   --octant-control: #f0f0ef;
   --octant-surface-muted: #f0f0ef;
-  --octant-control-hover: #e8e8e6;
-  --octant-surface-hover: #e8e8e6;
-  --octant-control-pressed: #dfdfdd;
+  --octant-control-hover: #e2e2e1;
+  --octant-surface-hover: #e2e2e1;
+  --octant-control-pressed: #d3d3d2;
   --octant-border: #e0e0de;
   --octant-border-subtle: #e0e0de;
   --octant-border-strong: #bdbdbb;
@@ -1089,14 +1089,18 @@ h6 {
   grid-row: 1 / -1;
 }
 
-/* Two columns of tools drop the half-of-the-workspace term: the thread keeps
-   only its own minimum, as dockWidthCeiling does for the handle. */
+/* Two columns of tools drop the half-of-the-workspace term and ask the thread
+   for less than one column does (--octant-tiled-primary-min, set on the shell
+   beside --octant-wide-primary-min), as dockWidthCeiling does for the handle. */
 .workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
   grid-template-columns:
-    minmax(var(--octant-wide-primary-min), 1fr)
+    minmax(var(--octant-tiled-primary-min, var(--octant-wide-primary-min)), 1fr)
     minmax(
       var(--octant-context-sidebar-min),
-      min(var(--octant-context-sidebar-width, 360px), calc(100% - var(--octant-wide-primary-min)))
+      min(
+        var(--octant-context-sidebar-width, 360px),
+        calc(100% - var(--octant-tiled-primary-min, var(--octant-wide-primary-min)))
+      )
     );
 }
 

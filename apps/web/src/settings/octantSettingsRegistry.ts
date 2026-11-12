@@ -202,7 +202,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Background",
           scope: "app",
           keywords:
-            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity flowing colour none",
         },
         {
           id: settingId("appearance.scheme.light-preset"),
@@ -280,7 +280,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("app-background-motion"),
           label: "Background motion",
           scope: "app",
-          keywords: "background motion still wave animate animated move click ripple bounce pixels",
+          keywords:
+            "background motion still wave animate animated move click ripple bounce pixels flowing",
         },
         {
           id: settingId("app-background-effect"),

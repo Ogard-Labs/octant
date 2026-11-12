@@ -67,8 +67,8 @@ meaning, or decoration on a control that already reads, is not. A feature that i
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground: a first-party picture or a
 person's photo, shown plain or through one print effect, or the field of
-Pulsing characters or Dithered pixels, behind the start screens or behind
-every page.
+Pulsing characters, Dithered pixels, or Flowing colour, behind the start
+screens or behind every page.
 
 ## Language
 
@@ -191,7 +191,14 @@ neutrals Steel, Slate, Silver, Graphite, Carbon and White, or Mono. Mono is the
 grey look: it sets Style to Mono and its ink accent. A swatch overrides the
 accent fill and the ink on it (`accent-foreground` and `primary-foreground`):
 dark ink on most, white on Slate, Graphite and light-mode Carbon, each clearing
-normal-text contrast on its fill (`accentSwatches.ts`). Accent text stays on the
+normal-text contrast on its fill (`accentSwatches.ts`). A fill is also a switch
+track, a usage meter and a primary button, so on the light card it must reach
+3:1: the chromatic swatches and Silver take a deeper step in light, the dark
+value with only its OKLCH lightness lowered (Lime measured 1.74:1 on the card
+before, 3.03:1 after), and the dark values are unchanged. The Appearance chips
+show the fill the current mode uses. An accent chosen before the light fills
+were deepened is read as the same swatch, at paint time, with no write to the
+saved settings. Accent text stays on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
 White would vanish on the light page and Carbon on the dark one, so each takes a
 silver in that mode, written as a mode-only override: an override's optional
@@ -267,6 +274,9 @@ never told from the page by an outline alone.
   the fill and the bevel carry the lift and the shadow helps only where the
   surface crosses something lighter; in light the surfaces are already the
   lightest thing on the page and the shadow carries it.
+- **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
+  the raised elevation's white top line drew as a light seam on the dark pill
+  in light, so it takes the two shadows alone in both modes.
 - **What sits on a floating surface is based on that surface.** Its control
   fills, its pointed-at row and its hairlines step up from `--octant-float`
   (`--octant-float-control`, `-hover`, `-pressed`, `-line`); the page's own
@@ -304,7 +314,9 @@ in `apps/web/src/ui/shadcn/field-paint.ts`: the strong border and no fill at
 rest, the muted-text border on hover, and the control hover fill on keyboard
 focus; an invalid field keeps its danger border in every state. A feature's
 stylesheet lays a field out (width, height, type size) and never repaints it,
-so the three react alike in light and dark.
+so the three react alike in light and dark. A search or name field a feature
+draws for itself still takes its edge from the same role (`--input`, the strong
+border), not from the hairline or a control fill.
 
 The window is a frame and one sheet. The rail and the title band form one
 L-shaped frame in the window surface (the sidebar colour), with no line where
@@ -817,9 +829,11 @@ concentric with the half circle it stands in; a square tile there left a wedge
 of the pill between its corner and the curve. Attach is a plus on the quiet
 control fill: it adds to the message, by more than one route in the desktop
 app. Send is a quiet circle in the control fill until there is something to
-send, then the pill's one solid control: the primary text colour as its fill,
-with the page colour on it. It is not the accent: a filled accent circle was
-the loudest thing on the page under an empty prompt. The microphone is in the
+send (the fill stays at full strength and only the arrow is dimmed: at half
+strength the circle measured 1.07:1 on the page in light and vanished), then
+the pill's one solid control: the primary text colour as its fill, with the
+page colour on it. It is not the accent: a filled accent circle was the
+loudest thing on the page under an empty prompt. The microphone is in the
 pill because it writes into the prompt; in the line under it, it read as a
 fact about the thread. A notice about sending stays in the pill, under the
 prompt. How the
@@ -934,9 +948,15 @@ Tab keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name
-themselves in a tooltip. The chosen model carries a check, not a filled row;
-a row's star shows on hover, on focus, or once it is on; and a provider mark leads
-each row only in a list mixed from several providers. Choosing a model keeps the menu open, since the
+themselves in a tooltip. The picker of a thread whose model can no longer
+change (a completed Work thread, which passes `locked`) keeps the name in the
+ordinary meta ink (the blanket disabled opacity left it at 2.11:1) and looks
+unpressable by its dimmed chevron, default cursor and absent hover; a picker
+disabled for any other reason, such as a running turn or no ready provider,
+keeps the ordinary disabled look. The chosen model carries a check, not a
+filled row; a row's star shows on hover, on focus, or once it is on; and a
+provider mark leads each row only in a list mixed from several providers.
+Choosing a model keeps the menu open, since the
 reasoning level beneath is often the next choice. Its reasoning control shows
 the full track, discrete stops, and filled range, with the reading ("Reasoning
 High") and reset above, and Faster and Smarter at the track's two ends. The fill
@@ -956,7 +976,8 @@ accepting another edit, so the next configuration choice uses the confirmed pair
 
 The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, a field of dithered pixels, or the plain page. A fresh install starts on Soft glow, one of three Gradient
+of pulsing characters, a field of dithered pixels, a flowing colour field, or
+the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -973,8 +994,21 @@ two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
 frames a second and prints through a 4×4 ordered dither (or plain pixels) at
 the chosen pixel size and number of shades; a click on a start screen sends
 the same pushing, accent-lit ring through it at twenty-four frames a second,
-for under two seconds. Motion Still holds either drawn field on one frame and
-takes no clicks. Pulsing characters is the other drawn ground, and only when a person
+for under two seconds. Flowing is a drawn ground of large, soft, edgeless
+colour that drifts like ink in water, and only when a person picks it. Four
+stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
+dark saturated reading of the accent, a brighter accent tone, and a vivid glow
+with a slight hue shift — so a change of accent recolours the field over about
+600 ms. Dark mode is predominantly dark: near-black at the top-left, the dark
+accent through the middle, and one luminous corner at the bottom-right, never
+a pastel wash. Light mode inverts that ramp into a pale wash whose every stop
+still clears WCAG AA against primary text. The field is painted in one GPU pass at about half
+resolution and thirty frames a second, paused while the window is hidden or
+the ground is off-screen, and falls back to a few blurred radial gradients
+that use the same stops when that path is unavailable. A static grain at a few
+percent of opacity and a quiet vignette sit on top of either path so the wash
+does not band. It answers no clicks. Motion Still holds it on one frame; Wave
+lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the other drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twenty-four frames a second while a few glyphs swap. The field is
@@ -1333,37 +1367,41 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light     | Use                                                |
-| ---------------------- | --------------------------------------------------- | --------- | --------- | -------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9` | Page ground: welcome, lists, Settings              |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9` | Title bars and shell chrome                        |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground             |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                           |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles          |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons              |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6` | Hover and highlighted rows                         |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd` | Pressed state                                      |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                     |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d` | Rare structural divider                            |
-| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                              |
-| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                    |
-| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                               |
-| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96` | Theme compatibility and accent tints               |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea` | Selected rows and active controls                  |
-| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414` | One primary action or active mark                  |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                                |
-| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414` | Accent used as text; normal-text contrast          |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000` | Opaque by contract; the bridge mixes it to a wash  |
+| Role                   | CSS variable                                        | Dark      | Light     | Use                                                        |
+| ---------------------- | --------------------------------------------------- | --------- | --------- | ---------------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9` | Page ground: welcome, lists, Settings                      |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9` | Title bars and shell chrome                                |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground                     |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                        |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                                   |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles                  |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons                      |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e2e2e1` | Hover and highlighted rows                                 |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                        |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                             |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                            |
+| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill         |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                                       |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96` | Theme compatibility and accent tints                       |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea` | Selected rows and active controls                          |
+| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414` | One primary action or active mark                          |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                                        |
+| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414` | Accent used as text; normal-text contrast                  |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000` | Opaque by contract; the bridge mixes it to a wash          |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
 reading surface is white; a hairline, not a grey fill, separates the sidebar
 from the workspace. Every hairline registers on the surface it separates
 (about 1.3:1 in both modes); inputs and outline buttons use the strong border
-so an edge is never guessed. The renderer fallback in
+so an edge is never guessed. An off switch and an unchecked checkbox are the
+exception: they must be found at a glance on a card, so they take the strong
+divider (4.4:1 on a card and 4.9:1 on the page in light; the strong border
+measured 1.65:1 and 1.85:1 there).
+The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
 The code editor and its diff draw from the same resolved roles through the
@@ -1590,9 +1628,11 @@ generator images, Plugins blocks, and the Activity feed a pulse line.
 
 **Sidebar header width.** The mode tray never shrinks. Where the sidebar header
 (modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
-Forward) cannot fit one row, which is the 220-236px sidebar of a 681-960px
-browser window, the actions wrap to a second row under the tray instead of
-sliding beneath it. The tray's row stays first at the top of the sidebar.
+Forward) cannot fit one row, which is a sidebar of 220-236px (also the width a
+1100px window leaves it beside an open dock), the actions wrap to a second row
+under the tray instead of sliding beneath it. The tray's row stays first at the
+top of the sidebar, and the header keeps its full wrapped height however long
+the thread list is, so the list always starts under both rows.
 
 **Usage rings.** Above Settings, at the foot of either rail, each provider
 that reports a plan window with a figure gets a ring in its identity colour
@@ -1895,7 +1935,9 @@ composer opens with a Chat / In a folder switch in its context tray, and
 and Code are both on: a conversation mark for Work and a code mark for Code.
 A tooltip names the mode on hover and keyboard focus; the label is clipped
 from view and stays the button's accessible name. The active mode carries
-`aria-current="page"` and a fill plus hairline, not colour alone. With one
+`aria-current="page"` and a fill plus hairline, not colour alone. The fill is
+the primary text at 12%, one step over the tray's 6%: the selection role drew
+as the tray itself (1.01:1 in light). With one
 mode enabled the header is a single label and no control. Settings still
 offers a dropdown that names the current mode; a host that stored that choice
 keeps it. Code and Work keep separate Project View sets. The
@@ -2162,9 +2204,12 @@ On wide windows it may use at most half of the workspace beside the sidebar
 (`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
 keeps the thread readable beside any tool, and the resize handle stops there
 too; with two columns of tool tiles shown it may take all the thread's own
-minimum leaves (560px from 1100px up, 360px below, the same minimum the
-stylesheet's grid uses); the bottom panel may use at most 38 percent of the
-viewport height while preserving 320px for the primary workspace. It can host
+minimum leaves (the thread keeps 440px beside two columns from 1100px up and
+360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
+one column keeps 560px from 1100px up. At 560px two tools could never stand side by
+side in a 1440px window, so a second column asks the thread for less); the bottom panel may use at most 38 percent of the
+viewport height while preserving 320px for the primary workspace, and it hosts
+exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
@@ -2227,21 +2272,37 @@ testing an app in the simulator beside the page it served had to choose between
 them, so open tools can also be shown together as tiles, each one live, under
 the one tab strip. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
-puts the tool below in the last column. A tile is a region named for its tool,
-with a 26px caption bar (the tool's icon and name, as in the strip's tab recipe)
-and a **Hide <tool> from view** control that takes the tile out of view without closing the tool (the strip tab's own Hide control closes it). The
-focused tile (the one whose tab is selected) is told apart by its caption
+puts the tool below in the last column. A tile is a region named for its tool
+with **one bar**, the tool's own header, 32px high in every tile so neighbouring
+bars line up. Its leading edge names the tool once (the icon and name; for the
+Browser the bar is its row of pages, each with its close, and the new-page
+control, and with one page the page's title is the name) and its trailing edge
+holds the tile's controls: an **Arrange <tool>** menu button and a **Close
+<tool>** button that closes the tool as its strip tab's close does (every page
+for the Browser). Stacked, a page showed four bars (the strip, a "Browser"
+caption, the Browser's own page row and its toolbar) and named the tool three
+times, so the strip no longer repeats a shown tool and a tile has no caption
+over its bar. A tool alone has no bar of its own. The Arrange menu holds **Move
+left**, **Move right**, **Move up** and **Move down**, each present only when
+that move is possible within the caps (a one-column layout moved sideways makes the
+second column, and a column left empty goes), then **Show alone**, **Hide
+from view** and, for the Browser and Terminal only, **Minimise to card**; a move keeps every tool mounted and the native Browser page
+follows its tile. The focused tile (the one whose tab is selected) is told apart by its bar
 reading in the full ink, with no ring and no fill, so a see-through theme shows
 through every tile; the dock's own surface is the tiles' ground. Dividers
 between columns and between a column's tiles are hairline separators with a 7px
-hit area that resize by pointer drag or arrow keys (Home and End go to the ends
+hit area, a hairline at rest, in the quiet strong-divider role while hovered or
+held, and never an accent line after a click (only keyboard focus shows a mark,
+the app's own focus outline), that resize by pointer drag or arrow keys (Home and End go to the ends
 of the range the floors allow), each named for the two tools it sits between
 ("Resize Environment and Vitals") and reporting the range it can really reach; no tile
 is shorter than 140px or column narrower than 280px (the dock's own minimum
 width) while the dock has the room, and the columns stack when the tile area
 cannot give two columns 280px each. Columns therefore stand side by side only
-when the tile area has the width: at 1440px with the sidebar open the dock is
-500px and "beside" stacks, which is why the head control promises no direction;
+when the tile area has the width: at 1440px with the sidebar open a second
+column widens the dock to about 620px and the columns stand side by side at about
+306px each (they stacked at 500px while the thread kept 560px), and in a narrower
+window "beside" stacks, which is why the head control promises no direction;
 the strip menu keeps explicit Show beside and Show below. Stacked columns stay
 resizable by a separator between them along the vertical axis, and no tile is
 ever under its floor: when stacked tiles cannot all fit the dock, the tile area
@@ -2255,17 +2316,17 @@ its own), and gives the tool a definite height to scroll within, so one tool's
 rows are never painted over the next tile. A tile resolves its own
 tool: one that cannot be described for the active pane says so inside its tile,
 never shows another pane's content, and leaves the other tiles on screen. The
-single-tool view is the same tile area with one caption-less tile, and tiles are
+single-tool view is the same tile area with one bar-less tile, and tiles are
 positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
 
-In the strip, tabs that are shown in a tile read in the full ink and a shown tab
-that is not selected says "Shown" to assistive technology. A tab's context menu
-(right click or the menu key) offers **Show beside** and **Show below** for a
-tool that is not the focused tile, and **Show alone** and **Hide from view** for
-a tool that is shown while tiles exist; Shift+F10 opens the menu as the menu key
-does. A **Show another tool** button in the dock head, before Close, opens a
+With two or more tiles the strip lists only the open tools that are not
+shown, then Add tool and **Show another tool**; with every open tool shown it
+holds just those two controls, and with one tool shown it is the ordinary tab row.
+Its roving focus keeps working with fewer tabs, and choosing a hidden tab
+replaces the focused tile's tool. A hidden tab's context menu (right click, the
+menu key or Shift+F10) offers **Show beside** and **Show below**. A **Show another tool** button in the dock head, before Close, opens a
 menu of the same name that lists first the open tools that are not on screen and,
 after a separator, the other tools the thread can launch; it shows the choice
 with the focused tile in one step (opening it first when needed), beside it when
@@ -2309,8 +2370,11 @@ Terminal shows about six rows of the smallest terminal type, read-only, or "No
 terminal running" or "Preview unavailable". The picture and the terminal keep
 their own content fill, inside the card. A minimised tool leaves the strip, since
 its card stands for it, and **Show another tool** lists it with the open tools not
-on screen. A Browser or Terminal tab's menu offers **Minimise**, and a tile
-caption offers a **Minimise <tool>** icon button before **Hide <tool> from view**.
+on screen. A tile's **Arrange <tool>** menu offers **Minimise to card** (Browser and
+Terminal only, after **Hide from view**), and so does a Browser or Terminal tab's
+menu; the tile bar gains no button for it. Show on a card returns the tool as a
+tile of its own, to the place it left while that place still exists and else as
+the last tile, focused, without taking a shown tool's tile.
 While an agent's Browser session is live and the thread's Browser is out of sight
 the Browser shows as a card without being minimised; with the dock closed, the
 window's dock toggle (not in the modal dock, which has no shelf) carries one quiet
@@ -2903,9 +2967,9 @@ interfaces. Revealing them must not move the transcript.
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
 ambient motion behind the work by default; an animated built-in picture, the
-Pulsing characters and Dithered pixels grounds, and a printed picture set to
-Wave are the moving grounds a person may choose, and reduced motion holds each
-on a still frame. Running state
+Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
+set to Wave are the moving grounds a person may choose, and reduced motion holds
+each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
@@ -2927,10 +2991,30 @@ library closes at once, on a press of its trigger, does not fade over what the
 press opened. Under reduced motion, from the system or from the setting, there
 is no transition at all: an overlay is there or it is not. A recipe carries no
 arrival or departure classes of its own. A dialog that a feature renders only
-while it is open arrives the same way (`@starting-style`) and leaves at once,
-because a stylesheet cannot hold an element that is gone; a surface whose
-leaving should be seen stays mounted and is told when it is open, as Settings'
-sheet is.
+while it is open arrives the same way (`@starting-style`). A stylesheet cannot
+hold an element that is gone, so a surface leaves this way only while it stays
+mounted and is told it has closed. Settings' sheet and a dialog with an `open`
+of its own do that themselves, and such a dialog keeps `open` apart from what
+it shows: one whose words come from the state closing clears (a review, a
+comparison, Rewind) is rendered only while that state exists, like the rest.
+A dialog a feature renders only while it is
+open is wrapped in `OctantDialogPresence`, which keeps the last thing the
+feature rendered until the exit has finished and tells the dialog inside it
+has closed: a confirmation still names what it asked about after the feature
+has cleared that state, and the command palette keeps the rows it showed.
+Every confirmation, the command palette, the Code file search, the Navigator,
+the narrow dock, first run and the other dialogs a feature mounts on demand
+leave this way. Two cases still leave at once: a dialog whose owner goes with
+it (a row removed by the confirmation it showed), and one of two dialogs that
+share a presence when the other takes its place. In a window nobody can see
+there is no exit to show, so a dialog closed there is removed at once.
+
+A dialog that is leaving is only there to be seen. Its scrim and its controls
+take no press and no key (`inert`), so the page under it answers at once and a
+second press cannot repeat what the first did. Focus goes back to the opener
+as the exit starts, not when it ends, and when the exit ends focus is left
+where it is if the person, or a command they ran from the dialog, has moved it
+in the meantime.
 
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
 control. Words in the chrome do not select when the pointer drags across them,

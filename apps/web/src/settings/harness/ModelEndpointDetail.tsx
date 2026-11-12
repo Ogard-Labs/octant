@@ -52,6 +52,7 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../../ui/base/OctantToggleGroup";
@@ -1043,28 +1044,30 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
           </OctantButton>
         </SettingRow>
       </div>
-      {confirming ? (
-        <OctantConfirmDialog
-          cancelLabel="Keep endpoint"
-          confirmLabel="Remove endpoint"
-          destructive
-          onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setPending(true);
-            void props.onRemove(instance.id).finally(() => {
-              setPending(false);
-              setConfirming(false);
-            });
-          }}
-          pending={pending}
-          restoreFocus={trigger}
-          title={`Remove ${instance.displayName}?`}
-        >
-          {`It signs out and deletes its settings; threads that used it keep their history.${
-            rolesLine === null ? "" : ` ${rolesLine}`
-          }`}
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirming ? (
+          <OctantConfirmDialog
+            cancelLabel="Keep endpoint"
+            confirmLabel="Remove endpoint"
+            destructive
+            onCancel={() => setConfirming(false)}
+            onConfirm={() => {
+              setPending(true);
+              void props.onRemove(instance.id).finally(() => {
+                setPending(false);
+                setConfirming(false);
+              });
+            }}
+            pending={pending}
+            restoreFocus={trigger}
+            title={`Remove ${instance.displayName}?`}
+          >
+            {`It signs out and deletes its settings; threads that used it keep their history.${
+              rolesLine === null ? "" : ` ${rolesLine}`
+            }`}
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

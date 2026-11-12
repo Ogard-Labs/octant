@@ -23,9 +23,11 @@ import {
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
   MINIMISABLE_DOCK_SURFACES,
+  moveUtilityTile,
   showUtilityTabBelow,
   showUtilityTabBeside,
   type DockTileLayout,
+  type DockTileMove,
   type ThreadUtilityDockState,
 } from "./rightUtilityDockSelection";
 import type { OctantMenuItem } from "../ui/base/OctantMenu";
@@ -61,6 +63,7 @@ export interface DockTileControls {
   readonly onHideTile: (tabId: string) => void;
   /** Takes a Browser or Terminal tool out of view as a card on the shelf. */
   readonly onMinimise: (tabId: string) => void;
+  readonly onMove: (tabId: string, direction: DockTileMove) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly onOpenBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -212,14 +215,25 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   useEffect(() => {
     if (refocus === undefined) return;
     if (refocus.card !== undefined) {
-      const card = root.current?.querySelector<HTMLElement>(
-        `[data-dock-card="${refocus.card}"] .dock-mini-card__action`,
-      );
-      if (card !== null && card !== undefined) {
-        card.focus();
-        setRefocus(undefined);
-        return;
-      }
+      // The card mounts a beat after the tool leaves its tile. Focus goes to it
+      // only while it is still free: on the page body, or in the menu that
+      // closes; anywhere the person has since put it, it stays.
+      const wantedCard = refocus.card;
+      const takeCard = () => {
+        const card = root.current?.querySelector<HTMLElement>(
+          `[data-dock-card="${wantedCard}"] .dock-mini-card__action`,
+        );
+        const current = document.activeElement;
+        const free =
+          current === null ||
+          current === document.body ||
+          current.closest('[role="menu"]') !== null;
+        if (card?.isConnected === true && free && current !== card) card.focus();
+      };
+      const cardTimers = [0, 60, 250].map((delay) => setTimeout(takeCard, delay));
+      return () => {
+        for (const timer of cardTimers) clearTimeout(timer);
+      };
     }
     const tabs = [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])];
     // The tool's own tab, else the selected one, else the overflow count:
@@ -230,9 +244,35 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         : tabs.find((tab) => tab.dataset.dockTab === refocus.tab)) ??
       tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ??
       root.current?.querySelector<HTMLElement>(".dock-tool-strip__more") ??
-      root.current?.querySelector<HTMLElement>('[aria-label="Add tool"]');
+      toolPanel.current;
     target?.focus();
-    setRefocus(undefined);
+    // The tool's own tab can appear a beat late (the strip measures its room
+    // after tabs change), and a closing menu returns focus to its trigger,
+    // which may be the tile that just went. Focus is taken again only from the
+    // page body, from the stand-in just focused, or from a popup that is
+    // closing; anywhere else it is where the person put it and stays.
+    const wanted = refocus.tab;
+    const timers = [0, 60, 250].map((delay) =>
+      setTimeout(() => {
+        const preferred =
+          wanted === undefined
+            ? undefined
+            : [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])].find(
+                (tab) => tab.dataset.dockTab === wanted,
+              );
+        const current = document.activeElement;
+        const free =
+          current === null ||
+          current === document.body ||
+          current === target ||
+          current.closest('[role="menu"]') !== null;
+        const next = preferred ?? target;
+        if (next?.isConnected === true && free && current !== next) next.focus();
+      }, delay),
+    );
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
   }, [refocus]);
   // A drag that ends where no dragend reaches (its source unmounted) must not
   // leave the drop target over the dock.
@@ -286,7 +326,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     }
     const surface = props.tabs.find((tab) => tab.id === id);
     if (surface !== undefined && MINIMISABLE_DOCK_SURFACES.has(dockTabSurface(surface).id)) {
-      items.push({ label: "Minimise", value: "minimise" });
+      items.push({ label: "Minimise to card", value: "minimise" });
     }
     return items;
   }
@@ -298,7 +338,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     else if (value === "hide") tiles?.onHideTile(id);
     else if (value === "minimise") {
       const tab = props.tabs.find((candidate) => candidate.id === id);
-      if (focusInside() && tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
+      if (tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
       tiles?.onMinimise(id);
     }
   }
@@ -319,42 +359,54 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     else if (zone === "below") tiles?.onShowBelow(id);
     else props.onSelectSurface(id);
   }
+  /** The Browser's pages: its bar in a tile, a row at the top of its body alone. */
+  function pagesRow(selectedId: string | undefined) {
+    return (
+      <div aria-label="Browser pages" className="dock-browser-pages" role="tablist">
+        {browserTabs.map((page) => (
+          <span className="dock-browser-pages__page content-tab" key={page.id}>
+            <OctantButton
+              aria-selected={page.id === selectedId}
+              className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
+              onClick={() => props.onSelectSurface(page.id)}
+              role="tab"
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <DockToolIcon surface="browser" />
+              <span>{page.label}</span>
+            </OctantButton>
+            <IconButton
+              className="content-tab__close text-muted-foreground"
+              icon={X}
+              label={`Close ${page.label}`}
+              onClick={() => props.onCloseTab(page.id)}
+            />
+          </span>
+        ))}
+        <IconButton
+          icon={Plus}
+          label="New Browser page"
+          onClick={() => props.onOpenTab("browser")}
+        />
+      </div>
+    );
+  }
+  /**
+   * The tool's panel. With pages, the row sits first in the body when the tool
+   * is alone and in the tile's bar otherwise; the slot stays either way, so
+   * the page below it keeps its place and is never remounted by the move.
+   */
   function renderToolBody(
     tab: RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor,
     selectedId: string | undefined,
     pages: boolean,
+    rowInBody: boolean,
   ) {
     return pages ? (
       <>
-        <div aria-label="Browser pages" className="dock-browser-pages" role="tablist">
-          {browserTabs.map((page) => (
-            <span className="dock-browser-pages__page content-tab" key={page.id}>
-              <OctantButton
-                aria-selected={page.id === selectedId}
-                className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
-                onClick={() => props.onSelectSurface(page.id)}
-                role="tab"
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <DockToolIcon surface="browser" />
-                <span>{page.label}</span>
-              </OctantButton>
-              <IconButton
-                className="content-tab__close text-muted-foreground"
-                icon={X}
-                label={`Close ${page.label}`}
-                onClick={() => props.onCloseTab(page.id)}
-              />
-            </span>
-          ))}
-          <IconButton
-            icon={Plus}
-            label="New Browser page"
-            onClick={() => props.onOpenTab("browser")}
-          />
-        </div>
+        {rowInBody ? pagesRow(selectedId) : null}
         <div className="dock-browser-pages__page-body" key={tab.id}>
           {props.renderTab?.(dockTabDescriptor(tab)) ?? contents[dockTabSurface(tab).id]}
         </div>
@@ -363,22 +415,48 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       (props.renderTab?.(dockTabDescriptor(tab)) ?? contents[dockTabSurface(tab).id])
     );
   }
+  /** Closes a tool as its strip tab's close does: the Browser closes every page. */
+  function closeTool(tabId: string) {
+    if (focusInside()) setRefocus({});
+    if (browserTabs.some((tab) => tab.id === tabId)) {
+      for (const tab of browserTabs) props.onCloseTab(tab.id);
+      return;
+    }
+    props.onCloseTab(tabId);
+  }
   function renderTile(tabId: string): DockTileContent | undefined {
     const tab = props.tabs.find((candidate) => candidate.id === tabId);
     if (tab === undefined) return undefined;
     const tool = dockTabSurface(tab);
     const available = tiles?.resolveSurface(tool.id) ?? { kind: "surface" };
     const pages = tool.id === "browser" && browserTabs.length > 1;
+    const label = pages ? "Browser" : tab.label;
+    const movable = (direction: DockTileMove) =>
+      moveUtilityTile(placementState, tab.id, direction) !== placementState;
     return {
       key: pages ? "browser" : tab.id,
-      label: pages ? "Browser" : tab.label,
+      label,
       surface: tool.id,
+      barLeading: pages ? (
+        pagesRow(tab.id)
+      ) : (
+        <>
+          <DockToolIcon surface={tool.id} />
+          <span className="dock-tile__name">{label}</span>
+        </>
+      ),
+      moves: {
+        left: movable("left"),
+        right: movable("right"),
+        up: movable("up"),
+        down: movable("down"),
+      },
       bodyClassName: `right-utility-dock__tool${pages ? " right-utility-dock__tool--pages" : ""}`,
       inset: tool.id === "plan" || tool.id === "delivery" || tool.id === "agents",
       minimisable: shelfDrawn && MINIMISABLE_DOCK_SURFACES.has(tool.id),
       children:
         available.kind === "surface" ? (
-          renderToolBody(tab, tab.id, pages)
+          renderToolBody(tab, tab.id, pages, !tiled)
         ) : (
           <ShellState
             message={unavailableMessage()}
@@ -413,7 +491,8 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     tests: props.tests,
   };
 
-  // "Show a tool beside" is for a dock with a tool on screen and room for one
+  const visibleStripTabs = tiled ? stripTabs.filter((tab) => !shownInStrip.has(tab.id)) : stripTabs;
+  // "Show another tool" is for a dock with a tool on screen and room for one
   // more; at the caps it would only offer what is refused.
   const lastColumn = layout?.columns.at(-1);
   const capsFull =
@@ -477,19 +556,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               }}
               surfaces={props.toolsAwaitingThread ?? props.launchableSurfaces}
             />
-          ) : (
+          ) : // With tiles, every shown tool has its own bar, so the strip lists
+          // only the open tools that are not on screen.
+          tiled && visibleStripTabs.length === 0 ? null : (
             <DockToolStrip
-              {...(stripActive === undefined ? {} : { active: stripActive })}
-              onClose={(tabId) => {
-                if (focusInside()) setRefocus({});
-                // Closing the Browser closes all its pages, as closing a
-                // browser window does.
-                if (tabId === browserRepresentative?.id) {
-                  for (const tab of browserTabs) props.onCloseTab(tab.id);
-                  return;
-                }
-                props.onCloseTab(tabId);
-              }}
+              {...(tiled || stripActive === undefined ? {} : { active: stripActive })}
+              onClose={closeTool}
               menuFor={tabMenu}
               onMenuAction={runTabMenu}
               onTabDragEnd={() => {
@@ -506,7 +578,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                 if (tabId === browserRepresentative?.id && target === activeTabId) return;
                 props.onSelectSurface(target);
               }}
-              tabs={stripTabs}
+              tabs={visibleStripTabs}
             />
           )}
           {/* The title band offers a few tools by face; Add tool lists every
@@ -518,9 +590,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               ? {}
               : { references: props.launchableReferences })}
           />
+          {showBeside}
         </div>
         <div className="right-utility-dock__actions">
-          {showBeside}
           {props.onClose === undefined ? null : (
             <IconButton
               icon={X}
@@ -559,18 +631,22 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                 ? layout
                 : { columns: [{ share: 1, tiles: [{ tabId: activeTab.id, share: 1 }] }] }
             }
+            onCloseTile={closeTool}
             onFocusTile={props.onSelectSurface}
             onHideTile={(tabId) => {
-              if (focusInside()) setRefocus({ tab: stripIdOf(tabId) });
+              // From the tile's menu: focus is in a popup, so it is not "inside".
+              setRefocus({ tab: stripIdOf(tabId) });
               tiles?.onHideTile(tabId);
             }}
             onMinimiseTile={(tabId) => {
               const tab = props.tabs.find((candidate) => candidate.id === tabId);
-              if (focusInside() && tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
+              if (tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
               tiles?.onMinimise(tabId);
             }}
+            onMoveTile={(tabId, direction) => tiles?.onMove(tabId, direction)}
             onResizeColumn={(index, shares) => tiles?.onResizeColumn(index, shares)}
             onResizeColumns={(shares) => tiles?.onResizeColumns(shares)}
+            onShowTileAlone={(tabId) => tiles?.onShowAlone(tabId)}
             panelRef={toolPanel}
             renderTile={renderTile}
           />

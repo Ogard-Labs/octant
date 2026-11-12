@@ -44,6 +44,7 @@ import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { ThreadUtilityDockKey } from "../shell/rightUtilityDockSelection";
 import type { useShellController } from "../shell/useShellController";
 import type { useThreadUtilityPresentation } from "../shell/useThreadUtilityPresentation";
+import type { DockTileMove } from "../shell/rightUtilityDockSelection";
 import type { VisibleMode } from "../shell/workKind";
 import type { WorkspaceViewProps } from "../shell/WorkspaceView";
 import type { useZenController } from "../zen/useZenController";
@@ -228,7 +229,10 @@ export type ShellActions = {
   /** Takes a Browser or Terminal tool out of its tile as a small live card at the foot of the dock. */
   readonly minimiseDockTool: (tabId: string) => void;
   /** Takes a minimised tool's card away; the tool stays an open tab in the strip. */
+  /** Brings a minimised tool back from its card, to the place it was minimised from while that place exists. */
+  readonly restoreDockTool: (tabId: string) => void;
   readonly hideDockCard: (tabId: string) => void;
+  readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -286,6 +290,7 @@ export type ShellActions = {
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
+  readonly setProjectDesignSystem: ProjectController["setDesignSystem"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];

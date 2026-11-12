@@ -42,6 +42,17 @@ export interface DockTileLayout {
   readonly columns: ReadonlyArray<DockTileColumn>;
 }
 
+/**
+ * A tile's place: its column from the left and its row from the top, and
+ * whether it stood alone in its column, which is then a column of its own again.
+ */
+export interface DockToolPlace {
+  readonly surface: RightUtilityDockSurfaceId;
+  readonly column: number;
+  readonly row: number;
+  readonly alone: boolean;
+}
+
 export interface ThreadUtilityDockState {
   readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
   /**
@@ -58,6 +69,12 @@ export interface ThreadUtilityDockState {
    * stands for all of a tool's tabs. Never present on the bottom panel's state.
    */
   readonly minimised?: ReadonlyArray<string>;
+  /**
+   * Where each minimised tool stood in the layout when it was minimised, so
+   * restoring it can put it back there while that place still exists. A tool
+   * that was the one shown, with no layout around it, leaves none.
+   */
+  readonly minimisedPlaces?: ReadonlyArray<DockToolPlace>;
   /**
    * The Browser page that was last shown. The Browser is one tool with pages,
    * so showing "the Browser" again (from its strip entry, a menu, a drag or its
@@ -207,21 +224,17 @@ export function closeUtilityTabState(
   const minimised = state.minimised;
   if (state.layout !== undefined) {
     return settle(tabs, state.layout, state.active, {
+      ...carried(state),
       preferred: neighbourTile(state, tabId),
-      minimised,
-      lastBrowser: state.lastBrowser,
     });
   }
   if (state.active !== tabId)
-    return settle(tabs, undefined, state.active, { minimised, lastBrowser: state.lastBrowser });
+    return settle(tabs, undefined, state.active, { ...carried(state), minimised });
   // The shown tool went: the next one that is not a card takes its place.
   const cards = new Set(minimised);
   const before = state.tabs.slice(0, closedIndex).filter((tab) => !cards.has(tab.id)).length;
   const visible = tabs.filter((tab) => !cards.has(tab.id));
-  return settle(tabs, undefined, visible[Math.min(before, visible.length - 1)]?.id, {
-    minimised,
-    lastBrowser: state.lastBrowser,
-  });
+  return settle(tabs, undefined, visible[Math.min(before, visible.length - 1)]?.id, carried(state));
 }
 
 /**
@@ -236,8 +249,7 @@ export function removeUtilityTabs(
   const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
   return settle(tabs, state.layout, state.active, {
-    minimised: state.minimised,
-    lastBrowser: state.lastBrowser,
+    ...carried(state),
   });
 }
 
@@ -250,8 +262,7 @@ export function retainAvailableUtilityTabs(
     if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
   return settle(tabs, state.layout, state.active, {
-    minimised: state.minimised,
-    lastBrowser: state.lastBrowser,
+    ...carried(state),
   });
 }
 
@@ -292,8 +303,8 @@ export function showUtilityTabAlone(
   if (tab === undefined) return state;
   if (state.layout === undefined && state.active === tabId) return state;
   return settle(state.tabs, undefined, tabId, {
+    ...carried(state),
     minimised: withoutMinimisedTool(state, tab.surface),
-    lastBrowser: state.lastBrowser,
   });
 }
 
@@ -311,7 +322,7 @@ export function hideUtilityTile(
     state.tabs,
     withoutTile(layout, tabId),
     state.active === tabId ? neighbourTile(state, tabId) : state.active,
-    { minimised: state.minimised, lastBrowser: state.lastBrowser },
+    carried(state),
   );
 }
 
@@ -345,17 +356,20 @@ export function minimiseUtilityTool(
     const active =
       state.active !== undefined && toolIds.has(state.active) ? undefined : state.active;
     const { active: _shown, layout: _none, ...rest } = withoutCards(state);
-    return withLastBrowser({
-      ...rest,
-      ...(active === undefined ? {} : { active }),
-      minimised: cards,
-    });
+    return pruned(
+      withLastBrowser({
+        ...rest,
+        ...(active === undefined ? {} : { active }),
+        minimised: cards,
+      }),
+      tab.surface,
+    );
   }
   const order = layoutTabIds(layout);
   const remaining = order.filter((id) => !toolIds.has(id));
   if (remaining.length === 0) {
     const { active: _shown, layout: _gone, ...rest } = withoutCards(state);
-    return withLastBrowser({ ...rest, minimised: cards });
+    return pruned(withLastBrowser({ ...rest, minimised: cards }), tab.surface);
   }
   let focus = state.active;
   if (state.active !== undefined && toolIds.has(state.active)) {
@@ -366,9 +380,20 @@ export function minimiseUtilityTool(
   }
   let kept = layout;
   for (const id of toolIds) kept = withoutTile(kept, id);
+  const from = layout.columns.flatMap((column, columnIndex) =>
+    column.tiles.flatMap((tile, row) =>
+      toolIds.has(tile.tabId)
+        ? [{ surface: tab.surface, column: columnIndex, row, alone: column.tiles.length === 1 }]
+        : [],
+    ),
+  )[0];
   return settle(state.tabs, kept, focus, {
+    ...carried(state),
     minimised: cards,
-    lastBrowser: state.lastBrowser,
+    places: [
+      ...(state.minimisedPlaces ?? []).filter((place) => place.surface !== tab.surface),
+      ...(from === undefined ? [] : [from]),
+    ],
   });
 }
 
@@ -396,15 +421,171 @@ export function hideUtilityCard(
 }
 
 /**
- * Brings a minimised tool back as the focused tile's tool, or as the one tool
- * shown. Selecting any tab of the tool does the same, so a card is never the
- * only way back.
+ * Brings a tool back from its card as a tile of its own and focuses it. It
+ * returns to the place it was minimised from while that place still exists (its
+ * column is there with room, or it was the column after the last and there is
+ * room for one), else it becomes the last tile. It never takes over a shown
+ * tool's tile, so nothing shown remounts; only when the caps leave no room does
+ * it take the focused tile's, as selecting its tab would. With nothing shown
+ * it is the one tool shown. A Browser already shown is only focused: it is one
+ * tool, and a second Browser tile would show it twice.
  */
 export function restoreUtilityTool(
   state: ThreadUtilityDockState,
   tabId: string,
 ): ThreadUtilityDockState {
-  return state.minimised?.includes(tabId) === true ? focusTab(state, tabId) : state;
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return state;
+  const remembered = state.minimisedPlaces?.find((place) => place.surface === tab.surface);
+  const base = withMinimised(state, withoutMinimisedTool(state, tab.surface));
+  if (base.active === undefined) return focusTab(base, tabId);
+  if (shownUtilityTabIds(base).includes(tabId)) return focusTab(base, tabId);
+  if (tab.surface === "browser" && browserShownIn(base)) return focusTab(base, tabId);
+  const columns = base.layout?.columns ?? [{ share: 1, tiles: [{ tabId: base.active, share: 1 }] }];
+  const roomIn = (index: number) =>
+    (columns[index]?.tiles.length ?? MAX_DOCK_TILES_PER_COLUMN) < MAX_DOCK_TILES_PER_COLUMN;
+  const newColumnFits = columns.length < MAX_DOCK_TILE_COLUMNS;
+  let target:
+    | { readonly column: number; readonly row: number; readonly alone: boolean }
+    | undefined;
+  if (remembered?.alone === true && newColumnFits && remembered.column <= columns.length) {
+    target = { column: remembered.column, row: 0, alone: true };
+  } else if (
+    remembered !== undefined &&
+    !remembered.alone &&
+    remembered.column < columns.length &&
+    roomIn(remembered.column)
+  ) {
+    target = { column: remembered.column, row: remembered.row, alone: false };
+  } else if (newColumnFits) {
+    target = { column: columns.length, row: 0, alone: true };
+  } else if (roomIn(columns.length - 1)) {
+    target = {
+      column: columns.length - 1,
+      row: columns[columns.length - 1]?.tiles.length ?? 0,
+      alone: false,
+    };
+  }
+  if (target === undefined) return focusTab(base, tabId);
+  return settle(base.tabs, insertTile(columns, tabId, target), tabId, carried(base));
+}
+
+function browserShownIn(state: ThreadUtilityDockState): boolean {
+  return shownUtilityTabIds(state).some(
+    (id) => state.tabs.find((tab) => tab.id === id)?.surface === "browser",
+  );
+}
+
+/** Adds a tile at a place, giving it an even share and scaling its neighbours to make room. */
+function insertTile(
+  columns: ReadonlyArray<DockTileColumn>,
+  tabId: string,
+  spot: { readonly column: number; readonly row: number; readonly alone: boolean },
+): DockTileLayout {
+  if (spot.alone) {
+    const count = columns.length;
+    const added: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+    const scaled = columns.map((column) => ({
+      ...column,
+      share: (column.share * count) / (count + 1),
+    }));
+    return { columns: [...scaled.slice(0, spot.column), added, ...scaled.slice(spot.column)] };
+  }
+  return {
+    columns: columns.map((column, index) => {
+      if (index !== spot.column) return column;
+      const count = column.tiles.length;
+      const row = Math.min(spot.row, count);
+      const scaled = column.tiles.map((tile) => ({
+        ...tile,
+        share: (tile.share * count) / (count + 1),
+      }));
+      const tiles = [
+        ...scaled.slice(0, row),
+        { tabId, share: 1 / (count + 1) },
+        ...scaled.slice(row),
+      ];
+      return { ...column, tiles };
+    }),
+  };
+}
+
+export type DockTileMove = "left" | "right" | "up" | "down";
+
+/**
+ * Moves a shown tile one step. Up and down swap it with its neighbour in the
+ * column; left and right take it to the other column, at the same row or the
+ * end of that column. A one-column layout sideways makes the second column,
+ * and a column left empty goes, so the layout can collapse to one column. A
+ * move the caps (two columns of three tiles) or the edges refuse returns the
+ * same state. The tool stays mounted: only its tile's place changes.
+ */
+export function moveUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  direction: DockTileMove,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined) return state;
+  const columnIndex = layout.columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === tabId),
+  );
+  const column = layout.columns[columnIndex];
+  if (column === undefined) return state;
+  const row = column.tiles.findIndex((tile) => tile.tabId === tabId);
+  const tile = column.tiles[row];
+  if (tile === undefined) return state;
+  const rebuilt = (columns: ReadonlyArray<DockTileColumn>) =>
+    settle(state.tabs, { columns }, state.active, {
+      ...carried(state),
+    });
+
+  if (direction === "up" || direction === "down") {
+    const other = row + (direction === "up" ? -1 : 1);
+    const neighbour = column.tiles[other];
+    if (neighbour === undefined) return state;
+    const tiles = column.tiles.map((candidate, index) =>
+      index === row ? neighbour : index === other ? tile : candidate,
+    );
+    return rebuilt(
+      layout.columns.map((candidate, index) =>
+        index === columnIndex ? { ...candidate, tiles } : candidate,
+      ),
+    );
+  }
+
+  const targetIndex = columnIndex + (direction === "left" ? -1 : 1);
+  const target = layout.columns[targetIndex];
+  if (target === undefined) {
+    // Past the last column: a new one, only from a column with something left.
+    if (layout.columns.length >= MAX_DOCK_TILE_COLUMNS || column.tiles.length < 2) return state;
+    const rest = column.tiles.filter((candidate) => candidate.tabId !== tabId);
+    // An even split, as `place()` makes: the new column takes 1/(n+1) and the
+    // kept ones are scaled by n/(n+1), so their ratio is unchanged.
+    const count = layout.columns.length;
+    const alone: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+    const kept: DockTileColumn = {
+      ...column,
+      tiles: rest,
+      share: (column.share * count) / (count + 1),
+    };
+    return rebuilt(direction === "left" ? [alone, kept] : [kept, alone]);
+  }
+  if (target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;
+  const at = Math.min(row, target.tiles.length);
+  const count = target.tiles.length;
+  const scaled = target.tiles.map((candidate) => ({
+    ...candidate,
+    share: (candidate.share * count) / (count + 1),
+  }));
+  const joined = [...scaled.slice(0, at), { tabId, share: 1 / (count + 1) }, ...scaled.slice(at)];
+  const columns = layout.columns.flatMap((candidate, index) => {
+    if (index === targetIndex) return [{ ...candidate, tiles: joined }];
+    if (index !== columnIndex) return [candidate];
+    const tiles = candidate.tiles.filter((entry) => entry.tabId !== tabId);
+    return tiles.length === 0 ? [] : [{ ...candidate, tiles }];
+  });
+  return rebuilt(columns);
 }
 
 /** Sets the columns' fractions of the width, in column order. */
@@ -507,6 +688,12 @@ export function changeDisplayedUtilityState(
   // a card, or the tab would come back as an ordinary hidden one.
   const unshownCards = (stored.minimised ?? []).filter((id) => !shown.has(id) && !gone.has(id));
   const minimised = [...(next.minimised ?? []), ...unshownCards];
+  const keptPlaces = (stored.minimisedPlaces ?? []).filter(
+    (place) =>
+      !(next.minimisedPlaces ?? []).some((candidate) => candidate.surface === place.surface) &&
+      stored.tabs.some((tab) => tab.surface === place.surface && unshownCards.includes(tab.id)),
+  );
+  const places = [...(next.minimisedPlaces ?? []), ...keptPlaces];
   return {
     ...next,
     tabs: [
@@ -514,6 +701,7 @@ export function changeDisplayedUtilityState(
       ...next.tabs.filter((tab) => !known.has(tab.id)),
     ],
     ...(minimised.length === 0 ? {} : { minimised }),
+    ...(minimised.length === 0 || places.length === 0 ? {} : { minimisedPlaces: places }),
   };
 }
 
@@ -611,7 +799,28 @@ function withMinimised(
   minimised: ReadonlyArray<string> | undefined,
 ): ThreadUtilityDockState {
   if (minimised === state.minimised) return state;
-  return { ...withoutCards(state), ...(minimised === undefined ? {} : { minimised }) };
+  return pruned({
+    ...withoutCards(state),
+    ...(minimised === undefined ? {} : { minimised }),
+  });
+}
+
+/**
+ * Keeps a remembered place only for a tool that is still a card, and forgets
+ * `except`'s place besides: a tool minimised from the single view has none.
+ */
+function pruned(
+  state: ThreadUtilityDockState,
+  except?: RightUtilityDockSurfaceId,
+): ThreadUtilityDockState {
+  const { minimisedPlaces, ...rest } = state;
+  if (minimisedPlaces === undefined) return state;
+  const cards = new Set(state.minimised);
+  const surfaces = new Set(state.tabs.filter((tab) => cards.has(tab.id)).map((tab) => tab.surface));
+  const places = minimisedPlaces.filter(
+    (place) => surfaces.has(place.surface) && place.surface !== except,
+  );
+  return places.length === 0 ? rest : { ...rest, minimisedPlaces: places };
 }
 
 /** A state without its cards: what is shown and which Browser page was last. */
@@ -661,6 +870,7 @@ function settle(
   options: {
     readonly preferred?: string | undefined;
     readonly minimised?: ReadonlyArray<string> | undefined;
+    readonly places?: ReadonlyArray<DockToolPlace> | undefined;
     readonly lastBrowser?: string | undefined;
   } = {},
 ): ThreadUtilityDockState {
@@ -668,6 +878,15 @@ function settle(
     ...settleUnrecorded(tabs, layout, active, options),
     ...(options.lastBrowser === undefined ? {} : { lastBrowser: options.lastBrowser }),
   });
+}
+
+/** What a change to the tiles keeps of the cards and of the Browser's last page. */
+function carried(state: ThreadUtilityDockState) {
+  return {
+    minimised: state.minimised,
+    places: state.minimisedPlaces,
+    lastBrowser: state.lastBrowser,
+  };
 }
 
 /**
@@ -691,11 +910,14 @@ function settleUnrecorded(
   options: {
     readonly preferred?: string | undefined;
     readonly minimised?: ReadonlyArray<string> | undefined;
+    readonly places?: ReadonlyArray<DockToolPlace> | undefined;
   },
 ): ThreadUtilityDockState {
   const open = new Set(tabs.map((tab) => tab.id));
   const minimised = (options.minimised ?? []).filter((id) => open.has(id));
   const cards = new Set(minimised);
+  const cardSurfaces = new Set(tabs.filter((tab) => cards.has(tab.id)).map((tab) => tab.surface));
+  const places = (options.places ?? []).filter((place) => cardSurfaces.has(place.surface));
   const columns = (layout?.columns ?? []).flatMap((column) => {
     const tiles = column.tiles.filter((tile) => open.has(tile.tabId) && !cards.has(tile.tabId));
     return tiles.length === 0 ? [] : [{ ...column, tiles: rescaleTiles(tiles) }];
@@ -713,6 +935,7 @@ function settleUnrecorded(
     tabs,
     ...(focused === undefined ? {} : { active: focused }),
     ...(minimised.length === 0 ? {} : { minimised }),
+    ...(places.length === 0 ? {} : { minimisedPlaces: places }),
   };
   return shown.length < 2 ? next : { ...next, layout: { columns: rescaleColumns(columns) } };
 }
@@ -774,7 +997,7 @@ function place(
         columns: [...scaled.slice(0, focusedColumn + 1), added, ...scaled.slice(focusedColumn + 1)],
       },
       tabId,
-      { minimised: state.minimised, lastBrowser: state.lastBrowser },
+      carried(state),
     );
   }
   // "Beside" with both columns present falls back to below in the last column.
@@ -796,7 +1019,7 @@ function place(
       ),
     },
     tabId,
-    { minimised: state.minimised, lastBrowser: state.lastBrowser },
+    carried(state),
   );
 }
 
@@ -979,6 +1202,7 @@ interface StoredDockState {
   readonly active?: string;
   readonly layout?: DockTileLayout;
   readonly minimised?: ReadonlyArray<string>;
+  readonly minimisedPlaces?: ReadonlyArray<DockToolPlace>;
   readonly lastBrowser?: string;
 }
 
@@ -995,6 +1219,9 @@ function encodeDockStates(
       ...(tiled && state.layout !== undefined ? { layout: state.layout } : {}),
       ...(tiled && state.minimised !== undefined && state.minimised.length > 0
         ? { minimised: [...state.minimised] }
+        : {}),
+      ...(tiled && state.minimisedPlaces !== undefined && state.minimisedPlaces.length > 0
+        ? { minimisedPlaces: [...state.minimisedPlaces] }
         : {}),
       ...(tiled && state.lastBrowser !== undefined ? { lastBrowser: state.lastBrowser } : {}),
     };
@@ -1033,7 +1260,12 @@ function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState
     tabs.some((tab) => tab.id === candidate.lastBrowser && tab.surface === "browser")
       ? { lastBrowser: candidate.lastBrowser }
       : {};
-  const withCards = { ...(minimised.length === 0 ? {} : { minimised }), ...remembered };
+  const places = decodePlaces(candidate.minimisedPlaces, tabs, cards);
+  const withCards = {
+    ...(minimised.length === 0 ? {} : { minimised }),
+    ...(places.length === 0 ? {} : { minimisedPlaces: places }),
+    ...remembered,
+  };
   const fallback = visible.at(-1)?.id;
   const activeCandidate = typeof candidate.active === "string" ? candidate.active : undefined;
   // A record that holds cards and names no active tab was showing the overview.
@@ -1050,6 +1282,31 @@ function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState
   const shown = layoutTabIds(layout);
   const focused = active !== undefined && shown.includes(active) ? active : shown[0];
   return { tabs, ...(focused === undefined ? {} : { active: focused }), layout, ...withCards };
+}
+
+/** A remembered place is read as untrusted: a known tool that is a card, with a place inside the caps. */
+function decodePlaces(
+  value: unknown,
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  cards: ReadonlySet<string>,
+): ReadonlyArray<DockToolPlace> {
+  if (!Array.isArray(value)) return [];
+  const places: DockToolPlace[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const surface = decodeDockSurfaceId(item.surface);
+    const { column, row, alone } = item;
+    if (surface === undefined || !MINIMISABLE_DOCK_SURFACES.has(surface)) continue;
+    if (!tabs.some((tab) => tab.surface === surface && cards.has(tab.id))) continue;
+    if (typeof column !== "number" || typeof row !== "number") continue;
+    if (typeof alone !== "boolean") continue;
+    if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+    if (column < 0 || column >= MAX_DOCK_TILE_COLUMNS) continue;
+    if (row < 0 || row >= MAX_DOCK_TILES_PER_COLUMN) continue;
+    if (places.some((place) => place.surface === surface)) continue;
+    places.push({ surface, column, row, alone });
+  }
+  return places;
 }
 
 /**

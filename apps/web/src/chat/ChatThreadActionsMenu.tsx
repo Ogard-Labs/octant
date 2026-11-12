@@ -19,6 +19,7 @@ import {
   threadHandOffMessage,
 } from "../thread/threadHandOff";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { buildChatMarkdownExport } from "./chatMarkdownExport";
 import { MoveToProjectDialog, type MoveToProjectDialogProps } from "./MoveToProjectDialog";
 
@@ -260,16 +261,18 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
         // fresh action instead of a radio selection that would stop firing.
         value=""
       />
-      {moveOpen && props.moveToProject !== undefined ? (
-        <MoveToProjectDialog
-          onClose={() => setMoveOpen(false)}
-          onMove={props.moveToProject.onMove}
-          projects={props.moveToProject.projects}
-          {...(props.moveToProject.onCreateProject === undefined
-            ? {}
-            : { onCreateProject: props.moveToProject.onCreateProject })}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {moveOpen && props.moveToProject !== undefined ? (
+          <MoveToProjectDialog
+            onClose={() => setMoveOpen(false)}
+            onMove={props.moveToProject.onMove}
+            projects={props.moveToProject.projects}
+            {...(props.moveToProject.onCreateProject === undefined
+              ? {}
+              : { onCreateProject: props.moveToProject.onCreateProject })}
+          />
+        ) : null}
+      </OctantDialogPresence>
       {status === undefined ? null : (
         <p aria-live="polite" className="chat-workspace__export-status" role="status">
           {status}

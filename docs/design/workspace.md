@@ -238,7 +238,7 @@ in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
-rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
+rows split into **Context** (Memory, Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
 rows is not drawn. **Guardrail level** shows the level the Project's threads
@@ -863,9 +863,17 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Columns stand side by side only when the tile area can give each 280px and
-otherwise stack (at 1440px with the sidebar open the dock is 500px, so they
-stack), and stacked columns stay resizable. A tool the bottom panel takes, or one
+has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
+with an Arrange menu (Move left, right, up and down where the caps allow, Show
+alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at
+its trailing edge; the strip lists only the tools that are not shown (a minimised tool is
+not a tile and not a strip tab: its card stands for it). Stacked, a page showed four bars and named the tool
+three times. A divider is a hairline that shows a quiet strong role while hovered
+or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
+otherwise stack. The thread keeps 440px beside two columns (560px beside one,
+from a 1100px window up), because at 560px two tools could never stand side by
+side in a 1440px window: with the sidebar open a second column widens the dock to
+about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
 that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
 already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
@@ -1094,15 +1102,21 @@ thread's one shell, so minimising either takes the whole tool and leaves one
 card, never one for each tab. A minimised tool is an open tab that is in no
 tile and is nobody's selected tab; if it was the only tool shown the overview
 returns, and with tiles focus moves as it does when a tile is hidden. Choosing
-any of its tabs, from the strip, **Show another tool**, a drop or the card, brings
-the whole tool back as the focused tile's tool. The state is window-local
-presentation stored with the thread's open tools; the bottom panel never has
-one.
+any of its tabs, from the strip, **Show another tool** or a drop, brings the
+whole tool back as the focused tile's tool, as any hidden tool comes back; its
+card brings it back as a tile of its own (see **A card**). The state, with the
+place each minimised tool stood in, is window-local presentation stored with the
+thread's open tools; the bottom panel never has one.
 
-- **Ways in.** A Browser or Terminal tab's context menu (the menu key and
-  Shift+F10 included) offers **Minimise**, and a tile's caption offers a
-  **Minimise <tool>** control before **Hide <tool> from view**. Focus goes to the
-  card's expand control, since the control it was on has left.
+- **Ways in.** A tile's **Arrange <tool>** menu offers **Minimise to card** for the
+  Browser and the Terminal only, after **Hide from view**. A Browser or Terminal
+  tab's context menu (the menu key and Shift+F10 included) offers the same item
+  where it offers arranging a tool. The tile bar has no button of its own for it,
+  so a tile still has one bar and one name. Minimising never closes or stops the
+  tool and never sends anything to a page or a shell. Focus goes to the card's
+  expand control, since the control it was on has left; it is taken only while
+  focus is still on the page body or in the closing menu, so a person who has
+  since moved it keeps it where they put it.
 - **The shelf.** A group named **Minimised tools** at the foot of the dock body,
   under the overview when no tool is shown and under the tiles when tools are
   shown. It takes its natural height, at most two cards (Browser, Terminal), and
@@ -1115,8 +1129,15 @@ one.
   <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
-  Show brings the tool back as the focused tile's tool (the Browser as the page
-  it last showed) and puts the keyboard in it. Hide card removes the card and
+  Show brings the tool back as a tile of its own (the Browser as the page it
+  last showed), focused, and puts the keyboard in it. It returns to the place it
+  was minimised from while that place still exists: the same row of a column it
+  shared, or a column of its own again at the same position, when there is room
+  under the caps. Otherwise it becomes the last tile: a new column while there is
+  room for one, else the end of the last column. With nothing shown it is the one
+  tool shown. It never takes over a shown tool's tile, so no shown tool remounts;
+  only when both columns are full does it take the focused tile's, as choosing
+  its tab would. A tool that was the only one shown leaves no place. Hide card removes the card and
   nothing else: the tool goes back to being an ordinary open tab in the strip,
   not shown, and no page or shell is closed or stopped (closing a tab with its
   own browser context ends that context, which a card that only previews must

@@ -79,6 +79,8 @@ export interface DockContainerProps {
     | "hideDockCard"
     | "hideDockTile"
     | "minimiseDockTool"
+    | "restoreDockTool"
+    | "moveDockTile"
     | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
@@ -728,7 +730,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                   const entry = shelfEntries.find((candidate) => candidate.tabId === tabId);
                   if (entry !== undefined) hideCard(entry);
                 },
-                onShow: actions.selectDockTab,
+                onShow: actions.restoreDockTool,
                 // Keyed by thread and checkout: a card belongs to one shell and
                 // never shows another thread's under its own name.
                 renderCard: (entry: DockShelfEntry, controls: DockCardControls) =>
@@ -806,6 +808,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           narrow: isNarrow,
           onHideTile: actions.hideDockTile,
           onMinimise: actions.minimiseDockTool,
+          onMove: actions.moveDockTile,
           onOpenBeside: actions.openDockTabBeside,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,

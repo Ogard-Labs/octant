@@ -191,14 +191,20 @@ export function dockWidthCeiling(
     (options.tileColumns ?? 1) >= 2
       ? workspaceWidth -
         ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
-          ? WIDE_PRIMARY_MIN
+          ? TILED_PRIMARY_MIN
           : NARROW_PRIMARY_MIN)
       : workspaceWidth / 2;
   return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
 }
 
-/** The thread column's minimum beside an open dock, as `--octant-wide-primary-min` sets it. */
-const WIDE_PRIMARY_MIN = 560;
+/**
+ * The thread column's minimum beside two columns of tools, from 1100px up. One
+ * column keeps `--octant-wide-primary-min` (560px); at 560px, two tools could
+ * never stand side by side in a 1440px window with the sidebar open, so a
+ * second column asks the thread for 440px instead. The stylesheet mirrors it
+ * as `--octant-tiled-primary-min`.
+ */
+export const TILED_PRIMARY_MIN = 440;
 const NARROW_PRIMARY_MIN = 360;
 const WIDE_VIEWPORT = 1100;
 
