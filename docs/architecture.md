@@ -5796,8 +5796,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
   The agent's tool is offered in Chat, Work, and Code turns whose provider
-  carries app-managed tools (never a Side Chat or a routine's turn, which has
-  nobody to answer), and only while an enabled image profile exists; every
+  carries app-managed tools (never a Side Chat; in a turn the host runs as
+  itself, such as a routine's, only where the Project holds a kept choice
+  when the turn starts, since nobody could answer its card), and only while
+  an enabled image profile exists; every
   provider is also told, in the turn's tool host lines, to call it for a
   picture instead of drawing one as SVG or HTML. A call spends nothing by
   itself: the host holds an image offer for the window whose turn asked, and
@@ -5806,11 +5808,22 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   profile and model the host can run when the answer arrives, checked again
   before the job is queued. The "do not ask again" choice keeps that
   profile and model, is journaled per Project and survives a restart, and a
-  routine in that Project may use it (maintainer request, 2026-11-12; not
-  built yet: today "Don't ask again in this thread" keeps the choice for the
-  thread in host memory only, so a restart asks again, and a routine's turn
-  is not offered the tool). A kept choice the host can no longer run is
-  dropped and asked again rather than swapped. An offer lives at most ten minutes and is given
+  routine in that Project may use it (maintainer request, 2026-11-12). It is
+  the Project's `imageGenerationChoice`, changed by
+  `project.image-generation-choice-changed@1`: the host journals it when the
+  card's answer asks, every thread of the Project then generates with it
+  without a card at every level, and Project Overview names the kept model
+  with "Ask again", which drops it. The Project command that sets or drops
+  it is refused from a paired device, as the other standing permissions are;
+  the card itself is answered only at a window on the host. A Chat thread
+  outside a Project has no Project to hold a choice and keeps it for that
+  thread in host memory, so a restart asks again there. At Full access a
+  call with no kept choice also skips the card when exactly one image
+  profile is ready, and generates on that profile's default model: the
+  agent's own model suggestion is not a person's choice
+  (`imageGenerationWithoutAsking` in `@octant/domain`). A kept choice the
+  host can no longer run is dropped and asked again rather than swapped, at
+  Full access too; in a turn nobody attends the call then starts nothing. An offer lives at most ten minutes and is given
   up when its turn stops or its window goes away; Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
@@ -8489,7 +8502,29 @@ the model at another size.
   Harness says the same for a slot's chosen model. The host also runs the
   verification by itself the first time a model is used, because it is a
   capability probe, not a grant; the manual action stays (maintainer request,
-  2026-11-12; not built yet: today only the Verify tools action runs it).
+  2026-11-12). `verifyModelToolsOnFirstUse` on the provider service is that
+  run: the same host-run check, writing the same record, called once where a
+  use starts (a Chat send, a Code provider turn's start, and a Work thread's
+  model selection, which is where Work first needs the tools). An endpoint
+  the host has not looked at since it started has its connection checked
+  first. It never fails the use: a model that does not call the test tool, or
+  a run that fails or is interrupted, leaves the model unverified, so the
+  turn runs without tools (and Work refuses the selection) exactly as for an
+  unverified model. Uses that arrive together share one request. A run that
+  did not finish is tried again at the next use. A model that answered
+  without calling the tool is not asked again by the host until its
+  endpoint's configuration changes, the host restarts, or a person presses
+  Verify tools: asking on every use would bill a request per turn for an
+  answer that does not change. The last run that left a model without tools
+  is reported with the runtime as `toolChecks` (model, `unsupported` or
+  `failed`, the reason, the time), kept in host memory, and the endpoint's
+  model row shows it beside "Chat only · Verify tools"; it grants and
+  withholds nothing, since admission reads the verified set alone. The check
+  is one request holding the echo tool and a two-word prompt. The endpoint
+  may bill it, and spend ceilings do not count it, as they never counted the
+  button's: a ceiling sums the usage turns record, and this request belongs
+  to no turn. It is bounded by the rule above, at most one per model until
+  something changes, or one per use start while the endpoint keeps failing.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -10334,9 +10369,14 @@ that is not yet effective for the thread is refused and never reaches the model.
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
-  `extension-tool-grant` aggregate). The person can also allow all tools of
-  one server at once, at every level (maintainer request, 2026-11-12; not
-  built yet: today a grant covers one tool, never the whole server). The grant
+  `extension-tool-grant` aggregate). The person can also answer "allow all
+  tools of this server", wherever the prompt offers to remember (maintainer
+  request, 2026-11-12). That journals the same event with no tool name and no
+  listing digest: it binds the Project, extension, package, component, and
+  the package version and digest, so it covers every tool the server lists,
+  including one added later under the same digest, and an update asks again.
+  It is revoked, listed, and forgotten exactly as a tool's grant is, and the
+  Plan and outside-content rules below apply to it unchanged. A tool's grant
   binds the Project, extension, package, component, and MCP tool name, the
   package version and digest, and a SHA-256 of the tool's name, description,
   and input schema as its server listed them at connect; the provider-facing
@@ -10359,9 +10399,13 @@ that is not yet effective for the thread is refused and never reaches the model.
     Remembering is an answer at the machine, and the person who sent that
     turn is not at it.
   - A Plan turn is asked for every call, and the answer covers that call
-    alone. A Chat thread outside a Project can remember a grant for the
-    account (maintainer request, 2026-11-12; not built yet: today a thread
-    with no Project is asked for every call). An answer that asks to be
+    alone. A Chat thread outside a Project remembers a grant for the
+    account (maintainer request, 2026-11-12): the same events with no
+    Project, on one fixed account aggregate
+    (`EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID`). Only a thread outside a
+    Project uses an account grant; a Project's thread keeps to its own
+    Project's grants, so an answer given in Chat never spares a prompt where
+    a Project's files and shell are in reach. An answer that asks to be
     remembered where it cannot be is refused and the call keeps waiting.
   - Below Full access, on a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
@@ -10380,8 +10424,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings ›
-    Permissions lists them by Project with Revoke, and the prompt offers "always
-    allow" only to a client on a loopback host.
+    Permissions lists them by Project with Revoke, a whole server's grant as
+    "All tools of" that server and the account's under "Chat outside a
+    Project", and the prompt offers "always allow" only to a client on a
+    loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called

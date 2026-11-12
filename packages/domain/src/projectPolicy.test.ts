@@ -35,6 +35,7 @@ import {
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectAgentMemoryWrites,
+  changeProjectImageGenerationChoice,
   changeProjectBrandKit,
   changeProjectColor,
   changeProjectDesignSystem,
@@ -296,6 +297,27 @@ describe("Project creation and lifecycle", () => {
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("keeps, replaces, and drops a Project's image generation choice, and refuses a change that changes nothing", () => {
+    const choice = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    } as never;
+    for (const type of ["chat", "work", "code"] as const) {
+      const project = makeProject(ids[type], "0/1", { type });
+      const kept = changeProjectImageGenerationChoice(project, choice, updatedAt);
+      expect(kept).toMatchObject({ type, imageGenerationChoice: choice, version: 2 });
+      expect(() => changeProjectImageGenerationChoice(kept, choice, updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const dropped = changeProjectImageGenerationChoice(kept, undefined, updatedAt);
+      expect(dropped.version).toBe(3);
+      expect("imageGenerationChoice" in dropped).toBe(false);
+      expect(() => changeProjectImageGenerationChoice(project, undefined, updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    }
   });
 
   it("lets a Project of any mode allow agents to write its memory without asking, which starts off", () => {

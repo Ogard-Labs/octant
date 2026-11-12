@@ -43,9 +43,9 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
-| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
+| [Providers](#providers)                                                               | 7         | 6       | 1            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
-| [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
+| [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **248**   | **164** | **79**       | **5**               |
+| **All areas**                                                                         | **248**   | **166** | **77**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1292,10 +1292,10 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - A provider credential goes only over HTTPS to hosts the driver declares, or to the origin of a base URL the person configured.
 - A custom image source is a provider, model and label from a bounded list. A request is accepted only for an exact listed pair, and a removed or disabled instance fails with a reason, never falling back. _Here only._
 - An image driver that cannot honour a requested image count or reference images fails closed as invalid configuration. A per-image safety failure turns the whole result into a refusal with no partial success. _Here only._
-- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice is journaled per Project and survives a restart, and a routine in that Project may use it. At Full access the card is skipped when the Project holds that choice or exactly one image profile is ready (maintainer request, 2026-11-12). Not built yet: today every call asks at every level, the choice lives in host memory until a restart and the tool is never offered in a routine's turn. The tool is offered only while an image profile is ready, never in Plan or a Side Chat, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07). A call waits up to two minutes for the image and hands the finished image to a model that reads images; the thread shows each image after the turn that made it. In Work and Code the agent can save a finished image as a new file under the folder its turn works in, at the turn's level, confined and never overwriting.
+- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice is journaled per Project and survives a restart, and a routine in that Project may use it. At Full access the card is skipped when the Project holds that choice or exactly one image profile is ready, which then generates on that profile's default model (maintainer request, 2026-11-12). A kept choice the host can no longer run is dropped and asked again, at Full access too; Project Overview names the kept model and takes it back with "Ask again", from a window on the host only; and a Chat thread outside a Project keeps its choice for that thread in host memory. The tool is offered only while an image profile is ready, never in Plan or a Side Chat, in a turn the host runs as itself only where the Project holds a choice, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07). A call waits up to two minutes for the image and hands the finished image to a model that reads images; the thread shows each image after the turn that made it. In Work and Code the agent can save a finished image as a new file under the folder its turn works in, at the turn's level, confined and never overwriting.
 - Voice persists nothing. A paired device reaches transcription but never synthesis.
 
-Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ## Context and usage
 
@@ -1418,7 +1418,7 @@ Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.
 Direct-endpoint providers run under the native harness, which owns the agent loop and the conversation. Drivers supply only a transport through the provider SDK endpoint port.
 
 - A local model endpoint must be a loopback origin, and every request names its context window.
-- A model is offered Octant's tools only after tool verification passed for that model. Verification runs automatically the first time the model is used, as a capability probe and not a grant, and the manual Verify tools button stays (maintainer request, 2026-11-12). Not built yet: today it runs only when a person runs Verify tools on that model. Only the host-run command writes the record, and a tool call in a turn widens nothing.
+- A model is offered Octant's tools only after tool verification passed for that model. Verification runs automatically the first time the model is used, as a capability probe and not a grant, and the manual Verify tools button stays (maintainer request, 2026-11-12). The automatic run never blocks the use: a model that does not call the test tool, or a run that fails, takes the turn without tools, and the endpoint's model row says why. A run that did not finish is tried again at the next use, one check at most per turn start; a model that answered without calling the tool is asked again only from the button, after a configuration change, or after a restart. The check is one small request, billed by the endpoint and not counted by spend ceilings. Only the host-run check writes the record, and a tool call in a turn widens nothing.
 - GPT-6 Luna function-tool requests through Chat Completions use its supported `none` reasoning mode, for both verification and real turns. Other models and plain-text requests keep their defaults.
 - The conversation is journaled step by step. Resume closes interrupted calls as safe or unsafe to replay, and nothing is silently re-run.
 - When a request outgrows the endpoint, the loop first compacts earlier turns tool-less on the session's own endpoint, then trims. The lead can read cut exchanges back through a read-only journal lookup.
@@ -1427,7 +1427,7 @@ Direct-endpoint providers run under the native harness, which owns the agent loo
 - After any context reduction or summary, the goal, its acceptance criteria and the recently edited files are restored to the request. Reduction changes only the assembled request, never the journal. _Here only._
 - The harness's standing instructions include one fixed About Octant block, the same in every mode: the modes and what each may touch, Projects and the board, that an agent never marks a thread Done, access levels and read-only Plan mode, Project memory, skills, Canvas and helper agents, each tool named only as "when offered".
 
-Status: Partly built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
+Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
 ### Harness tool authority and taint
 
@@ -1538,8 +1538,8 @@ Below Full access every MCP tool call waits for an approval in the turn's window
 
 - Built: a Work or Code thread at Full access runs an MCP tool unasked, with or without a window, and records no grant for it; a Plan turn on such a thread still asks.
 - A paired device answers only prompts its own turns raised, and an unanswered approval waits in Needs you until a person answers it (maintainer request, 2026-11-12); not built yet: today it expires after five minutes.
-- A turn the host runs with no window (a routine, a goal loop) waits in Needs you for its approval instead of being refused (maintainer request, 2026-11-12); not built yet: today such a call is refused.
-- A remembered approval covers one tool in one Project, bound to a digest of its listing. The person can also allow all tools of one server at once, and a Chat thread outside a Project can remember a grant for the account (maintainer request, 2026-11-12); not built yet: today a grant covers one tool in one Project and nothing wider. It grows only through the local window answering its own turn's prompt, and any mismatch asks again.
+- A turn the host runs with no window (a routine, a goal loop) waits in Needs you for its approval instead of being refused (maintainer request, 2026-11-12). Built: such a turn runs under the host's own scope, so its prompt is raised and any local window that may drive its thread answers it, once. Not built yet: the prompt is shown on the open thread and not in Needs you, it expires with the five-minute limit above, and a call that reaches the host with no scope at all is still refused, because no window could be shown it.
+- A remembered approval covers one tool in one Project, bound to a digest of its listing. The person can also allow all tools of one server at once, bound to the package version and digest so an update asks again, and a Chat thread outside a Project remembers a grant for the account, which only threads outside a Project use (maintainer request, 2026-11-12). A grant grows only through the local window answering its own turn's prompt, and any mismatch asks again.
 - Below Full access, on a thread that has taken in outside content, a remembered grant holds only for a local stdio server; a network server asks every call.
 - Uninstall, withdrawn trust and rollback revoke grants, and installing again restores nothing.
 
@@ -2265,7 +2265,7 @@ Approval and confirmation dialogs default to the safe answer, and the host decid
 
 - The safe action receives initial focus. Escape, Cancel and backdrop dismissal never change data, and closing restores focus to the opener.
 - Destructive actions opt into the danger treatment explicitly; ordinary confirmations use the standard action treatment.
-- An extension tool request names the plugin, its server and the tool. "Always allow in this Project" appears only when the host marks the call rememberable and the window is local.
+- An extension tool request names the plugin, its server and the tool. "Always allow in this Project" ("Always allow for this account" on a thread outside a Project) and "Allow all tools of this server" appear only when the host marks the call rememberable and the window is local.
 - A browser request from a CLI in a Code thread's terminal says a program in the terminal asked, not the thread's agent.
 - Native Code approvals are isolated host documents. Shared renderer components never grant Code authority, and Enter never implicitly grants access.
 

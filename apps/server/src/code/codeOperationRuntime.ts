@@ -310,6 +310,15 @@ export interface CodeOperationRuntimeOptions {
    * arriving and not yet committed. A held thread starts no turn.
    */
   readonly moveHold?: (threadId: string) => boolean;
+  /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * where a turn starts. Never rejects: a model it could not verify takes the
+   * turn without tools.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: CodeThread["providerInstanceId"],
+    modelId: CodeThread["modelId"],
+  ) => Promise<void>;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -2886,6 +2895,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         reason === undefined ? undefined : { category: "failed", message: reason },
       );
     };
+    // Before the turn's standing is read and its tools are chosen: one check
+    // at most per start, and a check that fails leaves the turn without tools.
+    await this.#options
+      .verifyModelToolsOnFirstUse?.(input.thread.providerInstanceId, input.thread.modelId)
+      .catch(() => undefined);
     const command = this.#pending.get(String(input.operationId));
     const root = this.#roots.get(key);
     if (

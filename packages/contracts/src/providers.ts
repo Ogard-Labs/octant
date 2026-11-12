@@ -1979,6 +1979,22 @@ export const ProviderAccountAuthentication = Schema.Literal(
 );
 export type ProviderAccountAuthentication = typeof ProviderAccountAuthentication.Type;
 
+/**
+ * A Verify tools run that left a model without Octant's tools, and why: the
+ * model answered without calling the test tool (`unsupported`), or the run
+ * did not finish (`failed`: the endpoint refused, timed out, or was
+ * interrupted). The host runs the check when a person presses Verify tools
+ * and by itself the first time a model is used, so this is where the result
+ * of a run nobody was watching is read.
+ */
+export const ProviderModelToolCheck = Schema.Struct({
+  modelId: ProviderModelId,
+  outcome: Schema.Literal("unsupported", "failed"),
+  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+  checkedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProviderModelToolCheck = typeof ProviderModelToolCheck.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -2001,6 +2017,13 @@ export const ProviderObservedState = Schema.Struct({
   // flag, so one verified model does not unlock tools for the other models
   // of the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
+  /**
+   * Attached by the server when it reports a runtime to a client; a driver
+   * never sets it. The models whose last Verify tools run left them without
+   * tools, each with its reason. It grants and withholds nothing: admission
+   * reads `verifiedToolModelIds` alone.
+   */
+  toolChecks: Schema.optional(Schema.Array(ProviderModelToolCheck)),
   /**
    * Attached by the server when it reports a runtime to a client; a driver
    * never sets it. Absent for image profiles, which run no turns.
@@ -3155,6 +3178,7 @@ export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(Provider
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);
 export const decodeProviderCapabilities = Schema.decodeUnknownSync(ProviderCapabilities);
 export const decodeProviderObservedState = Schema.decodeUnknownSync(ProviderObservedState);
+export const decodeProviderModelToolCheck = Schema.decodeUnknownSync(ProviderModelToolCheck);
 export const decodeProviderRegistrySnapshot = Schema.decodeUnknownSync(ProviderRegistrySnapshot);
 export const decodeProviderAuthenticationAttempt = Schema.decodeUnknownSync(
   ProviderAuthenticationAttempt,

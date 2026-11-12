@@ -11,6 +11,7 @@ import {
   type ImageJob,
   type OpenAiImageQuality,
   type OpenAiImageSize,
+  type ProjectImageGenerationChoice,
   type ProviderInstance,
   type ThreadExportAttachment,
 } from "@octant/contracts";
@@ -180,6 +181,42 @@ export function listEligibleImageProfiles(
     }
   }
   return [...profiles, ...listCustomImageProfiles(customSources, instances)];
+}
+
+/**
+ * What an agent's image call does before anyone is asked. A choice the
+ * Project keeps generates at every level. A kept choice the host can no
+ * longer run is reported so the caller drops it, and the call asks rather
+ * than swapping in another model, at Full access too: the person named that
+ * model, not whichever is left. With nothing kept, Full access generates only
+ * when exactly one profile is ready, on that profile's default model: there
+ * is then no profile to pick, and the agent's own model suggestion is not a
+ * person's choice. Plan is refused before this is reached.
+ */
+export function imageGenerationWithoutAsking(input: {
+  readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
+  readonly kept: ProjectImageGenerationChoice | undefined;
+  readonly fullAccess: boolean;
+}):
+  | { readonly kind: "generate"; readonly choice: ProjectImageGenerationChoice }
+  | { readonly kind: "ask"; readonly keptUnavailable: boolean } {
+  const { kept, profiles } = input;
+  if (kept !== undefined) {
+    const runnable = profiles.some(
+      (profile) =>
+        String(profile.instanceId) === String(kept.profileInstanceId) &&
+        profile.modelAllowlist.some((id) => String(id) === String(kept.modelId)),
+    );
+    return runnable ? { kind: "generate", choice: kept } : { kind: "ask", keptUnavailable: true };
+  }
+  const [only, ...others] = profiles;
+  if (input.fullAccess && only !== undefined && others.length === 0) {
+    return {
+      kind: "generate",
+      choice: { profileInstanceId: only.instanceId, modelId: only.defaultModel },
+    };
+  }
+  return { kind: "ask", keptUnavailable: false };
 }
 
 export function hasEligibleImageProfile(

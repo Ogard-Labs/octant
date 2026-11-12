@@ -491,6 +491,25 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
+  /**
+   * Drop the image model the Project's agents use without asking, so the next
+   * image call shows its card again. The server accepts it only from a window
+   * on the host.
+   */
+  async function askAgainForImageGeneration(projectId: ProjectId): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined) return false;
+    if (project.imageGenerationChoice === undefined) return true;
+    return execute(
+      {
+        kind: "change-project-image-generation-choice",
+        projectId,
+        expectedVersion: project.version,
+      },
+      "Agents now ask before generating an image in this Project.",
+    );
+  }
+
   /** Set, replace, or (with an empty kit) clear the Project's brand kit. */
   async function setBrandKit(projectId: ProjectId, brandKit: CanvasDesignBrand): Promise<boolean> {
     const project = projectById.get(projectId);
@@ -1042,6 +1061,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setProviderPolicy,
     setNativeProviders,
     setAgentMemoryWrites,
+    askAgainForImageGeneration,
     setBrandKit,
     setDesignSystem,
     setDesktopRecipe,

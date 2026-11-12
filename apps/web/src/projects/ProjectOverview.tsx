@@ -94,6 +94,8 @@ export interface ProjectOverviewProps {
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onAgentMemoryWritesChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /** Drops the image model the Project's agents use without asking; absent hides the row. */
+  readonly onImageGenerationAskAgain?: (projectId: ProjectId) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
     projectId: ProjectId,
@@ -542,6 +544,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 onChange={(enabled) => props.onAgentMemoryWritesChange?.(props.project.id, enabled)}
               />
             )}
+            {props.onImageGenerationAskAgain === undefined ||
+            props.project.imageGenerationChoice === undefined ? null : (
+              <KeptImageGenerationChoice
+                disabled={archived || connectionStale}
+                modelId={String(props.project.imageGenerationChoice.modelId)}
+                onAskAgain={() => props.onImageGenerationAskAgain?.(props.project.id)}
+              />
+            )}
             {props.project.type === "work" && props.onWorkDeveloperToolsChange !== undefined ? (
               <WorkDeveloperToolsSetting
                 disabled={archived || connectionStale}
@@ -724,6 +734,45 @@ function AgentMemoryWritesSetting(props: {
             void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
           }}
         />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The image model a person told a thread of this Project to keep using
+ * ("Don't ask again" on the image card). It is shown only while one is kept,
+ * because the card is where a model is chosen; here the person takes the
+ * standing permission back.
+ */
+function KeptImageGenerationChoice(props: {
+  readonly disabled: boolean;
+  readonly modelId: string;
+  readonly onAskAgain: () => Promise<boolean> | undefined;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Image generation</h3>
+          <p>
+            Agents in this Project generate images with {props.modelId} without asking, in routines
+            too. Each image is billed to your image provider. Plan never generates.
+          </p>
+        </div>
+        <OctantButton
+          disabled={props.disabled || pending}
+          onClick={() => {
+            setPending(true);
+            void Promise.resolve(props.onAskAgain()).finally(() => setPending(false));
+          }}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          Ask again
+        </OctantButton>
       </div>
     </section>
   );

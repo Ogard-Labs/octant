@@ -651,8 +651,10 @@ implementation; each takes the fail-closed option.
   every endpoint's. The host also runs it by itself the first time a model is
   used, from whatever turn uses it: it is a capability probe, not a grant, so
   it needs no local window, and the manual button stays as it is (maintainer
-  request, 2026-11-12). Not built yet: today only the button runs it, and an
-  unverified model is refused tools until the person presses it.
+  request, 2026-11-12). A first-use run that fails, or a model that does not
+  call the echo tool, leaves the model without tools and never blocks the
+  turn; [Architecture: Native harness](../architecture.md#native-harness)
+  owns when it is tried again and where its reason is shown.
 - **Digest-bound records.** An instance's observation, Verify tools record,
   and conformance belong to the digest it binds. A package that selects
   another digest leaves the instance `driver-not-admitted` with no models,

@@ -16,6 +16,7 @@ import {
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
   type ProjectAgentMemoryWrites,
+  type ProjectImageGenerationChoice,
   type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
@@ -615,6 +616,37 @@ export function changeProjectAgentMemoryWrites(
     reject("invalid-lifecycle", "Project agent memory writes is already selected");
   }
   return { ...project, agentMemoryWrites, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Keep the image profile and model this Project's agents generate with
+ * without asking, replace it, or (with no choice) drop it so the next call
+ * asks again. Every mode's Project can hold one, because every mode's agent
+ * can generate. Rejects a no-op change so the journal never carries an event
+ * that changed nothing.
+ */
+export function changeProjectImageGenerationChoice(
+  project: Project,
+  choice: ProjectImageGenerationChoice | undefined,
+  updatedAt: UtcTimestamp,
+): Project {
+  const current = project.imageGenerationChoice;
+  const unchanged =
+    choice === undefined
+      ? current === undefined
+      : current !== undefined &&
+        String(current.profileInstanceId) === String(choice.profileInstanceId) &&
+        String(current.modelId) === String(choice.modelId);
+  if (unchanged) {
+    reject("invalid-lifecycle", "Project image generation choice is already selected");
+  }
+  const { imageGenerationChoice: _dropped, ...rest } = project;
+  return {
+    ...rest,
+    ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+    version: nextVersion(project),
+    updatedAt,
+  };
 }
 
 /**

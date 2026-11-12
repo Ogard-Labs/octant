@@ -7,7 +7,12 @@ import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { OctantMode } from "./modes";
-import { KeyProviderDriverKinds, PermissionMode, ProviderInstanceId } from "./providers";
+import {
+  KeyProviderDriverKinds,
+  PermissionMode,
+  ProviderInstanceId,
+  ProviderModelId,
+} from "./providers";
 import { AutoReviewer } from "./shield";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -150,6 +155,19 @@ export type ProjectColor = typeof ProjectColor.Type;
 export const ProjectAgentMemoryWrites = Schema.Literal("enabled", "disabled");
 export type ProjectAgentMemoryWrites = typeof ProjectAgentMemoryWrites.Type;
 
+/**
+ * The image profile and model a person told a thread of this Project to keep
+ * using without asking ("Don't ask again" on the image card). An agent's image
+ * call in the Project then generates with it at every level, in a routine's
+ * turn too. Absent means each call asks, apart from Full access with exactly
+ * one ready image profile. The host drops a choice it can no longer run.
+ */
+export const ProjectImageGenerationChoice = Schema.Struct({
+  profileInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+export type ProjectImageGenerationChoice = typeof ProjectImageGenerationChoice.Type;
+
 const ProjectFields = {
   id: ProjectId,
   name: Schema.NonEmptyTrimmedString,
@@ -163,6 +181,7 @@ const ProjectFields = {
    */
   brandKit: Schema.optional(CanvasDesignBrand),
   agentMemoryWrites: Schema.optional(ProjectAgentMemoryWrites),
+  imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -814,6 +833,12 @@ export const ProjectCommand = Schema.Union(
     agentMemoryWrites: ProjectAgentMemoryWrites,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-project-image-generation-choice"),
+    ...ProjectCommandFields,
+    /** The choice to keep; absent drops it, so the next call asks again. */
+    imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-project-brand-kit"),
     ...ProjectCommandFields,
     /** An empty kit clears it. */
@@ -930,6 +955,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-agent-memory-writes-changed"),
+    project: Project,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-image-generation-choice-changed"),
     project: Project,
   }).annotations(strict),
   Schema.Struct({
@@ -1216,6 +1245,10 @@ export const ProjectAgentMemoryWritesChanged = Schema.Struct({ project: Project 
   strict,
 );
 export type ProjectAgentMemoryWritesChanged = typeof ProjectAgentMemoryWritesChanged.Type;
+export const ProjectImageGenerationChoiceChanged = Schema.Struct({ project: Project }).annotations(
+  strict,
+);
+export type ProjectImageGenerationChoiceChanged = typeof ProjectImageGenerationChoiceChanged.Type;
 export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
 export const ProjectDesignSystemChanged = Schema.Struct({ project: Project }).annotations(strict);
@@ -1353,6 +1386,9 @@ export const decodeWorkProjectPermissionModeChanged = Schema.decodeUnknownSync(
 export const decodeWorkProjectActionsChanged = Schema.decodeUnknownSync(WorkProjectActionsChanged);
 export const decodeProjectAgentMemoryWritesChanged = Schema.decodeUnknownSync(
   ProjectAgentMemoryWritesChanged,
+);
+export const decodeProjectImageGenerationChoiceChanged = Schema.decodeUnknownSync(
+  ProjectImageGenerationChoiceChanged,
 );
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
 export const decodeProjectDesignSystemChanged = Schema.decodeUnknownSync(

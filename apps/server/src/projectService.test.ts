@@ -1108,6 +1108,36 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Project keeps an image generation choice and one when it drops it", async () => {
+    const fixture = fixtureService({ projects: [chatProject()] });
+    const imageGenerationChoice = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    };
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-project-image-generation-choice",
+        projectId: chatId,
+        expectedVersion: 1,
+        imageGenerationChoice,
+      }),
+    ).resolves.toMatchObject({
+      kind: "project-image-generation-choice-changed",
+      project: { imageGenerationChoice, version: 2 },
+    });
+    const dropped = await fixture.service.executeProject(windowId, {
+      kind: "change-project-image-generation-choice",
+      projectId: chatId,
+      expectedVersion: 2,
+    });
+    expect(dropped).toMatchObject({ kind: "project-image-generation-choice-changed" });
+    expect("imageGenerationChoice" in dropped.project).toBe(false);
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.image-generation-choice-changed@1",
+      "project.image-generation-choice-changed@1",
+    ]);
+  });
+
   it("journals one event when a Project of any mode lets agents write its memory without asking", async () => {
     const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
     for (const [index, id] of [chatId, workId].entries()) {

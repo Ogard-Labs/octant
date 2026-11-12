@@ -173,6 +173,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
     | "goalService"
+    | "keptImageChoices"
     | "projectMemoryAccess"
     | "projectService"
     | "workProjectStatusFiles"
@@ -193,6 +194,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "imageJobService"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
   > &
@@ -319,6 +321,7 @@ export function wireWork(deps: WorkDependencies) {
     workThreadProjection,
     workTurnProjection,
     personMemoryAccess,
+    keptImageChoices,
     projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
@@ -380,6 +383,7 @@ export function wireWork(deps: WorkDependencies) {
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       observeRuntime: (threadId) => ({
         ...observeWorkThreadRuntime(threadId),
         ...liveTurns.read(String(threadId)),
@@ -639,42 +643,47 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
-        // A routine's turn has nobody at a window to answer the card.
-        const imageTools =
-          !browserSupported || isRoutineHostScope(input.windowId)
-            ? undefined
-            : createThreadImageAgentTools({
-                windowId: input.windowId,
-                threadKind: "work-thread",
-                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
-                offers: imageGenerationOffers,
-                jobs: imageJobService,
-                listInstances: () => persistence.readProviderInstances(),
-                readImageGenerationCustomSources: () =>
-                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                    .imageGeneration.customSources,
-                readsImages: () =>
-                  providerRuntimeRegistry
-                    .observedState(input.thread.providerInstanceId)
-                    ?.models.find(
-                      (candidate) => String(candidate.id) === String(input.thread.modelId),
-                    )
-                    ?.inputModalities.includes("image") === true,
-                // A file edit at the turn's level: Ask first and Auto ask the
-                // person, Accept edits and Full access write at once.
-                save: {
-                  posture: () => {
-                    const access = runningWorkTurns.get(String(input.thread.id))?.access;
-                    const level =
-                      access === undefined
-                        ? "approval-gated"
-                        : workThreadAccessOf(access).executionPolicy;
-                    return level === "approval-gated" ? "ask" : "allow";
-                  },
-                  write: (relativePath, bytes) =>
-                    saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+        // A routine's turn has nobody at a window to answer the card, so it
+        // is offered the tool only where its Project keeps a choice.
+        const imageTools = !browserSupported
+          ? undefined
+          : createThreadImageAgentTools({
+              windowId: input.windowId,
+              unattended: isRoutineHostScope(input.windowId),
+              threadKind: "work-thread",
+              scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+              offers: imageGenerationOffers,
+              kept: keptImageChoices,
+              // The level the running turn has; with no turn running, none.
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
+              jobs: imageJobService,
+              listInstances: () => persistence.readProviderInstances(),
+              readImageGenerationCustomSources: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.customSources,
+              readsImages: () =>
+                providerRuntimeRegistry
+                  .observedState(input.thread.providerInstanceId)
+                  ?.models.find(
+                    (candidate) => String(candidate.id) === String(input.thread.modelId),
+                  )
+                  ?.inputModalities.includes("image") === true,
+              // A file edit at the turn's level: Ask first and Auto ask the
+              // person, Accept edits and Full access write at once.
+              save: {
+                posture: () => {
+                  const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                  const level =
+                    access === undefined
+                      ? "approval-gated"
+                      : workThreadAccessOf(access).executionPolicy;
+                  return level === "approval-gated" ? "ask" : "allow";
                 },
-              });
+                write: (relativePath, bytes) =>
+                  saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+              },
+            });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
