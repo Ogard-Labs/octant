@@ -560,11 +560,11 @@
 }
 
 .right-utility-dock__tool .browser-workspace {
-  grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+  grid-template-rows: minmax(var(--oct-title-rail-h), auto) minmax(0, 1fr);
 }
 
 .right-utility-dock__tool .browser-workspace--message {
-  grid-template-rows: var(--oct-title-rail-h) auto minmax(0, 1fr);
+  grid-template-rows: minmax(var(--oct-title-rail-h), auto) auto minmax(0, 1fr);
 }
 
 /* The notice is body copy about what the tool cannot do; a title rail holds
