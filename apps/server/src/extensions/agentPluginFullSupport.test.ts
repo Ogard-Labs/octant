@@ -535,6 +535,84 @@ rl.on("line", (line) => {
 });
 
 describe("Agent Plugin MCP session manager", () => {
+  async function launchWithEgress(egress: ReadonlyArray<string> | undefined) {
+    let started: { env: Record<string, string>; sandbox: Record<string, unknown> } | undefined;
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      egressHostsForSource: () => egress,
+      stdioSupervisor: {
+        startInteractive: async (input: never) => {
+          started = input as never;
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          let pending = "";
+          stdin.setEncoding("utf8");
+          stdin.on("data", (chunk) => {
+            pending += String(chunk);
+            for (
+              let newline = pending.indexOf("\n");
+              newline >= 0;
+              newline = pending.indexOf("\n")
+            ) {
+              const message = JSON.parse(pending.slice(0, newline)) as {
+                id?: number;
+                method?: string;
+              };
+              pending = pending.slice(newline + 1);
+              if (message.id === undefined) continue;
+              stdout.write(
+                `${JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: message.id,
+                  result: message.method === "tools/list" ? { tools: [] } : { ok: true },
+                })}\n`,
+              );
+            }
+          });
+          return {
+            receipt: { state: "ready" },
+            process: {
+              pid: 9002,
+              ready: Promise.resolve(),
+              wait: new Promise(() => undefined),
+              stop: async () => undefined,
+              cancel: async () => undefined,
+              stdin,
+              stdout,
+              once: () => undefined,
+            },
+          } as never;
+        },
+      },
+    });
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+    await manager.drainAll();
+    return started;
+  }
+
+  it("gives a stdio server only a loopback proxy port when its catalog entry lists hosts", async () => {
+    const started = await launchWithEgress(["*.example.com"]);
+    expect(started?.sandbox).toMatchObject({ allowNetwork: false });
+    const ports = started?.sandbox["allowLoopbackPorts"] as ReadonlyArray<number>;
+    expect(ports).toHaveLength(1);
+    expect(started?.env["HTTPS_PROXY"]).toBe(`http://127.0.0.1:${String(ports[0])}`);
+  });
+
+  it("starts a stdio server with no network and no proxy when no hosts are listed", async () => {
+    const started = await launchWithEgress(undefined);
+    expect(started?.sandbox).toMatchObject({ allowNetwork: false });
+    expect(started?.sandbox).not.toHaveProperty("allowLoopbackPorts");
+    expect(started?.env).not.toHaveProperty("HTTPS_PROXY");
+  });
+
   it("preserves oversized MCP catalogues for the downstream fail-closed capacity check", async () => {
     const manager = new AgentPluginMcpSessionManager({
       store: {

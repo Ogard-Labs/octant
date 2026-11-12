@@ -269,6 +269,24 @@ export class UserAddedMcpServerStore {
     return this.#registry.get(sourceRef) !== undefined;
   }
 
+  /**
+   * The hosts a package may reach, from the bundled catalog entry whose
+   * reserved `connector-<id>` folder this host wrote. The package never names
+   * its own: a third-party package or a hand-added server cannot hold that
+   * folder name, so it gets none.
+   */
+  egressHosts(
+    sourceRef: string,
+    lookup: (id: string) => { readonly egress?: ReadonlyArray<string> } | undefined = connectorById,
+  ): ReadonlyArray<string> | undefined {
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return undefined;
+    const name = basename(registered.absolutePath);
+    if (!name.startsWith(CONNECTOR_PACKAGE_PREFIX)) return undefined;
+    const hosts = lookup(name.slice(CONNECTOR_PACKAGE_PREFIX.length))?.egress;
+    return hosts === undefined || hosts.length === 0 ? undefined : hosts;
+  }
+
   /** Verify the generated source's actual configuration, including packages added before this setup existed. */
   localSetupId(sourceRef: string): "paper" | undefined {
     const registered = this.#registry.get(sourceRef);
