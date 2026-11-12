@@ -977,8 +977,9 @@ img.zen-appearance__thumb {
   padding: var(--oct-space-1) var(--oct-space-2);
 }
 
-/* The tab primitive paints its selected fill from an attribute this Base UI
-   version does not set, so the selected tab is read from its ARIA state. */
+/* The tab recipe fills a selected tab (data-active). These two-line tabs keep
+   this surface's own softer fill and ink, read from the ARIA state so they
+   also hold in a renderer without the data attribute. */
 .project-agent-pages__tab[aria-selected="true"] {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
