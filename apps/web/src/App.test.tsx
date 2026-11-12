@@ -146,33 +146,41 @@ async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): P
   await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
 }
 
-/** A tool the dock's title band offers by face before any tool is open. */
+/** A tool's button in the title band's row. */
+function bandTool(tool: string): HTMLElement {
+  return within(screen.getByRole("toolbar", { name: "Tools" })).getByRole("button", {
+    name: tool,
+  });
+}
+
+/** A tool with a button of its own in the title band's tool row. */
 async function openQuickDockTool(
   user: ReturnType<typeof userEvent.setup>,
-  dock: HTMLElement,
+  _dock: HTMLElement,
   tool: string,
 ): Promise<void> {
-  const quickTools = within(dock).getByRole("group", { name: "Quick tools" });
-  await user.click(within(quickTools).getByRole("button", { name: `Open ${tool}` }));
+  const row = await screen.findByRole("toolbar", { name: "Tools" });
+  await user.click(within(row).getByRole("button", { name: tool }));
 }
 
-/** Opens the dock's Add tool menu; it hangs from the plus in a portal outside the dock. */
+/** Opens the row's More tools menu; it hangs from the ellipsis in a portal. */
 async function openAddToolMenu(
   user: ReturnType<typeof userEvent.setup>,
-  dock: HTMLElement,
+  _dock: HTMLElement,
 ): Promise<HTMLElement> {
-  await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-  return screen.findByRole("menu", { name: "Add tool" });
+  const row = await screen.findByRole("toolbar", { name: "Tools" });
+  await user.click(within(row).getByRole("button", { name: "More tools" }));
+  return screen.findByRole("menu", { name: "More tools" });
 }
 
-/** A tool with no quick button is opened from the dock's Add tool menu. */
+/** A tool with no button of its own is opened from the row's More tools menu. */
 async function openDockToolFromLauncher(
   user: ReturnType<typeof userEvent.setup>,
   dock: HTMLElement,
   tool: string,
 ): Promise<void> {
   const menu = await openAddToolMenu(user, dock);
-  await user.click(within(menu).getByRole("menuitem", { name: tool }));
+  await user.click(within(menu).getByRole("menuitemcheckbox", { name: tool }));
 }
 
 /** Code with nothing open: the Code welcome tab, which renders Code Home. */
@@ -3351,14 +3359,18 @@ describe("App", () => {
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
-    expect(within(dock).getByRole("button", { name: "Open Files" })).toBeVisible();
+    expect(bandTool("Files")).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Thread tools" })).not.toBeInTheDocument();
     const addTool = await openAddToolMenu(user, dock);
-    expect(within(addTool).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument();
-    expect(within(addTool).queryByRole("menuitem", { name: "Delivery" })).not.toBeInTheDocument();
-    expect(within(addTool).getByRole("menuitem", { name: "Agents" })).toBeVisible();
+    expect(
+      within(addTool).queryByRole("menuitemcheckbox", { name: "Plan" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(addTool).queryByRole("menuitemcheckbox", { name: "Delivery" }),
+    ).not.toBeInTheDocument();
+    expect(within(addTool).getByRole("menuitemcheckbox", { name: "Agents" })).toBeVisible();
   });
 
   it.each([
@@ -3624,10 +3636,7 @@ describe("App", () => {
       expect(
         await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
       ).toHaveTextContent("captured generation 1");
-      expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
       await user.click(within(dock).getByRole("button", { name: "Back to subagent" }));
       const latest = await within(dock).findByRole("region", { name: "Generation 2 result" });
       await user.click(within(latest).getByRole("button", { name: "Review changes" }));
@@ -3650,13 +3659,9 @@ describe("App", () => {
         ).not.toBeInTheDocument();
         await user.click(originalPane);
       } else {
-        await user.click(within(dock).getByRole("button", { name: "Hide Review" }));
-        await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-        await user.click(
-          within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
-            name: "Review",
-          }),
-        );
+        // Pressing Review closes it, and pressing it again opens it afresh.
+        await user.click(bandTool("Review"));
+        await user.click(bandTool("Review"));
       }
       expect(await screen.findByRole("button", { name: "Working tree" })).toBeVisible();
       expect(screen.queryByRole("region", { name: "Saved child review" })).not.toBeInTheDocument();
@@ -3764,7 +3769,9 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     const addTool = await openAddToolMenu(user, dock);
-    expect(await within(addTool).findByRole("menuitem", { name: "Delivery" })).toBeVisible();
+    expect(
+      await within(addTool).findByRole("menuitemcheckbox", { name: "Delivery" }),
+    ).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
   });
 
@@ -4291,10 +4298,7 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await openQuickDockTool(user, dock, "Environment");
-    expect(within(dock).getByRole("tab", { name: "Environment" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "true");
     expect(await within(dock).findByRole("region", { name: "Environment details" })).toBeVisible();
     expect(shellApi.execute.mock.calls.map(([command]) => command.kind)).not.toContain(
       "set-environment-presentation",
@@ -5414,10 +5418,7 @@ describe("App", () => {
     await showRightUtilityDock(user);
     let dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await openQuickDockTool(user, dock, "Browser");
-    expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "true");
 
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
@@ -5432,16 +5433,11 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
-    await waitFor(() =>
-      expect(within(dock).getByRole("group", { name: "Quick tools" })).toBeVisible(),
-    );
-    expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
+    await waitFor(() => expect(bandTool("Browser")).toBeVisible());
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "false");
     await openQuickDockTool(user, dock, "Terminal");
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.pointerDown(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
@@ -5451,12 +5447,7 @@ describe("App", () => {
         screen.getByRole("banner", { name: "Workspace actions for Controller foundation" }),
       ).toBeVisible(),
     );
-    await waitFor(() =>
-      expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      ),
-    );
+    await waitFor(() => expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "true"));
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
@@ -5700,11 +5691,13 @@ describe("App", () => {
     );
     // The row opens the existing Review tool in this dock, and the list keeps
     // its tab so the reader can pick another request.
-    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
+    const more = await openAddToolMenu(user, dock);
+    expect(within(more).getByRole("menuitemcheckbox", { name: "Pull requests" })).toHaveAttribute(
+      "aria-description",
+      "Open",
     );
-    expect(within(dock).getByRole("tab", { name: "Pull requests" })).toBeVisible();
+    await user.keyboard("{Escape}");
     expect(await within(dock).findByRole("region", { name: "Pull request review" })).toBeVisible();
   });
 
@@ -5758,11 +5751,8 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: "Pull request #12 · Open" }));
 
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
     await waitFor(() =>
       expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
         projectId,
@@ -5882,7 +5872,7 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
-  it.each(["select", "add", "bottom"])(
+  it.each(["add", "bottom"])(
     "starts a restored dock terminal only after an explicit %s gesture",
     async (gesture) => {
       window.localStorage.clear();
@@ -5926,15 +5916,9 @@ describe("App", () => {
       ).toBe(false);
       if (gesture === "bottom") {
         await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
-      } else if (gesture === "select") {
-        await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
       } else {
-        await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-        await user.click(
-          within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
-            name: "Terminal",
-          }),
-        );
+        await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
+        await user.click(await screen.findByRole("menuitem", { name: "New Terminal" }));
       }
       await waitFor(() =>
         expect(
@@ -6024,7 +6008,10 @@ describe("App", () => {
     const second = screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
     await user.click(first);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
+    // The explicit gesture is opening a terminal from its button: pressing the
+    // restored one closes it, and pressing again opens a fresh one.
+    await user.click(bandTool("Terminal"));
+    await user.click(bandTool("Terminal"));
     await user.click(second);
     expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
     const starts = () =>
@@ -6067,12 +6054,9 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(within(dock).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(bandTool("Browser")).toHaveAttribute("aria-pressed", "true");
+    expect(bandTool("Terminal")).toHaveAttribute("aria-description", "Open");
   });
 
   it("adds independent Browser tabs from the right sidebar launcher", async () => {
@@ -6095,13 +6079,12 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await openQuickDockTool(user, dock, "Browser");
-    await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-    // The menu hangs from the plus in a portal, outside the dock's own region.
-    const addTool = await screen.findByRole("menu", { name: "Add tool" });
-    await user.click(within(addTool).getByRole("menuitem", { name: "Browser" }));
+    await user.pointer({ target: bandTool("Browser"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "New Browser page" }));
 
-    expect(within(dock).getByRole("tab", { name: "Browser 1" })).toBeVisible();
-    expect(within(dock).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
+    const pages = within(dock).getByRole("tablist", { name: "Browser pages" });
+    expect(within(pages).getByRole("tab", { name: "Browser 1" })).toBeVisible();
+    expect(within(pages).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -6130,13 +6113,13 @@ describe("App", () => {
 
     await user.click(files);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("tab", { name: "Files" })).toBeVisible();
+    expect(within(dock).getByRole("region", { name: "Files" })).toBeVisible();
     expect(files).toHaveAttribute("aria-pressed", "true");
     expect(files).toHaveFocus();
 
     await user.click(files);
     await waitFor(() => expect(files).toHaveAttribute("aria-pressed", "false"));
-    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Files" })).toBeNull();
   });
 
   it("keeps focus on a tool's button when it closes the bottom panel's last tab", async () => {
@@ -6172,6 +6155,43 @@ describe("App", () => {
     expect(terminal).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("arranges and closes a tool from its button's context menu", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(
+      await within(await screen.findByRole("toolbar", { name: "Tools" })).findByRole("button", {
+        name: "Files",
+      }),
+    );
+    await user.click(bandTool("Environment"));
+    await screen.findByRole("region", { name: "Environment" });
+    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+
+    await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Show alone" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Files" })).toBeNull());
+    expect(bandTool("Files")).toHaveAttribute("aria-description", "Open");
+
+    await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Close Environment" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Environment" })).toBeNull());
+    expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
@@ -6200,8 +6220,13 @@ describe("App", () => {
     // A terminal in the bottom panel does not spend the reader's only terminal:
     // a second one is a second shell, so the dock keeps offering it.
     await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeVisible();
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    // The row's Terminal reads pressed while the panel shows it, and its menu
+    // still offers a second shell.
+    expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "true");
+    await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
+    expect(await screen.findByRole("menuitem", { name: "New Terminal" })).toBeVisible();
+    await user.keyboard("{Escape}");
 
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
     await user.click(
@@ -6244,12 +6269,12 @@ describe("App", () => {
 
     await openQuickDockTool(user, dock, "Environment");
 
-    expect(await within(dock).findByRole("tab", { name: "Environment" })).toBeVisible();
+    await waitFor(() => expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "true"));
     expect(screen.getByRole("region", { name: "Bottom panel" })).toBe(panel);
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
   });
 
-  it("closes the bottom panel when the tool opened in the dock is the one the panel holds", async () => {
+  it("closes the bottom panel's tool from its row button when the panel holds it", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     render(
@@ -6272,14 +6297,16 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
 
-    // One tool shows in one region at a time, so the dock's own Terminal would
-    // open filtered out of sight beside the panel's.
+    // One tool shows in one region at a time, so the row's Terminal reads
+    // pressed while the panel holds it, and pressing it closes it there rather
+    // than opening a second copy in the dock.
+    expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "true");
     await openQuickDockTool(user, dock, "Terminal");
 
-    expect(await within(dock).findByRole("tab", { name: "Terminal" })).toBeVisible();
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
     );
+    expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "false");
   });
 
   it("retains the restored Terminal tab when another bottom tool opens", async () => {
@@ -6410,8 +6437,8 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await showRightUtilityDock(user);
-    const threadDock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(threadDock).getByRole("button", { name: "Open Terminal" })).toBeEnabled();
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(bandTool("Terminal")).not.toHaveAttribute("aria-disabled");
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: New Code thread" }));
     await waitFor(() =>
@@ -6430,11 +6457,10 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(screen.getByRole("button", { name: "Close Right sidebar" })).toBeVisible();
-    const quickTools = within(dock).getByRole("group", { name: "Quick tools" });
-    for (const name of ["Open Environment", "Open Terminal", "Open Browser", "Open Files"]) {
-      const tool = within(quickTools).getByRole("button", { name });
-      expect(tool).toBeDisabled();
-      expect(tool).toHaveAttribute("title", "Available once the task starts");
+    expect(within(dock).queryByRole("group", { name: "Quick tools" })).toBeNull();
+    for (const name of ["Environment", "Terminal", "Browser", "Files"]) {
+      const tool = bandTool(name);
+      expect(tool).toHaveAttribute("aria-disabled", "true");
       expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
     }
     expect(within(dock).queryByRole("button", { name: "Add tool" })).toBeNull();
@@ -6464,9 +6490,7 @@ describe("App", () => {
     // The window's own choice, made on the thread earlier, shows the dock again
     // once the task has a thread.
     const started = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await waitFor(() =>
-      expect(within(started).getByRole("button", { name: "Open Terminal" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(bandTool("Terminal")).not.toHaveAttribute("aria-disabled"));
     expect(within(started).queryByRole("complementary", { name: "Project tools" })).toBeNull();
   });
 
@@ -6533,10 +6557,7 @@ describe("App", () => {
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await openQuickDockTool(user, dock, "Terminal");
-    expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
 
@@ -6646,8 +6667,7 @@ describe("App", () => {
     // The written document opens in the dock beside the transcript, already
     // readable, while the caret stays in the composer.
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    const documentTab = await within(dock).findByRole("tab", { name: "Document" });
-    expect(documentTab).toHaveAttribute("aria-selected", "true");
+    expect(await within(dock).findByRole("region", { name: "Document" })).toBeVisible();
     expect(await within(dock).findByRole("heading", { name: "Handoff" })).toBeVisible();
     expect(composer).toHaveFocus();
     expect(codeApi.openFile).toHaveBeenCalledWith(
@@ -6656,15 +6676,17 @@ describe("App", () => {
       "docs/handoff.md",
     );
 
-    await user.click(within(dock).getByRole("button", { name: "Hide Document" }));
-    expect(within(dock).queryByRole("tab", { name: "Document" })).toBeNull();
+    // Document has no button of its own: unchecking it in More tools closes it.
+    const more = await openAddToolMenu(user, dock);
+    await user.click(within(more).getByRole("menuitemcheckbox", { name: "Document" }));
+    expect(within(dock).queryByRole("region", { name: "Document" })).toBeNull();
 
     // The next turn rewrites the same file: the tab the person closed stays closed.
     change = "modified";
     await user.type(composer, "rewrite it{Enter}");
     await waitFor(() => expect(operations).toHaveLength(2));
     await screen.findAllByText("Written.");
-    expect(within(dock).queryByRole("tab", { name: "Document" })).toBeNull();
+    expect(within(dock).queryByRole("region", { name: "Document" })).toBeNull();
   }, 15_000);
 
   it("stops offering a written document after the turn deletes it", async () => {
@@ -6761,14 +6783,16 @@ describe("App", () => {
     await user.type(composer, "write the handoff{Enter}");
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByRole("tab", { name: "Document" })).toBeVisible();
+    expect(await within(dock).findByRole("region", { name: "Document" })).toBeVisible();
 
     // The next turn removes the file it wrote, so the dock stops offering a
     // document whose path can no longer be read.
     change = "deleted";
     await user.type(composer, "drop it again{Enter}");
     await waitFor(() => expect(operations).toHaveLength(2));
-    await waitFor(() => expect(within(dock).queryByRole("tab", { name: "Document" })).toBeNull());
+    await waitFor(() =>
+      expect(within(dock).queryByRole("region", { name: "Document" })).toBeNull(),
+    );
   }, 15_000);
 
   it("opens Review beside the active Code thread from View changes", async () => {
@@ -6843,10 +6867,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "View changes" }));
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
     await user.click(await within(dock).findByRole("button", { name: "Side by side" }));
     expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(thread).toBeVisible();
@@ -6878,7 +6899,7 @@ describe("App", () => {
     await user.click(overflow);
     await showRightUtilityDock(user);
     const drawer = await screen.findByRole("dialog", { name: "Right sidebar" });
-    await openDockToolFromLauncher(user, drawer, "Review");
+    await openQuickDockTool(user, drawer, "Review");
     expect(await screen.findByRole("dialog", { name: "Review" })).toBeVisible();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     await user.keyboard("{Escape}");

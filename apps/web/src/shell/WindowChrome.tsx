@@ -4,6 +4,7 @@ import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
 import { DockToolButtons } from "./DockToolButtons";
+import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import type { DockToolButtonsModel } from "./dockToolButtonsModel";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { ApplicationIdentity } from "./ApplicationIdentity";
@@ -25,6 +26,8 @@ export interface WindowChromeProps {
   readonly onToggleDock: (opener: HTMLElement) => void;
   /** One button per tool before the two toggles; absent at narrow widths. */
   readonly dockTools?: DockToolButtonsModel;
+  readonly dockReferences?: ReadonlyArray<DockUtilityLauncherReference>;
+  readonly onDockToolMenuAction?: (surface: RightUtilityDockSurfaceId, value: string) => void;
   readonly onToggleDockTool?: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
@@ -153,7 +156,16 @@ export function WindowChrome(props: WindowChromeProps) {
         ) : (
           <>
             {props.dockTools === undefined || props.onToggleDockTool === undefined ? null : (
-              <DockToolButtons model={props.dockTools} onPress={props.onToggleDockTool} />
+              <DockToolButtons
+                {...(props.dockReferences === undefined
+                  ? {}
+                  : { references: props.dockReferences })}
+                model={props.dockTools}
+                {...(props.onDockToolMenuAction === undefined
+                  ? {}
+                  : { onMenuAction: props.onDockToolMenuAction })}
+                onPress={props.onToggleDockTool}
+              />
             )}
             {props.bottomPanelAvailable !== true ||
             props.onToggleBottomPanel === undefined ? null : (

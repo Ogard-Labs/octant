@@ -118,19 +118,11 @@ describe("the thread dock overview", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("leaves the tools to the title band, with every other one under Add tool", async () => {
-    const user = userEvent.setup();
-    const onOpenTab = vi.fn();
-    const surface = (id: string) => {
-      const found = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === id);
-      if (found === undefined) throw new Error(`Missing ${id} dock surface.`);
-      return found;
-    };
+  it("shows the overview with no tool buttons of its own, leaving the tools to the title band", () => {
     render(
       <RightUtilityDockSurface
-        launchableSurfaces={[surface("terminal"), surface("tests")]}
         onCloseTab={vi.fn()}
-        onOpenTab={onOpenTab}
+        onOpenTab={vi.fn()}
         onSelectSurface={vi.fn()}
         overview={
           <DockThreadOverview
@@ -147,8 +139,9 @@ describe("the thread dock overview", () => {
 
     expect(screen.getByRole("region", { name: "Thread overview" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Open Terminal" }));
-    expect(onOpenTab).toHaveBeenCalledWith("terminal");
+    expect(screen.queryByRole("group", { name: "Quick tools" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Terminal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
   });
 });
 

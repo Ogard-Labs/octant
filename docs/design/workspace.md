@@ -854,8 +854,8 @@ rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
 Thread utilities live in the Right Utility Dock outside the split tree. The dock
 shows one open tool, or several together as tiles (at most two columns of three;
-[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the strip
-menu). One tool at a time meant choosing between a simulator and the page it
+[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the tool
+buttons' menu). One tool at a time meant choosing between a simulator and the page it
 was testing, so a thread keeps, beside its open tools and the selected one, which
 tools are shown. A shown tile is live and stays mounted while it is shown;
 a tool that is open but not shown is not mounted, as a hidden tab never was.
@@ -865,8 +865,8 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
 with an Arrange menu (Move left, right, up and down where the caps allow, Show
-alone, Hide from view) and Close at its trailing edge; the strip lists only the
-tools that are not shown. Stacked, a page showed four bars and named the tool
+alone, Hide from view) and Close at its trailing edge; a tool that is open but not
+shown is marked on its button in the title band's tool row. Stacked, a page showed four bars and named the tool
 three times. A divider is a hairline that shows a quiet strong role while hovered
 or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
@@ -1001,22 +1001,31 @@ Terminal only); they never stand as a column
 beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
-its title band offers the common tools, Add tool lists the rest, and an open
-dock shows a tool strip. At 961px and wider, a **tool row** sits before the bottom-panel and dock toggles: one
+its header is an empty band as tall as the title rail, and the tools are opened
+from the title band's **tool row**. At 961px and wider the row sits before the
+bottom-panel and dock toggles: one
 icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
 then **More tools**, a menu of every other tool the thread can use, grouped as the
-launcher groups them, each a checked item while that tool is shown. A button is present
+launcher groups them, each a checked item while that tool is shown, and after the
+tools the pull requests the thread is already about under "Relevant to this thread". A button is present
 only where the thread can use the tool. Pressing one opens the tool as a tile beside the
 focused one (alone when the dock is empty) and widens and shows the dock; pressing it
 again closes the tool (the Browser closes every page). A button reads pressed while its
-tool is on screen, in the dock or in an open bottom panel, and carries a quiet dot while
-the tool is open in the dock but not shown. It is disabled with "Close a tool to make
-room" when both columns are full and the tool is not shown, and, on a new Code task
+tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
+the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). It is disabled with "Close a tool to make room"
+when both columns are full and the tool is not shown, and, on a new Code task
 before its thread exists, with "Available once the task starts". A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
-movement, and its width is part of the trailing cluster the pane header reserves. The
-tab strip, Add tool, and Show another tool still open tools as well; the row does not
-replace them yet. Direct tools are Side Chat, Browser, Files,
+movement, and its width is part of the trailing cluster the pane header reserves.
+A tool's button has a context menu (right click, the menu key or Shift+F10): Show
+below for an open tool that is not on screen, Show alone, Hide from view and the
+moves the caps allow for a tile, New Terminal on Terminal and New Browser page on
+Browser, and Close. It is also the drag source: dropped on the dock body, the right third
+shows the tool beside, the lower third below, and anywhere else replaces the
+focused tile. At 960px and under the dock is a one-tool drawer, the title band is
+inert behind it, and the same row stands in the drawer's header; there a press
+replaces the tool shown and a tool cannot be dragged. The dock no longer has a tab strip, Add tool, Show another tool,
+or quick tools of its own (the bottom panel keeps its tab strip and Add tool). Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
 iOS Simulator, Android emulator, Desktop, and Vitals, as mode and capability allow. Chat
@@ -1296,7 +1305,7 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 ### Subagents
 
 Environment belongs to a
-thread as a context-aware dock tab opened from the dock tab strip or Add tool. Its
+thread as a context-aware dock tab opened from the title band's tool row. Its
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every

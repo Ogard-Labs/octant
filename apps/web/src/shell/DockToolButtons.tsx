@@ -1,14 +1,17 @@
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, GitPullRequest } from "lucide-react";
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon, dockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";
+import { endDockToolDrag, startDockToolDrag } from "./dockToolDrag";
 import type { DockToolButton, DockToolButtonsModel } from "./dockToolButtonsModel";
+import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { IconButton } from "./IconButton";
 import {
   OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
+  OctantMenuItem,
   OctantMenuPopup,
   OctantMenuPortal,
   OctantMenuPositioner,
@@ -16,11 +19,21 @@ import {
   OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 export interface DockToolButtonsProps {
   readonly model: DockToolButtonsModel;
+  /** The pull requests the thread is about, listed in More tools after the tools. */
+  readonly references?: ReadonlyArray<DockUtilityLauncherReference>;
+  /** A button's context-menu choice, by the menu item's value. */
+  readonly onMenuAction?: (surface: RightUtilityDockSurfaceId, value: string) => void;
   readonly onPress: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
+  /**
+   * Whether an open tool's button can be dragged onto the dock's drop zones.
+   * The one-tool drawer has none.
+   */
+  readonly dragSource?: boolean;
 }
 
 const ITEM_SELECTOR = "[data-dock-tool-item]";
@@ -33,9 +46,11 @@ const ITEM_SELECTOR = "[data-dock-tool-item]";
  */
 export function DockToolButtons(props: DockToolButtonsProps) {
   const { buttons, more } = props.model;
+  const references = props.references ?? [];
   const toolbar = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(0);
-  const count = buttons.length + (more.length > 0 ? 1 : 0);
+  const hasMore = more.length > 0 || references.length > 0;
+  const count = buttons.length + (hasMore ? 1 : 0);
   if (count === 0) return null;
   const stop = Math.min(current, count - 1);
 
@@ -77,14 +92,21 @@ export function DockToolButtons(props: DockToolButtonsProps) {
       {buttons.map((button, index) => (
         <ToolButton
           button={button}
+          dragSource={props.dragSource !== false}
           key={button.id}
+          onMenuAction={props.onMenuAction}
           onPress={props.onPress}
           tabStop={index === stop}
         />
       ))}
-      {more.length === 0 ? null : (
-        <MoreTools onPress={props.onPress} tabStop={buttons.length === stop} tools={more} />
-      )}
+      {hasMore ? (
+        <MoreTools
+          onPress={props.onPress}
+          references={references}
+          tabStop={buttons.length === stop}
+          tools={more}
+        />
+      ) : null}
     </div>
   );
 }
@@ -96,40 +118,77 @@ function describe(button: DockToolButton): string | undefined {
 
 function ToolButton(props: {
   readonly button: DockToolButton;
+  readonly dragSource: boolean;
+  readonly onMenuAction: DockToolButtonsProps["onMenuAction"];
   readonly onPress: DockToolButtonsProps["onPress"];
   readonly tabStop: boolean;
 }) {
   const { button } = props;
   const description = describe(button);
   const disabled = button.disabledReason !== undefined;
+  const draggable = props.dragSource && button.tabId !== undefined;
+  const dragId = button.tabId;
   return (
-    <OctantTooltip label={disabled ? `${button.label}. ${button.disabledReason}` : button.label}>
-      <IconButton
-        aria-pressed={button.pressed}
-        // Disabled by aria so the button keeps its place in the arrow-key
-        // order and its tooltip can still say why.
-        {...(disabled ? { "aria-disabled": true } : {})}
-        {...(description === undefined ? {} : { "aria-description": description })}
-        className="window-chrome__button dock-tool-buttons__button"
-        data-dock-open={button.open ? "true" : undefined}
-        data-dock-tool-item=""
-        data-dock-tool={button.id}
-        icon={dockToolIcon(button.id)}
-        label={button.label}
-        onClick={(event) => {
-          if (!disabled) props.onPress(button.id, event.currentTarget);
-        }}
-        tabIndex={props.tabStop ? 0 : -1}
-        // The tooltip names the button; a native title would say it twice.
-        title=""
-        type="button"
-      />
-    </OctantTooltip>
+    // One wrapper whatever the menu holds, so a button that gains or loses
+    // items is not remounted under the pointer or a drag in flight.
+    <OctantContextMenu
+      items={button.menu}
+      onValueChange={(value) => props.onMenuAction?.(button.id, value)}
+      triggerClassName="dock-tool-buttons__item"
+    >
+      <OctantTooltip label={disabled ? `${button.label}. ${button.disabledReason}` : button.label}>
+        <IconButton
+          aria-pressed={button.pressed}
+          // Disabled by aria so the button keeps its place in the arrow-key
+          // order and its tooltip can still say why.
+          {...(disabled ? { "aria-disabled": true } : {})}
+          {...(description === undefined ? {} : { "aria-description": description })}
+          className="window-chrome__button dock-tool-buttons__button"
+          data-dock-open={button.open ? "true" : undefined}
+          data-dock-tool-item=""
+          data-dock-tool={button.id}
+          draggable={draggable ? true : undefined}
+          icon={dockToolIcon(button.id)}
+          label={button.label}
+          onClick={(event) => {
+            if (!disabled) props.onPress(button.id, event.currentTarget);
+          }}
+          onDragEnd={() => endDockToolDrag()}
+          onDragStart={(event) => {
+            if (dragId === undefined) return;
+            // Some engines refuse to start a drag that carries no data.
+            event.dataTransfer.setData("text/plain", button.label);
+            event.dataTransfer.effectAllowed = "move";
+            startDockToolDrag(dragId);
+          }}
+          onKeyDown={(event) => {
+            // The menu key is the only keyboard route the browser turns into a
+            // context menu, and a Mac has none: Shift+F10 asks for it too.
+            if (event.key !== "F10" || !event.shiftKey) return;
+            event.preventDefault();
+            const bounds = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(
+              new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: bounds.left,
+                clientY: bounds.bottom,
+              }),
+            );
+          }}
+          tabIndex={props.tabStop ? 0 : -1}
+          // The tooltip names the button; a native title would say it twice.
+          title=""
+          type="button"
+        />
+      </OctantTooltip>
+    </OctantContextMenu>
   );
 }
 
 function MoreTools(props: {
   readonly onPress: DockToolButtonsProps["onPress"];
+  readonly references: ReadonlyArray<DockUtilityLauncherReference>;
   readonly tabStop: boolean;
   readonly tools: ReadonlyArray<DockToolButton>;
 }) {
@@ -168,7 +227,9 @@ function MoreTools(props: {
                   {group.surfaces.map((tool) => (
                     <OctantMenuCheckboxItem
                       {...(tool.disabledReason === undefined
-                        ? {}
+                        ? tool.open
+                          ? { "aria-description": "Open" }
+                          : {}
                         : { "aria-description": tool.disabledReason, disabled: true })}
                       checked={tool.pressed}
                       className="workspace-disclosure__action window-no-drag"
@@ -189,6 +250,31 @@ function MoreTools(props: {
                 </OctantMenuGroup>
               </Fragment>
             ))}
+            {props.references.length === 0 ? null : (
+              <>
+                {groups.length === 0 ? null : <OctantMenuSeparator />}
+                <OctantMenuGroup aria-label="Relevant to this thread">
+                  <OctantMenuGroupLabel>Relevant to this thread</OctantMenuGroupLabel>
+                  {props.references.map((reference) => (
+                    <OctantMenuItem
+                      className="workspace-disclosure__action window-no-drag"
+                      key={reference.id}
+                      onClick={reference.onOpen}
+                    >
+                      <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <span className="dock-utility-launcher__reference">
+                        <span>{reference.label}</span>
+                        {reference.detail === undefined ? null : (
+                          <span className="dock-utility-launcher__reference-detail">
+                            {reference.detail}
+                          </span>
+                        )}
+                      </span>
+                    </OctantMenuItem>
+                  ))}
+                </OctantMenuGroup>
+              </>
+            )}
           </OctantMenuPopup>
         </OctantMenuPositioner>
       </OctantMenuPortal>

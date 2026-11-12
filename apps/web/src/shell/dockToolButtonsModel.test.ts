@@ -153,6 +153,48 @@ describe("the title band's tool buttons", () => {
     expect(byId(model, "terminal")).toMatchObject({ pressed: false, press: { kind: "reveal" } });
   });
 
+  it("replaces the tool in front, rather than tiling, when the dock is the one-tool drawer", () => {
+    const model = buildDockToolButtons(
+      input({
+        narrow: true,
+        capsFull: true,
+        tabs: [{ id: "files", surface: "files" }],
+        shownTabIds: [],
+      }),
+    );
+    expect(byId(model, "files")?.press).toEqual({ kind: "select", tabId: "files" });
+    expect(byId(model, "review")?.press).toEqual({ kind: "open" });
+    expect(byId(model, "review")?.disabledReason).toBeUndefined();
+  });
+
+  it("offers arranging only for tiles, a new shell or page on the repeatable tools, and Close for an open tool", () => {
+    const tiled = {
+      tabs: [
+        { id: "files", surface: "files" as const },
+        { id: "review", surface: "review" as const },
+        { id: "environment", surface: "environment" as const },
+      ],
+      shownTabIds: ["files", "review"],
+      activeTabId: "review",
+      layout: {
+        columns: [
+          { share: 0.5, tiles: [{ tabId: "files", share: 1 }] },
+          { share: 0.5, tiles: [{ tabId: "review", share: 1 }] },
+        ],
+      },
+    };
+    const model = buildDockToolButtons(input(tiled));
+    const items = (id: string) => byId(model, id)?.menu.map((item) => item.label);
+    expect(items("files")).toEqual(["Show alone", "Hide from view", "Move right", "Close Files"]);
+    expect(items("review")).toEqual(["Show alone", "Hide from view", "Move left", "Close Review"]);
+    expect(items("environment")).toEqual(["Show below", "Close Environment"]);
+    expect(items("terminal")).toEqual(["New Terminal"]);
+    expect(items("browser")).toEqual(["New Browser page"]);
+    expect(byId(model, "files")?.tabId).toBe("files");
+    const drawer = buildDockToolButtons(input({ ...tiled, narrow: true }));
+    expect(byId(drawer, "files")?.menu.map((item) => item.label)).toEqual(["Close Files"]);
+  });
+
   it("disables a tool that is not shown once the tile caps are reached", () => {
     const model = buildDockToolButtons(
       input({

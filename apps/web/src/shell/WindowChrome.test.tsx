@@ -943,6 +943,8 @@ describe("WindowChrome", () => {
           pressed: true,
           open: false,
           press: { kind: "close" as const, tabIds: ["files"] },
+          tabIds: ["files"],
+          menu: [],
         },
       ],
       more: [],

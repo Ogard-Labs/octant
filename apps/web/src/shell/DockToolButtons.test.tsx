@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockToolButtons } from "./DockToolButtons";
@@ -9,7 +9,16 @@ function button(
   label: string,
   overrides: Partial<DockToolButton> = {},
 ): DockToolButton {
-  return { id, label, pressed: false, open: false, press: { kind: "open-beside" }, ...overrides };
+  return {
+    id,
+    label,
+    pressed: false,
+    open: false,
+    press: { kind: "open-beside" },
+    tabIds: [],
+    menu: [],
+    ...overrides,
+  };
 }
 
 const model = (overrides: Partial<DockToolButtonsModel> = {}): DockToolButtonsModel => ({
@@ -131,6 +140,71 @@ describe("the title band's tool buttons", () => {
     const menu = await screen.findByRole("menu", { name: "More tools" });
     expect(within(menu).queryByText("Thread tools")).toBeNull();
     expect(within(menu).queryByRole("separator")).toBeNull();
+  });
+
+  it("lists the pull requests the thread is about in More tools after the tools", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(
+      <DockToolButtons
+        model={model()}
+        onPress={vi.fn()}
+        references={[{ id: "pr-1", label: "#7 Tidy the list", detail: "acme/app", onOpen }]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "More tools" }));
+    const menu = await screen.findByRole("menu", { name: "More tools" });
+    const group = within(menu).getByRole("group", { name: "Relevant to this thread" });
+    expect(within(group).getByText("acme/app")).toBeVisible();
+    // The tools come first, then the pull requests under their own heading.
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(labels[labels.length - 1]).toContain("#7 Tidy the list");
+    await user.click(within(group).getByRole("menuitem"));
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("keeps More tools for the pull requests alone when no other tool is left", () => {
+    render(
+      <DockToolButtons
+        model={model({ more: [] })}
+        onPress={vi.fn()}
+        references={[{ id: "pr-1", label: "#7 Tidy the list", onOpen: vi.fn() }]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "More tools" })).toBeInTheDocument();
+  });
+
+  it("makes an open tool's button the drag source, carrying its name", () => {
+    const transfer = { setData: vi.fn(), effectAllowed: "" };
+    render(
+      <DockToolButtons
+        model={model({
+          buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
+        })}
+        onPress={vi.fn()}
+      />,
+    );
+    const files = screen.getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("draggable", "true");
+    fireEvent.dragStart(files, { dataTransfer: transfer });
+    expect(transfer.setData).toHaveBeenCalledWith("text/plain", "Files");
+    expect(transfer.effectAllowed).toBe("move");
+    fireEvent.dragEnd(files);
+  });
+
+  it("does not drag a tool that has no tab, or any tool when the dock has no drop zones", () => {
+    const { rerender } = render(<DockToolButtons model={model()} onPress={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("draggable");
+    rerender(
+      <DockToolButtons
+        dragSource={false}
+        model={model({ buttons: [button("files", "Files", { tabId: "files" })], more: [] })}
+        onPress={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Files" })).not.toHaveAttribute("draggable");
   });
 
   it("renders nothing when no tool is available", () => {

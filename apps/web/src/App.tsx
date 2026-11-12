@@ -433,6 +433,7 @@ import {
   NO_DOCK_TOOL_BUTTONS,
   type DockToolButtonsModel,
 } from "./shell/dockToolButtonsModel";
+import { useDockReferences } from "./app/dockReferences";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
@@ -4557,6 +4558,12 @@ function LaunchedShell(
       case "open-beside":
         openDockTabBeside(surface);
         return;
+      case "open":
+        openDockTab(surface);
+        return;
+      case "select":
+        selectDockTab(press.tabId);
+        return;
       case "show-beside":
         if (!dockOpen) setActivePaneDockVisible(true);
         showDockTabBeside(press.tabId);
@@ -4587,6 +4594,37 @@ function LaunchedShell(
         }
         return;
     }
+  }
+  /**
+   * A tool button's context-menu choice: arranging the tool among the tiles,
+   * a new shell or page, or closing it. The tab it acts on comes from the same
+   * model that drew the menu.
+   */
+  function runDockToolMenu(surface: RightUtilityDockSurfaceId, value: string) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined) return;
+    if (readerOpen && !dockPresentedOpen) closeWorkspaceReaders();
+    const tabId = button.tabId;
+    if (value === "new") {
+      addDockTab(surface);
+      return;
+    }
+    if (tabId === undefined) return;
+    if (value === "close") {
+      for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      return;
+    }
+    if (value === "below") {
+      if (!dockOpen) setActivePaneDockVisible(true);
+      showDockTabBelow(tabId);
+    } else if (value === "alone") showDockTabAlone(tabId);
+    else if (value === "hide") hideDockTile(tabId);
+    else if (value === "move-left") moveDockTile(tabId, "left");
+    else if (value === "move-right") moveDockTile(tabId, "right");
+    else if (value === "move-up") moveDockTile(tabId, "up");
+    else if (value === "move-down") moveDockTile(tabId, "down");
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -5322,6 +5360,7 @@ function LaunchedShell(
       toggleBottomPanel,
       toggleDock,
       toggleDockTool,
+      runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
@@ -5330,6 +5369,13 @@ function LaunchedShell(
       wakeCodeThread: codeController.wakeThread,
     }),
   );
+
+  const dockReferences = useDockReferences({
+    actions,
+    pullRequests: dockPullRequests,
+    projectId: dockThreadProjectId,
+    repository: dockThreadRepository,
+  });
 
   // Work and Code start screens share one shape: tiles, then the card area.
   // Code reads the host's activity line off the board; Work has no board card to
@@ -5442,6 +5488,8 @@ function LaunchedShell(
           activeTabId: displayedDockState.active,
           lastBrowserTabId: displayedDockState.lastBrowser,
           dockOpen,
+          narrow: isNarrow,
+          layout: displayedDockState.layout,
           dockPresentedOpen,
           bottomHeld: bottomHeldSurfaces,
           bottomPresentedOpen: bottomPanelPresentedOpen,
@@ -7591,6 +7639,7 @@ function LaunchedShell(
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
             dockPresentedOpen={dockPresentedOpen}
+            dockReferences={dockReferences}
             dockTools={dockToolButtons}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
@@ -7904,7 +7953,8 @@ function LaunchedShell(
                     displayedDockState={displayedDockState}
                     dockPresentationWidth={dockPresentationWidth}
                     dockPresentedOpen={dockPresentedOpen}
-                    dockPullRequests={dockPullRequests}
+                    dockReferences={dockReferences}
+                    dockToolButtons={dockToolButtons}
                     dockResolution={dockResolution}
                     dockResolveSurface={dockResolveSurface}
                     dockSidecarsByThread={dockSidecarsByThread}
@@ -7913,12 +7963,9 @@ function LaunchedShell(
                     {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
                     dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                     {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-                    {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
-                    {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
                     {...(dockToolsAwaitingThread === undefined ? {} : { dockToolsAwaitingThread })}
                     {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                     isNarrow={isNarrow}
-                    launchableDockSurfaces={launchableDockSurfaces}
                     navigation={navigationModel}
                     now={minuteNow.getTime()}
                     {...(dockOverviewThread === undefined

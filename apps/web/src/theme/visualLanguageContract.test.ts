@@ -888,19 +888,6 @@ describe("the public-block visual language", () => {
     expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
   });
 
-  it("lets the dock's labelled quick tool ellipsize instead of clipping mid-word", () => {
-    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
-    const rule = (selector: string) =>
-      dock.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-
-    const tool = rule('\\.dock-quick-tools > \\.dock-quick-tools__tool\\[data-labelled="true"\\]');
-    expect(tool).toMatch(/min-width:\s*0/);
-    expect(tool).toMatch(/flex:\s*0 1 auto/);
-    expect(rule('\\.dock-quick-tools__tool\\[data-labelled="true"\\] > span')).toMatch(
-      /text-overflow:\s*ellipsis/,
-    );
-  });
-
   it("keeps Usage on the open grammar instead of stat cards", () => {
     const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
     const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");

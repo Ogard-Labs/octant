@@ -659,6 +659,12 @@ html[data-octant-native-host="true"]
   position: relative;
 }
 
+/* The context-menu wrapper takes no box of its own, so the buttons keep their
+   spacing in the row. */
+.dock-tool-buttons__item {
+  display: contents;
+}
+
 .dock-tool-buttons__button[data-dock-open="true"]::after {
   position: absolute;
   bottom: 2px;

@@ -1,4 +1,11 @@
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import {
+  moveUtilityTile,
+  showUtilityTabBelow,
+  type DockTileLayout,
+  type DockTileMove,
+  type ThreadUtilityDockState,
+} from "./rightUtilityDockSelection";
 
 /** The tools that get a button of their own in the title band, left to right. */
 export const DOCK_TOOL_BUTTON_ORDER: ReadonlyArray<RightUtilityDockSurfaceId> = [
@@ -41,11 +48,29 @@ export type DockToolPress =
   | { readonly kind: "reveal" }
   | { readonly kind: "open-beside" }
   | { readonly kind: "show-beside"; readonly tabId: string }
+  /** The drawer shows one tool: a press replaces it with a tool that has no tab yet. */
+  | { readonly kind: "open" }
+  /** The drawer shows one tool: a press replaces it with an open one. */
+  | { readonly kind: "select"; readonly tabId: string }
   | { readonly kind: "close"; readonly tabIds: ReadonlyArray<string> }
   | { readonly kind: "close-bottom" }
   /** The bottom panel holds the tool behind its active one: show it there. */
   | { readonly kind: "select-bottom" }
   | { readonly kind: "refused" };
+
+/** One row of a tool button's context menu. */
+export interface DockToolMenuItem {
+  readonly value: string;
+  readonly label: string;
+  readonly disabled?: boolean;
+}
+
+const MOVES: ReadonlyArray<{ readonly direction: DockTileMove; readonly label: string }> = [
+  { direction: "left", label: "Move left" },
+  { direction: "right", label: "Move right" },
+  { direction: "up", label: "Move up" },
+  { direction: "down", label: "Move down" },
+];
 
 export interface DockToolButton {
   readonly id: RightUtilityDockSurfaceId;
@@ -57,6 +82,16 @@ export interface DockToolButton {
   /** Why pressing does nothing; absent when it does something. */
   readonly disabledReason?: string;
   readonly press: DockToolPress;
+  /**
+   * The open tab the tool stands for: the one shown, else the Browser's page
+   * to return to. It is what arranging and dragging act on; absent while the
+   * tool has no tab in the dock.
+   */
+  readonly tabId?: string;
+  /** Every open tab of the tool (a Browser's pages, a second shell). */
+  readonly tabIds: ReadonlyArray<string>;
+  /** What the button's context menu offers, in order; empty means no menu. */
+  readonly menu: ReadonlyArray<DockToolMenuItem>;
 }
 
 export interface DockToolButtonsModel {
@@ -89,6 +124,10 @@ export interface DockToolButtonsInput {
   readonly lastBrowserTabId?: string | undefined;
   /** The dock is open for this thread, even if a reader is hiding it. */
   readonly dockOpen: boolean;
+  /** The dock is the one-tool drawer: a press replaces the tool in front. */
+  readonly narrow?: boolean;
+  /** The tiles the dock shows, which arranging a tool starts from. */
+  readonly layout?: DockTileLayout | undefined;
   /** The dock is on screen. */
   readonly dockPresentedOpen: boolean;
   /** Tools the open bottom panel holds. */
@@ -105,20 +144,41 @@ function describeButton(
   input: DockToolButtonsInput,
 ): DockToolButton {
   const tabs = input.tabs.filter((tab) => tab.surface === tool.id);
+  const tabIds = tabs.map((tab) => tab.id);
   const shown = tabs.filter((tab) => input.shownTabIds.includes(tab.id));
-  const base = { id: tool.id, label: tool.label };
+  const narrow = input.narrow === true;
   const [firstShown] = shown;
+  const tabId =
+    firstShown !== undefined
+      ? firstShown.id
+      : tool.id === "browser"
+        ? browserPageToShow({
+            browserTabIds: tabIds,
+            shownTabIds: input.shownTabIds,
+            activeTabId: input.activeTabId,
+            lastBrowserTabId: input.lastBrowserTabId,
+          })
+        : tabs[0]?.id;
+  const base = {
+    id: tool.id,
+    label: tool.label,
+    tabIds,
+    ...(tabId === undefined ? {} : { tabId }),
+  };
+  const menu = (): ReadonlyArray<DockToolMenuItem> =>
+    toolMenu(tool, input, tabId, firstShown !== undefined);
   if (firstShown !== undefined) {
     return {
       ...base,
       pressed: input.dockPresentedOpen,
       open: false,
+      menu: menu(),
       press: input.dockPresentedOpen
         ? {
             kind: "close",
             // The Browser closes every page, as the dock's own close does; a
             // second shell is closed one at a time.
-            tabIds: tool.id === "browser" ? tabs.map((tab) => tab.id) : [firstShown.id],
+            tabIds: tool.id === "browser" ? tabIds : [firstShown.id],
           }
         : { kind: "open-dock" },
     };
@@ -128,42 +188,97 @@ function describeButton(
     // so only it reads pressed and closes; a tool behind it is open but not
     // shown, and a press brings it to the front.
     if (input.bottomActive !== undefined && input.bottomActive !== tool.id) {
-      return { ...base, pressed: false, open: true, press: { kind: "select-bottom" } };
+      return {
+        ...base,
+        pressed: false,
+        open: true,
+        menu: menu(),
+        press: { kind: "select-bottom" },
+      };
     }
     return {
       ...base,
       pressed: input.bottomPresentedOpen,
       open: false,
+      menu: menu(),
       press: input.bottomPresentedOpen ? { kind: "close-bottom" } : { kind: "reveal" },
     };
   }
-  if (input.capsFull) {
+  if (input.capsFull && !narrow) {
     return {
       ...base,
       pressed: false,
       open: tabs.length > 0,
+      menu: menu(),
       disabledReason: DOCK_TOOLS_CAPS_FULL,
       press: { kind: "refused" },
     };
   }
   if (tabs.length === 0) {
-    return { ...base, pressed: false, open: false, press: { kind: "open-beside" } };
+    return {
+      ...base,
+      pressed: false,
+      open: false,
+      menu: menu(),
+      press: narrow ? { kind: "open" } : { kind: "open-beside" },
+    };
   }
-  const tabId =
-    tool.id === "browser"
-      ? browserPageToShow({
-          browserTabIds: tabs.map((tab) => tab.id),
-          shownTabIds: input.shownTabIds,
-          activeTabId: input.activeTabId,
-          lastBrowserTabId: input.lastBrowserTabId,
-        })
-      : tabs[0]?.id;
   return {
     ...base,
     pressed: false,
     open: true,
-    press: tabId === undefined ? { kind: "refused" } : { kind: "show-beside", tabId },
+    menu: menu(),
+    press:
+      tabId === undefined
+        ? { kind: "refused" }
+        : narrow
+          ? { kind: "select", tabId }
+          : { kind: "show-beside", tabId },
   };
+}
+
+/**
+ * What the tool's button offers on a right click: where to put it among the
+ * tiles, a new shell or page for the two repeatable tools, and closing it.
+ * What does not apply is left out; a placement the caps refuse stays listed
+ * but disabled, as the dock's own menu did.
+ */
+function toolMenu(
+  tool: { readonly id: RightUtilityDockSurfaceId; readonly label: string },
+  input: DockToolButtonsInput,
+  tabId: string | undefined,
+  shown: boolean,
+): ReadonlyArray<DockToolMenuItem> {
+  const items: DockToolMenuItem[] = [];
+  const narrow = input.narrow === true;
+  if (tabId !== undefined && !narrow) {
+    const state: ThreadUtilityDockState = {
+      tabs: input.tabs,
+      ...(input.activeTabId === undefined ? {} : { active: input.activeTabId }),
+      ...(input.layout === undefined ? {} : { layout: input.layout }),
+    };
+    if (!shown) {
+      items.push({
+        value: "below",
+        label: "Show below",
+        disabled: showUtilityTabBelow(state, tabId) === state,
+      });
+    } else if (input.layout !== undefined) {
+      items.push(
+        { value: "alone", label: "Show alone" },
+        { value: "hide", label: "Hide from view" },
+      );
+      for (const move of MOVES) {
+        if (moveUtilityTile(state, tabId, move.direction) !== state) {
+          items.push({ value: `move-${move.direction}`, label: move.label });
+        }
+      }
+    }
+  }
+  if (tool.id === "terminal") items.push({ value: "new", label: "New Terminal" });
+  if (tool.id === "browser") items.push({ value: "new", label: "New Browser page" });
+  if (tabId !== undefined) items.push({ value: "close", label: `Close ${tool.label}` });
+  return items;
 }
 
 /**
@@ -185,6 +300,8 @@ export function buildDockToolButtons(input: DockToolButtonsInput): DockToolButto
         label: tool.label,
         pressed: false,
         open: false,
+        tabIds: [],
+        menu: [],
         disabledReason: DOCK_TOOLS_AWAIT_TASK_START,
         press: { kind: "refused" },
       };
