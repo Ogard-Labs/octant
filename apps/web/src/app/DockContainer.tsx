@@ -610,6 +610,9 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("delivery")
         }
         isNarrow={isNarrow}
+        {...(displayedDockState.lastBrowser === undefined
+          ? {}
+          : { lastBrowserTabId: displayedDockState.lastBrowser })}
         files={
           bottomPanelOpen && activeBottomSurface?.id === "files"
             ? undefined

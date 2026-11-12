@@ -53,6 +53,27 @@ export interface DockTileControls {
   readonly onShowBeside: (tabId: string) => void;
 }
 
+/**
+ * What the dock needs to show several tools at once. Absent, the dock is the
+ * single-tool view it always was.
+ */
+export interface DockTileControls {
+  readonly layout?: DockTileLayout;
+  /** The modal presentation has room for one tool, so it draws only the focused tile. */
+  readonly narrow: boolean;
+  /** Each tile answers for its own tool: the dock's one resolution is the focused tile's. */
+  readonly resolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
+  readonly onHideTile: (tabId: string) => void;
+  readonly onMove: (tabId: string, direction: DockTileMove) => void;
+  /** Opens a tool and shows it beside the focused tile in one step. */
+  readonly onOpenBeside: (surface: RightUtilityDockSurfaceId) => void;
+  readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
+  readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
+  readonly onShowAlone: (tabId: string) => void;
+  readonly onShowBelow: (tabId: string) => void;
+  readonly onShowBeside: (tabId: string) => void;
+}
+
 export interface RightUtilityDockSurfaceProps {
   readonly activeTabId?: string;
   readonly agents?: ReactNode;
@@ -325,6 +346,47 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     terminal: props.terminal,
     tests: props.tests,
   };
+
+  const visibleStripTabs = tiled ? stripTabs.filter((tab) => !shownInStrip.has(tab.id)) : stripTabs;
+  // "Show another tool" is for a dock with a tool on screen and room for one
+  // more; at the caps it would only offer what is refused.
+  const lastColumn = layout?.columns.at(-1);
+  const capsFull =
+    layout !== undefined &&
+    layout.columns.length >= MAX_DOCK_TILE_COLUMNS &&
+    (lastColumn?.tiles.length ?? 0) >= MAX_DOCK_TILES_PER_COLUMN;
+  const onScreenInStrip = tiled
+    ? shownInStrip
+    : new Set(activeTabId === undefined ? [] : [stripIdOf(activeTabId)]);
+  const browserOnScreen = [...onScreenInStrip].some((id) =>
+    browserTabs.some((tab) => tab.id === id),
+  );
+  const showBeside =
+    tiles === undefined ||
+    tiles.narrow ||
+    props.resolution.kind !== "surface" ||
+    activeTab === undefined ||
+    capsFull ? null : (
+      <DockShowBesideMenu
+        launchable={remaining.filter(
+          (candidate) =>
+            candidate.id !== "browser" || (!browserOnScreen && browserTabs.length === 0),
+        )}
+        // The menu's own focus return target disappears when the choice leaves
+        // nothing more to offer, so the keyboard goes to the tool chosen.
+        onOpen={(surface) => {
+          setRefocus({ tab: surface });
+          tiles.onOpenBeside(surface);
+        }}
+        onShowOpen={(stripId) => {
+          setRefocus({ tab: stripId });
+          tiles.onShowBeside(toolOf(stripId));
+        }}
+        open={stripTabs
+          .filter((tab) => !onScreenInStrip.has(tab.id))
+          .map((tab) => ({ id: tab.id, label: tab.label, surface: dockTabSurface(tab).id }))}
+      />
+    );
 
   return (
     <div
