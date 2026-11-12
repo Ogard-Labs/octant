@@ -3980,9 +3980,12 @@ input.switch:checked::after {
      between them, or the label reads as one more row. */
   margin-top: var(--oct-space-5);
   padding: 0 var(--oct-nav-inset);
+  /* Every section label in the sidebar is a navigation group label: the
+     role's size and weight, so a Project section and an activity group read
+     as the same kind of caption. */
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: 0;
   color: var(--oct-meta);
   text-transform: none;
