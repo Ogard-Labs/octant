@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { scanHostWorktrees } from "./hostWorktreeDiscovery";
+import { scanHostWorktrees, worktreeAdminDirectory } from "./hostWorktreeDiscovery";
 
 const execFileAsync = promisify(execFile);
 const signal = new AbortController().signal;
@@ -117,5 +117,22 @@ describe("host worktree discovery", () => {
       signal,
     );
     expect(scan.complete).toBe(false);
+  });
+
+  it("matches Git for Windows' record of a worktree whatever its slashes and letter case", async () => {
+    const common = await realpath(await mkdtemp(join(tmpdir(), "octant-win-admin-")));
+    directories.push(common);
+    const admin = join(common, "worktrees", "feature");
+    await mkdir(admin, { recursive: true });
+    await writeFile(join(admin, "gitdir"), "c:/Users/Me/src/feature/.git\n");
+
+    await expect(
+      worktreeAdminDirectory(common, "C:\\Users\\me\\src\\feature", "win32"),
+    ).resolves.toBe(admin);
+
+    await writeFile(join(admin, "gitdir"), "/Users/Me/src/feature/.git\n");
+    await expect(
+      worktreeAdminDirectory(common, "/Users/me/src/feature", "linux"),
+    ).resolves.toBeUndefined();
   });
 });
