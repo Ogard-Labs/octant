@@ -1493,7 +1493,7 @@ describe("ChatWorkspace", () => {
 
     expect(screen.getByRole("heading", { name: "Calm planning" })).toBeVisible();
     expect(screen.getByText("Work list · 1 remaining · 1 blocked")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Enable web research" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Web research" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -1514,7 +1514,7 @@ describe("ChatWorkspace", () => {
     expect(screen.getByRole("list", { name: "Selected extensions" })).toHaveTextContent(
       "Build guidance",
     );
-    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+    await user.click(screen.getByRole("button", { name: "Web research" }));
     expect(controller.execute).toHaveBeenCalledWith({
       kind: "change-chat-research",
       threadId: controller.activeView!.thread.id,
@@ -1676,7 +1676,7 @@ describe("ChatWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
     await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
-    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+    await user.click(screen.getByRole("button", { name: "Web research" }));
 
     // Both settings were requested, so both have to survive. Sending the
     // research toggle on the rendered version would race the option change and
@@ -1728,7 +1728,7 @@ describe("ChatWorkspace", () => {
     await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     // A third command, queued behind both, marks where the queue has got to:
     // the dropped change cannot slip in after it.
-    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+    await user.click(screen.getByRole("button", { name: "Web research" }));
 
     releaseSwitch();
     await waitFor(() =>

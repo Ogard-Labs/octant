@@ -1047,28 +1047,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   onFileSelected={(file) => images.attach([file])}
                 />
               ),
-              leading: (
-                <>
-                  <PermissionModePicker
-                    autoSupported={props.autoSupported === true}
-                    autoReview={props.autoReview}
-                    onChange={(next) => {
-                      setPermissionMode(next);
-                      props.onPermissionModeChange?.(next);
-                    }}
-                    value={permissionMode}
-                    {...(props.permissionModes === undefined
-                      ? {}
-                      : { modes: props.permissionModes })}
-                    warningScope={
-                      props.projectId === undefined
-                        ? "machine"
-                        : { projectId: String(props.projectId) }
-                    }
-                    {...(props.creating === true ? { disabled: true } : {})}
-                  />
-                </>
-              ),
               trailing: (
                 <>
                   <span className="code-composer-adapter__context-picker">
@@ -1100,6 +1078,28 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     />
                   </span>
                   {props.poolControl}
+                </>
+              ),
+              approval: (
+                <>
+                  <PermissionModePicker
+                    autoSupported={props.autoSupported === true}
+                    autoReview={props.autoReview}
+                    onChange={(next) => {
+                      setPermissionMode(next);
+                      props.onPermissionModeChange?.(next);
+                    }}
+                    value={permissionMode}
+                    {...(props.permissionModes === undefined
+                      ? {}
+                      : { modes: props.permissionModes })}
+                    warningScope={
+                      props.projectId === undefined
+                        ? "machine"
+                        : { projectId: String(props.projectId) }
+                    }
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
                 </>
               ),
               dictate: (

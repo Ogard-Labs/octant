@@ -13,7 +13,7 @@ import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeCompo
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachButton, type ComposerThreadAction } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
   decodeWorkQuestionnaireResponse,
@@ -66,7 +66,7 @@ import type {
   ThreadMentionClient,
 } from "@octant/client-runtime";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
-import { Check, CirclePause, Ellipsis, FileText, FolderOpen } from "lucide-react";
+import { Check, CirclePause, FileText, FolderOpen } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -88,7 +88,6 @@ import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -2184,6 +2183,37 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // subfolder that happens to share the Project's name is still named.
   const folderRepeatsProject =
     path !== undefined && (folder === undefined || folder === ".") && folderLabel === projectLabel;
+  const placeName = [
+    projectLabel,
+    path === undefined || folderRepeatsProject ? undefined : folderLabel,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" / ");
+  // The full place for a pointer user when the row cuts the name short; the
+  // spans inside the button carry no title of their own.
+  const placeTooltip = [
+    "Thread info",
+    [projectLabel, path].filter((part): part is string => part !== undefined).join(" · "),
+  ]
+    .filter((part) => part !== "")
+    .join(": ");
+  const placeControl = (
+    <>
+      <span className="composer-place__icon">
+        <FolderOpen aria-hidden="true" size={16} />
+      </span>
+      {projectLabel === undefined ? null : (
+        <span className="composer-place__name" title={folderRepeatsProject ? path : projectLabel}>
+          {projectLabel}
+        </span>
+      )}
+      {path === undefined || folderRepeatsProject ? null : (
+        <span className="composer-place__folder" title={path}>
+          {folderLabel}
+        </span>
+      )}
+    </>
+  );
   // The transcript draws the inline Canvases and the card list the rest.
   const threadCanvases = useThreadCanvasCards({
     client: props.canvasClient,
@@ -2252,6 +2282,36 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     rowKeys: transcriptRows.map((row) => row.key),
     canvasesByRow: canvasPlacement.byRow,
   });
+
+  // What the old "Task actions" menu offered, now a group of the add menu.
+  const taskActions: ReadonlyArray<ComposerThreadAction> =
+    thread?.lifecycle === "active" && !completionLocked
+      ? [
+          {
+            label: "Mark done",
+            icon: <Check aria-hidden="true" size={14} />,
+            disabled: completing || providerChanging || creating,
+            onSelect: () => setCompletionFormOpen(true),
+          },
+          ...(thread.documentDelivery === "native-artifacts"
+            ? [
+                {
+                  label: "Use Canvas instead of Claude artifacts",
+                  disabled: deliveryChanging,
+                  onSelect: () => void changeDocumentDelivery("canvas"),
+                },
+              ]
+            : artifactsChoosable
+              ? [
+                  {
+                    label: "Use Claude artifacts instead of Canvas",
+                    disabled: deliveryChanging,
+                    onSelect: () => setConfirmArtifacts(true),
+                  },
+                ]
+              : []),
+        ]
+      : [];
 
   const sideChatNotice = sideChatDraftNotice({
     count: composerDraft.sideChatReturns.length,
@@ -2781,7 +2841,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ? {}
             : {
                 info: (
-                  <ThreadInfo>
+                  <ThreadInfo
+                    place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
+                  >
                     <ThreadGuardrailLevel
                       factsVersion={thread.version}
                       factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
@@ -2817,22 +2879,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 ),
               })}
           context={
-            <div className="work-folder-bar" role="group" aria-label="Project and folder">
-              <FolderOpen aria-hidden="true" size={12} />
-              {projectLabel === undefined ? null : (
-                <span
-                  className="work-folder-bar__project"
-                  title={folderRepeatsProject ? path : projectLabel}
-                >
-                  {projectLabel}
-                </span>
-              )}
-              {path === undefined || folderRepeatsProject ? null : (
-                <span className="work-folder-bar__folder" title={path}>
-                  {folderLabel}
-                </span>
-              )}
-            </div>
+            thread === undefined ? (
+              <div className="composer-place" role="group" aria-label="Project and folder">
+                {placeControl}
+              </div>
+            ) : undefined
           }
           className="thread-composer thread-column"
           chips={
@@ -2951,17 +3002,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           }
           row={{
             attach:
-              props.turnClient === undefined ? undefined : (
+              props.turnClient === undefined && taskActions.length === 0 ? undefined : (
                 <ComposerAttachButton
                   accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={creating || completionLocked}
                   refusedReason={
-                    imageSupport === false
-                      ? "The selected model does not accept images. Choose an image-capable model."
-                      : undefined
+                    props.turnClient === undefined
+                      ? "Attachments need a connected host."
+                      : imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
                   }
                   onRefused={images.refuse}
                   onFileSelected={(file) => images.attach([file])}
+                  threadActions={taskActions}
                 />
               ),
             leading: (
@@ -2980,52 +3034,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     threadKind="work-thread"
                   />
                 )}
-                {thread?.lifecycle === "active" && !completionLocked ? (
-                  <OctantMenu
-                    items={[
-                      {
-                        value: "complete",
-                        label: "Mark done",
-                        icon: <Check aria-hidden="true" size={14} />,
-                        disabled: completing || providerChanging || creating,
-                      },
-                      ...(thread.documentDelivery === "native-artifacts"
-                        ? [
-                            {
-                              value: "canvas",
-                              label: "Use Canvas instead of Claude artifacts",
-                              disabled: deliveryChanging,
-                            },
-                          ]
-                        : artifactsChoosable
-                          ? [
-                              {
-                                value: "native-artifacts",
-                                label: "Use Claude artifacts instead of Canvas",
-                                disabled: deliveryChanging,
-                              },
-                            ]
-                          : []),
-                    ]}
-                    onValueChange={(value) => {
-                      if (value === "canvas") void changeDocumentDelivery("canvas");
-                      else if (value === "native-artifacts") setConfirmArtifacts(true);
-                      else setCompletionFormOpen(true);
-                    }}
-                    selectionMode="action"
-                    trigger={<Ellipsis aria-hidden="true" size={16} />}
-                    triggerClassName="shell-icon-button"
-                    triggerLabel="Task actions"
-                    value=""
-                  />
-                ) : null}
               </>
             ),
-            // Two groups: what the person adds sits left, how the task runs
-            // sits right beside send. The model used to hug the attach
-            // button, so it jumped sides between a new task and the thread it
-            // became.
-            trailing: (
+            // How the task runs sits at the row's trailing edge, beside send:
+            // the model's name, the approval control, then the context ring.
+            approval: (
               <>
                 {thread === undefined ? null : (
                   <PermissionModePicker
@@ -3048,6 +3061,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     }
                   />
                 )}
+              </>
+            ),
+            trailing: (
+              <>
                 {thread === undefined ? null : (
                   <span
                     aria-label="Bound provider and model"
