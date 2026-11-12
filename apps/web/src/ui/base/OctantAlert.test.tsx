@@ -45,7 +45,7 @@ describe("OctantAlert", () => {
   it("draws a neutral alert's icon in neutral ink and only the warning variant's in the warning ink", () => {
     const system = readFileSync(join(process.cwd(), "src/styles/octant.css"), "utf8");
     const mark = (selector: string) =>
-      new RegExp(`${selector.replace(/[.[\]="]/g, "\\$&")} > svg \\{([^}]*)\\}`).exec(
+      new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\="]/g, "\\$&")} > svg \\{([^}]*)\\}`).exec(
         system,
       )?.[1] ?? "";
     expect(mark(".callout")).toContain("color: var(--oct-meta);");
