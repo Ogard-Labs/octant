@@ -1596,10 +1596,10 @@ function ActiveSectionContent({
                 <SettingRow
                   description={
                     transfer.direction === "upload"
-                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
-                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
+                      : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
                   }
-                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${browserProfileKey(transfer.profile)}`}
                   label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
                   scope="host"
                   settingId="browser-agent-downloads"
@@ -2249,6 +2249,16 @@ const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
 const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 50];
 
 /** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+/** Where a remembered upload or download answer applies: the profile the page was in. */
+function rememberedTransferProfile(
+  transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
+): string {
+  const profile = transfer.profile;
+  if (profile === undefined) return "on Private pages";
+  if (profile.kind === "personal") return "in the Personal profile";
+  return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
+}
+
 function BrowserTransferLimitSelect(props: {
   readonly id: string;
   readonly label: string;

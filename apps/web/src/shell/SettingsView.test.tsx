@@ -1962,10 +1962,14 @@ describe("SettingsView", () => {
     });
     navigateTo("Permissions");
     expect(
-      screen.getByText("Agents upload files from /projects/brief to this site without asking."),
+      screen.getByText(
+        "Agents upload files from /projects/brief to this site on Private pages without asking.",
+      ),
     ).toBeVisible();
     expect(
-      screen.getByText("Agents save downloads from this site into /projects/brief without asking."),
+      screen.getByText(
+        "Agents save downloads from this site on Private pages into /projects/brief without asking.",
+      ),
     ).toBeVisible();
     // The rows are listed in the order remembered: the upload, then the download.
     const forget = screen.getAllByRole("button", { name: "Forget" });

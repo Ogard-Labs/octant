@@ -50,7 +50,7 @@ import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/us
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ChatThreadId, CodeEnvironmentObservation } from "@octant/contracts";
-import { resolveRememberedBrowserProfileSites } from "./browserProfilePolicy";
+import { browserProfileKey, resolveRememberedBrowserProfileSites } from "./browserProfilePolicy";
 import { trimTrailingSlashes } from "./trimTrailing";
 import { resolveAvailableMode } from "./modePolicy";
 
@@ -738,7 +738,12 @@ export function replaceShellSettings(
   };
 }
 
-/** Whether an "Always allow" answer covers this direction, site and workspace. */
+/**
+ * Whether an "Always allow" answer covers this direction, site, workspace
+ * and Browser profile. The profile is part of it because a site's signed-in
+ * session differs by profile: an answer about files sent from a Private page
+ * says nothing about the same site signed in as the person.
+ */
 export function browserTransferRemembered(
   remembered: ReadonlyArray<RememberedBrowserTransfer>,
   transfer: RememberedBrowserTransfer,
@@ -747,7 +752,8 @@ export function browserTransferRemembered(
     (entry) =>
       entry.direction === transfer.direction &&
       entry.origin === transfer.origin &&
-      entry.workspaceRoot === transfer.workspaceRoot,
+      entry.workspaceRoot === transfer.workspaceRoot &&
+      browserProfileKey(entry.profile) === browserProfileKey(transfer.profile),
   );
 }
 

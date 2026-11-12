@@ -212,16 +212,22 @@ export interface BrowserAppManagedToolsOptions {
   readonly uuid: () => string;
 }
 
-/** Whether the person answered "Always allow" for this direction, site and workspace. */
+/** Whether the person answered "Always allow" for this direction, site, workspace and profile. */
 function transferRemembered(
   options: BrowserAppManagedToolsOptions,
   direction: "upload" | "download",
   origin: string,
   workspaceRoot: string | undefined,
+  profile: StoredBrowserProfile | undefined,
 ): boolean {
   return (
     workspaceRoot !== undefined &&
-    options.approvals?.isTransferRemembered?.({ direction, origin, workspaceRoot }) === true
+    options.approvals?.isTransferRemembered?.({
+      direction,
+      origin,
+      workspaceRoot,
+      ...(profile === undefined ? {} : { profile }),
+    }) === true
   );
 }
 
@@ -569,7 +575,7 @@ export function createBrowserAppManagedTools(
         ask: async (facts, pageOrigin) =>
           savesUnasked ||
           (permission === undefined &&
-            transferRemembered(options, "download", pageOrigin, options.uploadRoot?.()))
+            transferRemembered(options, "download", pageOrigin, options.uploadRoot?.(), profile))
             ? "approved"
             : permission === undefined
               ? (approvals?.request({
@@ -624,7 +630,8 @@ export function createBrowserAppManagedTools(
           : { maxFileBytes: options.uploadFileLimitBytes() }),
         ask: (files) =>
           permission?.approve(files) ??
-          (uploadsUnasked || transferRemembered(options, "upload", origin, options.uploadRoot?.())
+          (uploadsUnasked ||
+          transferRemembered(options, "upload", origin, options.uploadRoot?.(), profile)
             ? Promise.resolve("approved" as const)
             : approvals === undefined
               ? Promise.resolve("denied" as const)

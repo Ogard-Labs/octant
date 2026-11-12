@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserTransferRemembered } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -1042,6 +1042,7 @@ describe("octant_browser profile argument", () => {
         readonly direction: string;
         readonly origin: string;
         readonly workspaceRoot: string;
+        readonly profile?: unknown;
       }>;
     } = {},
   ) {
@@ -1101,17 +1102,8 @@ describe("octant_browser profile argument", () => {
         request,
         isRemembered: (origin: string, profile: unknown) =>
           options.remembered?.(origin, profile) === true,
-        isTransferRemembered: (transfer: {
-          readonly direction: string;
-          readonly origin: string;
-          readonly workspaceRoot: string;
-        }) =>
-          (options.rememberedTransfers ?? []).some(
-            (entry) =>
-              entry.direction === transfer.direction &&
-              entry.origin === transfer.origin &&
-              entry.workspaceRoot === transfer.workspaceRoot,
-          ),
+        isTransferRemembered: (transfer: never) =>
+          browserTransferRemembered((options.rememberedTransfers ?? []) as never, transfer),
         isUnattendedScope: () => options.unattended === true,
         isPairedDevice: () => options.paired === true,
       } as never,
@@ -1288,6 +1280,41 @@ describe("octant_browser profile argument", () => {
           expect.objectContaining({ upload: expect.anything(), workspaceRoot: workspace }),
         );
       }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("asks again for an upload on a page in another Browser profile than the one the person always allowed", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const personal = { kind: "personal" };
+      const page = {
+        inspect: openPage(personal),
+        modelBindings: boundPage(),
+        uploadRoot: workspace,
+        defaultProfile: "personal" as const,
+      };
+      const upload = { operation: "upload", ref: "e1", files: ["report.txt"] };
+      const answer = {
+        direction: "upload",
+        origin: "https://example.com",
+        workspaceRoot: workspace,
+      };
+
+      const remembered = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, profile: personal }],
+      });
+      expect((await remembered.run(upload)).isError).toBe(false);
+      expect(remembered.request).not.toHaveBeenCalled();
+
+      // The same site and folder, answered on a Private page.
+      const asked = fixture({ ...page, rememberedTransfers: [answer] });
+      await asked.run(upload);
+      expect(asked.request).toHaveBeenCalledWith(
+        expect.objectContaining({ upload: expect.anything(), profile: personal }),
+      );
     } finally {
       await rm(folder, { recursive: true, force: true });
     }

@@ -35,6 +35,7 @@ import {
   normalizeEnvironmentPresentationState,
   removeEnvironmentPresentation,
   replaceEnvironmentPresentation,
+  browserTransferRemembered,
   replaceShellSettings,
   resolveFirstRunOnboarding,
   resolveEffectivePresentation,
@@ -268,6 +269,34 @@ describe("shell settings policy", () => {
       replaceShellSettings(current, { ...replacement, workspaceMaterial: "system" })
         .workspaceMaterial,
     ).toBe("system");
+  });
+
+  it("remembers a Browser upload or download for its site, folder and profile, and for no other profile", () => {
+    const transfer = {
+      direction: "upload",
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+    } as const;
+    const personal = { kind: "personal" } as const;
+    const project = {
+      kind: "project",
+      projectId: "30000000-0000-4000-8000-000000000001",
+    } as never;
+    const inPersonal = [{ ...transfer, profile: personal }];
+
+    expect(browserTransferRemembered(inPersonal, { ...transfer, profile: personal })).toBe(true);
+    expect(browserTransferRemembered(inPersonal, { ...transfer, profile: project })).toBe(false);
+    // A Private page carries no profile, and an answer given there stays there.
+    expect(browserTransferRemembered(inPersonal, transfer)).toBe(false);
+    expect(browserTransferRemembered([transfer], { ...transfer, profile: personal })).toBe(false);
+    expect(browserTransferRemembered([transfer], transfer)).toBe(true);
+    expect(
+      browserTransferRemembered(inPersonal, {
+        ...transfer,
+        profile: personal,
+        workspaceRoot: "/projects/other",
+      }),
+    ).toBe(false);
   });
 
   it("resolves first-run onboarding once and never reopens it", () => {
