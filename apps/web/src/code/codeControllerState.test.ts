@@ -106,11 +106,11 @@ describe("providerRequestFromEvent", () => {
     summary: "Let this thread use Henrik's iPhone?",
   } as const;
 
-  it("keeps the host's mark that only a window on its own computer may answer", () => {
-    expect(providerRequestFromEvent({ ...asked, localPersonOnly: true } as never)).toMatchObject({
+  it("reads an approval an older journal marked for the host's own windows as any other approval", () => {
+    expect(providerRequestFromEvent({ ...asked, localPersonOnly: true } as never)).toEqual({
       kind: "approval",
-      localPersonOnly: true,
+      approvalId: asked.approvalId,
+      summary: asked.summary,
     });
-    expect(providerRequestFromEvent(asked as never)).not.toHaveProperty("localPersonOnly");
   });
 });
