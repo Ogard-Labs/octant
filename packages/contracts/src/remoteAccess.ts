@@ -456,4 +456,12 @@ export type RemoteClientPrincipal =
       readonly protocolVersion: number;
       readonly capabilityDigest: string;
       readonly sessionId: RemoteSessionId;
+      /**
+       * Who let this device onto the host. `host-person` is a pairing the
+       * host's own person approved, and such a device is that person. A device
+       * the hub's roster introduced, an agent grant's session, and any
+       * principal built without the proof carry `hub-roster` or nothing, and
+       * stay held to the remote action catalogue.
+       */
+      readonly admittedBy?: "host-person" | "hub-roster";
     };

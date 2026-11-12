@@ -303,7 +303,7 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).not.toHaveBeenCalled();
   });
 
-  it("exposes provider bootstrap read-only while keeping provider administration local-only", async () => {
+  it("forwards provider bootstrap read-only, forwards provider administration and sign-in for the product dispatch to judge, and keeps discovery and probes local-only", async () => {
     const fixture = handler();
     const bootstrap = await fixture.route(request("/api/providers/bootstrap"));
     const bootstrapMutation = await fixture.route(
@@ -318,10 +318,28 @@ describe("remote route policy", () => {
       }),
     );
     await bootstrapMutation.arrayBuffer();
-    const blocked: Response[] = [];
+    const forwarded: Response[] = [];
     for (const path of [
       "/api/providers/commands",
       "/api/providers/oauth",
+      "/api/providers/thread-native-setup",
+    ]) {
+      const response = await fixture.route(
+        request(path, {
+          method: "POST",
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+          },
+          body: "{}",
+        }),
+      );
+      await response.arrayBuffer();
+      forwarded.push(response);
+    }
+    const blocked: Response[] = [];
+    for (const path of [
       "/api/providers/discovery/scan",
       "/api/providers/instance-1/packaged-smoke-turn",
       "/api/providers/instance-1/probe",
@@ -345,8 +363,9 @@ describe("remote route policy", () => {
     expect(bootstrap.status).toBe(200);
     await bootstrap.arrayBuffer();
     expect(bootstrapMutation.status).toBe(405);
-    expect(blocked.map((response) => response.status)).toEqual([404, 404, 404, 404, 404, 404]);
-    expect(fixture.authenticatedProduct).toHaveBeenCalledOnce();
+    expect(forwarded.map((response) => response.status)).toEqual([200, 200, 200]);
+    expect(blocked.map((response) => response.status)).toEqual([404, 404, 404, 404]);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(4);
   });
 
   it("rejects authority confusion and forwarded identity before dispatch", async () => {
@@ -778,7 +797,7 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("forwards a paired device's MCP tool prompt list and answer, and keeps remembered approvals local", () => {
+  it("forwards a paired device's MCP tool prompts and remembered approvals, and keeps skill folders local", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
       routePolicy.inspect(
@@ -798,8 +817,25 @@ describe("remote route policy", () => {
       maxBodyBytes: 4_096,
     });
     expect(inspect("/api/extensions/tool-approvals", "GET")).toMatchObject({ kind: "reject" });
+    // Remembered approvals, and installing, trusting, and enabling a package,
+    // are forwarded for the product dispatch to judge: it admits a device the
+    // host's own person paired and holds every other session to the catalogue.
+    for (const path of [
+      "/api/extensions/tool-grants",
+      "/api/extensions/lifecycle",
+      "/api/extensions/npm",
+      "/api/extensions/user-servers",
+      "/api/extensions/sign-in",
+    ]) {
+      expect(inspect(path, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+    }
+    // A skill folder is chosen in the host's own folder picker.
     for (const method of ["GET", "POST"] as const) {
-      const decision = inspect("/api/extensions/tool-grants", method);
+      const decision = inspect("/api/extensions/skills", method);
       expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
       if (decision.kind === "reject") expect(decision.response.status).toBe(404);
     }
@@ -808,8 +844,8 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "extension-tool-grants",
-            match: { kind: "exact", path: "/api/extensions/tool-grants" },
+            id: "extension-skills",
+            match: { kind: "exact", path: "/api/extensions/skills" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },

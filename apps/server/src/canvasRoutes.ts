@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
 import type { CanvasDesignSystem } from "@octant/contracts/canvas";
@@ -1425,7 +1426,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (route === "public-link-settings" && request.method === "POST") {
           // Turning public links on or pointing them at another service is
           // the person's choice at this Mac, never a paired device's.
-          if (principal.kind !== "local-window") {
+          if (!principalActsAsHostPerson(principal)) {
             return jsonResponse(
               decodeCanvasPublicLinkSettingsResult({
                 kind: "canvas-public-link-settings-refused",
@@ -1486,7 +1487,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               origin,
             );
           // Revoking is recorded as the owner's act, like an authenticated share's.
-          if (principal.kind !== "local-window") {
+          if (!principalActsAsHostPerson(principal)) {
             return refusedRevoke(
               "unauthorized",
               "A public link can be revoked only from a window on this computer.",

@@ -586,7 +586,7 @@ export type ProvidersDependencies = Pick<
   Pick<
     AuthorityWiring,
     | "extensionToolApprovalService"
-    | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "processAuthorityNow"
     | "windowAuthorityStore"
   > &
@@ -614,7 +614,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     extensionToolApprovalService,
     externalContentIngestionStore,
     githubExtensionSnapshot,
-    isPairedDeviceScope,
+    isRestrictedDeviceScope,
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessSessions,
@@ -1009,7 +1009,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
-          isPairedDeviceScope,
+          isPairedDeviceScope: isRestrictedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,

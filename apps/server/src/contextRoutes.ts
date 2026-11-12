@@ -1,3 +1,4 @@
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeContextCommand,
   decodeContextInspectorRequest,
@@ -311,9 +312,8 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
 }
 
 function requestPrincipal(request: Request): ContextRoutePrincipal {
-  return readPrincipalRouteContext(request)?.principal.kind === "remote-device"
-    ? "remote-device"
-    : "local-window";
+  // A device the host's own person paired is judged as a local window is.
+  return boundPrincipalIsRestricted(request) ? "remote-device" : "local-window";
 }
 
 /** The thread a compaction read names, from exactly two query parameters. */

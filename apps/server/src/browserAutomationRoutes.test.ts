@@ -529,8 +529,8 @@ describe("browser automation routes", () => {
     expect(service.create).not.toHaveBeenCalled();
   });
 
-  it("lets a paired device act inside the page but never drive the host's browser", async () => {
-    function pairedRequest(kind: string): Request {
+  it("lets a hub-introduced device act inside the page but never drive the host's browser, and a device the host's own person paired navigate and type", async () => {
+    function pairedRequest(kind: string, admittedBy?: "host-person" | "hub-roster"): Request {
       const request = new Request("http://127.0.0.1/api/browser/actions", {
         method: "POST",
         headers: {
@@ -557,6 +557,7 @@ describe("browser automation routes", () => {
           protocolVersion: 1,
           capabilityDigest: "a".repeat(64),
           sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: windowId,
       });
@@ -567,10 +568,15 @@ describe("browser automation routes", () => {
     expect(service.act).toHaveBeenCalledOnce();
 
     for (const kind of ["navigate", "type", "close-tab"]) {
-      const response = await handler(pairedRequest(kind));
-      expect(response?.status).toBe(403);
+      expect((await handler(pairedRequest(kind)))?.status).toBe(403);
+      expect((await handler(pairedRequest(kind, "hub-roster")))?.status).toBe(403);
     }
     expect(service.act).toHaveBeenCalledOnce();
+
+    for (const kind of ["navigate", "type"]) {
+      expect((await handler(pairedRequest(kind, "host-person")))?.status).toBe(200);
+    }
+    expect(service.act).toHaveBeenCalledTimes(3);
   });
 
   it("refuses a paired device that asks to record the host's page", async () => {

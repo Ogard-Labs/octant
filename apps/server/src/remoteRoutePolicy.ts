@@ -74,10 +74,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/desktop",
   "/api/shell",
   "/api/folders",
-  "/api/extensions/lifecycle",
-  "/api/extensions/npm",
   "/api/extensions/skills",
-  "/api/extensions/tool-grants",
   "/api/providers/discovery",
   "/api/host-control",
   "/api/replica-store",
@@ -85,9 +82,41 @@ const LOCAL_ONLY_PREFIXES = [
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
   "/api/provider-cloud",
-  // Reviewing what a thread read and clearing its outside-content mark is a
-  // person's act at this machine.
+] as const;
+
+/**
+ * Routes forwarded for a device the host's own person paired, which does what
+ * a local window does (maintainer decision, 2026-11-12). Forwarding admits
+ * nobody: the product dispatch holds every other device session (one the hub's
+ * roster introduced, an agent grant) to the remote action catalogue, where
+ * none of these is an action, and each route refuses such a principal itself.
+ */
+const PERSON_PAIRED_DEVICE_ROUTES = [
+  // Installing, trusting, enabling, and removing a package; remembered tool
+  // approvals; adding, pinning, signing in to, and reconnecting a server.
+  "/api/extensions/lifecycle",
+  "/api/extensions/npm",
+  "/api/extensions/tool-grants",
+  "/api/extensions/user-servers",
+  "/api/extensions/project-pins",
+  "/api/extensions/sign-in",
+  "/api/extensions/connections",
+  "/api/extensions/discovered",
+  // Provider administration and sign-in start. A key itself still reaches the
+  // credential broker only through the desktop bridge.
+  "/api/providers/commands",
+  "/api/providers/thread-native-setup",
+  "/api/providers/oauth",
+  // Reviewing what a thread read and clearing its outside-content mark.
   "/api/thread-external-content",
+  "/api/terminal-sessions/list",
+  "/api/terminal-sessions/history",
+  "/api/person-memory/commands",
+  "/api/benchmarks/suites/save",
+  "/api/benchmarks/suites/delete",
+  "/api/benchmarks/runs/start",
+  "/api/benchmarks/runs/cancel",
+  "/api/benchmarks/runs/purge",
 ] as const;
 
 /**
@@ -874,9 +903,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     // A paired device lists and answers the MCP tool prompts its own turns
-    // raised, approve once or deny. Remembered approvals stay on the
-    // local-only tool-grants route, and the approval service refuses a paired
-    // device's answer that asks to be remembered.
+    // raised. The approval service lets only the host's own person remember
+    // an answer: a hub-introduced device approves once or denies.
     kind: "exact" as const,
     path: "/api/extensions/tool-approvals",
     methods: ["POST"] as const,
@@ -929,8 +957,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     maxBodyBytes: 64 * 1_024,
   },
   // Benchmark reads and the stars write. Saving or deleting a suite and starting,
-  // cancelling, or purging a run are never forwarded; the route also refuses them
-  // for a remote principal.
+  // cancelling, or purging a run are forwarded with the person-paired device
+  // routes; the route refuses them for any other device session.
   ...[
     "/api/benchmarks/suites/list",
     "/api/benchmarks/runs/list",
@@ -939,6 +967,17 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/benchmarks/runs/export",
     "/api/benchmarks/cells/rate",
   ].map((path) => ({ kind: "exact" as const, path, methods: ["POST"] as const })),
+  ...PERSON_PAIRED_DEVICE_ROUTES.map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+  })),
+  {
+    kind: "exact" as const,
+    path: "/api/person-memory",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   {
     kind: "exact" as const,
     path: "/api/usage/dashboard",

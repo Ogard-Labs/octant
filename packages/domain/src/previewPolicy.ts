@@ -1,3 +1,4 @@
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId, ProjectType } from "@octant/contracts/projects";
@@ -94,7 +95,7 @@ export interface PreviewHandoffAuthorityInput {
   readonly activeThreadId?: CodeThreadId;
   readonly target: PreviewTarget;
   readonly posture: PreviewPosture;
-  readonly principalKind: "local-window" | "remote-device";
+  readonly principalKind: PrincipalKind;
 }
 
 /**
@@ -111,7 +112,7 @@ export function authorizePreviewHandoff(
   input: PreviewHandoffAuthorityInput,
 ): PreviewAuthorityDecision {
   if (input.posture === "plan") return "deny";
-  if (input.principalKind !== "local-window") return "deny";
+  if (!actsAsHostPerson(input.principalKind)) return "deny";
   return authorizePreviewTarget(input);
 }
 

@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeTerminalSessionHistoryRequest,
   decodeTerminalSessionHistoryResponse,
@@ -52,7 +53,7 @@ export function createTerminalSessionRouteHandler(
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
-      if (context.principal.kind !== "local-window")
+      if (!principalActsAsHostPerson(context.principal))
         return failure("Terminal sessions are local-window only.", 403, origin);
     } catch (error) {
       return failure(

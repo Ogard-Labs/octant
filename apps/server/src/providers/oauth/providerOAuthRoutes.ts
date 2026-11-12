@@ -1,3 +1,4 @@
+import { principalAuthorityKind } from "../../clientPrincipal";
 import {
   decodeProviderInstanceId,
   type ProviderInstance,
@@ -565,8 +566,8 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
 }
 
 function principalKind(request: Request): PrincipalKind {
-  const context = readPrincipalRouteContext(request);
-  return context?.principal.kind === "remote-device" ? "remote-device" : "local-window";
+  const principal = readPrincipalRouteContext(request)?.principal;
+  return principal === undefined ? "local-window" : principalAuthorityKind(principal);
 }
 
 function json(body: ProviderOAuthView, status: number, origin: string | null): Response {

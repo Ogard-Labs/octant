@@ -1,3 +1,4 @@
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeBrowserDownloadPermissionsCommand,
   decodeBrowserDownloadPermissionsResult,
@@ -79,7 +80,7 @@ import {
   decodeBrowserProfilesResult,
 } from "@octant/contracts/browser-profiles";
 import { storedBrowserProfile } from "@octant/domain";
-import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import {
   decodeBrowserCredentialCommand,
@@ -896,7 +897,7 @@ export function createBrowserAutomationRouteHandler(
         // already admitted this route for a remote principal; the kind it may
         // carry is decided here, where the principal is known, so a companion
         // client can never navigate, type, or close a tab on the host.
-        if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
+        if (boundPrincipalIsRestricted(request)) {
           const reach = remoteBrowserActionReach(input.kind);
           if (reach.kind === "denied") {
             return failure({ category: "unauthorized", message: reach.reason }, 403, origin);

@@ -206,7 +206,50 @@ describe("Project routes", () => {
     }
   });
 
-  it("refuses a paired device's access-grant change while a local window keeps the route", async () => {
+  it("lets a device the host's own person paired change a Project's access grant and set its level to Full access, and refuses a hub-introduced device both", async () => {
+    const executeProject = vi.fn(() => ({ kind: "code-project-access-changed" }));
+    const route = routeFixture({ executeProject });
+    const commands = [
+      {
+        kind: "change-code-project-access",
+        projectId,
+        expectedVersion: 0,
+        codeAccessPersistence: "project-default",
+      },
+      {
+        kind: "change-code-project-permission-mode",
+        projectId,
+        expectedVersion: 0,
+        permissionMode: "full-access",
+      },
+    ];
+    const from = (command: unknown, admittedBy: "host-person" | "hub-roster") => {
+      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device", admittedBy } as never,
+        scopeId: windowId,
+      });
+      return remote;
+    };
+
+    for (const command of commands) {
+      expect((await route(from(command, "hub-roster")))?.status).toBe(403);
+    }
+    expect(executeProject).not.toHaveBeenCalled();
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+    }
+    expect(executeProject).toHaveBeenCalledTimes(commands.length);
+  });
+
+  it("refuses a hub-introduced device's access-grant change while a local window keeps the route", async () => {
     const executeProject = vi.fn(() => ({ kind: "code-project-access-changed" }));
     const route = routeFixture({ executeProject });
     const headers = {

@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_ORIGIN } from "./clientPrincipal";
 import { codeLanguageReferencesFixture } from "./code/codeLanguageReferencesTestFixtures";
 import {
   decodeCodeCheckoutIdentity,
@@ -212,7 +213,69 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device raising a thread to Full access, and lets it lower one", async () => {
+  it("lets a device the host's own person paired raise a thread and the default to Full access, and an agent grant's session only what its own guard admitted", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const from = (
+      command: Record<string, unknown>,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000941" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const raiseThread = {
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    };
+    const raiseDefault = {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "full-access",
+      defaultPermissionPersistence: "current-session",
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    // The grant's guard runs before this route and holds the agent to the
+    // level the person chose; the route only stops refusing what it admitted.
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(3);
+
+    for (const introduced of [
+      { origin: "https://octant.invalid", admittedBy: "hub-roster" },
+      { origin: "https://octant.invalid" },
+    ] as const) {
+      for (const raise of [raiseThread, raiseDefault]) {
+        expect((await route(from(raise, introduced)))?.status).toBe(403);
+      }
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a hub-introduced device raising a thread to Full access, and lets it lower one", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";

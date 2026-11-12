@@ -279,6 +279,12 @@ export interface RemoteHttpAuthenticationOptions {
   ) => Promise<Response | undefined>;
   /** The proxy session and its routes. Absent, both answer unavailable. */
   readonly serverProxy?: RemoteServerProxyAuthentication;
+  /**
+   * Whether the host's own person approved this device's pairing, or the hub's
+   * roster introduced it. Absent, every device is held to the remote action
+   * catalogue.
+   */
+  readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
 }
 
 export interface RemoteHttpAuthentication {
@@ -518,7 +524,7 @@ export function createRemoteHttpAuthentication(
       if (options.admission !== undefined && admissionRelease === undefined) {
         throw new RemoteHttpAuthFailure(429, "rate-limited");
       }
-      const handoff = await authenticateRequest(
+      const verified = await authenticateRequest(
         request,
         sessionId,
         sessionFacts,
@@ -526,6 +532,17 @@ export function createRemoteHttpAuthentication(
         options.proofService,
         route,
       );
+      // Who let the device on is read from the host's own record at each
+      // request, never from the session or the client. Without the port the
+      // principal carries no admission and stays held to the catalogue.
+      const admittedBy =
+        verified.principal.kind === "remote-device"
+          ? options.deviceAdmittedBy?.(String(verified.principal.deviceId))
+          : undefined;
+      const handoff =
+        verified.principal.kind === "remote-device" && admittedBy !== undefined
+          ? { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) }
+          : verified;
 
       // S1: Create the registry abort controller before registration. The
       // combined signal merges client-disconnect (request.signal) with the

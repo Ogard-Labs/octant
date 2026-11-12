@@ -1,3 +1,4 @@
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 import type { CodeCheckoutId } from "@octant/contracts/code";
 import type {
   CodeDebugConfiguration,
@@ -25,10 +26,11 @@ import type { ToolExtensionId } from "@octant/contracts/tool-actions";
 export type DebugSessionHostPlatform = "macos" | "linux" | "windows" | "other";
 
 /**
- * Who caused the start. Only the person at a local window starts a session:
- * a paired device and an agent are each refused, whatever the posture.
+ * Who caused the start. Only the host's own person starts a session, at a local
+ * window or on a device they paired:
+ * any other device session and an agent are each refused, whatever the posture.
  */
-export type DebugSessionStarter = "local-window" | "remote-device" | "agent";
+export type DebugSessionStarter = PrincipalKind | "agent";
 
 /** One adapter in one package state: the state a configuration's approval covers. */
 export interface DebugAdapterPackageState {
@@ -124,9 +126,10 @@ export function decideDebugSessionStart(
   // session could run in.
   if (request.mode !== "code") return { status: "refused", reason: "mode-prohibited" };
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  // Starting runs the program on the host, which stays with the person at the
-  // machine; an approval on record does not let a device or an agent start it.
-  if (request.startedBy !== "local-window") {
+  // Starting runs the program on the host, which is the person's to do, at the
+  // machine or on a device they paired; an approval on record does not let any
+  // other device session or an agent start it.
+  if (request.startedBy === "agent" || !actsAsHostPerson(request.startedBy)) {
     return { status: "refused", reason: "local-host-required" };
   }
   if (!request.approvals.some((approval) => approvalCovers(approval, request))) {

@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
   decodeAnswerNativeHarnessQuestion,
   decodeDecideNativeHarnessApproval,
@@ -152,8 +153,11 @@ export function createNativeHarnessSessionRouteHandler(
         now: now(),
       });
       windowId = String(context.scopeId);
+      // A device the host's own person paired answers a thread's requests as a
+      // local window does. Any other device session answers only the child
+      // requests its own turns raised, once each.
       person =
-        context.principal.kind === "remote-device"
+        context.principal.kind === "remote-device" && !principalActsAsHostPerson(context.principal)
           ? { kind: "remote-device", deviceId: String(context.principal.deviceId) }
           : { kind: "local-window" };
     } catch (error) {

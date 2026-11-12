@@ -19,7 +19,7 @@ import type {
 } from "@octant/cli/agent-tools";
 import { Schema } from "effect";
 import type { AuthenticatedProductDispatchHandoff } from "../authenticatedProductRoutes";
-import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { AgentAccessService } from "./agentAccessService";
 
 const decodeHostId = Schema.decodeUnknownSync(StableHostId);
@@ -27,7 +27,7 @@ const decodeDeviceId = Schema.decodeUnknownSync(DeviceId);
 const decodeSessionId = Schema.decodeUnknownSync(RemoteSessionId);
 
 /** The origin a paired-device principal carries when it is an outside agent. */
-export const AGENT_ACCESS_ORIGIN = "octant-agent-access";
+export { AGENT_ACCESS_ORIGIN };
 
 export interface AgentSessionDependencies {
   readonly service: Pick<
@@ -379,7 +379,9 @@ export function guardAgentRequest(input: {
       }
       if (!modelAllowed(grant, body["modelId"]))
         return refused("That model is not in this agent's grant.");
-      if (body["fullAccessSandbox"] !== undefined)
+      // Keeping or dropping the sandbox is a Full access choice, so it is the
+      // agent's only when the person chose Full access for this grant.
+      if (body["fullAccessSandbox"] !== undefined && scope.highestLevel !== "full-access")
         return refused("Full access stays with the person.");
       return {
         kind: "allowed",
@@ -417,8 +419,10 @@ export function guardAgentRequest(input: {
       }
       if (!modelAllowed(grant, created["modelId"]))
         return refused("That model is not in this agent's grant.");
+      // Remembering a level on the Project is administration, which no grant
+      // holds, whatever its level.
       if (
-        created["fullAccessSandbox"] !== undefined ||
+        (created["fullAccessSandbox"] !== undefined && scope.highestLevel !== "full-access") ||
         created["permissionPersistence"] === "project-default" ||
         !codeAccessAllowed(
           grant.scope.highestLevel,
@@ -510,7 +514,7 @@ function threadInScope(
 function withinCeiling(grant: AgentGrant, access: AgentThreadAccess | undefined): boolean {
   if (access === undefined) return false;
   if (access.kind === "chat") return true;
-  if (access.fullAccessSandbox) return false;
+  if (access.fullAccessSandbox && grant.scope.highestLevel !== "full-access") return false;
   return access.kind === "code"
     ? codeAccessAllowed(grant.scope.highestLevel, access.executionPolicy, access.autoApprove)
     : workAccessAllowed(grant.scope.highestLevel, access.access);
@@ -535,7 +539,13 @@ function modelAllowed(grant: AgentGrant, modelId: unknown): boolean {
 
 /** The levels at or below the grant's highest, safest first. */
 function levelsUpTo(highest: AgentGrantLevel): ReadonlyArray<PermissionMode> {
-  const order: ReadonlyArray<AgentGrantLevel> = ["plan", "ask-first", "accept-edits", "auto"];
+  const order: ReadonlyArray<AgentGrantLevel> = [
+    "plan",
+    "ask-first",
+    "accept-edits",
+    "auto",
+    "full-access",
+  ];
   return order
     .slice(0, order.indexOf(highest) + 1)
     .filter((level) => (AGENT_GRANT_LEVELS as ReadonlyArray<string>).includes(level));

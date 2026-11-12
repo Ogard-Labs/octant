@@ -1,3 +1,4 @@
+import { principalAuthorityKind } from "./clientPrincipal";
 import {
   decodeHostBackupRequest,
   decodeHostLifecycleRequest,
@@ -560,7 +561,7 @@ function handleSetMemoryLimits(
       store: dependencies.windowAuthorityStore,
       now,
     });
-    principalKind = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+    principalKind = principalAuthorityKind(context.principal);
   } catch (error) {
     if (error instanceof WindowAuthorityError) {
       return failure("Host control is unauthorized.", 401, origin);

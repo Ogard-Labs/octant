@@ -20,6 +20,7 @@ import {
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
+import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
@@ -205,8 +206,9 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
-      // A paired device may lower a thread; raising one, or the default new
-      // threads start at, to Full access is chosen at a window on this host,
+      // A hub-introduced device or an agent grant may lower a thread; raising
+      // one, or the default new threads start at, to Full access is the
+      // person's choice, at a window on this host or on a device they paired,
       // as it is for Code.
       if (raisesWorkToFullAccess(command) && refusesFullAccessRaise(request)) {
         return failureResponse(
@@ -384,8 +386,18 @@ function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
   }
 }
 
-/** A request whose principal is anything but a window on this host. */
+/**
+ * A request from anyone but the host's own person. A device that person paired
+ * raises a thread or the default to Full access exactly as a local window does
+ * (maintainer decision, 2026-11-12). An agent grant's session raises only what
+ * its own guard admitted before this route: a thread, when the person chose
+ * Full access for that grant.
+ */
 function refusesFullAccessRaise(request: Request): boolean {
   const principal = readPrincipalRouteContext(request)?.principal;
-  return principal !== undefined && principal.kind !== "local-window";
+  return (
+    principal !== undefined &&
+    !principalActsAsHostPerson(principal) &&
+    !isAgentGrantSession(principal)
+  );
 }

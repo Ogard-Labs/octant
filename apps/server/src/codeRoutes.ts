@@ -191,7 +191,12 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
-import { resolveLocalWindowPrincipal, WINDOW_CAPABILITY_HEADER } from "./clientPrincipal";
+import {
+  isAgentGrantSession,
+  principalActsAsHostPerson,
+  resolveLocalWindowPrincipal,
+  WINDOW_CAPABILITY_HEADER,
+} from "./clientPrincipal";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -624,12 +629,19 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     if (route === undefined) return undefined;
 
     let authenticatedWindowId: WindowId;
-    // Only the person at a local desktop window speaks as `user`. The same
-    // route chain serves the authenticated remote gateway, so a paired device
-    // stays gated as an agent and cannot skip a Code approval by reaching the
-    // route directly.
+    // The host's own person speaks as `user`: at a local window, or on a
+    // device they paired (maintainer decision, 2026-11-12). The same route
+    // chain serves the authenticated remote gateway, so every other device
+    // session (hub-introduced, an agent grant) stays gated as an agent and
+    // cannot skip a Code approval by reaching the route directly.
     let operationInitiator: "user" | "agent";
+    // The transport the request arrived on: only a local window holds a
+    // capability to recheck.
     let callerKind: "local-window" | "remote-device";
+    // Whose rules the request is judged by. A device the person paired is
+    // judged as a local window is; it stays the principal and the actor.
+    let callerAuthority: "local-window" | "remote-device";
+    let agentGrantSession: boolean;
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
@@ -646,7 +658,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       authenticatedWindowId = principalContext.scopeId;
       callerKind = principalContext.principal.kind;
       principalAbortSignal = principalContext.abortSignal;
-      operationInitiator = callerKind === "local-window" ? "user" : "agent";
+      callerAuthority = principalActsAsHostPerson(principalContext.principal)
+        ? "local-window"
+        : "remote-device";
+      agentGrantSession = isAgentGrantSession(principalContext.principal);
+      operationInitiator = callerAuthority === "local-window" ? "user" : "agent";
       const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
       // Review and selected-hunk requests recheck that this same window still
       // holds the authority it presented, at each awaited step of the request.
@@ -684,12 +700,12 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       );
     }
 
-    // A host may ask a paired phone or web client's merge for a fresh unlock
-    // on an owner device first. A local window's click needs none, and the
-    // check runs before the service is reached, so a refused merge changes
-    // nothing.
+    // A host may ask a hub-introduced client's merge for a fresh unlock on an
+    // owner device first. A local window's click and a merge from a device the
+    // host's own person paired need none, and the check runs before the
+    // service is reached, so a refused merge changes nothing.
     const ownerUnlockRefusal = (body: Uint8Array) => {
-      if (callerKind !== "remote-device") return undefined;
+      if (callerAuthority !== "remote-device") return undefined;
       const unlock = dependencies.pairedMergeUnlock?.();
       if (unlock === undefined || !unlock.required()) return undefined;
       const checked = unlock.verify({
@@ -750,11 +766,12 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           // The coordinator role, the wake switches, and how coordinators
-          // start workers are the person's choices at a window on this host;
-          // a paired device or any agent-gated caller may watch, never set.
+          // start workers are the person's choices, at a window on this host
+          // or on a device they paired; any agent-gated caller may watch,
+          // never set.
           if (
             command !== undefined &&
-            callerKind !== "local-window" &&
+            callerAuthority !== "local-window" &&
             (command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-message-wake" ||
               command.kind === "set-code-thread-coordinator-wake" ||
@@ -782,13 +799,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          // Full access no longer asks for a native confirmation, so the
-          // confirmation no longer keeps a paired device from reaching it.
-          // A device may lower a thread; raising one to Full access is chosen
-          // at a window on this host.
+          // Any device the host's own person paired raises a thread, a
+          // Project, or the default to Full access exactly as a local window
+          // does (maintainer decision, 2026-11-12). An agent grant's session
+          // raises only what its own guard admitted before this route: a
+          // thread, when the person chose Full access for that grant. A
+          // hub-introduced device may lower a thread, never raise one.
           if (
             command !== undefined &&
-            callerKind === "remote-device" &&
+            callerAuthority === "remote-device" &&
+            !agentGrantSession &&
             raisesToFullAccess(command)
           ) {
             return failureResponse(
@@ -798,10 +818,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           // The model that judges is a choice about where work is sent, so it
-          // is made at a window on this host, never by a paired device.
+          // is the person's, at a window on this host or on a device they paired.
           if (
             command !== undefined &&
-            callerKind === "remote-device" &&
+            callerAuthority === "remote-device" &&
             command.kind === "update-code-settings" &&
             command.shieldModel !== undefined
           ) {
@@ -888,7 +908,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             decodeProjectTerminalResult(
               await dependencies.projectTerminals.execute(
                 authenticatedWindowId,
-                callerKind,
+                callerAuthority,
                 command,
               ),
             ),
@@ -903,7 +923,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           // person's act at the machine. The remote gate never forwards this
           // route; a paired device that reached it anyway is refused here
           // before its body is read, and the service refuses it again.
-          if (callerKind !== "local-window") {
+          if (callerAuthority !== "local-window") {
             return failureResponse(
               {
                 category: "unauthorized",
@@ -933,7 +953,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           return jsonResponse(
             decodeCodeLanguageApprovalResult(
               await dependencies.language.approve(
-                { scopeId: authenticatedWindowId, principal: callerKind },
+                { scopeId: authenticatedWindowId, principal: callerAuthority },
                 approval,
               ),
             ),
@@ -952,7 +972,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           // remote gate never forwards these routes; a paired device that
           // reached one anyway is refused here before its body is read, and
           // the service refuses it again.
-          if (callerKind !== "local-window") {
+          if (callerAuthority !== "local-window") {
             return failureResponse(
               {
                 category: "unauthorized",
@@ -973,7 +993,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
             throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
           }
-          const caller = { scopeId: authenticatedWindowId, principal: callerKind };
+          const caller = { scopeId: authenticatedWindowId, principal: callerAuthority };
           const decoded = <T>(decode: (input: unknown) => T): T => {
             try {
               return decode(value);
@@ -1086,7 +1106,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
             throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
           }
-          const caller = { scopeId: authenticatedWindowId, principal: callerKind };
+          const caller = { scopeId: authenticatedWindowId, principal: callerAuthority };
           let featureActive = true;
           const assertFeatureCaller = () => {
             if (!featureActive || request.signal.aborted || principalAbortSignal?.aborted)
@@ -1715,7 +1735,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 command,
                 request.signal,
-                callerKind,
+                callerAuthority,
               ),
             ),
             200,
@@ -1755,7 +1775,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 command,
                 request.signal,
-                callerKind,
+                callerAuthority,
               ),
             ),
             200,
@@ -1766,7 +1786,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
           // Like the actions it serves, this is the desktop window's own read.
-          if (callerKind !== "local-window") {
+          if (callerAuthority !== "local-window") {
             return failureResponse(
               {
                 category: "unauthorized",
@@ -1797,7 +1817,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 query,
                 request.signal,
-                callerKind,
+                callerAuthority,
               ),
             ),
             200,
@@ -1810,7 +1830,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           // A comment or reply posts under the person's name, and close and
           // labels change their repository: these are the desktop window's own
           // controls, so a paired device is refused before anything decodes.
-          if (callerKind !== "local-window") {
+          if (callerAuthority !== "local-window") {
             return failureResponse(
               {
                 category: "unauthorized",
@@ -1841,7 +1861,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 command,
                 request.signal,
-                callerKind,
+                callerAuthority,
               ),
             ),
             200,
@@ -1932,7 +1952,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                   authenticatedWindowId,
                   command,
                   request.signal,
-                  callerKind,
+                  callerAuthority,
                 ),
               ),
               200,

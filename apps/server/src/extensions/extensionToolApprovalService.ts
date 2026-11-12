@@ -1,3 +1,4 @@
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
 import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
 import {
   decodeExtensionToolApproval,
@@ -22,7 +23,7 @@ export const MAX_PENDING_APPROVALS = 32;
  * the service scope its authenticated principal resolved to.
  */
 export interface ExtensionToolApprovalAnswerer {
-  readonly kind: "local-window" | "remote-device";
+  readonly kind: PrincipalKind;
   readonly scopeId: WindowId;
 }
 
@@ -174,17 +175,18 @@ export class ExtensionToolApprovalService {
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, answerer)) return false;
     if (decision.remember === true) {
-      // A remembered approval grows only from a person's answer at the local
-      // window whose own turn raised the prompt, and only to a prompt that
-      // offered it: one a host-owned or a paired device's turn raised arrives
-      // with no `remember`, whoever answers. The host's own scope is nobody,
-      // so it may settle its prompt but never remember one, and a paired
+      // A remembered approval grows only from the host's own person, answering
+      // from the local window or the device they paired whose own turn raised
+      // the prompt, and only to a prompt that offered it: one a host-owned, a
+      // hub-introduced device's, or an agent grant's turn raised arrives with
+      // no `remember`, whoever answers. The host's own scope is nobody, so it
+      // may settle its prompt but never remember one, and a hub-introduced
       // device approves once only. A refused or failed `remember` leaves the
       // call waiting, to be approved once.
       if (
         decision.decision !== "approved" ||
         pending.remember === undefined ||
-        answerer.kind !== "local-window" ||
+        !actsAsHostPerson(answerer.kind) ||
         String(pending.windowId) !== String(answerer.scopeId) ||
         this.options.isHostScope?.(answerer.scopeId) === true ||
         !pending.remember()

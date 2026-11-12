@@ -9,11 +9,6 @@ const GATE_ORIGIN = "https://octant.example:8443";
  * diagnostics export, and local-only administration.
  */
 const LOCAL_ONLY_PROBES = [
-  { path: "/api/benchmarks/suites/save", method: "POST" },
-  { path: "/api/benchmarks/suites/delete", method: "POST" },
-  { path: "/api/benchmarks/runs/start", method: "POST" },
-  { path: "/api/benchmarks/runs/cancel", method: "POST" },
-  { path: "/api/benchmarks/runs/purge", method: "POST" },
   { path: "/api/usage/reset", method: "POST" },
   { path: "/api/usage/retain", method: "POST" },
   { path: "/api/diagnostics/export", method: "POST" },
@@ -25,9 +20,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/host-control/data-map", method: "GET" },
   { path: "/api/host-control/export", method: "GET" },
   { path: "/api/host-control/lifecycle", method: "POST" },
-  { path: "/api/extensions/lifecycle", method: "POST" },
-  { path: "/api/extensions/npm", method: "POST" },
-  { path: "/api/extensions/tool-grants", method: "POST" },
+  { path: "/api/extensions/skills", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
   { path: "/api/desktop/provider-credentials/set", method: "POST" },
   { path: "/api/desktop/provider-sign-in/begin", method: "POST" },
@@ -40,7 +33,6 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/secret-stores/command-bindings", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },
-  { path: "/api/thread-external-content", method: "POST" },
   { path: "/api/speech/synthesis", method: "POST" },
   { path: "/api/desktop/agent-access", method: "GET" },
   { path: "/api/desktop/agent-access/commands", method: "POST" },
@@ -129,9 +121,12 @@ export interface ForwardListClassifierMismatch {
 /**
  * Compare the default remote forward list with the product route classifier.
  *
- * A forwarded path must never classify as local-host-required. A local-only
- * path must never be forwarded. A classified remote-approvable product path
- * in the probe set must be forwarded, or the two lists have drifted.
+ * The classifier is what holds a hub-introduced device and an agent grant: a
+ * forwarded path must never classify as local-host-required for them. A
+ * local-only path must never be forwarded. A classified remote-approvable
+ * product path in the probe set must be forwarded, or the two lists have
+ * drifted. A device the host's own person paired is not judged by the
+ * classifier; it reaches every forwarded route, as a local window does.
  */
 export function compareRemoteForwardListToClassifier(): ReadonlyArray<ForwardListClassifierMismatch> {
   const policy = createRemoteRoutePolicy({ origin: GATE_ORIGIN });

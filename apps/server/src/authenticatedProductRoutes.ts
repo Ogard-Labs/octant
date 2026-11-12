@@ -1,6 +1,10 @@
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
-import type { ClientPrincipal } from "./clientPrincipal";
+import {
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+  type ClientPrincipal,
+} from "./clientPrincipal";
 import {
   bindPrincipalRouteContext,
   resolvePrincipalRouteContext,
@@ -32,12 +36,18 @@ export function createAuthenticatedProductDispatch(
   options: AuthenticatedProductDispatchOptions,
 ): (handoff: AuthenticatedProductDispatchHandoff) => Promise<Response | undefined> {
   return async (handoff) => {
-    const action = classifyProductAction(handoff.request);
-    const decision = authorizePrincipalAction({
-      principalKind: handoff.principal.kind,
-      action: action ?? "",
-    });
-    if (decision.kind === "deny") return unauthorizedResponse();
+    // A device the host's own person paired is that person: every route the
+    // private listener forwards reaches its handler, as it does for a local
+    // window, and the handler's own authority checks decide. Any other device
+    // session is held to the catalogue, where an uncatalogued action fails closed.
+    if (!principalActsAsHostPerson(handoff.principal)) {
+      const action = classifyProductAction(handoff.request);
+      const decision = authorizePrincipalAction({
+        principalKind: principalAuthorityKind(handoff.principal),
+        action: action ?? "",
+      });
+      if (decision.kind === "deny") return unauthorizedResponse();
+    }
 
     const context = resolvePrincipalRouteContext({
       request: handoff.request,

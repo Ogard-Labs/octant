@@ -38,6 +38,7 @@ const LEVEL_LABELS: Readonly<Record<AgentGrantLevel, string>> = {
   "accept-edits": "Accept edits",
   auto: "Auto",
   plan: "Plan",
+  "full-access": "Full access",
 };
 const MODE_LABELS: Readonly<Record<AgentGrantMode, string>> = {
   chat: "Chat",

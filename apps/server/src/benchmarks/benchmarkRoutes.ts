@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
   BENCHMARK_ROUTE_PATHS,
   decodeBenchmarkCellRateRequest,
@@ -96,7 +97,7 @@ export function createBenchmarkRouteHandler(
         now: now(),
       });
       windowId = context.scopeId;
-      if (WRITE_PATHS.has(url.pathname) && context.principal.kind !== "local-window") {
+      if (WRITE_PATHS.has(url.pathname) && !principalActsAsHostPerson(context.principal)) {
         return failure("Benchmark changes stay with a local window.", 403, origin, allowedOrigin);
       }
     } catch (error) {

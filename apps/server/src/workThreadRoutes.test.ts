@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_ORIGIN } from "./clientPrincipal";
 import {
   decodeWorkThread,
   decodeWorkThreadId,
@@ -105,7 +106,62 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
+  it("lets a device the host's own person paired raise a Work thread and the Work default to Full access, and an agent grant's session what its own guard admitted", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
+    const from = (
+      command: Record<string, unknown>,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000021" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const raiseThread = {
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "full-access",
+    };
+    const raiseDefault = {
+      kind: "update-work-settings",
+      expectedVersion: 1,
+      defaultAccess: "full-access",
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(3);
+
+    expect(
+      (
+        await route(
+          from(raiseThread, { origin: "https://octant.invalid", admittedBy: "hub-roster" }),
+        )
+      )?.status,
+    ).toBe(403);
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a hub-introduced device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000020";

@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { randomUUID } from "node:crypto";
 import {
   AutomationEventSourceChoices,
@@ -448,7 +449,7 @@ async function handleCommand(
   // routine, can mean Full access with nobody watching, and Full access is
   // chosen at a window on this host, so a paired device cannot set either.
   if (
-    context.principal.kind === "remote-device" &&
+    !principalActsAsHostPerson(context.principal) &&
     (body.kind === "create-automation" || body.kind === "update-automation") &&
     isRecord(body.definition) &&
     (body.definition.projectLevel !== undefined || body.definition.runLevel !== undefined)
@@ -466,7 +467,7 @@ async function handleCommand(
   // Letting a routine merge the pull requests it opens is the person's standing
   // permission for work nobody watches, so only a window on this host grants it.
   if (
-    context.principal.kind === "remote-device" &&
+    !principalActsAsHostPerson(context.principal) &&
     (body.kind === "create-automation" || body.kind === "update-automation") &&
     isRecord(body.definition) &&
     body.definition.agentMerge !== undefined

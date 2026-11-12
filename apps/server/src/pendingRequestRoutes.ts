@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { Schema } from "effect";
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
@@ -73,7 +74,7 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
     let windowId: WindowId;
     try {
       const context = authenticate();
-      if (context.principal.kind !== "local-window") return reply(403);
+      if (!principalActsAsHostPerson(context.principal)) return reply(403);
       windowId = context.scopeId;
     } catch {
       return reply(401);
@@ -97,7 +98,7 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
         try {
           const context = authenticate();
           return (
-            context.principal.kind === "local-window" &&
+            principalActsAsHostPerson(context.principal) &&
             String(context.scopeId) === String(windowId)
           );
         } catch {

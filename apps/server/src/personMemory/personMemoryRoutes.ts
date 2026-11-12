@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
   decodePersonMemoryCommand,
   decodePersonMemoryResult,
@@ -67,7 +68,7 @@ export function createPersonMemoryRouteHandler(dependencies: PersonMemoryRouteDe
       }
       throw error;
     }
-    if (principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal)) {
       return json(
         decodePersonMemoryResult({
           kind: "person-memory-refused",

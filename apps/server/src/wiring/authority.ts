@@ -23,7 +23,10 @@ import {
   threadWithActiveTurnPosture,
 } from "../code/codeOperationRuntime";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
-import { readDeviceRegistration } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistration,
+} from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
 import { AgentRunPersistenceService } from "../agentRun/agentRunPersistenceService";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
@@ -133,9 +136,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
       readDeviceRegistration(persistence.connection, String(scopeId)),
       Date.now(),
     );
+  // A device the host's own person paired is that person, so its turns are not
+  // held to what a hub-introduced device's turns are: its prompts may be
+  // remembered and its turns carry the person's memory, as a local window's do.
+  const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
+    isPairedDeviceScope(scopeId) &&
+    !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
-    isPairedDeviceScope,
+    isPairedDeviceScope: isRestrictedDeviceScope,
     isHostScope: isRoutineHostScope,
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
@@ -330,6 +339,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     routineProposalService,
     imageGenerationOffers,
     isPairedDeviceScope,
+    isRestrictedDeviceScope,
     liveTurns,
     machineChangeFeed,
     onAgentRunExecutionAccepted,

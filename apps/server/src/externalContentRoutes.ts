@@ -7,7 +7,11 @@ import {
 } from "@octant/contracts";
 import type { ContextFailure } from "@octant/contracts/context-rpc";
 import { authorizePrincipalAction } from "@octant/domain";
-import { ClientPrincipalError } from "./clientPrincipal";
+import {
+  ClientPrincipalError,
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+} from "./clientPrincipal";
 import type { ExternalContentClearStore } from "./context/externalContentClearStore";
 import type {
   ThreadMessageQueueService,
@@ -104,14 +108,15 @@ export function createExternalContentRouteHandler(dependencies: ExternalContentR
         ? failure("unauthorized", "External-content request is unauthorized.", 401, origin)
         : failure("invalid", "External-content request is invalid.", 400, origin);
     }
-    // Reviewing what a thread read is a person's act at this machine. A paired
-    // device is refused the read as well, and the host's own scope is refused
-    // although it resolves as local: nobody is at the window of a host-run turn.
+    // Reviewing what a thread read is the act of the host's own person, at
+    // this machine or on a device they paired. Any other device session is
+    // refused the read as well, and the host's own scope is refused although
+    // it resolves as local: nobody is at the window of a host-run turn.
     if (
-      context.principal.kind !== "local-window" ||
+      !principalActsAsHostPerson(context.principal) ||
       isRoutineHostScope(context.scopeId) ||
       authorizePrincipalAction({
-        principalKind: context.principal.kind,
+        principalKind: principalAuthorityKind(context.principal),
         action: "thread.external-content.clear",
       }).kind !== "allow"
     ) {
@@ -145,7 +150,11 @@ export function createExternalContentRouteHandler(dependencies: ExternalContentR
             threadId,
             windowId: context.scopeId,
             expectedVersion: decoded.expectedVersion,
-            principal: "local-window",
+            principal: principalAuthorityKind(context.principal),
+            // The device that cleared the mark is the recorded actor.
+            ...(context.principal.kind === "remote-device"
+              ? { deviceId: String(context.principal.deviceId) }
+              : {}),
             turn: standing === "unavailable" ? "unknown" : standing,
           }),
           origin,

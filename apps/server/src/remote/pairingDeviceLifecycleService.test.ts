@@ -20,6 +20,7 @@ import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import {
+  readDeviceApprovedByPerson,
   readDeviceRegistrations,
   RemoteAccessProjection,
 } from "../persistence/remoteAccessProjection";
@@ -265,6 +266,29 @@ describe("PairingDeviceLifecycleService", () => {
     ).toThrow(PairingDeviceLifecycleError);
     void timed;
     void later;
+  });
+
+  it("proves a device the person approved from its approval record, and never one the hub's roster introduced or one with no record", () => {
+    const { service, connection } = createService({
+      randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 11),
+    });
+    const ticket = service.createTicket({ sourceClass: "lan-private" });
+    service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+    const approved = service.approveTicket({ ticketId: ticket.ticketId });
+    const introduced = service.admitIntroducedDevice({
+      devicePublicKey: generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+        .publicKey.export({ type: "spki", format: "pem" })
+        .toString(),
+      deviceLabel: "Guest phone",
+      origin: "https://mac.example.test",
+      sourceClass: "tailscale",
+    });
+
+    expect(readDeviceApprovedByPerson(connection, approved.device.deviceId)).toBe(true);
+    expect(readDeviceApprovedByPerson(connection, introduced.deviceId)).toBe(false);
+    expect(readDeviceApprovedByPerson(connection, "99999999-9999-4999-8999-999999999999")).toBe(
+      false,
+    );
   });
 
   it("approves a claimed ticket into a durable device registration and denies duplicates", () => {
