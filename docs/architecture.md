@@ -13562,9 +13562,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   or selected terminal session may use an existing sign-in only through an
   explicit local-person grant, "this routine or child may use this profile on
   these sites", which is persistent and survives a host restart and an app
-  update (maintainer request, 2026-11-12; not built yet: today it is a
-  host/recipient/model/authority/profile/HTTPS session permission that lapses
-  on every restart and must be reviewed again). It is
+  update (maintainer request, 2026-11-12). It keeps its reviewed expiry and
+  its host/recipient/model/authority/profile/HTTPS binding, and is restored
+  only when a clean host close journaled it as still live; a terminal's
+  permission ends with the host. Not built yet: a restored grant takes no
+  lease on the background native owner. It is
   revalidated before effects and observations; it owns its context and receives
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
   A paired device sees only that a signed-in page exists. The

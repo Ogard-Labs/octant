@@ -516,8 +516,37 @@ confirmed, because replaying history cannot otherwise distinguish a committed
 grant from a later revocation whose write failed; a grant whose revocation
 state cannot be proved after a restart is not restored.
 Journal records retain permission and revocation metadata, never cookies or
-credential values. Not built yet: today a host restart restores no session
-permission, routine permissions included, and the person must review again.
+credential values. Built, with one part remaining:
+
+- The review states whether the permission survives a restart, and the host
+  sets that for a routine or a managed child only. A permission journaled
+  without it, a terminal's included, is never restored.
+- A clean host close journals `browser.session-held@1` for each surviving
+  grant still live at that moment. A restart restores only a grant whose
+  history is the person's `browser.session-granted@1` followed by nothing but
+  held and resumed records, the newest one a held record, and it journals
+  `browser.session-resumed@1` before the grant authorizes anything. A grant
+  with no revocation on record is not proof: a revocation whose write failed
+  and a host that was killed leave the same history, so only the clean-close
+  record restores. A host that crashed or was killed, a record that does not
+  decode, a gap in the history and an unreadable journal therefore restore
+  nothing, and the person reviews again.
+- Revoke is confirmed only after its record is journaled. When that write
+  fails the grant is still withdrawn for the running host, the person is told
+  the record was not saved, and the grant is not restored.
+- A restored grant keeps the expiry the person reviewed (a routine's seven
+  days, 30 at most; a child's 15 minutes, one hour or eight hours) and is
+  checked against the caller as it is now. A changed routine definition
+  revision, execution profile or model, Project binding or effective
+  authority, a changed child run, workspace or authority, a caller that is no
+  longer eligible, a profile that no longer exists and a passed expiry lapse
+  it instead, and the lapse is journaled so that changing back restores
+  nothing. Restoring waits for the host's providers to finish warming,
+  because a routine's eligibility reads what its provider supports; a
+  provider that is not available then lapses the grant.
+- Not built yet: a restored grant takes no lease on the background native
+  owner. It runs only while a local window that holds its Project is open,
+  until the person reviews it again.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
 their separate gates. A delegated session permission authorizes none of them. A named routine may

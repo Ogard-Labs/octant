@@ -20,6 +20,8 @@ import {
   BrowserSessionRevoked,
   BrowserSessionExpired,
   BrowserSessionChanged,
+  BrowserSessionHeld,
+  BrowserSessionResumed,
 } from "@octant/contracts/browser-session-grants";
 import {
   CHILD_WORKTREE_SOURCE_UPDATED,
@@ -809,6 +811,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
     .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)
     .register(BROWSER_SESSION_EVENT_NAMES.changed, 1, BrowserSessionChanged)
+    .register(BROWSER_SESSION_EVENT_NAMES.held, 1, BrowserSessionHeld)
+    .register(BROWSER_SESSION_EVENT_NAMES.resumed, 1, BrowserSessionResumed)
     .register(BROWSER_FLOW_EVENT_NAMES.saved, 1, BrowserFlowSaved)
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
