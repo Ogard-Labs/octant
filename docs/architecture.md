@@ -248,9 +248,12 @@ The design rests on a small set of invariants that every package obeys:
 - **Remote clients never exceed what the host granted.** Remote clients never
   exceed host, mode, provider, Project, or thread authority. A hub or peer host
   acting on another host is a remote client there, held to the grant that
-  host's person chose. A person's own owner device may use a local window's
-  powers on a host only after a fresh unlock on that device; agents, routines,
-  and peer hosts never do
+  host's person chose. A person's own paired device, once authenticated, is
+  the person: it may do on the host everything a local window may, with no
+  owner-device requirement and no extra unlock (maintainer decision,
+  2026-11-12). Agents, routines, and peer hosts never gain that. Not built
+  yet: today only an owner device, after a fresh unlock on that device, uses a
+  local window's powers
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
 - **Owner Browser control is a separate person capability.** An enrolled owner
   may unlock one already-open visible native Code Private page for at most
@@ -258,7 +261,10 @@ The design rests on a small set of invariants that every package obeys:
   window and task authority. Credential-bearing frames use a volatile human
   response, never an agent observation or artifact. Stop, disconnect and expiry
   leave the existing person hold; explicit Hand back requires the agent to read
-  again. Other resources and ordinary paired callers remain refused. The owning
+  again. Any paired device controls the Browser as a local window does, so
+  this unlock gates nothing once that is built (maintainer decision, 2026-11-12;
+  not built yet: today other resources and ordinary paired callers remain
+  refused and the owner unlock above is the only remote control). The owning
   rules are [Owner control of an open Code page](design/browser-agent-tool.md#owner-control-of-an-open-code-page).
 - **Privacy is about third parties.** Preserve local-first and
   privacy-preserving defaults. Add telemetry, external calls, credential
@@ -508,10 +514,11 @@ the pair with two sizes in GB of 1024³ bytes, the same unit as the default
 (0.5 to 64, very low above low) that apply as
 given on any machine, without the small-machine scaling: the person chose them
 knowing what else the machine runs. The limits are a host setting in Settings >
-Host, changed only by a local window: `POST /api/host-control/memory-limits`
-sits on the loopback host-control surface, behind the `host.service.memory-limits`
-action that a paired device is denied, so a paired device can neither read nor
-change it. Each change is one journaled event
+Host, changed by a local window or a paired device (maintainer decision, 2026-11-12; not
+built yet: today `POST /api/host-control/memory-limits` sits on the loopback
+host-control surface, behind the `host.service.memory-limits` action that a
+paired device is denied, so a paired device can neither read nor change it).
+Each change is one journaled event
 (`host-memory-limits.changed@1`) naming who made it, when, and the values
 before and after; the `host_memory_limits_projection` row is rebuilt from those
 events, and saving the values already in force records nothing. A pair that is
@@ -549,8 +556,9 @@ kill by signal. A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
-the shared embedded editor and a local-window-only, Project-confined source
-read/save route. Full source, physical identity and revision are checked
+the shared embedded editor and a Project-confined source read/save route for
+a local window or a paired device (maintainer decision, 2026-11-12; not built yet:
+today the route is local-window only). Full source, physical identity and revision are checked
 independently of preview chunks; no agent or remote write authority is added.
 Draft recovery remains on the client. Code keeps its authoritative file-helper
 save path. [Workspace: File editing](design/workspace.md#file-editing) owns
@@ -586,7 +594,9 @@ host then answers `turned-off`. A person can also add a `repo-tooling` server,
 which runs the repository's own tooling: it starts only after the person at a
 local window approves it for a checkout or the Code Project (a journaled
 `shell-commands` approval through the local-only
-`POST /api/code/language/approvals`), never in Plan or for a paired device,
+`POST /api/code/language/approvals`, which a paired device may answer too by
+maintainer decision, 2026-11-12; not built yet: today it is refused to a paired
+device), never in Plan,
 may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
@@ -616,12 +626,12 @@ configuration digest and adapter package state) and starts it; the adapter and
 the program run in one capsule confined as a terminal, on the session's own
 `proxied` egress under the thread's rules below Full access, and the session
 ends at once when the thread, its posture, its checkout, the confirmation, or
-the Project goes. An agent may also start, control and read a debug session:
-unasked at Full access, approval-gated per configuration below it, and refused
-in Plan; a paired device that is not an owner device stays refused (maintainer
-request, 2026-11-12). Not built yet: today the routes under `/api/code/debug/`
-are local-window only with no remote action and no agent tool reaches a
-session. Nothing a session
+the Project goes. An agent starts, controls, reads and stops a debug session
+through a plugin-shaped agent tool: unasked at Full access, approval-gated per
+configuration below it, and refused in Plan; a paired device drives a session
+as a local window does (maintainer decision, 2026-11-12). Not built yet: today
+the routes under `/api/code/debug/` are local-window only with no remote
+action, and no agent tool reaches a session. Nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
 breakpoints (configuration saved locally per endpoint/window/thread/checkout,
@@ -649,7 +659,8 @@ device row on a host carries that host's own identity, so the comparison does
 not separate one paired device from another. A server Project's server is read by
 `GET /api/server-projects/resources?projectId=`, which runs one fixed
 read-only script over that Project's SSH connection and answers the same
-snapshot; a local window only, never a paired device, and Linux servers only.
+snapshot, for a local window or a paired device (maintainer decision, 2026-11-12;
+not built yet: today a paired device is refused), and Linux servers only.
 The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
@@ -807,20 +818,25 @@ operations; a recording already running when Plan begins is stopped and
 discarded ([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mode)).
 Downloads in the agent's Browser
 are blocked on every page unless the person turns on "Let agents download
-files" in Settings (a shell setting only a local window writes, off by
+files" in Settings (a shell setting a local window or a paired device writes
+by maintainer decision, 2026-11-12, not built yet: today only a local window writes
+it; off by
 default below Full access and on by default at Full access). Then a download
 an agent action starts is held in a private
 temporary folder of the host, never the workspace, and saved only by the
 agent's `download-save` as a new file in `downloads/` of the thread's
 workspace. At Full access the save does not ask; below it the save asks the
-person, and the answer can be remembered per site. The path checks hold at
+person, and "Always allow" is remembered per site, folder and profile
+(maintainer decision, 2026-11-12). The path checks hold at
 every level. A symbolic link is refused at every level, programs, installers
-and scripts only below Full access, and a paired device,
-a terminal grant, and Plan cannot save
+and scripts only below Full access, and a terminal grant and Plan cannot save;
+a paired device saves as a local window does (maintainer decision, 2026-11-12; not
+built yet: today a paired device cannot save)
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
 download the person starts in the Browser pane saves to the Downloads folder
 at every level. Ordinary uploads do not ask at Full access; below it they ask
-and the answer can be remembered per site. The size and held-file caps are
+and "Always allow" is remembered per site, folder and profile, as for a
+save. The size and held-file caps are
 Settings defaults, not constants (maintainer request, 2026-11-12). Not built
 yet: today the save and each upload ask every time at every access level,
 agent downloads are off by default at every level, programs and installers
@@ -1052,8 +1068,9 @@ live session"). The menu bar raises no notifications; banners and the dock badge
 stay with the renderer's attention signals. The dock badge counts the threads
 that need the person (as the Inbox does), never a finished turn. Windows report only which thread
 they show, which clears that thread's done row and tells the shell the window
-can open a thread it is asked for. The read is local-window only, like pending
-requests. Titles never enter the public health response or redacted
+can open a thread it is asked for. The read is answered to a local window or
+a paired device, like pending requests (maintainer decision, 2026-11-12; not built
+yet: today both are local-window only). Titles never enter the public health response or redacted
 diagnostics. Separately managed hosts retain their existing lifecycle
 restrictions. Nothing here writes provider MCP or hook configuration.
 
@@ -1125,11 +1142,11 @@ document as a future version. Frames follow the
   blocks, a dashboard among them; closed diagram node roles (process, decision,
   terminator), edge styles, and group tones drawn by the one deterministic
   layout; a Gantt view of `plan`; and import of a bounded Mermaid subset into
-  typed diagram blocks. A diagram outside the translated subset renders with
-  a bundled renderer inside the existing sandboxed no-network frame, and its
-  raw source shows only when rendering fails (maintainer request, 2026-11-12;
-  not built yet: today Mermaid never renders, and an unknown construct fails
-  closed and stays a code block).
+  typed diagram blocks. The translator is widened to the constructs models
+  use most, with no new dependency and no Mermaid renderer; a diagram still
+  outside the translated subset stays a code block showing its raw source
+  (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer
+  direction; not built yet: today the subset is the narrower one).
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -1164,14 +1181,19 @@ document as a future version. Frames follow the
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped. A design or prototype also has a per-Canvas "Allow network" switch
-  that only the person sets, off by default (maintainer request, 2026-11-12;
-  not built yet: today no running frame is given a connection).
+  that only the person sets, off by default. The connection it gives runs
+  through a filtering egress proxy on the host that refuses loopback, private
+  ranges, link-local addresses and the Octant server; the proxy is built
+  first and the switch after it (maintainer decision, 2026-11-12; not built yet:
+  today neither exists and no running frame is given a connection).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a
   new Canvas holding one `document`-size `design`. It is a create in every
   respect authority sees: the same window context, Project, and create-policy
   checks run on the host before the page is read, the server writes the
-  Canvas, and a paired device may not import, as it may not create. The host
+  Canvas, and a paired device imports and creates as a local window does
+  (maintainer decision, 2026-11-12; not built yet: today a paired device may
+  neither import nor create). The host
   bounds the page (256 KiB, and one frame and stylesheet after the import)
   and answers `too-large`, `not-html`, `unparseable`, `empty`, or
   `unsupported` before anything is journaled. The tier is the design policy's
@@ -1237,7 +1259,9 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-runs only when a person requests it. **Record screen** starts and stops a time-limited recording a person asked for;
+is input: a live Allow input grant covers it like a tap, whoever sends it
+(maintainer decision, 2026-11-12; not built yet: today it runs only when a
+person requests it). **Record screen** starts and stops a time-limited recording a person asked for;
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
@@ -1440,15 +1464,17 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 - **Host:** a Work thread takes Auto, Ask first, Accept edits, or Full access
   from Settings › Work when it is created and switches from its composer
   (`change-work-thread-access`, journaled on the thread); raising a thread or
-  the Settings default to Full access is chosen at a local window, as in
-  Code. A caller with narrower authority than the thread (a goal-loop round,
+  the Settings default to Full access is open to a local window and to any
+  paired device, as in Code (maintainer decision, 2026-11-12; not built yet:
+  today only a local window or an owner device may). A caller with narrower authority than the thread (a goal-loop round,
   a routine, a delegated turn) runs the turn at the thread's level clamped to
   its own (`clampWorkAccess`).
 
 - **Developer tools:** a Work Project's switch
   (`change-work-project-developer-tools`, journaled as
   `project.work-developer-tools-changed@1` with who and when on the Project)
-  is set only from a window on this host; a paired device is refused. It
+  is set from a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today a paired device is refused). It
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it. A server Work Project's separately
   journaled choice exposes saved actions in Settings and the active
@@ -1823,8 +1849,8 @@ kept on the record as `designSystem` and journaled as
 Work and Code turn is told to follow it and carries the Project's own file as
 keyed standing context; Canvas designs draw with its tokens, which take the
 place of the brand kit when present, and a Canvas that follows it (Canvas
-schema version 28) draws its typed blocks' colours from it. Only a window on this host lists, reads, creates, or
-saves one, a save replaces only the revision it was opened at, and no read or
+schema version 28) draws its typed blocks' colours from it. A local window or a paired device lists, reads, creates, or
+saves one (maintainer decision, 2026-11-12; not built yet: today only a window on this host does), a save replaces only the revision it was opened at, and no read or
 write follows a link. This is product context, not an agent brief: the rule
 below that Octant writes no agent brief and a Work turn reads no `AGENTS.md`
 is unchanged. See [Project design systems](design/design-systems.md).
@@ -1903,9 +1929,10 @@ keep, largest first, with the Project, branch, folder, and a bounded size
 (200,000 entries, then "more than"). Remove asks once and runs the same
 cleanup as a confirmed local-user request: it refuses uncommitted changes, an
 active thread, and a thread whose turn is still in progress, and keeps the
-branch. Listing and removing are a local
-window's alone, because the list names folders on this computer and removal
-deletes from its disk; a paired device is refused both. The receipt's
+branch. Listing and removing are the person's, at a local window or a paired
+device (maintainer decision, 2026-11-12; not built yet: today a paired device is
+refused both, because the list names folders on this computer and removal
+deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
@@ -1955,7 +1982,8 @@ folders in `~/Library/Developer/Xcode/DerivedData` whose `info.plist`
 workspace is gone (orphaned) or that Xcode has not opened for 30 days
 (unused); a workspace on an unmounted volume is neither. Removing one reads
 it again and keeps a folder Xcode has opened since. Both lists and every
-removal are a local window's only; nothing is journaled, because none of
+removal are the person's, at a local window or a paired device (maintainer
+decision, 2026-11-12; not built yet: today a local window's only); nothing is journaled, because none of
 these folders is Octant's.
 
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
@@ -2257,19 +2285,18 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **On the phone.** The Android and iOS client offers Fork from here and
   Rewind to here on every message of a Chat, Work or Code thread it can open,
   through the same host routes and commands, and gains no authority from it.
-  A paired device is a remote principal and a Code operation from it is gated
-  as an agent's, so the host's own rules decide each part. A fork and a
-  conversation-only rewind are allowed. A rewind that puts files back is the
-  in-place restore, which the host asks an approval for under Ask first and
-  Auto-accept edits, and approvals are taken only at a window on the computer
-  (`/api/desktop/*` never reaches a phone); under Full access the host asks
-  nothing and allows it. The phone therefore offers files only for a Full
-  access Code thread whose preview says files can come back, shows the same
-  preview and the same single confirmation, and otherwise offers the
-  conversation only and says why in the sheet. Chat and Work have no files and
-  say so. Nothing is offered while a turn starts, runs or waits, or while the
-  host is stale; the host refuses the same cases itself. The removed message
-  returns to the phone's composer above any draft.
+  A paired device's Code operation is the person's, as a local window's is
+  (maintainer decision, 2026-11-12): a fork, a conversation-only rewind, and a
+  rewind that puts files back are all offered, and the device answers the
+  in-place restore approval the host asks under Ask first and Auto-accept
+  edits. Chat and Work have no files and say so. Nothing is offered while a
+  turn starts, runs or waits, or while the host is stale; the host refuses the
+  same cases itself. The removed message returns to the phone's composer above
+  any draft. Not built yet: today a Code operation from a paired device is
+  gated as an agent's and approvals are taken only at a window on the computer
+  (`/api/desktop/*` never reaches a phone), so the phone offers files only for
+  a Full access Code thread whose preview says files can come back, and
+  otherwise offers the conversation only and says why in the sheet.
 
   Rationale: the narrower choice keeps the existing boundary. Giving a phone
   its own way to approve a file restore would be a new approval path for a
@@ -2718,7 +2745,10 @@ hold for every action in it:
   which a standing Full access grant does not stand in for; the person's own
   click in a window is that approval. A push to the default branch follows a
   Project setting (maintainer request, 2026-11-12; not built yet: today it
-  needs the same one-act approval). Both are journaled with the thread's
+  needs the same one-act approval). The setting's switch, "Agents may push to
+  the default branch", stays hidden in Settings until an agent push path to
+  the default branch exists; the server field and rule stay (maintainer decision, 2026-11-12;
+  not built yet: today the switch is shown). Both are journaled with the thread's
   other Git work.
 - **Labels, close, and reopen.** `update-pull-request` also adds and removes
   labels the repository already has (a label it lacks is refused, never
@@ -2728,8 +2758,10 @@ hold for every action in it:
 - **Comments and review replies.** `comment-pull-request` posts a comment, or a
   reply in one review thread, under the person's name. At Full access it
   does not ask. Below Full access the Project switch "Agents may comment on
-  pull requests" stands in for the per-post ask; with the switch off the agent
-  drafts the post by asking, and the approval shows the whole text
+  pull requests" stands in for the per-post ask on a thread that has read no
+  outside content; a thread that has read outside content still asks before
+  posting, switch on or off (maintainer decision, 2026-11-12); with the switch off
+  the agent drafts the post by asking, and the approval shows the whole text
   (maintainer request, 2026-11-12). Not built yet: today the host posts only
   with an approval for that act, at every level.
 - **Watching its own pull request.** The tool's `watch` lets the host wake the
@@ -2768,8 +2800,8 @@ hold for every action in it:
   `project.code-agent-merge-changed@1`) and a Code routine's **Merge the pull
   requests it opens** choice (`agentMerge: "allowed"` on the routine
   definition, copied into every run's snapshot). Each is its own stored
-  choice, set only from a window on this host (a paired device is answered
-  403), and neither is inferred from a request-time approval. With a stored
+  choice, set from a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today a paired device is answered 403), and neither is inferred from a request-time approval. With a stored
   choice in force the tool sends the merge as `authorization: standing` naming
   `project` or `routine`; the host does not take that word, it reads the
   stored choice again at the merge and refuses with `unauthorized` when it no
@@ -2891,41 +2923,21 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   confirmation. No provider, plugin, routine, hub or peer host reaches the
   routes. Merge when ready from a paired device is built, under its own rule
   below. An agent's merge on a Project setting or routine is built, under the
-  merge rules above. Built: a host may ask a paired client's merge for a
-  fresh unlock on one of its owner devices first
-  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  **Owner unlock before a phone or browser merges** is a host switch, off by
-  default and set only from a window on that host
-  (`POST /api/desktop/hub/paired-merge-unlock`; each change is journaled), so
-  no paired client is locked out until the person turns it on. While it is on,
+  merge rules above. A paired client's merge needs no owner unlock: the
+  authenticated device is the person, and the reviewed-head confirmation and
+  the required-checks gate are the whole of the check (maintainer decision, 2026-11-12).
+  Hub and peer hosts never merge on a person's behalf. Not built yet: today
+  the host switch **Owner unlock before a phone or browser merges**
+  (`POST /api/desktop/hub/paired-merge-unlock`, off by default, set only from
+  a window on that host, each change journaled) still exists; while it is on,
   the merge, stack, and Merge when ready routes answer a paired client's
-  request that carries no valid unlock with `owner-unlock-required`, a plain
-  reason, and the host's hub member id, before the service is reached, so
-  nothing merges. The owner device asks the host's owner route
-  (`/api/hub/owner/challenge`, a signed member request) for a challenge bound
-  to the merge route's own method, path, and body hash; only an owner on the
-  host's own list gets one. Its unlock key signs it (the phone's
-  biometric-gated key, or the browser's passkey for the origin that served the
-  page), and the client sends the same body again with the proof in
-  `x-octant-owner-unlock`. The host consumes the challenge, checks the proof
-  against the key on its own owner list (the hub's list while the hub role is
-  on, else the spoke's, under the Owners grant item), refuses a revoked device
-  or the hub's own member, and journals `owner-merge-unlocked` with the owner.
-  A missing, unreadable, replayed, expired, mismatched, unverified, or unlisted
-  unlock is refused with its reason. The reviewed-head confirmation and the
-  required-checks gate still apply after it. A local window's click needs no
-  unlock. Hub and peer hosts never merge on a person's behalf.
-  Rationale for the narrower choices taken: the proof names no owner, because
-  the challenge was issued to one owner the owner route authenticated, so the
-  host takes that owner and its key from its own list and never from the
-  request or the hub's roster. The client sends a merge without a proof first
-  and learns from the refusal that one is needed, so it never learns or keeps
-  the switch's state and a host with it off costs nothing. Turning Merge when
-  ready off merges nothing, so it asks no unlock. A stack asks one unlock for
-  the whole stack, because its body names every pull request and is checked
-  whole before anything merges. The switch is offered only beside a host's
-  owner devices; a host left in no hub with it on refuses every paired merge
-  with `no-owner-list` rather than merging without an owner.
+  request that carries no valid unlock with `owner-unlock-required`, the
+  owner device signs a challenge from `/api/hub/owner/challenge` bound to the
+  merge route's method, path, and body hash and resends the body with the
+  proof in `x-octant-owner-unlock`, the host journals `owner-merge-unlocked`,
+  and a host left in no hub with the switch on refuses every paired merge with
+  `no-owner-list`
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
 - **Stack.** The command lists one to ten pull requests bottom first, each
   with the head the person reviewed. The server reads every one first and
   refuses the stack whole unless each is open and each base is the head
@@ -2974,8 +2986,10 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
 takes one of: add or remove labels, a comment, a reply in one review thread,
 approve, request changes, close, or reopen, for a pull request in the
 repository a Project binds. The
-person's click is the approval. It answers 403 to a paired device, the
-service refuses any caller but a local window as `not-authorized`, and it
+person's click is the approval, at a local window or a paired device
+(maintainer decision, 2026-11-12; not built yet: today it answers 403 to a paired
+device and the service refuses any caller but a local window as
+`not-authorized`). It
 refuses unless the Project is connected on this window and resolves to
 exactly that github.com repository, and while GitHub access is revoked. A
 label the repository lacks is `label-not-found`, never created; reopening a
@@ -3004,11 +3018,12 @@ is offered once the pull request is closed or merged), and Close or Reopen
 pull request (neither is offered once merged). A comment or reply
 says it posts under the person's name. What the controls name comes from
 `POST /api/code/project-pull-requests/action-context`, a read-only query with
-the same Project check, answered 403 to a paired device and never journaled:
+the same Project check and never journaled:
 the pull request's labels, the repository's labels (up to 100), and up to 50
 review threads with their id, path, first author, and the start of the first
-comment. A paired phone or web client that reaches the pane is told that only
-the desktop window can do these.
+comment. A paired phone or web client reads it and uses the same controls
+(maintainer decision, 2026-11-12; not built yet: today the query answers 403 to a
+paired device, which is told that only the desktop window can do these).
 
 **Merge when ready and Auto-fix.** A Code thread's pull request review carries
 two switches (`POST /api/code/project-pull-requests/merge-when-ready` and
@@ -3216,7 +3231,7 @@ restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
 are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
-coordinator at a local window, Full access included; a mark on the coordinator
+coordinator at a local window or a paired device, Full access included; a mark on the coordinator
 does not lower a fixed level, and the coordinator itself stays read-only
 (maintainer request, 2026-11-12; not built yet: today the bounds are the
 constants 6, 3 and 12 and no level can be fixed). The planner below is now a
@@ -3409,7 +3424,7 @@ the thread it came from.
   fresh source read or copy. These are ordinary checkout files: review them
   before committing or pushing. The copy changes neither the main checkout nor
   ignore rules and grants no authority beyond the selected batch and child checkout.
-- **Integration events.** A person at a local window selects a connected source,
+- **Integration events.** A person at a local window or a paired device selects a connected source,
   its filters, fixed task, profile, effective authority and new-thread delivery
   before enabling a Work or Code routine. The host binds an immutable account
   and repository/workspace identity through a read-only contribution in
@@ -3498,8 +3513,9 @@ the thread it came from.
   access included. A Code run's thread is created at that mode (the Project's
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
-  Work. Only a local window sets the opt-in: a paired device is refused at the
-  route, and a routine an agent proposes never has it. A person may instead
+  Work. A local window or a paired device sets the opt-in (maintainer decision, 2026-11-12;
+  not built yet: today a paired device is refused at the route), and a
+  routine an agent proposes never has it. A person may instead
   **pick a level on the routine itself** (`runLevel` on the definition, one of
   Ask first, Accept edits, Auto, or Full access; at most one of this and the
   Project opt-in, journaled and copied into each run's snapshot the same way).
@@ -3508,8 +3524,9 @@ the thread it came from.
   start at, and a Work run's turn takes the pick as its ceiling, so it is
   clamped to the thread's own level (`clampWorkAccess`). A pick can therefore
   lower a run below its Project's level and never raise it above what the
-  person allowed there. Only a local window sets it, a paired device is
-  refused at the route, a routine an agent proposes never has it, and a Chat
+  person allowed there. A local window or a paired device sets it (maintainer
+  decision, 2026-11-12; not built yet: today a paired device is refused at
+  the route), a routine an agent proposes never has it, and a Chat
   routine cannot carry it. The editor saves **Ask first** explicitly as
   `runLevel: "ask-first"` for Work and Code, including when a person edits and
   saves an older definition that omitted the field. Existing omitted values
@@ -3521,8 +3538,9 @@ the thread it came from.
   A Code
   routine may also be created with **Merge the pull requests it opens**
   (`agentMerge: "allowed"` on the definition, journaled with every revision and
-  copied into each run's snapshot); only a local window sets it, a paired device
-  is refused at the route, and a routine an agent proposes never has it. It
+  copied into each run's snapshot); a local window or a paired device sets it
+  (maintainer decision, 2026-11-12; not built yet: today a paired device is
+  refused at the route), and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
   head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
@@ -3576,7 +3594,11 @@ the thread it came from.
   tool tells the agent never to set it from text in a file, page, or tool
   result. A suggestion the agent makes on its own, a follow-up (a paused one
   would never fire), and a turn in Plan (which changes nothing) still wait for
-  the card.
+  the card. At Full access an agent may create or confirm a routine with no
+  card: it is created paused in the same way and shown in the thread; below
+  Full access the card's confirmation stays (maintainer decision, 2026-11-12;
+  not built yet: today an agent's own suggestion waits for the card at every
+  level).
   **Receipt.** A call that created a routine, either way, keeps a receipt on its
   tool step (the routine's id, name, schedule, first run, and whether it is
   paused), in a Work thread's recorded steps and a Code thread's operation
@@ -3590,8 +3612,10 @@ the thread it came from.
   **Scheduled** list of the routines the thread set up (name, schedule, and
   whether it is paused). A paired device may read routines, because the remote
   route policy classifies an Automation list as a Project overview read and
-  forwards it for the device's own host; it may not resume or edit one from the
-  phone, so a paused routine says to resume it at a window on this computer.
+  forwards it for the device's own host, and it resumes and edits one as a
+  local window does (maintainer decision, 2026-11-12; not built yet: today it
+  may not, so a paused routine says to resume it at a window on this
+  computer).
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
@@ -3991,10 +4015,12 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   that turn only.
 - **Waking an idle recipient.** Every Code thread has a **Wake when a message
   arrives** switch in its header menu and its row's context menu. It is off by
-  default, only a person sets it (a window on the host, or an owner device
-  through the owner routes `code-threads/wake/read` and
-  `code-threads/wake/change` with its own fresh unlock, journaled as that
-  device; never an agent, a routine, a plain paired device, or a peer),
+  default, only a person sets it (a window on the host or any paired device,
+  journaled as that device; never an agent, a routine, or a peer;
+  maintainer decision, 2026-11-12; not built yet: today a paired device sets it
+  only as an owner device, through the owner routes `code-threads/wake/read`
+  and `code-threads/wake/change` with its own fresh unlock, and a plain paired
+  device is refused),
   and each change is journaled as the thread's own `code.thread-updated@1`
   (command `set-code-thread-message-wake`). When a
   message is admitted for a thread with the switch on and the thread is idle,
@@ -4747,11 +4773,13 @@ flowchart LR
     The message queue answers all of this for every mode, and the check and
     the append run under its per-thread ordering, so a send through the queue
     cannot land between them.
-  - Only the local-only `POST /api/thread-external-content` clears. Its `read`
+  - Only the person's `POST /api/thread-external-content` clears, from a
+    local window or a paired device (maintainer decision, 2026-11-12). Its `read`
     returns each source with its count and first and last time, and the
-    version a clear must name. The private listener answers a paired device
-    404, the handler refuses a paired device and the host's own scope, and the
-    route sits on the loopback chain only. No tool, command, model output,
+    version a clear must name. Not built yet: today the route sits on the
+    loopback chain only, the private listener answers a paired device 404,
+    and the handler refuses a paired device; it refuses the host's own scope
+    and that stays. No tool, command, model output,
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
   - The mark is keyed by the bare thread id, and Chat, Work, and Code
@@ -4813,8 +4841,8 @@ flowchart LR
   title, content hash, and time. A thread keeps its newest 200 captures by
   default, a number the person can change (maintainer request, 2026-11-12;
   not built yet: today a constant 32), and they
-  are erased with the thread. Only a local window that can open the thread reads
-  them, never a paired device. They never reach a Canvas share, replica sync, or
+  are erased with the thread. A local window or a paired device that can open the thread reads
+  them (maintainer decision, 2026-11-12; not built yet: today a paired device never does). They never reach a Canvas share, replica sync, or
   a diagnostics export. They leave the host only in an export the local owner
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
@@ -4833,7 +4861,9 @@ flowchart LR
   operation as a call writes it, an element as its role and name, and the page's
   path and title expected after it, never page text, a ref id, or a secret. A
   Project erase takes them; they are in no thread export, host data export, or
-  replica sync. Only a local window lists and deletes them. Detail is in
+  replica sync. A local window or a paired device lists and deletes them
+  (maintainer decision, 2026-11-12; not built yet: today only a local window
+  does). Detail is in
   [Browser for agents: Flows](design/browser-agent-tool.md#flows).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
   kind per day for the last 14 days, the journal head sequence, and the database
@@ -4873,9 +4903,10 @@ flowchart LR
 or .zip>` write the same files, built by one host command
   (`/api/diagnostics/bundle`, with a plain-list read at
   `/api/diagnostics/bundle/preview`). Both routes sit on the loopback
-  administration chain beside host control, reject a paired device, and are
-  not in the remote forward list, so only a window or CLI session on this
-  machine reaches them. The person sees the list of sections, with how many
+  administration chain beside host control. A paired device takes a bundle as
+  a local window does (maintainer decision, 2026-11-12); not built yet: today
+  both routes reject a paired device and are not in the remote forward list,
+  so only a window or CLI session on this machine reaches them. The person sees the list of sections, with how many
   entries each holds now, and what the file never holds, before anything is
   written; the CLI prints it first and `--list` stops there. The files are a
   readme plus one JSON file per section: versions (Octant, wire, runtime),
@@ -5085,8 +5116,10 @@ or .zip>` write the same files, built by one host command
   (thread, then Project, then host, else forever). A thread-scoped purge
   erases the named thread; a Project- or host-scoped purge erases only threads
   whose last update is older than their effective window; purging an
-  already-purged thread succeeds idempotently. A remote principal can neither
-  set a window nor purge. A purge erases by the bare thread id, so a thread
+  already-purged thread succeeds idempotently. A paired device sets a window
+  and purges as a local window does (maintainer decision, 2026-11-12; not built
+  yet: today a remote principal can do neither); a hub, a peer host, and an
+  agent grant can do neither. A purge erases by the bare thread id, so a thread
   whose id another mode's thread also holds (history from before the journal
   refused that, below) is never purged: a thread-scoped purge refuses it as
   `invalid`, and a Project- or host-scoped purge passes over it. The one self-applying
@@ -5120,8 +5153,10 @@ or .zip>` write the same files, built by one host command
   Chat thread owns outside every Project names no Project), a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
-  route chain. A remote principal and a paired device are refused, and the
-  remote forward list does not carry the path. The same forbidden-key walk
+  route chain. A paired device takes the export as a local window does
+  (maintainer decision, 2026-11-12; not built yet: today a paired device is
+  refused and the remote forward list does not carry the path); a hub, a
+  peer host, and an agent grant are refused. The same forbidden-key walk
   runs over the assembled cut. Large stores are read and written in bounded
   pages, so a transcript, usage row, or tombstone table is not loaded all
   at once; each page is walked before it is written. The cut names what it
@@ -5158,7 +5193,9 @@ or .zip>` write the same files, built by one host command
   it just wrote, refuses when other work is staged, and never pushes.
   Settings changes need the current `expectedVersion`. An external edit comes
   back only through an explicit re-import that appends a version. The
-  `/api/artifacts/mirror` route is loopback-only and refuses a paired device.
+  `/api/artifacts/mirror` route answers a local window or a paired device
+  (maintainer decision, 2026-11-12; not built yet: today it is loopback-only and
+  refuses a paired device).
 - **Artifact replicas.** A replica is an append-only log in a store the user
   owns — a synced folder, or an S3-compatible bucket. Each host writes only
   its own write-once entries, one per committed artifact version or deletion,
@@ -5209,9 +5246,10 @@ or .zip>` write the same files, built by one host command
   membership is derived from signed, write-once records and never journaled as
   a fact; only an admitted computer's entries within its cut are imported, and
   an import enters no thread until a person binds it under that thread's
-  authority; store selection, membership commands, and binding are host-only
-  and refuse a paired device, which may read only the status view under
-  `project.overview.read`; store credentials and device keys live in their own
+  authority; store selection, membership commands, and binding are the
+  person's, from a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today they refuse a paired device, which may read only the
+  status view under `project.overview.read`); store credentials and device keys live in their own
   credential-store namespaces and never leave the host; and with sync off, no
   store chosen, or Plan mode, no store call is made.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
@@ -5415,8 +5453,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
   - **Account.** Settings › Providers shows **Run <provider> as itself** on
     each Claude Code, Codex, OpenCode, and Mistral Vibe account. It sends
-    `set-provider-native-setup`, which only a local window may send (the
-    route refuses a paired device or web client), and journals
+    `set-provider-native-setup`, which a local window or a paired device
+    sends (maintainer decision, 2026-11-12; not built yet: today the route
+    refuses a paired device or web client), and journals
     `provider.instance-native-setup-changed@1` with the account's whole
     record; the field is `nativeSetup` on the instance, absent when off, and
     no configuration change or new account carries it. Any other provider's
@@ -5424,7 +5463,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     journal's own decoder.
   - **Project.** A Work or Code Project's **Trusted providers** lists the key
     providers it trusts (`nativeProviders` on the Project, set by
-    `change-project-native-providers` from a local window and journaled as
+    `change-project-native-providers` from a local window or, not built yet, a
+    paired device, and journaled as
     `project.native-providers-changed@1`). Trusting a provider there turns
     its own setup on in that Project and lets it load the Project's own
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
@@ -5432,7 +5472,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
     own choice: Account default, On, or Off (the **Provider tools** row of the
     thread's info panel). `set` on `POST /api/providers/thread-native-setup`
-    sends it, only from a local window (a paired device may read it, and the
+    sends it, from a local window or a paired device (maintainer decision, 2026-11-12;
+    not built yet: today a paired device may only read it; the
     host refuses a provider account that is not a key provider's), and
     journals `thread.native-setup-changed@1` on the thread's own
     `thread-native-setup` aggregate; the host reads it again at the thread's
@@ -5650,8 +5691,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; one "Install and trust" flow covers inspect, install, trust and
-  enable, with digest-bound trust and confinement unchanged (maintainer
-  request, 2026-11-12; not built yet: today these are separate steps); the catalog lists effective outside drivers in their own group from
+  enable, for every plugin and connector as for a driver, with digest-bound
+  trust and confinement unchanged and the separate steps still available
+  (maintainer decision, 2026-11-12; not built yet: today these are separate
+  steps); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
@@ -6030,7 +6073,9 @@ composition inspector for pin, exclude, and rebuild. Each of those commands
 is refused `unauthorized`, before it is journaled, unless the subject is the
 context subject of a chat, work, or code thread the calling local window can
 open (the rule that lets it read the thread's kept images and Browser captures);
-a paired device never reaches the route. Inspect (`POST /api/context/inspect`)
+a paired device sends them under the same rule within its own device scope
+(maintainer decision, 2026-11-12; not built yet: today a paired device never
+reaches the route). Inspect (`POST /api/context/inspect`)
 follows open in the same way: it answers a local window only for the context
 subject of a chat, work, or code thread that window can open, or for a
 `project` subject naming a Project it can open. A window can open a Project by
@@ -6976,9 +7021,11 @@ server checks it before any side effect:
 - It never clears taint. A summary of tainted content is tainted content; the
   thread's taint and its single-use approval rule carry over unchanged, and
   remembered approvals are neither added nor removed.
-- A paired remote client is refused (`remote-client`): context commands are
-  already local-window only (`authenticatedProductRoutes.ts` admits no remote
-  POST to `/api/context/commands`), and this design keeps that boundary.
+- A paired remote client compacts as a local window does (maintainer
+  decision, 2026-11-12). Not built yet: today it is refused
+  (`remote-client`), because context commands are local-window only
+  (`authenticatedProductRoutes.ts` admits no remote POST to
+  `/api/context/commands`).
 - The request costs tokens. It is reserved through the capacity scheduler as
   Chat maintenance is, recorded in the usage ledger under the thread with request
   shape `context-compaction`, priced, and counted against the Project's spend
@@ -7229,8 +7276,9 @@ every thread kind with the same `compaction` decision `compact-session` makes,
 the thread's `latestCompaction`, and, only while compaction is offered, the
 `executor` that would compact, so the confirm can name where the conversation
 goes before the person agrees. It authenticates the window and answers only one
-that can open the thread, as the command does; a paired device is passed
-through and refused `remote-client`. The window reads it when the thread opens,
+that can open the thread, as the command does; today a paired device is passed
+through and refused `remote-client` (not built yet: a paired device is
+answered as a window is). The window reads it when the thread opens,
 when its mode's navigation feed moves (turns starting and ending), and every
 1.5 seconds while a compaction runs, because the Work and Code streams do not
 carry the outcome to the meter; it asks the inspector again once a compaction it
@@ -8585,10 +8633,14 @@ the model at another size.
   restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
   The same server admission holds a recovered session until a person resumes it,
   unless the setting "Resume interrupted turns after a restart" is on (off by
-  default): then a turn with no uncertain side effect resumes by itself, and
-  a turn whose last effect is uncertain still waits for the person
-  (maintainer request, 2026-11-12; not built yet: today every recovered
-  session waits for a person);
+  default): then a turn whose last effect is proved settled resumes by itself,
+  and a turn whose last effect is uncertain still waits for the person. The
+  proof is a record the host writes before each tool call takes effect and
+  closes when it has, so after a restart an open record marks the one call
+  whose outcome is unknown; the record is built first and the automatic
+  resume is widened to the turns it proves settled
+  (maintainer decision, 2026-11-12; not built yet: today no such record is
+  written and every recovered session waits for a person);
   recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
@@ -9366,10 +9418,11 @@ where it was or narrows it:
 - _Who reaches the surface._ The rules lists and answers are served at
   `/api/native-harness/egress/threads/<thread id>` with the same thread check
   as the harness session's approvals. Like those approvals the route is not in
-  the paired-device catalogue today, so a paired device reaches it only once it
-  may answer the thread's approvals; the server takes the principal from the
-  authenticated request and refuses a Project rule from a paired device either
-  way.
+  the paired-device catalogue today. A paired device lists and answers them,
+  a Project rule included, as a local window does (maintainer decision, 2026-11-12);
+  the server takes the principal from the authenticated request. Not built
+  yet: today a paired device does not reach the route and a Project rule from
+  one is refused.
 - _Purge._ A thread purge erases the thread's `thread-egress` aggregate. Project
   rules are the Project's: a thread purge leaves `project-egress` in place,
   including the id of the thread a rule was granted from, and a Project erase
@@ -9630,7 +9683,8 @@ places and, at Auto, Octant Shield may allow an unlisted host for one call
 ([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
 is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
-`safe-networks`), changes only from a local window, and replays at startup.
+`safe-networks`), changes from a local window or a paired device (maintainer
+decision, 2026-11-12; not built yet: today only from a local window), and replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
 `open` for every runtime (open network as before, and Claude's sandbox without
 the proxy port); on, it does what follows. A Full access launch answers
@@ -9863,9 +9917,10 @@ the ordinary ladder: installed, untrusted, quarantined, switched off.
 installs nothing; a newer version is looked up, reviewed, and confirmed like
 any install. Every failure is a plain sentence: not found, no matching
 version, integrity missing or mismatched, registry refused or unreachable,
-fetches turned off, an unsupported package. Looking up and checking stay with
-a local window, like the rest of package lifecycle, and obey the Marketplace
-fetches preference. The lookup sends only `Accept` and the constrained
+fetches turned off, an unsupported package. Looking up and checking are open
+to a local window and a paired device, like the rest of package lifecycle
+(maintainer decision, 2026-11-12; not built yet: today package lifecycle stays
+with a local window), and obey the Marketplace fetches preference. The lookup sends only `Accept` and the constrained
 `User-Agent`; there is no telemetry.
 
 **Writing a plugin.** `octant plugin create <name> [--mcp-url <address>]`
@@ -10228,14 +10283,19 @@ that is not yet effective for the thread is refused and never reaches the model.
   the provider's app-managed tool transport. The host resolves the selection
   against the thread's own mode scope, connects the supervised session for
   that scope, offers only the selected tools, and refuses the turn when the
-  provider or model cannot carry Octant's tools. Below Full access every call
-  waits for an approval in the turn's window, shown in the open thread, unless
-  a remembered approval covers it (next item). At Full access a tool of a
+  provider or model cannot carry Octant's tools. Below Full access the first
+  call to any tool of a server waits for an approval, shown in the open
+  thread; that one answer covers all of that server's tools, bound to the
+  server's signing key, and a Plan turn is still asked for every call
+  (maintainer decision, 2026-11-12; next item). At Full access a tool of a
   trusted and enabled server runs without asking, on a thread marked by
   outside content too
   ([the Full access rule](#security-and-authority); maintainer request,
   2026-11-12). Not built yet: today every call asks at every level unless a
-  remembered approval covers it. Who may answer:
+  remembered approval covers it, and an answer covers one tool. Who may
+  answer: a local window or a paired device, alike, for any prompt on a thread
+  it may drive, with the same answers, remembering included (maintainer
+  decision, 2026-11-12). Not built yet: today the three rules below hold:
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
     may drive (bound to the Project the prompt recorded).
@@ -10324,28 +10384,35 @@ that is not yet effective for the thread is refused and never reaches the model.
   update or a changed listing is a new question
   (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
   identifiers and digests, never a call's arguments or result.
-  - A grant grows only through that answer from the local window whose own
-    turn raised the prompt. No route, command, manifest field, structured
-    reference, tool call, model output, paired device, or host-owned turn (a
-    routine, a goal loop, a usage-limit resume, a child-run delivery) can
-    create one. A host-owned turn in the Project may use one, but the prompt
-    it raises is approved once and is never remembered, even when a person
-    at a local window answers it: nobody chose to send that turn. A paired
-    device's turn is treated the same way: it may use a grant, and its prompt
-    is approved once, whether the device or a local window answers.
-    Remembering is an answer at the machine, and the person who sent that
-    turn is not at it.
+  - A grant grows only through that answer from a person, at a local window
+    or a paired device (maintainer decision, 2026-11-12). No route, command,
+    manifest field, structured reference, tool call, model output, or
+    host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
+    delivery) can create one. A host-owned turn in the Project may use one,
+    but the prompt it raises is approved once and is never remembered, even
+    when a person answers it: nobody chose to send that turn. Not built yet:
+    today only the local window whose own turn raised the prompt can remember;
+    a paired device's turn may use a grant, and its prompt is approved once,
+    whether the device or a local window answers.
+  - A package update signed by the same key keeps the package's trust and its
+    remembered tool approvals; a new or missing signing key asks again
+    (maintainer decision, 2026-11-12). Not built yet: today a grant binds the
+    package version and digest, so every update is a new question.
   - A Plan turn is asked for every call, and the answer covers that call
     alone. A Chat thread outside a Project can remember a grant for the
     account (maintainer request, 2026-11-12; not built yet: today a thread
     with no Project is asked for every call). An answer that asks to be
     remembered where it cannot be is refused and the call keeps waiting.
-  - Below Full access, on a thread that has taken in outside content, a grant holds only for a
+  - Below Full access, on a thread that has taken in outside content, a grant holds for a
     stdio server, which Octant launches with no network and writes limited to
-    its plugin data. A network (HTTP) server's tool asks for every call there
-    and the answer is single use, because its arguments can carry out what
-    the thread has read. Every MCP result taints its thread, so a network
-    tool's grant spares the prompt only until that thread's first tool result.
+    its plugin data. A network (HTTP) server's tool asks once per thread and
+    server after the mark, then runs for the rest of that thread, because its
+    arguments can carry out what the thread has read and one answer says the
+    person accepts that for this server (maintainer decision, 2026-11-12). Not
+    built yet: today a network server's tool asks for every call there, the
+    answer is single use, and, since every MCP result taints its thread, a
+    network tool's grant spares the prompt only until that thread's first
+    tool result.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
@@ -10355,10 +10422,12 @@ that is not yet effective for the thread is refused and never reaches the model.
     withdrawal is later in the journal than the grant, whether or not the
     host stopped before appending the revocation; Settings does not list it
     and a call asks again. A person
-    revokes one through the local-only `/api/extensions/tool-grants`, which
+    revokes one through `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings ›
     Permissions lists them by Project with Revoke, and the prompt offers "always
-    allow" only to a client on a loopback host.
+    allow" to a local window and a paired device (maintainer decision, 2026-11-12;
+    not built yet: today the route is local-only and the prompt offers
+    "always allow" only to a client on a loopback host).
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called
@@ -10403,7 +10472,8 @@ that is not yet effective for the thread is refused and never reaches the model.
   "Confirm each billed desktop" is on, which it is by default (maintainer
   request, 2026-11-12; not built yet: today every billed desktop is confirmed
   and no setting exists). Billed desktops
-  are off until a person at a local window sets a monthly spend cap; each
+  are off until a person, at a local window or a paired device (not built yet:
+  today a local window only), sets a monthly spend cap; each
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
@@ -10545,8 +10615,9 @@ the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
 approvals, remembered grants, taint rules, and the confined launch apply
 unchanged; the package is installed, trusted and switched on as one act,
-because the person just typed it in. Only a local window may add one
-(`/api/extensions/user-servers`); a paired device cannot. A value the person
+because the person just typed it in. A local window or a paired device adds one
+(`/api/extensions/user-servers`; maintainer decision, 2026-11-12; not built yet:
+today a paired device cannot). A value the person
 marks secret never enters the package: the host stores it in the credential
 broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
 `mcp-server-credential` Keychain service or Secret Service attribute) and the
@@ -10608,10 +10679,11 @@ the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
 plan id and a random confirmation token, `apply` runs only that plan with its token, once,
 within ten minutes, in the window that asked, and refuses when the account or
-its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **Local window only**: every step
-needs the window capability, a request forwarded from a paired device is
-refused (`not-a-local-window`), and no agent tool or route reaches it, since
-an agent holds no window capability. **No shell**: the program is started with
+its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
+needs a local window's capability or a paired device's session (maintainer
+decision, 2026-11-12; not built yet: today a request forwarded from a paired
+device is refused, `not-a-local-window`), and no agent tool or route reaches
+it, since an agent holds neither. **No shell**: the program is started with
 an argument list, every value is validated first (names are
 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, a web address must parse as http or https
 without credentials, a marketplace is `owner/repo`, an https address, or an
@@ -10643,7 +10715,8 @@ single-event aggregate, names the provider, the account, the command kind, the
 name the person gave, whether it succeeded, and whether a secret was used;
 it carries no address, argument, value, or secret. **What stays forbidden**:
 hand-editing a provider's config files, running a command the person was not
-shown, doing this from a paired device, doing it from an agent, passing a
+shown, doing it from an agent (and, not built yet otherwise, from a paired
+device today), passing a
 secret on a command line, showing a command whose text can differ from what runs (control,
 format and line-separator characters are refused in every value), accepting a marketplace's own install command for
 the person (the program's `--yes` is never passed), and any command the
@@ -10675,8 +10748,9 @@ is skipped rather than failing the turn, so a disabled or removed plugin
 never blocks work. A pin grants nothing: every tool call still
 asks, or uses a remembered approval in that Project, and the resolver's
 catalog, mode and provider checks apply as for an explicit selection. Chat
-has no Project and no pins. Only a local window sets a pin; a paired device
-may read the list. Uninstalling a package forgets its pins everywhere.
+has no Project and no pins. A local window or a paired device sets a pin
+(maintainer decision, 2026-11-12; not built yet: today a paired device may only
+read the list). Uninstalling a package forgets its pins everywhere.
 
 **Where a package works, on its card.** Each installed package's card says in
 words where it works, derived from the same data and rules the host applies
@@ -10717,12 +10791,18 @@ views use and under the same server checks. Connect calls the one shared
 connect function Connectors uses: Connect… on a card opens the detail, which
 states the authority in full and holds the one confirming press, the key field
 for a key connector and the sign-in for a sign-in connector; it still installs,
-trusts and turns on as one act, and only on the Octant window of the host.
+trusts and turns on as one act, from the Octant window of the host or a
+paired device (maintainer decision, 2026-11-12; not built yet: today only on the
+Octant window of the host).
 Rationale: one press on a card would connect without the authority statement
 in view. A Marketplace plugin
 is read first (the same inspection Marketplace makes, so the Marketplace
-fetches switch still governs it) and then installs with one Install that never
-trusts or turns it on; Trust and Turn on stay separate clicks afterwards.
+fetches switch still governs it) and then one confirmation installs, trusts
+and turns it on, for any plugin or connector and not only a provider driver;
+Install alone, Trust and Turn on stay available as separate steps for a
+person who wants them (maintainer decision, 2026-11-12). Not built yet: today
+one Install never trusts or turns a Marketplace plugin on, and Trust and Turn
+on are separate clicks afterwards.
 Found tools and blocked items still open Installed, which keeps their flows.
 A connector with a bundled mark shows it (`connectorLogos.ts`; each is a
 CC0 Simple Icons path with its source recorded beside it and noticed in
@@ -10872,8 +10952,9 @@ another API and receive it on connect; that names the authorization server;
 its metadata (RFC 8414, or the OpenID discovery document) must name that
 same issuer, names the endpoints and must allow PKCE with S256; Octant
 uses the locally configured application registration when one exists for
-that exact resource and issuer. Setup is a local-window-only
-`configure-client` request on the existing `/api/extensions/sign-in` route;
+that exact resource and issuer. Setup is a `configure-client` request from a
+local window or a paired device (maintainer decision, 2026-11-12; not built yet:
+today local-window only) on the existing `/api/extensions/sign-in` route;
 it accepts only a generated hosted MCP server at that resource, and does not
 begin consent or alter an existing account grant. Safe registration metadata
 lives separately from account grants in the existing MCP sign-in state file,
@@ -11035,8 +11116,9 @@ component's authentication generation, sessions, desired state and failures
 in every task scope through the same path a sign-in change uses, so the next
 authoritative task reconciliation connects fresh; a task using it elsewhere
 connects again on its next turn. Reconnect connects nothing itself and never
-replays a failed call; it is a local-window act, and the route refuses it to a
-paired device, which may read the listing only. Rationale: connecting from
+replays a failed call; it is the person's act, at a local window or a paired
+device (maintainer decision, 2026-11-12; not built yet: today the route refuses it
+to a paired device, which may read the listing only). Rationale: connecting from
 Settings would discover tools outside a task's authority, so the person's
 action only clears what blocks the next authorized connect.
 
@@ -11253,10 +11335,12 @@ retrying. No shared confidential secret ships in the app, and no hosted Octant
 confidential-client service is introduced. GitHub's PAT path remains available.
 A server that never asks for a sign-in is reported as such. The
 person's click on Sign in is the acknowledgment: there is no vendor terms
-text for a server they added themselves. A paired device can read the state
-and nothing more: a status read from a device returns the last known state
-of a pending attempt without polling the broker, since polling can finish
-the sign-in and store the grant, which is a host action. The release-boundary hold on a connector
+text for a server they added themselves. A paired device starts, finishes
+and removes a sign-in as a local window does; the grant is still stored only
+in the host's credential broker (maintainer decision, 2026-11-12). Not built
+yet: today a paired device can read the state and nothing more, and a status
+read from a device returns the last known state of a pending attempt without
+polling the broker, since polling can finish the sign-in and store the grant. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates it set
 are met by this section and the rules above.
 
@@ -11474,8 +11558,9 @@ assume package files on disk:
   same `expectedStateVersion` rule as an installed package and is refused as
   stale otherwise. Every other package command that names one (install,
   update, rollback, uninstall, trust, a component switch, an npm check) is
-  refused with a typed result, and only a local window may send it, as for
-  any lifecycle command.
+  refused with a typed result. A lifecycle command comes from a local window
+  or a paired device (maintainer decision, 2026-11-12; not built yet: today
+  only a local window may send one).
 - **Not a scope's plugin.** A scope's effective state leaves bundled plugins
   out, so they are never addressed with `@`, selected or pinned for a turn, or
   given tools, and a switch does not move the catalog epoch. The Library does
@@ -11504,13 +11589,14 @@ proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
 protocol on macOS, and admission (trust at a digest, a provider added off from
-a local window, host-run Verify tools, and the process stopped whenever the
+a local window (or, not built yet, a paired device), host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
 journaled at the digest that crashed, which a restart does not lift. Publisher
 signatures are built too: a signature file is verified at inspection, the key is
 pinned per package name and source at first trust, and a version by another key
-is held until the person re-trusts the new publisher at a local window. Only a
+is held until the person re-trusts the new publisher (at a local window
+today; a paired device too once built). Only a
 macOS host admits one. The author kit (`@octant/provider-sdk/outside-driver`,
 `outside-driver-serve`, `outside-driver-conformance`, and `outside-driver-sign`)
 and an example loopback driver package live in the provider SDK; its
@@ -11587,7 +11673,12 @@ mechanisms are:
   on its own owner list, for a request signed by a key its platform uses after
   the person proves presence, or for a short administration window after one
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Paired remote clients keep their own device-session path, unchanged.
+  A paired remote client keeps its own device-session path (device key,
+  pinned host identity, session) and never holds the bridge secret; an
+  authenticated session on that path carries what a local window's capability
+  carries (maintainer decision, 2026-11-12). Not built yet: today that path
+  reaches only the routes the remote gateway admits, and the owner-device
+  path above is the only one that gives a device window authority.
   **A native Nightly main is admitted per window.** Octant Nightly never holds
   the bridge secret. Its window registration adds a main-only token, distinct
   from the window capability and renderer identity, that Stable's main hands
@@ -11717,18 +11808,31 @@ mechanisms are:
     6. Billed or off-machine desktops: the spend cap is mandatory, and
        inside it the confirmation of each billed or off-machine lease and
        each transfer to a cloud desktop is a setting, on by default.
-    7. Who may choose Full access: a local window, or an owner device the
-       person marked. No other paired device and no agent grant raises a
-       thread to it.
-    8. The one-time warning when a machine or a Project first picks it.
+    7. The one-time warning when a machine or a Project first picks it.
+
+    Who is asking is not on the list. Any paired device sets a thread, a
+    Project, or the default to Full access and starts a thread there exactly
+    as a local window does, with no owner-device requirement and no extra
+    unlock, and an agent grant runs at Full access when the person chose that
+    level for the grant (maintainer decision, 2026-11-12). An agent creating
+    or confirming a routine is not on the list either: at this level the
+    routine is created paused and shown in the thread, which is behavior, not
+    an ask.
 
     Rationale: the same agent already holds an unwrapped shell and an open
     network at this level, so an ask on a download, a site, a Model Context
     Protocol tool, or a device effect costs the person's attention and
     protects nothing the shell does not already reach. The list keeps the
     asks whose effect is irreversible, visible to other people, spends
-    money, or acts on what only the person holds. Not built yet: the rules
-    this replaces still ask today; each owning section marks its own.
+    money, or acts on what only the person holds. An authenticated paired
+    device is the person, so holding it to less than a local window adds
+    friction for the person and stops nobody else. What protects the host is
+    unchanged: the device's own key, the pinned host identity, bounded
+    sessions, the journal recording every action with the device as its
+    actor, and revocation, which ends the device's reach at once. Not built
+    yet: the rules this replaces still ask today, and a paired device that is
+    not an owner device and an agent grant are still refused Full access;
+    each owning section marks its own.
 
   - **Unattended work.** At every level a wait is the safe state, so an ask
     never turns into a refusal by timing out: an unanswered approval or
@@ -11814,9 +11918,10 @@ mechanisms are:
       runtime that cannot keep it), "Keep the sandbox at Full access" in
       Settings › Code › Access and Settings › Work, and "Sandbox at Full
       access" beside a Project's default mode. In the terminal: `octant
-settings sandbox on|off [--work]`. Only a window on this host can turn
-      it off for a Full access thread, because that change names Full access,
-      which a paired device that is not an owner device cannot.
+settings sandbox on|off [--work]`. A window on this host or any paired
+      device turns it off for a Full access thread (maintainer decision, 2026-11-12;
+      not built yet: today only a window on this host can, because that
+      change names Full access, which a paired device is refused).
       Verified with the real Seatbelt profile on macOS: writes inside the
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
@@ -11870,8 +11975,9 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
     answer leaves new Work threads at Ask first. A new Work thread takes its
     Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a paired device that is not an
-    owner device cannot pick Full access for it.
+    first, Accept edits, or Full access, and a paired device picks any of them
+    as a local window does (maintainer decision, 2026-11-12; not built yet:
+    today a paired device cannot pick Full access for it).
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
     thread. The Browser asks at Full access only on a signed-in profile; a
@@ -12099,8 +12205,10 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   or first run) or a Project (its default or one of its threads) picks Full
   access, the window shows one warning: agents can change any file and run
   any command without asking, with no sandbox, so they can read the whole
-  home folder, including SSH and cloud keys. It is kept in the window's
-  storage, since only a window on this host can choose Full access. What
+  home folder, including SSH and cloud keys. A paired device that picks Full
+  access first shows the same warning (maintainer decision, 2026-11-12; not
+  built yet: today the warning is kept in the window's storage, since only a
+  window on this host can choose Full access). What
   still holds at Full access is privacy and the record, not prompts: no
   telemetry and the provider telemetry guards, the journal of every tool
   call and level change, secret redaction in logs, journal and exports,
@@ -12120,12 +12228,13 @@ access` agree); a thread's own change is journaled as
   Project modes existed starts its threads in Full access, as it did. Full
   access needs no native confirmation and is always journaled on the thread:
   session-only Full access is gone, and a session grant left from before is
-  revoked on the thread's next mode change. A paired device may lower a
-  thread but cannot raise one to Full access or start one at Full access;
-  the host refuses those at the route with "Full
-  access is chosen in the Octant window on this host." An owner device the
-  person marked may do both (maintainer request, 2026-11-12; not built yet:
-  today it is refused as any paired device is). `octant agent` keeps
+  revoked on the thread's next mode change. Any paired device lowers a
+  thread, raises one to Full access, and starts one at Full access, as a
+  local window does, with no owner-device requirement and no extra unlock
+  (maintainer decision, 2026-11-12). Not built yet: today a paired device may
+  lower a thread but the host refuses a raise or a Full access start at the
+  route with "Full access is chosen in the Octant window on this host.", an
+  owner device included. `octant agent` keeps
   sending Full access exactly when the Project remembers it, and
   `octant agent --access <mode>` asks for any mode on a new thread:
   `full-access` is remembered for the Code Project through the same
@@ -12213,10 +12322,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
-  each mode's own bounds and sanitization. The read is local-window only: its
-  path is outside every prefix the remote listener forwards, the remote action
-  classifier names no action for it, and the route refuses a paired device's
-  principal. Freshness rides the Machine change feed: any harness question,
+  each mode's own bounds and sanitization. A paired device reads it as a local
+  window does (maintainer decision, 2026-11-12). Not built yet: today the read
+  is local-window only: its path is outside every prefix the remote listener
+  forwards, the remote action classifier names no action for it, and the
+  route refuses a paired device's principal. Freshness rides the Machine change feed: any harness question,
   the lead's own or a child's, asked or settled publishes `work-navigation` and
   `code-navigation` (a Chat lead's question is journaled on the attempt), and
   any harness approval, the
@@ -12236,9 +12346,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   binding could answer, the subagent waits each persisted local window bound to
   the parent's project could open, and each mode's own navigation run state,
   and adds no authority or state.
-  It is local-window only under the same rules as pending requests: outside
-  every forwarded prefix, no remote action, and a paired device's principal is
-  refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
+  It follows the same rule as pending requests; today that is local-window
+  only: outside every forwarded prefix, no remote action, and a paired
+  device's principal is refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60
@@ -12637,7 +12747,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Claude artifacts, on a claude.ai account whose person enabled them
   (maintainer decisions, 2026-10-27 and 2026-10-28;
   [Providers and model endpoints](design/model-endpoints.md#claude-artifacts)).
-  Two choices, both off by default and both only from a window on this host:
+  Two choices, both off by default, from a window on this host or a paired
+  device (maintainer decision, 2026-11-12; not built yet: today only from a
+  window on this host, and the routes below refuse a paired device):
   **Enable Claude artifacts** on the account (the server refuses the provider
   command from anyone else) makes the choice available, and each thread then
   chooses artifacts instead of Canvas for itself, journaled on the thread
@@ -13273,13 +13385,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Project's bound root at its current binding revision (the Project's own
   folder, never a thread's managed worktree) through the same confinement a
   Code thread's terminal gets, with its own shell state and no credential
-  references. Only the person at a local window whose workspace holds that
-  Work or Code Project may start, attach to, type into, resize, or stop it. That is the
+  references. Only the person, at a local window whose workspace holds that
+  Work or Code Project or at a paired device that reaches it, may start, attach to, type into, resize, or stop it. That is the
   user-initiated terminal the Code policy already lets a local person open in
   an approval-gated thread without a prompt, so it asks for none and reaches no
-  further than that thread's terminal. A paired device is refused outright:
-  a remote Code terminal is gated as an agent, and a Project terminal has no
-  thread to hold that approval. The shell runs under the posture a new thread
+  further than that thread's terminal. A paired device uses it as the local
+  person does (maintainer decision, 2026-11-12). Not built yet: today a paired
+  device is refused outright: a remote Code terminal is gated as an agent,
+  and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
   Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. The owning
   window, Project, and binding revision are checked before every command, and
@@ -13295,7 +13408,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
 - **Project actions.** A Work or Code Project keeps up to twelve named
   actions on its record: a unique name, a one-line command and a relative
   directory. The person saves the list from the Project overview through the
-  existing versioned Project events; paired devices cannot save or launch them.
+  existing versioned Project events; a paired device saves and launches them too
+  (maintainer decision, 2026-11-12; not built yet: today paired devices cannot).
   Suggestions from package scripts and Makefile targets remain read-only until
   confirmed. Running first previews the host-resolved folder and branch.
   A task with a recorded working-folder choice defaults to that approved folder
@@ -13351,8 +13465,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
-  terminal, and honored only from a local window: a paired device, a routine, or
-  an agent is refused and no terminal starts. Only an active Code thread has
+  terminal, and honored only from the person, at a local window or a paired
+  device: a routine or an agent is refused and no terminal starts (maintainer
+  decision, 2026-11-12; not built yet: today a paired device is refused too). Only an active Code thread has
   one; Work has no thread terminal, and the Project terminal cannot ask. The host mints a
   grant bound to one host run, thread, terminal session, and window, holds it in
   memory only, and starts the terminal with two variables through its brokered
@@ -13457,11 +13572,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   no thread's origin approval carries into it. A separate Project browser
   service owns these contexts; the agent's browser tools resolve contexts only
   through the thread-owned automation service, which never sees them, and the
-  runtime is handed only the page action, never an authority. Only the person
-  at a local window whose workspace holds that Project for its mode may open,
-  read, or close it; a paired device is refused outright, because creating a
-  browsing context is already local-only and a Project page has no thread
-  whose approval could stand in. It opens only http and https addresses; a
+  runtime is handed only the page action, never an authority. Only the person,
+  at a local window whose workspace holds that Project for its mode or at a
+  paired device that reaches it, may open, read, or close it (maintainer
+  decision, 2026-11-12). Not built yet: today a paired device is refused
+  outright, because creating a browsing context is local-only and a Project
+  page has no thread whose approval could stand in. It opens only http and https addresses; a
   page on the same site takes a new address in place, and another site starts
   a fresh context whose allowlist is that site. It carries the host's usual
   session ceiling and is not journaled, like a thread's browsing context.
@@ -13476,18 +13592,19 @@ approval-gated` command that undoes it. The terminal shows no one-time
   headless and the desktop Browser. The list of a Project's live agent pages is
   a server route for a window that holds the Project and the thread: it returns
   names (page title and host, thread id and title, whether an agent drives it)
-  and never page text or a picture, and a paired device is told a stored-profile
-  page exists and nothing more.
+  and never page text or a picture; a paired device reads the same list
+  (maintainer decision, 2026-11-12; not built yet: today a paired device is told
+  a stored-profile page exists and nothing more).
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
-  per browsing context) unless the person at a local window puts it in their
+  per browsing context) unless the person, at a local window or a paired device, puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices that are not owner devices are refused on profile pages. A managed child, named routine
+  a paired device uses profile pages and answers their site approvals as a local window does (maintainer decision, 2026-11-12; not built yet: today paired devices are refused on profile pages). A managed child, named routine
   or selected terminal session may use an existing sign-in only through an
-  explicit local-person grant, "this routine or child may use this profile on
+  explicit grant from the person, "this routine or child may use this profile on
   these sites", which is persistent and survives a host restart and an app
   update (maintainer request, 2026-11-12; not built yet: today it is a
   host/recipient/model/authority/profile/HTTPS session permission that lapses
@@ -13508,14 +13625,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   clears its profile with its other data. Browser extensions install only from an
   unpacked Manifest V3 folder chosen with the native picker, or from a copy of
   an extension in another Chromium-family browser on this Mac that the person
-  picks in Settings, at a local window (the host copies it under
+  picks in Settings (the native picker needs a local window; the host copies it under
   `browser-extensions/<id>/` and journals the install), start disabled, are
   enabled per profile after the person reads what they can read and change, and
   never load into a Private page; an update that asks for more turns off
   everywhere until reconfirmed, and the desktop app loads them into the profile's
   Electron session, with `chrome.tabs` for the profile's own pages and
-  `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn waits
-  for a local window or an owner device, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn is answered on that phone or at any window or paired device that may drive the thread
+  (maintainer decision, 2026-11-12; not built yet: today it waits for a local window), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -13622,8 +13739,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
   classifier. A remote principal can never exceed host, mode, provider, Project,
-  or thread authority, cannot mint local receipts, and every remote mutation is
-  journaled with its principal. A hub acting on its spoke, or a spoke
+  or thread authority, and every remote mutation is journaled with its
+  principal. An authenticated paired device is the person and holds what a
+  local window holds, with no exceptions (maintainer decision, 2026-11-12): the
+  split of actions into ones a device may approve and ones that need the host
+  is removed, and wherever a specification still names only a local window as
+  the party that may do something, it describes what is built today and the
+  rule is a local window or a paired device. What does not change: a new
+  device is paired only with the approval of a party the host already trusts
+  (a local window or an already paired device), every session is signed by the
+  device's key against the pinned host identity over TLS, the pairing and
+  sign-in rate limits hold, secrets are redacted and never journaled or
+  logged, credentials are stored only in the credential broker, and authority
+  is checked on the host. Not built yet: today a remote device cannot mint
+  local receipts and is held to the remote action catalogue. A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
@@ -13631,7 +13760,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   another machine on the person's own network is a third such principal, held
   to an agent grant the person creates over the loopback administration
   channel (`/api/desktop/agent-access`, `octant agent-access`): named Projects,
-  modes, a highest level below Full access, tools, models, limits, and expiry.
+  modes, a highest level (Full access included when the person chooses it for
+  the grant; maintainer decision, 2026-11-12; not built yet: today a grant's
+  highest level stops below Full access), tools, models, limits, and expiry.
   It reaches only `POST /api/agent-access/claim` and `POST
 /api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
   Tailscale sources only, authenticated by a signed bridge proof or a bearer
@@ -13641,37 +13772,37 @@ approval-gated` command that undoes it. The terminal shows no one-time
   It never answers approvals or adds Projects, its threads are journaled as its
   own and marked as outside content, and revoking the grant ends its sessions.
   Settings › Remote access › Agent access administers grants from a local
-  window; a paired device may list them and revoke one through
-  `/api/agent-grants`, never make or widen one
+  window or a paired device (not built yet: today a paired device may list
+  them and revoke one through `/api/agent-grants`, never make or widen one)
   ([Agent access from other machines](design/agent-access.md)). The listener, pairing tickets, pairing
-  decisions, and device inventory are administered only over the host's
-  loopback administration channel — the desktop bridge secret plus a
-  registered window capability — which both Settings → Remote access and the
-  `octant listener` / `octant pair` / `octant auth` commands use; the private
-  listener forwards none of those routes. A listener enabled there is
+  decisions, and device inventory are administered by a local window over the
+  host's loopback administration channel (the desktop bridge secret plus a
+  registered window capability, which both Settings → Remote access and the
+  `octant listener` / `octant pair` / `octant auth` commands use) or by an
+  already paired device over its own session, so a new device is always
+  approved by a party the host already trusts (maintainer decision,
+  2026-11-12). Not built yet: today only the loopback channel administers
+  them and the private listener forwards none of those routes. A listener
+  enabled there is
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), with a pasted certificate's TLS key or, for a self-made
   certificate, only that it is self-made, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
-  A paired client may click, hover, scroll, and press keys in the host's agent
-  browser, and list its tabs, but may not navigate it, type into it, choose a
-  list option, drag, upload, save a download, or open, switch, or close a tab. Those clicks
-  and keys can still follow a link or submit a form within the context's
-  approved origins; the host's navigation guards refuse any page outside them,
-  so a paired client cannot take the host browser to a new origin.
-  A paired client also cannot take the page over from the agent or hand it
-  back; that hold is the person's at a window of this computer, checked by the
-  route, and the gateway does not admit its paths
+  A paired client uses the host's agent Browser as a local window does
+  (maintainer decision, 2026-11-12): it navigates, types, chooses a list
+  option, drags, uploads, saves a download, opens, switches, and closes tabs,
+  takes the page over from the agent and hands it back, writes to a thread
+  terminal, answers profile site approvals, and raises a thread to Full access
+  or starts one there. The host's navigation guards and site approvals apply
+  to it as they do to a window, and each action is journaled with the device
+  as its actor
   ([Person and agent together](design/browser-agent-tool.md#person-and-agent-together)).
-  An owner device the person marked at a local window is the exception
-  (maintainer request, 2026-11-12): it may raise a thread to Full access or
-  start one there, navigate and type in the host's agent Browser, write to a
-  thread terminal, and answer profile site approvals. Its approval answers
-  ride the five-minute unlock session by default; an unlock for each answer is
-  a setting. Every other paired device keeps the limits above
+  Not built yet: today a paired client may click, hover, scroll, press keys,
+  and list tabs only; navigation, typing, list options, drag, upload,
+  download, tab changes, and the take-over hold are refused to it (the gateway
+  does not admit their paths), and Full access, terminal writes, and profile
+  site approvals are refused to every paired device, an owner device included
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Not built yet: today these four are refused to an owner device as to any
-  other paired device.
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget
@@ -14194,7 +14325,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
     request plus a registered window capability, and refuses any request
     carrying an `Origin` header or a non-loopback `Host`. `/api/desktop` is
     local-only, so the private listener never forwards these routes and a
-    paired device cannot reach them. The bridge secret lives in the
+    paired device cannot reach them. A paired device may set, replace, and
+    remove a provider key and start a provider sign-in over its own
+    authenticated session, in a native client or a paired browser alike; the
+    key travels over the pinned TLS session, goes straight to the credential
+    broker, and is never journaled, logged, or returned (maintainer decision,
+    2026-11-12, which removes the rule that a provider key is never entered
+    through a browser; not built yet: today only the loopback routes here
+    accept a key). The bridge secret lives in the
     owner-only runtime directory, so only processes running as the host's
     user can call these routes, and no browser page can: a browser always
     sends `Origin` and never holds the secret. The server passes the key to
@@ -14349,7 +14487,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   registrations and rechecks that the same registration still exists at use. The bundled consumer registers from its plugin factory through this same port;
   server startup does not import its descriptor or name its operation.
   - The card submits privately to `/api/credential-requests`, authenticated to
-    its originating window. Paired clients are refused. It neither submits a
+    its originating window or paired device (maintainer decision, 2026-11-12; not
+    built yet: today paired clients are refused). It neither submits a
     chat message nor writes a credential to the journal. The host immediately
     claims the request before asynchronous work, rechecks thread, Project,
     checkout, provider, profile and window authority, and performs at most one
@@ -14392,7 +14531,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Keychain item) is a new adapter and no change to the broker, the journal, or
   Settings.
   - **Link.** Settings › Secret stores sends `link-store` to the host-only
-    `/api/secret-stores/commands` route (a local window; `/api/secret-stores` is
+    `/api/secret-stores/commands` route (a local window or a paired device by
+    maintainer decision, 2026-11-12; not built yet: today `/api/secret-stores` is
     a remote local-only prefix, so a paired device is refused). The broker's
     `/v1/secret-stores/link` links a store only while its tool is installed and
     the store is open, and records the store and the link time in
@@ -14460,7 +14600,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **Browser credential-use permission.** Vendor partner autofill access for
     Octant is unverified and is not assumed or required by this CLI-backed
     binding. No partner signup or extension compatibility is implied.
-    A local window may review a selected
+    A local window or, not built yet, a paired device may review a selected
     1Password account/vault/item and record a distinct
     `browser-credential-grant`, never an OAuth identity or a store unlock.
     The Browser derives the owning task, Project, profile and exact HTTPS
@@ -14779,8 +14919,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   computer that brought the revoked one in, directly or through others, can
   revoke it. A member leaves by signing a left record with its own key, which
   cuts it just before that record; it then forgets its identity and deletes
-  its device key. Store setup, joining, revoking, and leaving happen on the
-  host, never from a paired phone. Store credentials live in the host credential store — macOS
+  its device key. Store setup, joining, revoking, and leaving are done by the
+  person at a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today never from a paired phone). Store credentials live in the host credential store — macOS
   Keychain or freedesktop Secret Service — and are not written into the
   replica. An S3-compatible store is contacted only over authenticated TLS. A
   plaintext endpoint is refused, and store credentials are not sent on it.
@@ -14870,8 +15011,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   judged under the origin's posture (a server in a Plan thread's own worktree is
   never stoppable; the Project folder is no one thread's, so a server there is
   judged approval-gated even when a Plan thread works in it), a server Octant
-  does not own needs the confirmation naming process, folder and port, and a
-  paired device may stop only a server Octant owns; the actor comes
+  does not own needs the confirmation naming process, folder and port, which a
+  paired device gives as a local window does (maintainer decision, 2026-11-12;
+  not built yet: today a paired device may stop only a server Octant owns);
+  the actor comes
   from the request's authenticated principal. A window reads the host it is
   connected to; All Hosts federation does not carry these rows, with one
   exception: a desktop window whose Environments filter is narrowed to one
@@ -15228,8 +15371,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   removing a built-in group needs an explicit confirm, and the command
   carries `confirmed: true`, so an unconfirmed removal is not representable.
   Every change is journaled under the `protected-files` aggregate with the
-  actor; only a window on this host may change the list, never a paired
-  device. The journal holds changes, not the list, so a group a later Octant
+  actor; a window on this host or a paired device changes the list
+  (maintainer decision, 2026-11-12; not built yet: today never a paired
+  device). The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
 - **Linux access-time mediation is not yet shipped.** Parked (maintainer
@@ -15629,8 +15773,8 @@ whole, journal first, as `shield-servers.server-set@1` or
 `shield-servers.server-removed@1` on the `shield-servers` aggregate; a
 Project's list is journaled whole as `shield-servers.project-servers-set@1`
 under the Project's id, and `shield-servers.project-override-cleared@1`
-returns the Project to the account list. Startup replays them; only a person
-at a local window changes them (`GET`/`POST /api/shield/servers`, with
+returns the Project to the account list. Startup replays them; only a person,
+at a local window or a paired device (not built yet for the device), changes them (`GET`/`POST /api/shield/servers`, with
 `?projectId=` for a Project's list). The Judge, the confined path below, the
 record, and the notes all read the thread's Project's list. An alias is unique without regard to case, as ssh
 matches `Host` patterns, and a runbook inside a key or credential folder is
@@ -15807,7 +15951,8 @@ this; it would need each runtime's profile to open the relays.
 **The credential broker for SSH.** For a server registered to sign in with
 a key Octant keeps, the credential broker makes an Ed25519 key the first time
 the person asks for it (**Show key** in Settings, `show-server-key` on
-`POST /api/shield/servers`, a local window only, for a server whose sign-in
+`POST /api/shield/servers`, from a local window or, not built yet, a paired
+device, for a server whose sign-in
 is `octant-key`) and keeps it in a credential namespace of its own (the
 `app.octant.ssh-keys.v1` Keychain service, the `octant.ssh-keys.v1` Secret
 Service attribute), keyed by the server's id. Its routes (`/v1/ssh-keys/ensure`,
@@ -15843,8 +15988,8 @@ is stored as `CodeSettings.shieldModel`, memory's as
 `PersonMemorySettings.distillModel` and the second opinion's as
 `PersonMemorySettings.decisionReviewModel` (the one host-wide record only a
 local window reads or changes); the surface is the one place any is
-chosen, and all are changed only from a window on this host (a paired device
-cannot). The surface says in plain words that what the job reads goes to the
+chosen, and all are changed from a window on this host or a paired device
+(maintainer decision, 2026-11-12; not built yet: today a paired device cannot). The surface says in plain words that what the job reads goes to the
 chosen provider: the Judge's input (the person's recent messages, the pending
 call and the Project's root, never tool results or outside content) and
 memory's (a thread's title and the person's own messages, secrets redacted as
@@ -16210,8 +16355,10 @@ enabled signed-update channel; native host admission and credentials remain
 separate prerequisites. Windows Work and Code below Full access stay
 unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so the guarded
-levels fail closed there, and Full access, which uses no confinement, is the
-one level they run at (not built yet: today every level is refused). Simulator, the Apple workbench, and vibrancy stay
+levels fail closed there. Full access uses no confinement, but running Work
+and Code there on Windows is tracked as its own work and needs Windows forms
+of the confined launches first (maintainer decision, 2026-11-12); today every
+level is refused. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 The Windows owned-control prerequisite is an original in-process Node-API

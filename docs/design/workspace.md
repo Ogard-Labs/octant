@@ -40,10 +40,13 @@ before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
 connection alone do not show it. By default no interrupted turn continues by
 itself. One setting, "Resume interrupted turns after a restart", off by
-default, changes that: when it is on, a turn with no uncertain side effect
-resumes by itself, and a turn whose last effect is uncertain still waits for
-the person (maintainer request, 2026-11-12). Not built yet: today the setting
-does not exist and every interrupted turn waits for Resume.
+default, changes that: when it is on, a turn whose last effect is proved
+settled resumes by itself, and a turn whose last effect is uncertain still
+waits for the person. The proof is a record the host writes before each tool
+call takes effect; it is built first, and the automatic resume is then
+widened to the turns it proves settled (maintainer decision, 2026-11-12). Not
+built yet: today no such record is written, the setting does not exist and
+every interrupted turn waits for Resume.
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.

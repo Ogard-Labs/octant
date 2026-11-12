@@ -184,7 +184,8 @@ the open set where packages already live.
 
 ### Admission lifecycle
 
-One **Install and trust** flow at a local window covers inspect, install,
+One **Install and trust** flow, at a local window or a paired device
+(maintainer decision, 2026-11-12; not built yet: today a local window only), covers inspect, install,
 trust and enable: the person reads one review and confirms once, and the host
 then runs steps 1 to 4 in order, each journaled through the existing extension
 lifecycle, stopping at the first that refuses. Digest-bound trust and the

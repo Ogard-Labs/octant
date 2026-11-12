@@ -1287,10 +1287,12 @@ new surface in the first slices. Rejected: remote observe now (a later,
 remote-approvable `code.debug.observe` read of the stopped state, without
 `evaluate`, can be proposed once the local panel ships); remote control.
 
-**Decision DB8: agent debug tools follow the thread's level.** An agent may
-start, control, and read a debug session: unasked at Full access,
-approval-gated per configuration below it, and refused in Plan (maintainer
-request, 2026-11-12). Recommended because at Full access the same agent
+**Decision DB8: agent debug tools follow the thread's level.** An agent
+starts, controls, reads, and stops a debug session through a plugin-shaped
+agent tool, built now: unasked at Full access, approval-gated per
+configuration below it, and refused in Plan (maintainer decision, 2026-11-12).
+A paired device drives a session as a local window does; where this document
+still refuses one (`local-host-required`), that is what is built today. Recommended because at Full access the same agent
 already runs the program from an unwrapped shell and reads what it prints, so
 refusing the debugger there protects nothing. Rejected: no agent debug tools,
 the earlier rule; a read-only agent tool for the stopped state only. Not built
