@@ -43,6 +43,8 @@ export type DockToolPress =
   | { readonly kind: "show-beside"; readonly tabId: string }
   | { readonly kind: "close"; readonly tabIds: ReadonlyArray<string> }
   | { readonly kind: "close-bottom" }
+  /** The bottom panel holds the tool behind its active one: show it there. */
+  | { readonly kind: "select-bottom" }
   | { readonly kind: "refused" };
 
 export interface DockToolButton {
@@ -92,6 +94,8 @@ export interface DockToolButtonsInput {
   /** Tools the open bottom panel holds. */
   readonly bottomHeld: ReadonlyArray<RightUtilityDockSurfaceId>;
   readonly bottomPresentedOpen: boolean;
+  /** The tool the bottom panel shows; it holds others behind it as tabs. */
+  readonly bottomActive?: RightUtilityDockSurfaceId | undefined;
   /** Both columns are at their limit, so a tool not shown has no room. */
   readonly capsFull: boolean;
 }
@@ -120,6 +124,12 @@ function describeButton(
     };
   }
   if (input.bottomHeld.includes(tool.id)) {
+    // The panel shows one of its tools at a time. Only that one is on screen,
+    // so only it reads pressed and closes; a tool behind it is open but not
+    // shown, and a press brings it to the front.
+    if (input.bottomActive !== undefined && input.bottomActive !== tool.id) {
+      return { ...base, pressed: false, open: true, press: { kind: "select-bottom" } };
+    }
     return {
       ...base,
       pressed: input.bottomPresentedOpen,

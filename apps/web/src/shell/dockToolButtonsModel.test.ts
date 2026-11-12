@@ -130,6 +130,29 @@ describe("the title band's tool buttons", () => {
     });
   });
 
+  it("reads only the bottom panel's active tool as pressed and brings a tool behind it forward", () => {
+    const model = buildDockToolButtons(
+      input({
+        bottomHeld: ["terminal", "files"],
+        bottomActive: "files",
+        bottomPresentedOpen: true,
+      }),
+    );
+    expect(byId(model, "files")).toMatchObject({ pressed: true, press: { kind: "close-bottom" } });
+    expect(byId(model, "terminal")).toMatchObject({
+      pressed: false,
+      open: true,
+      press: { kind: "select-bottom" },
+    });
+  });
+
+  it("still reveals a bottom panel that a reader hides or that is closed, from its active tool", () => {
+    const model = buildDockToolButtons(
+      input({ bottomHeld: ["terminal"], bottomActive: "terminal", bottomPresentedOpen: false }),
+    );
+    expect(byId(model, "terminal")).toMatchObject({ pressed: false, press: { kind: "reveal" } });
+  });
+
   it("disables a tool that is not shown once the tile caps are reached", () => {
     const model = buildDockToolButtons(
       input({

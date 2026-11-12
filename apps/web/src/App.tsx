@@ -4468,7 +4468,7 @@ function LaunchedShell(
     }
   }
 
-  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId) {
+  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId, restoreFocus = true) {
     const nextState = closeUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextState);
@@ -4480,7 +4480,7 @@ function LaunchedShell(
         return next;
       });
     }
-    if (nextState.tabs.length === 0) closeBottomPanel();
+    if (nextState.tabs.length === 0) closeBottomPanel(restoreFocus);
   }
   function toggleBottomPanel(opener: HTMLElement) {
     // With a reader up the panel is stepped aside, not closed, so the toggle
@@ -4536,7 +4536,7 @@ function LaunchedShell(
    * model that draws the button, so the two cannot disagree. Focus stays on the
    * button: nothing here asks the dock to take it.
    */
-  function toggleDockTool(surface: RightUtilityDockSurfaceId, _opener: HTMLElement) {
+  function toggleDockTool(surface: RightUtilityDockSurfaceId, opener: HTMLElement) {
     const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
       (candidate) => candidate.id === surface,
     );
@@ -4565,7 +4565,16 @@ function LaunchedShell(
         for (const tabId of press.tabIds) closeDockTab(tabId);
         return;
       case "close-bottom":
-        closeBottomPanelTab(surface);
+        // The panel's own close sends focus to its toggle; this press came
+        // from the tool's button, which keeps it.
+        closeBottomPanelTab(surface, false);
+        queueMicrotask(() => {
+          if (opener.isConnected) opener.focus();
+        });
+        return;
+      case "select-bottom":
+        if (readerOpen) closeWorkspaceReaders();
+        openBottomTool(surface);
         return;
       case "reveal":
         // The bottom panel holds the tool but is not on screen: a reader
@@ -5436,6 +5445,7 @@ function LaunchedShell(
           dockPresentedOpen,
           bottomHeld: bottomHeldSurfaces,
           bottomPresentedOpen: bottomPanelPresentedOpen,
+          bottomActive: activeBottomSurface?.id,
           capsFull: dockCapsFull,
         })
       : NO_DOCK_TOOL_BUTTONS,

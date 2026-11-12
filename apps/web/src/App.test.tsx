@@ -6139,6 +6139,39 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "Files" })).toBeNull();
   });
 
+  it("keeps focus on a tool's button when it closes the bottom panel's last tab", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    await screen.findByRole("region", { name: "Bottom panel" });
+    const terminal = within(await screen.findByRole("toolbar", { name: "Tools" })).getByRole(
+      "button",
+      { name: "Terminal" },
+    );
+    await waitFor(() => expect(terminal).toHaveAttribute("aria-pressed", "true"));
+
+    terminal.focus();
+    await user.click(terminal);
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Bottom panel" })).toBeNull());
+    await new Promise((done) => setTimeout(done, 50));
+    expect(terminal).toHaveFocus();
+    expect(terminal).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
