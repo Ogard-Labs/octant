@@ -1403,7 +1403,7 @@ thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
-(`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
+(`STOP_CONFIRMATION_MS`, shared with Chat) for the runtime to answer its interrupt, then
 answers `interrupted` with "Stop was not confirmed. The provider may still be
 running this turn." The turn stays live and holds its thread until the
 runtime itself reports how it ended: its tool activity meanwhile is still
