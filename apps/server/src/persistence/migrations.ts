@@ -2539,7 +2539,6 @@ CREATE INDEX validation_evidence_authority_idx
     `,
   },
   {
-    // 98 is taken by another open branch; 99 keeps the two from colliding.
     version: 99,
     name: "create_chat_streamed_response_refs",
     // A streamed delta's reference, one row per delta, so applying a delta
@@ -2558,6 +2557,21 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
       CREATE INDEX chat_streamed_response_thread_idx
         ON chat_streamed_response_projection(thread_id);
+    `,
+  },
+  {
+    version: 100,
+    name: "create_code_restart_continuation_store",
+    // The crash-loop guard for continuing a Code turn a restart cut off: the
+    // continuation the host last started on each thread and how many of its
+    // chain a restart has cut off. Host-local, not a journaled fact: it must
+    // survive exactly the restart it counts, and nothing replays it.
+    sql: `
+      CREATE TABLE code_restart_continuation_store (
+        thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+        operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+        attempts INTEGER NOT NULL CHECK(attempts > 0)
+      ) STRICT;
     `,
   },
 ];

@@ -410,6 +410,59 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device changing Continue after restart, and lets a local window", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const commands = [
+      {
+        kind: "set-code-thread-restart-continuation",
+        threadId,
+        expectedVersion: 1,
+        continueAfterRestart: false,
+      },
+      {
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        restartContinuation: true,
+      },
+    ];
+    for (const command of commands) {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000942" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      const refused = await route(remote);
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    const local = await route(
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(commands[0]),
+      }),
+    );
+    expect(local?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {
     const execute = vi.fn(async () => ({ kind: "settings-updated" }));
     const route = routeFixture({ execute });

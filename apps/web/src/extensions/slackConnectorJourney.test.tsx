@@ -41,9 +41,11 @@ describe.each(["slack", "github-oauth", "github-repositories"] as const)(
     const guideUrl = entry.auth.setupGuide;
     if (guideUrl === undefined) throw new Error("Expected a documented setup guide");
     const requestedScopes = entry.auth.requestedScopes ?? [];
+    const setupSteps = entry.auth.setupSteps ?? [];
     const registration = {
       guideUrl,
       requestedScopes,
+      setupSteps,
       ...(entry.auth.permissionNotice === undefined
         ? {}
         : { permissionNotice: entry.auth.permissionNotice }),
@@ -243,6 +245,9 @@ describe.each(["slack", "github-oauth", "github-repositories"] as const)(
         await connect(kind, user);
         const dialog = await screen.findByRole("dialog", { name: "Client setup" });
         expect(within(dialog).getByLabelText("Callback address")).toHaveValue(callback);
+        for (const step of setupSteps) {
+          expect(screen.getAllByText(step).length).toBeGreaterThan(0);
+        }
         if (connectorId === "github-repositories")
           expect(
             within(dialog).getByText(

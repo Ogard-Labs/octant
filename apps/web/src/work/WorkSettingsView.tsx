@@ -142,6 +142,22 @@ export function WorkSettingsView(props: {
             }
           />
         </SettingRow>
+        <SettingRow
+          description="When Octant stops in the middle of a turn, from a crash, a quit, or a restart of this computer, the thread picks the turn up by itself when Octant opens again. This applies to every Work thread, not only new ones. A thread can turn this off from its menu."
+          focused={props.focusedSetting === "work-restart-continuation"}
+          label="Continue after restart"
+          scope="mode"
+          settingId="work-restart-continuation"
+        >
+          <OctantSwitch
+            checked={settings.restartContinuation !== false}
+            disabled={props.controller.busy}
+            label="Continue after restart"
+            onCheckedChange={(checked) =>
+              void props.controller.update({ restartContinuation: checked })
+            }
+          />
+        </SettingRow>
       </div>
     </SettingsSection>
   );

@@ -121,11 +121,13 @@ describe("GitMutationPort", () => {
     const amended = gitOutput(repository, "rev-parse", "HEAD").trim();
 
     // A plain push cannot replace history, and a lease on a head the remote
-    // does not have must not either.
-    await expect(push()).resolves.toMatchObject({ status: "failed" });
-    await expect(
-      push({ mode: "with-lease", expectedRemoteOid: "f".repeat(40) }),
-    ).resolves.toMatchObject({ status: "failed" });
+    // does not have must not either. Git reported both refusals, so neither
+    // is left unconfirmed.
+    await expect(push()).resolves.toEqual({ status: "failed", detail: expect.any(String) });
+    await expect(push({ mode: "with-lease", expectedRemoteOid: "f".repeat(40) })).resolves.toEqual({
+      status: "failed",
+      detail: expect.any(String),
+    });
     expect(remoteHead()).toBe(published);
 
     await expect(push({ mode: "with-lease", expectedRemoteOid: published })).resolves.toEqual({
@@ -136,6 +138,50 @@ describe("GitMutationPort", () => {
     git(repository, "commit", "--amend", "--allow-empty", "--message", "Amended again");
     await expect(push({ mode: "plain" })).resolves.toEqual({ status: "applied" });
     expect(remoteHead()).toBe(gitOutput(repository, "rev-parse", "HEAD").trim());
+  });
+
+  it("reports a push whose connection broke as unconfirmed rather than failed", async () => {
+    const root = temporaryDirectory();
+    const repository = createRepository(root);
+    const remote = join(root, "remote.git");
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    git(repository, "remote", "add", "origin", remote);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    // The network drops after Git has started sending: Git exits with its
+    // transport error and no per-ref status, so the remote may hold the push.
+    const port = new GitMutationPort(
+      {
+        execFile: (file, args, environment, signal) =>
+          args.includes("push")
+            ? Promise.resolve({
+                exitCode: 128,
+                stdout: "",
+                stderr: "fatal: the remote end hung up unexpectedly",
+              })
+            : liveExecFile(file, args, environment, signal),
+        pathExists: async (path) => existsSync(path),
+      },
+      {
+        confinement: fake.confinement,
+        temporaryDirectory: fake.temporaryDirectory,
+        gitExecutable: "/usr/bin/git",
+      },
+    );
+
+    await expect(
+      port.push({
+        checkoutRoot: repository,
+        remote: "origin",
+        localRef: "refs/heads/main",
+        remoteRef: "refs/heads/main",
+        confirmation: { remote: "origin", refspec: "refs/heads/main:refs/heads/main" },
+      }),
+    ).resolves.toEqual({
+      status: "failed",
+      detail: "fatal: the remote end hung up unexpectedly",
+      unconfirmed: true,
+    });
   });
 
   it("refuses a lease that is not a full object id before Git runs", async () => {

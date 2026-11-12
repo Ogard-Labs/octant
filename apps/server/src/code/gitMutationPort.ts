@@ -76,7 +76,12 @@ export type GitMutationResult =
         | "hunk-offset"
         | "read-only";
     }
-  | { readonly status: "failed"; readonly detail?: string };
+  | {
+      readonly status: "failed";
+      readonly detail?: string;
+      /** A push whose outcome Git never reported; see `failedPush`. */
+      readonly unconfirmed?: true;
+    };
 
 const liveDependencies: GitMutationDependencies = {
   execFile: async (file, args, environment, signal, stdin) => {
@@ -440,12 +445,22 @@ export class GitMutationPort {
         : input.force.mode === "with-lease"
           ? [`--force-with-lease=${input.remoteRef}:${input.force.expectedRemoteOid}`]
           : ["--force"];
-    return this.#apply(
-      input.checkoutRoot,
-      ["push", "--porcelain", ...forceArguments, "--", input.remote, refspec],
+    const result = await this.#run(
+      [
+        "-C",
+        input.checkoutRoot,
+        "push",
+        "--porcelain",
+        ...forceArguments,
+        "--",
+        input.remote,
+        refspec,
+      ],
       signal,
+      undefined,
       input.executionPolicy,
     );
+    return result.exitCode === 0 ? { status: "applied" } : failedPush(result);
   }
 
   /**
@@ -1333,6 +1348,28 @@ function failedMutation(stderr: string): GitMutationResult {
   return detail === ""
     ? { status: "failed" }
     : { status: "failed", detail: detail.slice(0, 2_048) };
+}
+
+/**
+ * A failed push is a definite failure only when Git said the remote refused
+ * it: a `[rejected]` or `[remote rejected]` porcelain line for the ref (a
+ * non-fast-forward, a stale lease, a hook), or a remote that refused the
+ * connection itself (credentials, a missing repository) before anything could
+ * be sent. Anything else (a dropped connection, a `[remote failure]` the
+ * remote never confirmed, a timeout, no output at all) may have landed, so it
+ * is reported unconfirmed and settled later by reading the remote branch.
+ */
+function failedPush(result: CommandResult): GitMutationResult {
+  const refused =
+    /^!\t[^\t]*\t\[(?:rejected|remote rejected)\]/m.test(result.stdout) ||
+    /Authentication failed|Permission denied|could not read (?:Username|Password)|The requested URL returned error: 40[134]|Repository not found|does not appear to be a git repository/i.test(
+      result.stderr,
+    );
+  if (refused) return failedMutation(result.stderr);
+  const detail = result.stderr.trim();
+  return detail === ""
+    ? { status: "failed", unconfirmed: true }
+    : { status: "failed", detail: detail.slice(0, 2_048), unconfirmed: true };
 }
 
 function validPaths(paths: readonly string[]): boolean {

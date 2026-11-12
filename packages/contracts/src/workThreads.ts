@@ -110,6 +110,12 @@ export const WorkThread = Schema.Struct({
   browserTaskProfile: Schema.optional(BrowserProfileChoice),
   /** Present on a fork: the thread and turn its carried conversation came from. */
   forkedFrom: Schema.optional(WorkThreadForkOrigin),
+  /**
+   * Set when a person turned off **Continue after restart** for this thread:
+   * a turn a host restart cuts off waits for them instead of continuing by
+   * itself. Absent, the Work setting decides.
+   */
+  restartContinuationOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -343,6 +349,12 @@ export const WorkSettings = Schema.Struct({
   defaultAccess: WorkAccess,
   /** New Work threads at Full access keep the sandbox. Absent is off. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Settings › Work › Continue after restart: whether the host continues, by
+   * itself, a Work turn a restart cut off. Absent is on, which is also what a
+   * store persisted before the switch existed reads as.
+   */
+  restartContinuation: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 })
@@ -364,6 +376,8 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   defaultAccess: WorkAccess,
   /** Absent keeps the stored choice. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Absent keeps the stored choice. */
+  restartContinuation: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
   .pipe(
@@ -374,6 +388,15 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
     ),
   );
 export type UpdateWorkSettingsCommand = typeof UpdateWorkSettingsCommand.Type;
+
+/** The thread's Continue after restart switch; only a person at a local window. */
+export const SetWorkThreadRestartContinuationCommand = Schema.Struct({
+  kind: Schema.Literal("set-work-thread-restart-continuation"),
+  ...WorkThreadCommandFields,
+  continueAfterRestart: Schema.Boolean,
+}).annotations(strict);
+export type SetWorkThreadRestartContinuationCommand =
+  typeof SetWorkThreadRestartContinuationCommand.Type;
 
 export const WorkThreadCommand = Schema.Union(
   CreateWorkThreadCommand,
@@ -394,6 +417,7 @@ export const WorkThreadCommand = Schema.Union(
   ChangeWorkThreadAccessCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,
+  SetWorkThreadRestartContinuationCommand,
   UpdateWorkSettingsCommand,
 );
 export type WorkThreadCommand = typeof WorkThreadCommand.Type;

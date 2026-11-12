@@ -27,6 +27,7 @@ import {
   HubMemberId,
   ThreadRetentionThreadId,
   decodeCodeCommand,
+  type HostRestartRecovery,
   type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -314,6 +315,8 @@ export type RemoteDependencies = {
     readonly threadMoveState: ThreadMoveStatePort;
     /** Tells owner phones, through the phone notification path, that a move waits. */
     readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
+    /** What this start did with the turns a restart cut off. */
+    readonly restartRecovery: () => HostRestartRecovery | undefined;
   };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -2419,6 +2422,7 @@ export function wireRemote(deps: RemoteDependencies) {
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
+    restartRecovery: deps.restartRecovery,
     memoryLimits: hostMemoryLimits,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
