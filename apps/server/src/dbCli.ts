@@ -330,8 +330,7 @@ export async function resolveCredentialPurgeAttempt(options: {
   });
 }
 
-async function runCli(): Promise<number> {
-  const args = process.argv.slice(2);
+export async function runDatabaseCli(args: ReadonlyArray<string>): Promise<number> {
   const parsed = parseDatabaseCommand(args);
   if (!parsed.ok) {
     process.stderr.write(`${parsed.message}\n${usage}\n`);
@@ -730,8 +729,4 @@ function buildRecoveryInput(connection: SqliteConnection, clock: () => string) {
     clock,
   });
   return { connection, journal, projections: runtime.projections, clock };
-}
-
-if (import.meta.main) {
-  process.exitCode = await runCli();
 }

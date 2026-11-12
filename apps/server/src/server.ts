@@ -2246,5 +2246,9 @@ export function fatalStartupOutput(error: unknown): string {
           category: "startup-failed",
           message: withStartupFailureReason(UNCLASSIFIED_STARTUP_FAILURE, error),
         };
-  return startupFailedOutput(failure.category, failure.message);
+  return startupFailedOutput(
+    failure.category,
+    failure.message,
+    failure instanceof PersistenceStartupFailed ? failure.recovery : undefined,
+  );
 }

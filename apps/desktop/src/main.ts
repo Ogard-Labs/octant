@@ -1,6 +1,8 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
+import { readHostStartupRefusal } from "./hostRecovery";
+import { showHostRecovery } from "./hostRecoveryWindow";
 import {
   attachWindowsDesktopHost,
   resolveWindowsDesktopHost,
@@ -4801,6 +4803,47 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   desktopQuitAccepted = true;
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
+  // A host that refused with its own record gets the recovery screen, which
+  // offers the repairs that refusal allows; the Windows host keeps its store in
+  // a native owned profile the offline maintenance command does not open.
+  const refusal = desktopWindowsHost === undefined ? readHostStartupRefusal(error) : undefined;
+  if (refusal !== undefined) {
+    const choice = await showHostRecovery({
+      refusal,
+      packaged: app.isPackaged,
+      root: resolveDesktopHostRoot({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        appRoot: repositoryRoot(),
+      }),
+      execPath: resolveDesktopNodeRuntime({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+      }),
+      env: {
+        ...process.env,
+        OCTANT_DATA_DIR: desktopDataDirectory,
+        ...desktopHostStartup.hostEnvironment,
+      },
+    }).catch(() => "quit" as const);
+    // Starting again is a fresh launch: the refused start already released
+    // everything it held, and a relaunch reuses the ordinary startup path.
+    if (choice === "retry") app.relaunch();
+    armQuitDeadline({
+      forceExit: forceExitAfterStalledQuit(),
+    });
+    await shutDownForQuit({
+      closeAdmission: closeBrowserAdmissionForQuit,
+      flushWindowState: async () => undefined,
+      stopHost: stopHostForQuit,
+      log: logQuitProblem,
+    });
+    finishQuit();
+    return;
+  }
   await quitAfterStartupFailure({
     message: formatDesktopStartupFailure(error),
     log: logQuitProblem,

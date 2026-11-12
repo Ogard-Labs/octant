@@ -106,7 +106,7 @@ export class WorkflowService {
     const result = this.#eventStore.replayAll();
     if (result.status !== "ok") {
       throw new WorkflowServiceError(
-        "Work workflow hydration failed; a malformed frame or scan-limit requires a snapshot rebuild.",
+        "Work workflow hydration found a malformed frame or passed the scan cap, so Octant refuses to serve a partial view.",
       );
     }
     for (const frame of result.frames) {

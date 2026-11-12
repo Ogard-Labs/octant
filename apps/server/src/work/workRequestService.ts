@@ -168,7 +168,7 @@ export class WorkRequestService {
     if (result.status !== "ok") {
       throw new WorkRequestServiceError(
         "unavailable",
-        "Work request hydration exceeded the journal scan cap; a snapshot rebuild is required.",
+        "Work request hydration exceeded the journal scan cap, so Octant refuses to serve a partial view.",
       );
     }
     for (const frame of result.frames) {

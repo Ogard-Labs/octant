@@ -463,7 +463,7 @@ describe("database CLI runtime composition", () => {
 });
 
 function runCli(directory: string, ...command: ReadonlyArray<string>) {
-  const result = spawnSync("bun", ["src/dbCli.ts", ...command], {
+  const result = spawnSync("bun", ["src/dbMaintenance.ts", ...command], {
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: { ...process.env, OCTANT_DATA_DIR: directory },
     encoding: "utf8",
@@ -476,7 +476,7 @@ function runCli(directory: string, ...command: ReadonlyArray<string>) {
 }
 
 async function runCliAsync(directory: string, ...command: ReadonlyArray<string>) {
-  const child = spawn("bun", ["src/dbCli.ts", ...command], {
+  const child = spawn("bun", ["src/dbMaintenance.ts", ...command], {
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: { ...process.env, OCTANT_DATA_DIR: directory },
     stdio: ["ignore", "pipe", "pipe"],
