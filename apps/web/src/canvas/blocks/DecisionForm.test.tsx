@@ -49,16 +49,26 @@ const form = decodeCanvasBlock({
 }) as CanvasChoiceBlock;
 
 /** A host that admits answers with the real policy, as the server does. */
-function host(options: { readonly refuse?: string } = {}) {
+function host(
+  options: {
+    readonly refuse?: string;
+    readonly refuseQuestion?: string;
+    readonly block?: CanvasChoiceBlock;
+  } = {},
+) {
   let state = EMPTY_CANVAS_CHOICE_ANSWER_STATE;
   const revise = vi.fn(
     async (command: CanvasChoiceAnswersReviseCommand): Promise<CanvasChoiceAnswersReviseResult> => {
-      if (options.refuse !== undefined) {
+      if (
+        options.refuse !== undefined &&
+        (options.refuseQuestion === undefined ||
+          command.changes.some((change) => change.questionId === options.refuseQuestion))
+      ) {
         return { kind: "denied", denialCode: "invalid-answer", message: options.refuse };
       }
       const admitted = admitCanvasChoiceAnswersRevision(
         command,
-        { blocks: [form] },
+        { blocks: [options.block ?? form] },
         state,
         person,
         "2026-11-12T10:00:00.000Z" as never,
@@ -223,6 +233,84 @@ describe("decision form", () => {
     release();
     await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
     expect(note).toHaveValue("one two");
+  });
+
+  it("queues a clear when an option is taken back before its first save settles", async () => {
+    const user = userEvent.setup();
+    const multi = decodeCanvasBlock({
+      blockId: "decisions",
+      schemaVersion: 29,
+      kind: "choice",
+      prompt: "Pick any",
+      questions: [
+        {
+          id: "reach",
+          prompt: "How far?",
+          selection: "multiple",
+          options: [
+            { id: "a", label: "A" },
+            { id: "b", label: "B" },
+          ],
+        },
+      ],
+    }) as CanvasChoiceBlock;
+    const { port, revise } = host({ block: multi });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    const slow = {
+      ...port,
+      revise: async (command: Parameters<typeof port.revise>[0]) => {
+        // The first write waits for the host; the clear behind it does not.
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return port.revise(command);
+      },
+    };
+    render(<ChoiceBlock block={multi} runtime={sendable(slow)} />);
+    const option = await screen.findByRole("checkbox", { name: /^A/ });
+    await user.click(option);
+    await user.click(option);
+    release();
+    await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
+    // The option taken back does not come back as a saved answer.
+    expect(screen.getByText("0 of 1 answered")).toBeInTheDocument();
+    expect(revise.mock.calls.map((call) => call[0].changes[0]?.kind)).toEqual(["set", "clear"]);
+  });
+
+  it("does not hold Send back for a draft on a question the agent has since removed", async () => {
+    const user = userEvent.setup();
+    const without = decodeCanvasBlock({
+      ...form,
+      sections: undefined,
+      questions: form.questions.filter((question) => question.id !== "who"),
+    }) as CanvasChoiceBlock;
+    const { port } = host({ refuse: "The thread is archived.", refuseQuestion: "who" });
+    const runtime = sendable(port);
+    const view = render(<ChoiceBlock block={form} runtime={runtime} />);
+    const send = await screen.findByRole("button", { name: "Send to the Work thread" });
+    for (const name of ["How far does it reach?", "May an agent hold it?"]) {
+      await user.click(
+        within(screen.getByRole("radiogroup", { name })).getByRole("radio", { name: /Yes/ }),
+      );
+    }
+    // "Who" is refused, so its draft is kept and Send waits on it.
+    await user.click(
+      within(screen.getByRole("radiogroup", { name: "Who may set it?" })).getByRole("radio", {
+        name: /No/,
+      }),
+    );
+    await screen.findByText("Not saved: The thread is archived.");
+    expect(send).toBeDisabled();
+    // The agent drops that question: its invisible draft no longer blocks Send.
+    view.rerender(<ChoiceBlock block={without} runtime={runtime} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send to the Work thread" })).toBeEnabled(),
+    );
   });
 
   it("keeps the pick and shows the host's reason when an answer is not saved", async () => {

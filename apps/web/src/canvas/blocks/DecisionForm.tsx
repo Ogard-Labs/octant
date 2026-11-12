@@ -81,6 +81,10 @@ export function DecisionForm(props: DecisionFormProps) {
     | { readonly kind: "refused"; readonly message: string }
   >({ kind: "idle" });
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Questions with a write the host has not settled. An emptied selection must
+  // still queue a clear behind such a write, or the write lands afterwards and
+  // brings back the option the person just took away.
+  const inFlight = useRef(new Map<string, number>());
   useEffect(() => {
     const pending = timers.current;
     return () => {
@@ -118,7 +122,7 @@ export function DecisionForm(props: DecisionFormProps) {
         };
       }
     } else if (draft.selected.length === 0) {
-      if (saved !== undefined) {
+      if (saved !== undefined || (inFlight.current.get(question.id) ?? 0) > 0) {
         change = { kind: "clear", blockId: block.blockId, questionId: question.id };
       }
     } else if (questionAnswerIsAllowed(question, { selectedOptionIds: draft.selected })) {
@@ -148,7 +152,9 @@ export function DecisionForm(props: DecisionFormProps) {
       return;
     }
     setStatus(question.id, { kind: "saving" });
+    inFlight.current.set(question.id, (inFlight.current.get(question.id) ?? 0) + 1);
     const result = await props.save([change]);
+    inFlight.current.set(question.id, (inFlight.current.get(question.id) ?? 1) - 1);
     if (result.status === "saved") {
       setStatus(question.id, { kind: "saved" });
       dropIfUnchanged();
@@ -209,9 +215,14 @@ export function DecisionForm(props: DecisionFormProps) {
   // What is on screen differs from what the host holds while a draft is
   // waiting to save, a save is in flight, or a save was refused (its draft is
   // kept). Sending then would put an older decision in front of the agent.
+  // Only questions the block still has count: an agent may have removed one
+  // while it held a draft, and no control remains to settle that draft.
+  const presentIds = new Set(block.questions.map((question) => question.id));
   const unsaved =
-    Object.keys(drafts).length > 0 ||
-    Object.values(statuses).some((status) => status.kind === "saving");
+    Object.keys(drafts).some((questionId) => presentIds.has(questionId)) ||
+    Object.entries(statuses).some(
+      ([questionId, status]) => presentIds.has(questionId) && status.kind === "saving",
+    );
   const send = async () => {
     if (props.send === undefined || sendState.kind === "sending" || unsaved) return;
     setSendState({ kind: "sending" });
