@@ -17,7 +17,7 @@ export default defineConfig({
   },
   entry: {
     main: "src/main.ts",
-    dbMaintenance: "src/dbMaintenance.ts",
+    dbMaintenance: "src/maintenanceCli.ts",
     canvasExportWorker: "src/canvas/canvasExportWorker.mjs",
   },
   format: ["esm"],

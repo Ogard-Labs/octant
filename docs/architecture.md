@@ -548,6 +548,32 @@ seconds apart), and the systemd unit restarts it on failure, which includes a
 kill by signal. A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
+**Background host and recovery screen.** Settings > General offers "Keep
+Octant running in the background" and, on macOS, "Open Octant at login". Both
+are off by default (maintainer decision, 2026-11-12). The first installs the
+same per-user LaunchAgent or systemd user unit `octant` manages, pointed at the
+installed app's own windowless host (`--octant-host-only`) with no inherited
+environment, so the host starts at login and the service manager restarts it
+after an unexpected exit while a deliberate Quit stays quit. The second is the
+operating system's login item for the app. Each switch shows what the
+operating system reports after a change, so a service `octant` installed shows
+as on. Only Octant's own top-level desktop windows reach these switches
+through the main process: a paired device talks to the host over the network
+and a Nightly client's bridge omits them, so neither can change them. A
+development run and Windows offer neither. When the managed host refuses to
+start and prints its refusal record, the desktop opens a recovery window
+instead of an error dialog and quit. The window is a static page with no
+script that explains the refusal in plain words and offers only the actions
+that refusal allows: for a damaged store, rebuilding from the journal and
+restoring the last verified backup (after a separate native confirmation,
+because a restore replaces what was recorded after the backup); otherwise
+starting again or quitting. Both repairs run the server's own offline store
+maintenance (`apps/server/dist/dbMaintenance.mjs` in the packaged app, the same
+code as the `db:*` scripts) under exclusive ownership, so the authority and
+integrity rules are the store's own. An unfinished local data removal offers
+neither repair. Starting again relaunches the app. See
+[Persistence: startup repair](#persistence).
+
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
 the shared embedded editor and a local-window-only, Project-confined source
 read/save route. Full source, physical identity and revision are checked
@@ -4586,13 +4612,26 @@ flowchart LR
   means a full scan. An incompatible row is quarantined wherever it sits, and a
   diagnostics call with `fresh` always scans everything. Deleting the watermark
   only makes the next start slower.
+- **Startup repair.** The journal is authoritative and projections are
+  rebuildable, so a start whose journal decodes and passes SQLite's integrity
+  check repairs damage confined to projections by itself: a checkpoint ahead
+  of the journal, aggregate heads that disagree with it, a lag catch-up did not
+  close, or a quarantine a compatible upcast can now read. It runs one full
+  rebuild, at most once per start, and logs that it did. Damage the rebuild
+  does not clear, a failed integrity check, a version gap inside the journal
+  and a row this build cannot decode are journal damage and still refuse the
+  start with `recovery-required`, leaving the journal unchanged. The refusal
+  record names what the store needs (`store-damaged`, or `removal-unfinished`
+  for a staged local data removal), and the desktop's
+  [recovery screen](#process-topology) offers only the matching actions.
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.
 - **Projections.** Each feature owns its projection and persistence schema
   (`persistence/*Projection.ts`, `*PersistenceSchema.ts`). Projections are
   checkpointed by sequence, detect lag, and can be rebuilt individually or
-  wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
+  wholesale (`db:status`, `db:verify`, `db:rebuild` in a source checkout; the
+  recovery screen runs the same rebuild in the installed app). A projection whose state
   lives only in process memory (AgentRuns, Canvases, image jobs, managed
   GitHub clones, artifact replicas) declares `holdsStateInMemory` and replays
   from the start of the journal at every host start, because its stored
@@ -16303,6 +16342,15 @@ documents its authority, privacy, and release boundaries):
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
+- Recovering after a crash or reboot without the terminal (maintainer
+  decision, 2026-11-12): projection-only damage rebuilds at startup, other
+  refusals open the desktop recovery screen, and a default-off background host
+  and open-at-login item keep the host available
+  ([process topology](#process-topology)). Not built yet: a local crash record
+  (Electron crash dumps kept on the device with upload off, added to a support
+  bundle only by choice, and named in the next start's notice), exporting a
+  support bundle from the recovery screen, and one-click restart of terminals,
+  dev servers and extensions a restart ended.
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

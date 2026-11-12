@@ -155,7 +155,7 @@ export function hostMaintenanceSpawnSpec(options: {
         "run",
         "--cwd",
         `${options.root}/apps/server`,
-        "src/dbMaintenance.ts",
+        "src/maintenanceCli.ts",
         ...commandArguments,
       ],
       env: options.env,

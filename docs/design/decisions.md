@@ -42,7 +42,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
-| [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
+| [Persistence](#persistence)                                                           | 11        | 7       | 4            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **248**   | **162** | **81**       | **5**               |
+| **All areas**                                                                         | **249**   | **162** | **82**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1113,7 +1113,7 @@ Unreadable events and unsafe migrations fail closed. Octant never skips an undec
 
 - A malformed, contract-invalid, unsupported-version or unapplicable event is quarantined: its projection keeps its last valid state and readiness becomes recovery-required with a typed reason that discloses no payload. _Here only._
 - A projection is authoritative unless it declares itself a derived view that no command or authority check reads (today only diagnostics exports). An authoritative projection that fails rolls back the whole append; a derived view that fails is quarantined and held alone, its lag reported, while the append commits and readiness stays current. `db:rebuild` repairs it and reports one that still fails.
-- Only a successful explicit projection rebuild retires quarantine; startup never clears it. Ambiguous recovery state resolves to waiting or recovery-required, never done or healthy. _Here only._
+- Only a successful projection rebuild retires quarantine: an explicit one, or the one bounded rebuild a start runs over a journal that decodes and passes its integrity check ([startup repair](../architecture.md#persistence)); startup never clears it otherwise. Ambiguous recovery state resolves to waiting or recovery-required, never done or healthy.
 - Migrations are ordered, forward-only and checksum-verified, applied in transactions before the server reports ready, with a store backup first.
 - A changed checksum or an unknown newer migration fails closed.
 
@@ -1130,6 +1130,18 @@ A restart recovers what the journal can prove and never guesses that an ambiguou
 - Removing a host on the phone sends nothing to the host, so it does not revoke the device.
 
 Status: Partly built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
+
+### Recovering after a crash without the terminal
+
+After a crash or reboot the host repairs what it safely can and says what is wrong, and nothing needs the `db:*` commands.
+
+- Damage confined to projections over a journal that decodes and passes SQLite's integrity check rebuilds from the journal at startup, at most once per start; journal damage still refuses the start and leaves the journal unchanged.
+- A refused start opens a desktop recovery screen, not an error dialog and quit. It explains the refusal in plain words and offers only what that refusal allows: rebuild from the journal and restore the last verified backup for a damaged store (the restore only after a separate confirmation), otherwise start again or quit. Both repairs run the server's own offline store maintenance. An unfinished local data removal offers neither.
+- Error copy names only commands that exist.
+- Settings offers "Keep Octant running in the background" (the per-user LaunchAgent or systemd unit `octant` manages, pointed at the app's own windowless host) and, on macOS, "Open Octant at login". Both are off by default, each shows what the operating system reports, and only Octant's own desktop windows can change them, never a paired device or a Nightly client. A real install and uninstall on a Mac is a maintainer check.
+- Not built yet: exporting a support bundle from the recovery screen; a local crash record (crash dumps kept on the device with upload off, in a support bundle only by choice, named in the next start's notice); one-click restart of terminals, dev servers and extensions a restart ended.
+
+Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Process topology](../architecture.md#process-topology) and [Persistence](../architecture.md#persistence).
 
 ### Snapshot-first thread reads
 
