@@ -83,6 +83,31 @@
   margin-top: var(--oct-space-3);
 }
 
+/* The expanded request has to outrank the follow-up card's two-line clamp
+   whichever sheet loads last, so it names the card's class too. */
+.follow-up-card__prompt.remote-workspace__proposal-intent--expanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.remote-workspace__proposal-toggle {
+  justify-self: start;
+  padding: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.remote-workspace__proposal-toggle:focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: 2px;
+  border-radius: var(--oct-radius-sm);
+}
+
 .remote-shell__header {
   display: grid;
   gap: var(--oct-space-3);
