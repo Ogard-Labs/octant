@@ -327,7 +327,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   type="button"
                   variant="bare"
                 >
-                  <Sparkles aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <Sparkles aria-hidden="true" size={16} />
                   <span>
                     <strong>Describe with Octant</strong>
                     <small>Start with the work and schedule in your own words.</small>
@@ -342,7 +342,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   type="button"
                   variant="bare"
                 >
-                  <Pencil aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <Pencil aria-hidden="true" size={16} />
                   <span>
                     <strong>Create manually</strong>
                     <small>Configure the trigger, task, environment, and approval policy.</small>
@@ -389,7 +389,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
               <div aria-label="Automation controls" className="surface-toolbar" role="group">
                 <label className="surface-toolbar__search automation-center__search">
                   <span className="sr-only">Search automations</span>
-                  <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <Search aria-hidden="true" size={14} />
                   <OctantInput
                     onChange={(event) => controller.setSearch(event.target.value)}
                     placeholder="Search automations"
@@ -452,7 +452,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   type="button"
                   variant="default"
                 >
-                  <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <Plus aria-hidden="true" size={14} />
                   <span>New automation</span>
                 </OctantButton>
               </div>
@@ -610,7 +610,7 @@ function AutomationListBody(props: {
           </OctantButton>
         }
         detail="Clear or adjust the active filters to see other automations."
-        icon={<CalendarClock size={20} strokeWidth={1.5} />}
+        icon={<CalendarClock size={20} />}
         title="No automations match these filters"
       />
     );
@@ -701,7 +701,7 @@ function AutomationListBody(props: {
                       className="automation-row__menu-toggle"
                     >
                       <span>Actions</span>
-                      <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                      <ChevronDown aria-hidden="true" size={14} />
                     </OctantMenuTrigger>
                     <OctantMenuPortal>
                       <OctantMenuPositioner align="end">
@@ -1123,7 +1123,7 @@ function AutomationDetail(props: {
       <details className="automation-detail__advanced">
         <summary>
           <span>Advanced</span>
-          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={14} />
         </summary>
         <dl className="automation-detail__facts">
           <div>
@@ -1154,7 +1154,7 @@ function AutomationDetail(props: {
       >
         <summary>
           <span>Run history</span>
-          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={14} />
         </summary>
         <AutomationHistoryBody
           automation={automation}

@@ -70,14 +70,14 @@ export function SidebarCountTiles(props: { readonly tiles: ReadonlyArray<Sidebar
           >
             {rows ? (
               <span aria-hidden="true" className="sidebar-tile__face">
-                <Icon className="sidebar-tile__icon" size={16} strokeWidth={1.8} />
+                <Icon className="sidebar-tile__icon" size={16} />
                 <span className="sidebar-tile__label">{label}</span>
                 <span className="sidebar-tile__count">{tile.count}</span>
               </span>
             ) : (
               <span aria-hidden="true" className="sidebar-tile__face">
                 <span className="sidebar-tile__top">
-                  <Icon className="sidebar-tile__icon" size={16} strokeWidth={1.8} />
+                  <Icon className="sidebar-tile__icon" size={16} />
                   <span className="sidebar-tile__count">{tile.count}</span>
                 </span>
                 <span className="sidebar-tile__label">{label}</span>

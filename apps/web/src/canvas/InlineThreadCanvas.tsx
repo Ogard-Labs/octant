@@ -219,7 +219,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
       data-testid="thread-canvas"
     >
       <header className="thread-canvas__header">
-        <FileStack aria-hidden="true" className="thread-canvas__icon" size={14} strokeWidth={1.8} />
+        <FileStack aria-hidden="true" className="thread-canvas__icon" size={14} />
         <h3 className="thread-canvas__title">{card.title}</h3>
         <div className="thread-canvas__actions">
           <OctantTooltip label={toggle.label} side="top">
@@ -232,7 +232,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
               type="button"
               variant="ghost"
             >
-              <ToggleIcon aria-hidden="true" size={14} strokeWidth={1.8} />
+              <ToggleIcon aria-hidden="true" size={14} />
             </OctantButton>
           </OctantTooltip>
           {inline ? (
@@ -247,9 +247,9 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
                 variant="ghost"
               >
                 {view === "card" ? (
-                  <ChevronsUpDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <ChevronsUpDown aria-hidden="true" size={14} />
                 ) : (
-                  <ChevronsDownUp aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <ChevronsDownUp aria-hidden="true" size={14} />
                 )}
               </OctantButton>
             </OctantTooltip>
@@ -264,7 +264,7 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
                 type="button"
                 variant="ghost"
               >
-                <PanelRightOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+                <PanelRightOpen aria-hidden="true" size={14} />
               </OctantButton>
             </OctantTooltip>
           )}

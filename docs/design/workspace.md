@@ -202,7 +202,7 @@ its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
 answers a plain 404 when there is none. The renderer draws it as an `<img>` at
-the row's own icon size (12, 14, 16, 20 or 24px) with a small radius; it never
+the row's own icon size (a step of the [icon scale](../../DESIGN.md#iconography-and-provider-marks)) with a small radius; it never
 inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
 while it loads, when the Project has none, and when the image fails. A Project's

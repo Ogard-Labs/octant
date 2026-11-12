@@ -27,7 +27,7 @@ export function OctantToast({
         : Info;
   return (
     <div className="toast" data-tone={tone} role={tone === "danger" ? "alert" : "status"}>
-      <Icon aria-hidden="true" className="toast__icon" size={16} strokeWidth={1.8} />
+      <Icon aria-hidden="true" className="toast__icon" size={16} />
       <div className="toast__content">
         <strong className="toast-title">{title}</strong>
         <p>

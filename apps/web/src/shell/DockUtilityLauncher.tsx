@@ -50,7 +50,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
     <span className="dock-utility-launcher">
       <OctantMenuRoot>
         <OctantMenuTrigger aria-label="Add tool" className="shell-icon-button window-no-drag">
-          <Plus aria-hidden="true" size={16} strokeWidth={1.5} />
+          <Plus aria-hidden="true" size={16} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner>
@@ -74,7 +74,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
                           reference.onOpen();
                         }}
                       >
-                        <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+                        <GitPullRequest aria-hidden="true" size={14} />
                         <span className="dock-utility-launcher__reference">
                           <span>{reference.label}</span>
                           {reference.detail === undefined ? null : (

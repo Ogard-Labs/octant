@@ -188,7 +188,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
 
       <div className="linear-issues__toolbar">
         <label className="linear-issues__search">
-          <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+          <Search aria-hidden="true" size={14} />
           <span className="sr-only">Search Linear issues</span>
           <OctantInput
             aria-label="Search Linear issues"
@@ -206,7 +206,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={14} strokeWidth={1.7} />
+              <X aria-hidden="true" size={14} />
             </OctantButton>
           )}
         </label>
@@ -322,12 +322,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
                       type="button"
                       variant="bare"
                     >
-                      <CircleDot
-                        aria-hidden="true"
-                        className="linear-issues__icon"
-                        size={16}
-                        strokeWidth={1.7}
-                      />
+                      <CircleDot aria-hidden="true" className="linear-issues__icon" size={16} />
                       <div className="linear-issues__row-content">
                         <div className="linear-issues__title-line">
                           <span className="linear-issues__identifier">{row.identifier}</span>

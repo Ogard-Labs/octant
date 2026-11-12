@@ -196,7 +196,7 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
               if (value === "stop") void stop();
             }}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
             triggerClassName="code-terminal-pane__actions-trigger"
             triggerLabel="More terminal actions"
             value="stop"

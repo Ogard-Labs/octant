@@ -184,7 +184,7 @@ export function DropdownMenuCheckboxItem({
     >
       {children}
       <MenuPrimitive.CheckboxItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Check aria-hidden="true" size={14} />
       </MenuPrimitive.CheckboxItemIndicator>
     </MenuPrimitive.CheckboxItem>
   );
@@ -207,7 +207,7 @@ export function DropdownMenuRadioItem({
     >
       {children}
       <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Check aria-hidden="true" size={14} />
       </MenuPrimitive.RadioItemIndicator>
     </MenuPrimitive.RadioItem>
   );
@@ -229,7 +229,7 @@ export function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} />
     </MenuPrimitive.SubmenuTrigger>
   );
 }

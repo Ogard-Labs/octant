@@ -92,7 +92,7 @@ export function ThreadMoveTombstone(props: {
             <EnvironmentTile icon={Laptop} />
             {props.hostName}
           </span>
-          <ArrowRight aria-label="to" size={14} strokeWidth={1.8} />
+          <ArrowRight aria-label="to" size={14} />
           <span className="thread-move-tombstone__host">
             <EnvironmentTile icon={Laptop} />
             {departed.destinationName}

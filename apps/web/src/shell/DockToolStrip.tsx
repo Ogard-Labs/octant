@@ -291,7 +291,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             variant="ghost"
           >
             <span>{overflow.length}</span>
-            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+            <ChevronDown aria-hidden="true" size={12} />
           </OctantButton>
           {overflowOpen ? (
             <span className="workspace-disclosure dock-tool-strip__overflow-menu" id={overflowId}>

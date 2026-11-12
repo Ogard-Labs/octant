@@ -589,7 +589,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                                 size="icon"
                                 variant="ghost"
                               >
-                                <ArrowUp aria-hidden="true" size={14} strokeWidth={1.7} />
+                                <ArrowUp aria-hidden="true" size={14} />
                               </OctantButton>
                               <OctantButton
                                 aria-label={`Move ${name} down`}
@@ -598,7 +598,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                                 size="icon"
                                 variant="ghost"
                               >
-                                <ArrowDown aria-hidden="true" size={14} strokeWidth={1.7} />
+                                <ArrowDown aria-hidden="true" size={14} />
                               </OctantButton>
                               <OctantButton
                                 aria-label={`Remove ${name} from ${label}`}
@@ -615,7 +615,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                                 size="icon"
                                 variant="ghost"
                               >
-                                <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                                <X aria-hidden="true" size={14} />
                               </OctantButton>
                             </span>
                           </div>
@@ -640,7 +640,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                               size="icon"
                               variant="ghost"
                             >
-                              <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                              <X aria-hidden="true" size={14} />
                             </OctantButton>
                           </span>
                         </div>

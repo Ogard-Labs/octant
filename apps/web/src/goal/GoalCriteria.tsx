@@ -45,7 +45,7 @@ export function GoalCriteria(props: GoalCriteriaProps) {
               key={criterion.id}
             >
               <span className="goal-criteria__state">
-                <Mark aria-hidden="true" size={12} strokeWidth={1.8} />
+                <Mark aria-hidden="true" size={12} />
                 <span>{met ? "Met" : "Not met"}</span>
               </span>
               <span className="goal-criteria__text">{criterion.text}</span>

@@ -275,7 +275,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
           restoreFocus={restoreFocusRef}
         >
           <div className="command-palette__field">
-            <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Search aria-hidden="true" size={14} />
             <OctantInput
               {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
               aria-controls={RESULTS_ID}
@@ -353,7 +353,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
                 role="option"
               >
                 <span className="command-palette__result-title">
-                  <FileText aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <FileText aria-hidden="true" size={12} />
                   {match.folder === undefined ? "" : `${folderName(match.folder)}/`}
                   {match.scope === "content"
                     ? `${String(match.path)}:${match.line}`
@@ -364,7 +364,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
                 ) : null}
                 {index === active ? (
                   <span className="command-palette__result-hint">
-                    <CornerDownLeft aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <CornerDownLeft aria-hidden="true" size={12} />
                     <span>Enter</span>
                   </span>
                 ) : null}

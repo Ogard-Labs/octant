@@ -372,7 +372,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                     textareaRef.current?.focus();
                   }}
                 >
-                  <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+                  <Icon aria-hidden="true" size={14} />
                   {idea.label}
                 </StartSuggestionChip>
               );

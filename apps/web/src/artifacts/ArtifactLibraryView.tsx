@@ -136,7 +136,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
                   type="button"
                   variant="secondary"
                 >
-                  <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <Plus aria-hidden="true" size={12} />
                   New artifact
                 </OctantButton>
               ),
@@ -147,7 +147,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         <>
           <div className="surface-toolbar">
             <div className="surface-toolbar__search artifact-library__search">
-              <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+              <Search aria-hidden="true" size={14} />
               <label className="sr-only" htmlFor="artifact-library-search">
                 Search artifacts
               </label>
@@ -250,10 +250,10 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               value={[props.view]}
             >
               <OctantToggleGroupItem aria-label="Gallery view" value="gallery">
-                <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.8} />
+                <LayoutGrid aria-hidden="true" size={14} />
               </OctantToggleGroupItem>
               <OctantToggleGroupItem aria-label="List view" value="list">
-                <List aria-hidden="true" size={14} strokeWidth={1.8} />
+                <List aria-hidden="true" size={14} />
               </OctantToggleGroupItem>
             </OctantToggleGroup>
           </div>
@@ -349,7 +349,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
                 ),
               }
             : {})}
-          icon={<Layers size={20} strokeWidth={1.5} />}
+          icon={<Layers size={20} />}
           detail={
             filters.tab === "shared"
               ? "Artifacts you share will appear here."

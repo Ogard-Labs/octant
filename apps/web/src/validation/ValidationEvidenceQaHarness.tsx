@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts/validation-rpc";
 import { StrictMode, useMemo } from "react";
 import { createRoot } from "react-dom/client";
+import { IconDefaults } from "../ui/IconDefaults";
 import "../styles.css";
 import { ValidationEvidencePane } from "./ValidationEvidencePane";
 import { useValidationEvidence } from "./useValidationEvidence";
@@ -64,6 +65,8 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("Validation QA root is missing.");
 createRoot(root).render(
   <StrictMode>
-    <ValidationEvidenceQaHarness />
+    <IconDefaults>
+      <ValidationEvidenceQaHarness />
+    </IconDefaults>
   </StrictMode>,
 );

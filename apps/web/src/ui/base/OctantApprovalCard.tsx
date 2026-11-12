@@ -25,7 +25,7 @@ export function OctantApprovalCard(props: OctantApprovalCardProps) {
       className={cn("approval-row approval-row--request", props.className)}
       role="group"
     >
-      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+      <CirclePause aria-hidden="true" size={14} />
       <span className="approval-row__text">
         {props.summary}
         {props.detail === undefined ? null : (

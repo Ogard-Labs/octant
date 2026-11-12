@@ -362,7 +362,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
               void share();
             }}
           >
-            <Share2 aria-hidden="true" size={14} strokeWidth={1.8} />
+            <Share2 aria-hidden="true" size={14} />
             <span>Share snapshot</span>
           </OctantButton>
         </div>
@@ -521,9 +521,9 @@ function ShareStatus(props: { readonly run: ShareRun }) {
       role={failed ? "alert" : "status"}
     >
       {run.kind === "done" ? (
-        <Check aria-hidden="true" size={14} strokeWidth={2} />
+        <Check aria-hidden="true" size={14} />
       ) : failed ? (
-        <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Ban aria-hidden="true" size={14} />
       ) : null}
       <span>{run.kind === "working" ? "Working…" : run.text}</span>
     </p>
@@ -549,9 +549,9 @@ function ShareList(props: {
         <li className="canvas-share__row" data-status={snapshot.status} key={snapshot.snapshotId}>
           <span className="canvas-share__row-status">
             {snapshot.status === "active" ? (
-              <Check aria-hidden="true" size={14} strokeWidth={2} />
+              <Check aria-hidden="true" size={14} />
             ) : (
-              <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+              <TriangleAlert aria-hidden="true" size={14} />
             )}
             <span>
               {snapshot.status === "active"
@@ -572,7 +572,7 @@ function ShareList(props: {
               data-testid={`canvas-share-open-${snapshot.snapshotId}`}
               onClick={() => props.onOpen(snapshot)}
             >
-              <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
+              <Eye aria-hidden="true" size={14} />
               <span>Open</span>
             </OctantButton>
             {snapshot.status === "revoked" ? null : (

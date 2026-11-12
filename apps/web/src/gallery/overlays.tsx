@@ -80,13 +80,13 @@ function OpenMenu() {
               <OctantMenuGroupLabel>Project</OctantMenuGroupLabel>
               <OctantMenuItem>
                 <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                  <Pencil size={16} strokeWidth={1.5} />
+                  <Pencil size={16} />
                 </span>
                 <span className="truncate font-medium">Rename</span>
               </OctantMenuItem>
               <OctantMenuItem>
                 <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                  <FolderOpen size={16} strokeWidth={1.5} />
+                  <FolderOpen size={16} />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">Open in Finder</span>
@@ -100,7 +100,7 @@ function OpenMenu() {
               </OctantMenuCheckboxItem>
               <OctantMenuItem>
                 <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                  <Copy size={16} strokeWidth={1.5} />
+                  <Copy size={16} />
                 </span>
                 <span className="truncate font-medium">Copy path</span>
                 <span className="oct-meta ml-auto">⌘⇧C</span>
@@ -112,7 +112,7 @@ function OpenMenu() {
             <OctantMenuSeparator />
             <OctantMenuItem>
               <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                <Trash2 size={16} strokeWidth={1.5} />
+                <Trash2 size={16} />
               </span>
               <span className="truncate font-medium">Remove</span>
             </OctantMenuItem>
@@ -294,10 +294,10 @@ export function OverlaySections() {
         >
           <OctantMenu
             items={[
-              { icon: <Pencil size={16} strokeWidth={1.5} />, label: "Rename", value: "rename" },
+              { icon: <Pencil size={16} />, label: "Rename", value: "rename" },
               {
                 description: "Reveal the checkout on disk",
-                icon: <FolderOpen size={16} strokeWidth={1.5} />,
+                icon: <FolderOpen size={16} />,
                 label: "Open in Finder",
                 value: "open",
               },
@@ -316,10 +316,10 @@ export function OverlaySections() {
         >
           <OctantContextMenu
             items={[
-              { icon: <Pencil size={16} strokeWidth={1.5} />, label: "Rename", value: "rename" },
+              { icon: <Pencil size={16} />, label: "Rename", value: "rename" },
               {
                 description: "Reveal the checkout on disk",
-                icon: <FolderOpen size={16} strokeWidth={1.5} />,
+                icon: <FolderOpen size={16} />,
                 label: "Open in Finder",
                 value: "open",
               },
