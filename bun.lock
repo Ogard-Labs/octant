@@ -93,6 +93,7 @@
         "@octant/provider-sdk": "workspace:*",
         "@octant/theme": "workspace:*",
         "@opencode-ai/sdk": "catalog:",
+        "ajv": "8.20.0",
         "better-sqlite3": "catalog:",
         "effect": "catalog:",
         "katex": "0.18.9",

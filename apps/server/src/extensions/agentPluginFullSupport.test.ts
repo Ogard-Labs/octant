@@ -789,7 +789,7 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
-  it("omits MCP tools whose nested input schema exceeds provider bounds", async () => {
+  it("omits MCP tools whose names repeat or whose input schemas are invalid", async () => {
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",
@@ -826,8 +826,20 @@ describe("Agent Plugin MCP session manager", () => {
                       ? {
                           tools: [
                             {
-                              name: "invalid",
+                              name: "oversized",
                               inputSchema: { values: Array.from({ length: 257 }, () => null) },
+                            },
+                            { name: "invalid", inputSchema: { type: "not-a-schema-type" } },
+                            { name: "missing" },
+                            { name: "boolean", inputSchema: false },
+                            { name: "duplicate", inputSchema: { type: "object" } },
+                            {
+                              name: "duplicate",
+                              inputSchema: {
+                                type: "object",
+                                properties: { required: { type: "string" } },
+                                required: ["required"],
+                              },
                             },
                           ],
                         }
@@ -1851,7 +1863,19 @@ describe("Agent Plugin MCP session manager", () => {
         id: body.id,
         result:
           body.method === "tools/list"
-            ? { tools: [{ name: "mutate", inputSchema: { type: "object" } }] }
+            ? {
+                tools: [
+                  {
+                    name: "mutate",
+                    inputSchema: {
+                      type: "object",
+                      properties: { target: { type: "string" } },
+                      required: ["target"],
+                      additionalProperties: false,
+                    },
+                  },
+                ],
+              }
             : body.method === "tools/call"
               ? { content: [{ type: "text", text: "mutated" }] }
               : {
@@ -1894,6 +1918,27 @@ describe("Agent Plugin MCP session manager", () => {
     });
     expect(authorizeToolCall).not.toHaveBeenCalled();
 
+    const invalidJson = await manager.createToolExecutionPort().execute({
+      thread: { id: effective.scope.threadId } as never,
+      name: definition!.name,
+      inputJson: '{"target":',
+    });
+    expect(invalidJson).toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    const invalidSchema = await manager.createToolExecutionPort().execute({
+      thread: { id: effective.scope.threadId } as never,
+      name: definition!.name,
+      inputJson: '{"target":42}',
+    });
+    expect(invalidSchema).toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    expect(authorizeToolCall).not.toHaveBeenCalled();
+    expect(toolCalls).toBe(0);
+
     const result = await manager.createToolExecutionPort().execute({
       windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
@@ -1917,7 +1962,12 @@ describe("Agent Plugin MCP session manager", () => {
       digest: `sha256:${"c".repeat(64)}`,
       definitionDigest: extensionToolDefinitionDigest({
         name: "mutate",
-        inputSchema: { type: "object" },
+        inputSchema: {
+          type: "object",
+          properties: { target: { type: "string" } },
+          required: ["target"],
+          additionalProperties: false,
+        },
       }),
       reach: "network",
       providerToolName: definition!.name,

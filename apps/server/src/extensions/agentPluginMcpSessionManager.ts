@@ -3,6 +3,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, relative } from "node:path";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type {
+  JsonSchemaType,
+  JsonSchemaValidator,
+} from "@modelcontextprotocol/sdk/validation";
+import Ajv2020 from "ajv/dist/2020.js";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type {
   ExtensionEffectiveSnapshot,
@@ -52,10 +58,16 @@ interface McpSessionAuthentication {
   readonly rejected: () => Promise<void>;
 }
 
+interface PreparedMcpTool {
+  readonly listed: McpToolDefinition;
+  readonly providerDefinition: ProviderToolDefinition;
+  readonly validateInput: JsonSchemaValidator<unknown>;
+}
+
 export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly serverName: string;
   readonly session: AgentPluginMcpSession;
-  readonly tools: ReadonlyArray<McpToolDefinition>;
+  readonly tools: ReadonlyArray<PreparedMcpTool>;
   readonly reach: ExtensionToolReach;
   readonly askEveryCall: ReadonlyArray<string>;
   readonly authenticationGeneration: number;
@@ -394,6 +406,19 @@ export class AgentPluginMcpSessionManager {
         ) {
           return { result: { error: "extension-tool-authority-mismatch" }, isError: true };
         }
+        const tool = record.tools.find((candidate) => candidate.listed.name === indexed.toolName);
+        if (tool === undefined) {
+          return { result: { error: "extension-tool-unavailable" }, isError: true };
+        }
+        let args: unknown;
+        try {
+          args = inputJson.trim() === "" ? {} : JSON.parse(inputJson);
+        } catch {
+          return { result: { error: "extension-tool-input-invalid" }, isError: true };
+        }
+        if (!tool.validateInput(args).valid) {
+          return { result: { error: "extension-tool-input-invalid" }, isError: true };
+        }
         const definitionDigest = record.toolDefinitionDigests.get(indexed.toolName);
         const approved =
           this.#authorizeToolCall === undefined || definitionDigest === undefined
@@ -456,7 +481,6 @@ export class AgentPluginMcpSessionManager {
         }, this.#toolCallTimeoutMs);
         timeout.unref?.();
         try {
-          const args = inputJson.trim() === "" ? {} : JSON.parse(inputJson);
           const result = await record.session.callTool(indexed.toolName, args, controller.signal);
           if (!this.#currentRecord(indexed.sessionKey, record))
             return {
@@ -892,6 +916,12 @@ export class AgentPluginMcpSessionManager {
       clearTimeout(timeout);
     }
     connectedSession = session;
+    const duplicateToolNames = duplicatedMcpToolNames(session.tools);
+    const tools = session.tools.flatMap((tool) => {
+      if (duplicateToolNames.has(tool.name)) return [];
+      const prepared = prepareMcpTool(target, tool);
+      return prepared === undefined ? [] : [prepared];
+    });
     const record: AgentPluginMcpSessionRecord = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -902,7 +932,7 @@ export class AgentPluginMcpSessionManager {
       scope: target.scope,
       serverName: launch.name,
       session,
-      tools: session.tools,
+      tools,
       // A stdio server only ever starts through `supervisedStdioProcessPort`,
       // which denies it the network, or lets it reach only its catalog entry's
       // hosts through the host's proxy, and confines its writes to plugin data.
@@ -916,7 +946,7 @@ export class AgentPluginMcpSessionManager {
       authenticationGeneration,
       ...(authentication === undefined ? {} : { authentication }),
       toolDefinitionDigests: new Map(
-        session.tools.map((tool) => [tool.name, extensionToolDefinitionDigest(tool)]),
+        tools.map((tool) => [tool.listed.name, extensionToolDefinitionDigest(tool.listed)]),
       ),
     };
     const key = sessionKey(target);
@@ -1035,9 +1065,9 @@ export class AgentPluginMcpSessionManager {
     this.#toolIndex.clear();
     for (const [key, record] of this.#sessions) {
       for (const tool of record.tools) {
-        this.#toolIndex.set(toolQualifiedName(record, tool.name), {
+        this.#toolIndex.set(tool.providerDefinition.name, {
           sessionKey: key,
-          toolName: tool.name,
+          toolName: tool.listed.name,
         });
       }
     }
@@ -1046,27 +1076,49 @@ export class AgentPluginMcpSessionManager {
   #definitions(
     records: ReadonlyArray<AgentPluginMcpSessionRecord>,
   ): ReadonlyArray<ProviderToolDefinition> {
-    return records.flatMap((record) =>
-      record.tools.flatMap((tool) => {
-        try {
-          return [
-            decodeProviderToolDefinition({
-              name: toolQualifiedName(record, tool.name),
-              ...boundedToolDescription(tool.description),
-              inputSchema:
-                tool.inputSchema !== undefined &&
-                typeof tool.inputSchema === "object" &&
-                tool.inputSchema !== null &&
-                !Array.isArray(tool.inputSchema)
-                  ? tool.inputSchema
-                  : {},
-            }),
-          ];
-        } catch {
-          return [];
-        }
+    return records.flatMap((record) => record.tools.map((tool) => tool.providerDefinition));
+  }
+}
+
+function duplicatedMcpToolNames(tools: ReadonlyArray<McpToolDefinition>): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const tool of tools) {
+    if (seen.has(tool.name)) duplicates.add(tool.name);
+    else seen.add(tool.name);
+  }
+  return duplicates;
+}
+
+function prepareMcpTool(
+  record: Pick<AgentPluginMcpSessionRecord, "extensionId" | "packageId" | "componentId" | "scope">,
+  tool: McpToolDefinition,
+): PreparedMcpTool | undefined {
+  try {
+    if (
+      tool.inputSchema === undefined ||
+      typeof tool.inputSchema !== "object" ||
+      tool.inputSchema === null ||
+      Array.isArray(tool.inputSchema)
+    ) {
+      return undefined;
+    }
+    const providerDefinition = decodeProviderToolDefinition({
+      name: toolQualifiedName(record, tool.name),
+      ...boundedToolDescription(tool.description),
+      inputSchema: tool.inputSchema,
+    });
+    const validateInput = new AjvJsonSchemaValidator(
+      new Ajv2020({
+        allErrors: false,
+        strict: false,
+        validateFormats: false,
+        validateSchema: true,
       }),
-    );
+    ).getValidator<unknown>(providerDefinition.inputSchema as JsonSchemaType);
+    return { listed: tool, providerDefinition, validateInput };
+  } catch {
+    return undefined;
   }
 }
 
