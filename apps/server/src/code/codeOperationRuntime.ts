@@ -262,8 +262,12 @@ type Awaitable<T> = T | Promise<T>;
 
 interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
-  /** A thread's runtime work records; without it a lost push or pull request is never settled. */
-  readonly readCodeRuntimeWorks?: (
+  /**
+   * A thread's runtime work records, from which a lost push or pull request
+   * is settled. Required: while it was optional the host wiring left it out,
+   * and no Git or pull request tab ever settled one outside tests.
+   */
+  readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
   ) => ReadonlyArray<{ readonly work: CodeRuntimeWork }>;
   readonly journal: Journal;
