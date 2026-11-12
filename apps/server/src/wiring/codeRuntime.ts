@@ -111,7 +111,7 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
-import { stalledTurnLimitMs } from "../providers/turnBudget";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 
 export function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -681,6 +681,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime = createCodeOperationRuntime({
         stalledTurnLimitMs: () =>
           stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);

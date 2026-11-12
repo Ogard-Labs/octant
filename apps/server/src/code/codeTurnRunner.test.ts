@@ -1941,6 +1941,35 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).not.toHaveBeenCalled();
   });
 
+  it("cuts a turn off once a provider tool call that reports no finish has paused the clock for the longest pause, read as the turn starts", async () => {
+    const pauses: Array<number | null> = [60];
+    const read = vi.fn(() => pauses.shift() ?? null);
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() =>
+        Queue.offer(queue, event({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" })),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+
+    const cut = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner({ timeoutMs: 40, providerToolCallPauseLimitMs: read }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(cut._tag).toBe("Failure");
+    expect(outcomes.at(-1)).toBe("interrupted");
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a turn alive through liveness alone without recording it as a turn event", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = fakeConnection({

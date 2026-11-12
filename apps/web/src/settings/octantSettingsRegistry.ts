@@ -720,6 +720,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
         },
         {
+          id: settingId("provider-tool-call-pause-limit"),
+          label: "Longest tool-call pause",
+          scope: "host",
+          keywords:
+            "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
+        },
+        {
           id: settingId("resume-interrupted-turns"),
           label: "Resume interrupted turns after a restart",
           scope: "host",

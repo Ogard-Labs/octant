@@ -355,6 +355,12 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly stalledTurnLimitMs?: () => number | null;
   /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off, read as each turn starts.
+   * Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * The extra folders of a Code thread's Project, read at each turn start so
    * a folder added or removed applies from the next turn. Absent reads none.
    */
@@ -2805,11 +2811,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
-    this.#runner = new CodeTurnRunner(
-      input.options.stalledTurnLimitMs === undefined
+    this.#runner = new CodeTurnRunner({
+      ...(input.options.stalledTurnLimitMs === undefined
         ? {}
-        : { stalledTurnLimitMs: input.options.stalledTurnLimitMs },
-    );
+        : { stalledTurnLimitMs: input.options.stalledTurnLimitMs }),
+      ...(input.options.providerToolCallPauseLimitMs === undefined
+        ? {}
+        : { providerToolCallPauseLimitMs: input.options.providerToolCallPauseLimitMs }),
+    });
     this.#active = input.options.activeTurns ?? new Map();
     this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;

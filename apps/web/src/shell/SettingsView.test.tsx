@@ -737,6 +737,25 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: null });
   });
 
+  it("pauses the stalled-turn limit for a tool call for 2 hours at most by default and saves the pause or Off the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const pause = await screen.findByRole("combobox", { name: "Longest tool-call pause" });
+    expect(pause).toHaveTextContent("2 hours");
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "8 hours" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerToolCallPauseLimitMinutes: 480 });
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({
+      providerToolCallPauseLimitMinutes: null,
+    });
+  });
+
   it("offers Resume interrupted turns after a restart, off by default, and saves the person's choice", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings({

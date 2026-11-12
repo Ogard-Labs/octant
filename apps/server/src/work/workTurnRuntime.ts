@@ -59,6 +59,7 @@ import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
   makeIdleTimeout,
   makeTurnTextParagraphs,
@@ -182,6 +183,12 @@ export interface WorkTurnRuntimeOptions {
    * and a running turn keeps the limit it started with.
    */
   readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
   /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
 }
@@ -195,6 +202,7 @@ export interface WorkTurnRuntimeOptions {
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
   readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #cleanupTimeoutMs: number;
   readonly #forceStops = new Map<
     string,
@@ -216,6 +224,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   constructor(options: WorkTurnRuntimeOptions = {}) {
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
     this.#cleanupTimeoutMs = Math.max(1, Math.min(fixedLimitMs, CLEANUP_TIMEOUT_MS));
   }
 
@@ -269,7 +279,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   async #runTurn(input: WorkTurnRunInput, meter: WorkTurnMeter): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
-      const idle = await Effect.runPromise(makeIdleTimeout(this.#stalledTurnLimitMs()));
+      const idle = await Effect.runPromise(
+        makeIdleTimeout(this.#stalledTurnLimitMs(), this.#providerToolCallPauseLimitMs()),
+      );
       const execution = Effect.scoped(
         this.#execute(input, idle, meter).pipe(
           Effect.catchAll((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),

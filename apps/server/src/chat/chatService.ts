@@ -684,6 +684,12 @@ export interface ChatServiceOptions {
    */
   readonly stalledTurnLimitMs?: () => number | null;
   /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off, read as each turn starts.
+   * Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * Deadline for the maintenance request that compacts a turn's dropped
    * conversation. The turn awaits it before dispatching the user's own
    * message, so it is bounded separately from the turn itself.
@@ -1201,6 +1207,9 @@ export class ChatService {
       ...(options.stalledTurnLimitMs === undefined
         ? {}
         : { stalledTurnLimitMs: options.stalledTurnLimitMs }),
+      ...(options.providerToolCallPauseLimitMs === undefined
+        ? {}
+        : { providerToolCallPauseLimitMs: options.providerToolCallPauseLimitMs }),
       ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     });
   }

@@ -283,14 +283,19 @@ turn event budget. A session that goes fully silent still times out, at the
 stalled-turn limit: a setting in Settings › Providers & Models, 30 minutes by
 default, from 5 minutes to 8 hours, which may be turned off. A provider tool
 call the runtime reports as running pauses that clock, as an app-managed call
-does; Force stop is unchanged (maintainer request, 2026-11-12).
+does, for at most the longest tool-call pause: a second setting there, two
+hours by default, from 5 minutes to 24 hours, which may be turned off
+(maintainer decision, 2026-11-12). Force stop is unchanged (maintainer
+request, 2026-11-12).
 
 The limit is a host setting (`stalledTurnLimitMinutes`, `null` for Off),
 journaled with the other shell settings and changed only at a local window.
 Chat, Work and Code read it when a turn starts: a change applies from the
 next turn, and a running turn keeps the limit it started with. A turn cut off
 by the limit ends as it did under the fixed limit. With the setting Off, only
-Stop and Force stop end a silent turn.
+Stop and Force stop end a silent turn. The longest tool-call pause
+(`providerToolCallPauseLimitMinutes`, `null` for Off) is stored, changed and
+read the same way.
 
 A provider tool call is running from its normalized `tool-start` until the
 `tool-success` or `tool-failure` with the same `toolCallId`. Claude Code,
@@ -299,10 +304,18 @@ Octant Harness and the direct model endpoints run no tools of their own:
 their tools are app-managed calls, which already pause the clock. An outside
 driver gets the pause when it emits the same events. A tool the model's
 provider runs on its own servers is reported as outside content, not as a
-tool call, so the clock keeps running through it. Rationale: a runtime that
-reports a start and never the finish holds its turn open until the person
-stops it; that was preferred to cutting off a long build or test run, and
-Stop and Force stop still end such a turn.
+tool call, so the clock keeps running through it.
+
+One call pauses the clock for no longer than the longest tool-call pause,
+counted from its start. When that passes the clock runs again from that
+moment, so a turn whose provider stays silent is cut off one stalled-turn
+limit later; an event from the provider, the call's late finish included, is
+activity as usual, and another call that started later still pauses for its
+own time. With the pause Off a call pauses the clock until it finishes.
+Rationale: a runtime that reports a start and never the finish would hold its
+turn open until the person stops it. Two hours covers a long build or test
+run, and Off keeps the unbounded pause for work that runs longer; Stop and
+Force stop still end such a turn.
 
 An app-managed tool call in Chat keeps its own deadline of five minutes,
 apart from the stalled-turn limit; it does not follow the setting.

@@ -45,6 +45,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
   makeIdleTimeout,
   makeTurnTextParagraphs,
@@ -279,6 +280,12 @@ export interface CodeTurnRunnerOptions {
    * and a running turn keeps the limit it started with.
    */
   readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
   /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
 }
@@ -286,16 +293,20 @@ export interface CodeTurnRunnerOptions {
 export class CodeTurnRunner {
   readonly #maxEvents: number;
   readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
     const maxEvents = this.#maxEvents;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
+    const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -453,7 +464,7 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs());
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,

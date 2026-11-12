@@ -69,6 +69,7 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
   makeIdleTimeout,
   makeTurnTextParagraphs,
@@ -212,6 +213,12 @@ export interface ChatTurnRunnerOptions {
    */
   readonly stalledTurnLimitMs?: () => number | null;
   /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * A fixed stalled-turn limit and app-managed tool deadline, for a caller
    * with no host setting to read.
    */
@@ -317,6 +324,7 @@ export class ChatTurnRunner {
   readonly #contextHarness: ContextHarnessService;
   readonly #maxEvents: number;
   readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #appManagedToolDeadlineMs: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
   readonly #openQuestions = new Map<string, OpenChatQuestion>();
@@ -330,6 +338,8 @@ export class ChatTurnRunner {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
     this.#appManagedToolDeadlineMs = options.timeoutMs ?? APP_MANAGED_TOOL_DEADLINE_MS;
   }
 
@@ -378,6 +388,7 @@ export class ChatTurnRunner {
     const contextHarness = this.#contextHarness;
     const maxEvents = this.#maxEvents;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
+    const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
     const spendCeiling = this.#spendCeiling;
     const openQuestions = this.#openQuestions;
@@ -964,7 +975,7 @@ export class ChatTurnRunner {
               }),
             );
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs());
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
           Effect.flatMap(() =>

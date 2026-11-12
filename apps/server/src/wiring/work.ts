@@ -106,7 +106,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
-import { stalledTurnLimitMs } from "../providers/turnBudget";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -431,6 +431,10 @@ export function wireWork(deps: WorkDependencies) {
       turnRuntime: new WorkTurnRuntime({
         stalledTurnLimitMs: () =>
           stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
       }),
       prepareProductFeedbackForTurn: (input) => {
         const scope = resolveFeedbackThread(input.windowId, input.threadId);

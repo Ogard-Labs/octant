@@ -5,6 +5,7 @@ import {
   countsTowardTurnEventBudget,
   makeIdleTimeout,
   makeTurnTextParagraphs,
+  providerToolCallPauseLimitMs,
   stalledTurnLimitMs,
 } from "./turnBudget";
 
@@ -162,6 +163,87 @@ describe("turn budget", () => {
     await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
   });
 
+  it("stops pausing the clock for a provider tool call that reports no finish once the longest pause has passed", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(1_000, 5_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      // The call pauses the clock for its five seconds and never finishes.
+      yield* TestClock.adjust(5_000);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      // The clock then runs again: one full limit of silence cuts the turn off.
+      yield* TestClock.adjust(999);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* TestClock.adjust(1);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("pauses the clock indefinitely for a provider tool call when the longest pause is Off", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(30 * 60_000, null);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      // Well past the default two hours.
+      yield* TestClock.adjust(6 * 60 * 60_000);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* Fiber.interrupt(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("resumes the clock from a provider tool call's finish, inside the longest pause or after it", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(1_000, 5_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      yield* TestClock.adjust(3_000);
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+      );
+      // A second call outlives the pause and finishes late, just inside the limit.
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-2", toolName: "shell" }),
+      );
+      yield* TestClock.adjust(5_900);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-success", toolCallId: "call-2", summary: "Tool completed." }),
+      );
+      yield* TestClock.adjust(999);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* TestClock.adjust(1);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
+  it("pauses for the default two hours when nothing tells it the host's setting", async () => {
+    const program = Effect.gen(function* () {
+      const idle = yield* makeIdleTimeout(60_000);
+      const watcher = yield* Effect.fork(idle.expired);
+
+      yield* idle.observe(
+        runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+      );
+      yield* TestClock.adjust(2 * 60 * 60_000 + 59_999);
+      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      yield* TestClock.adjust(1);
+      yield* Fiber.join(watcher);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+  });
+
   it("still cuts a silent turn off when no tool call is running", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000);
@@ -192,5 +274,12 @@ describe("turn budget", () => {
     expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 30 })).toBe(30 * 60_000);
     expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 5 })).toBe(5 * 60_000);
     expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: null })).toBeNull();
+  });
+
+  it("reads the longest provider tool-call pause from the host setting, Off included", () => {
+    expect(providerToolCallPauseLimitMs({ providerToolCallPauseLimitMinutes: 120 })).toBe(
+      120 * 60_000,
+    );
+    expect(providerToolCallPauseLimitMs({ providerToolCallPauseLimitMinutes: null })).toBeNull();
   });
 });
