@@ -75,11 +75,23 @@ describe("GitMutationPort", () => {
         },
       }),
     ).resolves.toEqual({ status: "applied" });
-    expect(
-      execFileSync("git", ["--git-dir", remote, "rev-parse", "refs/heads/main"], {
-        encoding: "utf8",
-      }).trim(),
-    ).toMatch(/^[a-f0-9]{40}$/);
+    const pushed = execFileSync("git", ["--git-dir", remote, "rev-parse", "refs/heads/main"], {
+      encoding: "utf8",
+    }).trim();
+    expect(pushed).toMatch(/^[a-f0-9]{40}$/);
+    // Reading the remote afterwards is how a push the host lost is settled: the
+    // branch it named points at what was pushed, and a branch never pushed is
+    // reported absent rather than guessed.
+    await expect(
+      port.remoteHead({ checkoutRoot: repository, remote: "origin", remoteRef: "refs/heads/main" }),
+    ).resolves.toEqual({ status: "found", oid: pushed });
+    await expect(
+      port.remoteHead({
+        checkoutRoot: repository,
+        remote: "origin",
+        remoteRef: "refs/heads/never-pushed",
+      }),
+    ).resolves.toEqual({ status: "absent" });
   });
 
   it("replaces an amended branch only when the remote head is the one the lease names", async () => {

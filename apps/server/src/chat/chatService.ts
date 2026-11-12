@@ -706,6 +706,11 @@ export interface ChatServiceOptions {
    * rejecting a valid first send.
    */
   readonly providerChangeProbeSettleMs?: number;
+  /**
+   * How long a Stop on a provider that shares one process across threads waits
+   * for the runtime to confirm the turn ended before recording it unconfirmed.
+   */
+  readonly stopConfirmationMs?: number;
   readonly providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
@@ -1065,6 +1070,13 @@ export interface ChatSubscribeOptions {
   readonly appended?: boolean;
 }
 
+/**
+ * How long a Stop on a shared-process provider (Codex, OpenCode) waits for the
+ * runtime to confirm the turn ended: the same grace a provider that owns its
+ * process gives before Force stop is offered.
+ */
+const STOP_CONFIRMATION_MS = 10_000;
+
 export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
@@ -1090,6 +1102,7 @@ export class ChatService {
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerChangeProbeSettleMs: number;
+  readonly #stopConfirmationMs: number;
   readonly #providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
@@ -1180,6 +1193,7 @@ export class ChatService {
       this.#contextMaintenanceShutdownTimeoutMs = options.contextMaintenanceShutdownTimeoutMs;
     }
     this.#providerChangeProbeSettleMs = options.providerChangeProbeSettleMs ?? 1_500;
+    this.#stopConfirmationMs = options.stopConfirmationMs ?? STOP_CONFIRMATION_MS;
     this.#hiddenThreadIds = options.hiddenThreadIds ?? (() => EMPTY_HIDDEN_THREAD_IDS);
     this.#resolveSideChatReturns = options.resolveSideChatReturns;
     if (options.resolveSideChatSourceContext !== undefined) {
@@ -4064,6 +4078,45 @@ export class ChatService {
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
 
+  #settleUnconfirmedStopLater(threadId: ChatThreadId, attemptId: ChatAttempt["id"]): void {
+    const timer = setTimeout(() => {
+      try {
+        const current = this.#persistence
+          .readChatThreadView(threadId)
+          ?.turns.flatMap((turn) => turn.attempts)
+          .find((candidate) => String(candidate.id) === String(attemptId));
+        if (
+          current === undefined ||
+          (current.outcome !== "queued" && current.outcome !== "streaming")
+        )
+          return;
+        const unconfirmed = transitionChatAttempt(current, {
+          outcome: "interrupted",
+          updatedAt: decodeTimestamp(this.#clock()),
+          failure: { code: decodeDiagnosticFailureCode("stop-unconfirmed") },
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+          expectedVersion: readAggregateVersion(
+            this.#persistence.connection,
+            "chat-thread",
+            threadId,
+          ),
+          events: [
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: unconfirmed,
+            }),
+          ],
+        });
+      } catch {
+        // A thread deleted or a journal unavailable meanwhile leaves the
+        // attempt to restart reconciliation, which interrupts it.
+      }
+    }, this.#stopConfirmationMs);
+    timer.unref?.();
+  }
+
   async #interruptTurn(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "interrupt-chat-turn" }>,
   ): Promise<ChatCommandResult> {
@@ -4081,11 +4134,17 @@ export class ChatService {
     }
     const controller = this.#activeAttempts.get(String(command.attemptId));
     controller?.abort();
-    // A runtime that can be force-stopped keeps the attempt streaming until it
-    // really ends, so the person can see a Stop that did not take and reach for
-    // Force stop. A runtime that cannot be killed alone settles at once, as it
-    // always has, so a stuck turn never strands the thread.
-    if (controller !== undefined && this.#turnRunner.canForceStop(String(command.attemptId))) {
+    // A Stop is only a request: the attempt keeps running until the runtime
+    // confirms the turn ended, and the runner then records it cancelled. A
+    // runtime that can be force-stopped waits for the person, who sees a Stop
+    // that did not take and can reach for Force stop. One that shares its
+    // process cannot be killed alone, so after a short wait the turn is
+    // recorded as a Stop the runtime never confirmed: the thread is freed
+    // without claiming the work stopped.
+    if (controller !== undefined) {
+      if (!this.#turnRunner.canForceStop(String(command.attemptId))) {
+        this.#settleUnconfirmedStopLater(thread.id, attempt.id);
+      }
       return { kind: "attempt-updated", attempt };
     }
     const timestamp = decodeTimestamp(this.#clock());

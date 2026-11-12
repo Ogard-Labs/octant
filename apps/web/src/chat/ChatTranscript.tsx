@@ -198,6 +198,7 @@ const attemptFailureSentences: Record<string, string> = {
   "research-failed": "Research failed during this turn.",
   "research-timed-out": "Research did not return before the turn deadline.",
   "stale-resume": "The provider could not resume its earlier session.",
+  "stop-unconfirmed": "Stop was not confirmed. The provider may still be running this response.",
   "timed-out": "The provider stopped responding and the turn timed out.",
   "tool-failed": "An app-managed tool call failed during this turn.",
   "tool-timed-out": "An app-managed tool call did not return before the turn deadline.",

@@ -358,6 +358,12 @@ export const CodeThread = Schema.Struct({
    * a worker wakes for its own coordinator's messages.
    */
   coordinatorWakeOff: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when a person turned off **Continue after restart** for this thread:
+   * a turn a host restart cuts off waits for them instead of continuing by
+   * itself. Absent, the Code setting decides.
+   */
+  restartContinuationOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -536,6 +542,12 @@ export const CodeSettings = Schema.Struct({
   coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
   /** How many open workers one coordinator may have; absent is the default. */
   coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
+  /**
+   * Settings › Code › Continue after restart: whether the host continues, by
+   * itself, a Code turn a restart cut off. Absent is on, which is also what a
+   * store persisted before the switch existed reads as.
+   */
+  restartContinuation: Schema.optional(Schema.Boolean),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -767,6 +779,8 @@ export const CodeCommand = Schema.Union(
     coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
     /** Absent keeps the stored limit. */
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
+    /** Absent keeps the stored choice. */
+    restartContinuation: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -801,6 +815,12 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("set-code-thread-coordinator-wake"),
     ...CodeThreadCommandFields,
     wake: Schema.Boolean,
+  }).annotations(strict),
+  /** The thread's Continue after restart switch; only a person at a local window. */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-restart-continuation"),
+    ...CodeThreadCommandFields,
+    continueAfterRestart: Schema.Boolean,
   }).annotations(strict),
   /**
    * Put a finished thread away without archiving it. The host refuses while a
@@ -1073,12 +1093,38 @@ export const CodeRuntimeWorkState = Schema.Literal(
 );
 export type CodeRuntimeWorkState = typeof CodeRuntimeWorkState.Type;
 
+export const CodeRuntimeRemoteStep = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("push"),
+    remote: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._-]{1,255}$/)),
+    remoteRef: Schema.String.pipe(
+      Schema.maxLength(1_024),
+      Schema.pattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
+    ),
+    /** The commit the push sent: the remote branch pointing at it means the push landed. */
+    commitOid: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pull-request"),
+    action: Schema.Literal("create", "update", "comment", "merge"),
+  }).annotations(strict),
+);
+export type CodeRuntimeRemoteStep = typeof CodeRuntimeRemoteStep.Type;
+
 const CodeRuntimeWorkFields = {
   id: CodeRuntimeWorkId,
   threadId: CodeThreadId,
   kind: CodeRuntimeWorkKind,
   state: CodeRuntimeWorkState,
   updatedAt: UtcTimestamp,
+  /**
+   * The remote effect this work makes (a push, or a pull request step), so if
+   * the host loses it mid-flight the effect may have landed without the host
+   * learning so. Restart reconciliation leaves such work `ambiguous` rather
+   * than `interrupted`, and the push's target lets a later look at the remote
+   * settle it.
+   */
+  remoteStep: Schema.optional(CodeRuntimeRemoteStep),
 } as const;
 // The member with evidence comes first: a client ignores unknown fields in a
 // host answer, so the bare member listed first would accept an evidence-bearing

@@ -940,12 +940,24 @@ function unsettledOperationHead(
   return head?.aggregate_version;
 }
 
+/**
+ * A provider turn this start's reconciliation found still running: the turn
+ * the previous host was carrying when it stopped. Only these were cut off by
+ * this restart; a turn already waiting before it was cut off by an earlier
+ * one, or is waiting on something else, such as a usage limit.
+ */
+export interface CodeTurnCutOffByRestart {
+  readonly threadId: CodeThreadId;
+  readonly operationId: string;
+}
+
 export function reconcileCodeRestart(input: {
   readonly connection: SqliteConnection;
   readonly journal: Journal;
   readonly reconciledAt: string;
   readonly uuid?: () => string;
-}): void {
+}): ReadonlyArray<CodeTurnCutOffByRestart> {
+  const cutOff: CodeTurnCutOffByRestart[] = [];
   const uuid = input.uuid ?? randomUUID;
   const correlationId = uuid();
   const checkoutRows = input.connection
@@ -1051,16 +1063,29 @@ export function reconcileCodeRestart(input: {
     const work = decodeRuntimeRow(row);
     // A restart ends every OS process this host owned. Only a provider turn can
     // legitimately survive as a wait — it may still be owed a resume or an
-    // approval — so it becomes `waiting`. File, terminal, test, Git, delivery,
-    // and review work has no process left to wait for and is `interrupted`;
-    // calling a dead shell "waiting" would leave the thread blocked forever.
-    const state = work.kind === "provider-turn" ? "waiting" : "interrupted";
+    // approval — so it becomes `waiting`. Work that reaches a remote (a push,
+    // a pull request step) may have landed before the host died without the
+    // host ever learning so: it is `ambiguous`, which the board holds for
+    // every kind, because `interrupted` would let the thread read Ready over a
+    // push nobody can account for. File, terminal, test, review, and local Git
+    // work has no process left to wait for and its result is in the checkout,
+    // so it is `interrupted`; calling a dead shell "waiting" would leave the
+    // thread blocked forever. Delivery work recorded before `remoteStep`
+    // existed is still a GitHub call, so its kind alone decides.
+    const state =
+      work.kind === "provider-turn"
+        ? "waiting"
+        : work.remoteStep !== undefined || work.kind === "delivery"
+          ? "ambiguous"
+          : "interrupted";
     // `updatedAt` keeps the moment this work last actually moved. Stamping the
     // restart here would make an old frozen turn look newer than a turn that
     // finished after it, and the board reads the latest provider turn to decide
     // whether the thread is still owed anything. The reconciliation time lives
     // on the event instead.
     const reconciled = decodeCodeRuntimeWork({ ...work, state });
+    if (work.kind === "provider-turn")
+      cutOff.push({ threadId: work.threadId, operationId: String(work.id) });
     input.journal.append({
       aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
       expectedVersion: row.aggregate_version,
@@ -1179,6 +1204,7 @@ export function reconcileCodeRestart(input: {
       ],
     });
   }
+  return cutOff;
 }
 
 /**

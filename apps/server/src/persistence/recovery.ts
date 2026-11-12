@@ -315,6 +315,26 @@ function inspectDatabase(input: RecoveryInput): {
 }
 
 /**
+ * Damage a full rebuild from the journal repairs without changing the journal.
+ * Every issue here lives in a projection table (aggregate heads are one) or a
+ * projection checkpoint. A failed SQLite integrity check, a version gap inside
+ * the journal, or a journal row this build cannot decode is journal damage: a
+ * rebuild would replay the same rows and cannot fix it, so it stays a refusal.
+ */
+const PROJECTION_ISSUE_KINDS: ReadonlySet<DatabaseVerificationIssue["kind"]> = new Set([
+  "aggregate-head-mismatch",
+  "aggregate-head-orphan",
+  "checkpoint-ahead",
+]);
+
+export function damageIsProjectionOnly(verification: DatabaseVerification): boolean {
+  return (
+    verification.integrity === "ok" &&
+    verification.issues.every((issue) => PROJECTION_ISSUE_KINDS.has(issue.kind))
+  );
+}
+
+/**
  * Rebuilds the authoritative projections as one unit, then each derived view
  * on its own. A derived view that still cannot apply an event is quarantined
  * again and reported as held, without undoing the authoritative repair: no

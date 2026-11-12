@@ -233,6 +233,8 @@ export interface ChatThreadNavigationItem {
   readonly messageWake?: boolean;
   /** Code only: a person turned off this worker's Wake for coordinator. */
   readonly coordinatorWakeOff?: boolean;
+  /** Code only: a person turned off Continue after restart for this thread. */
+  readonly restartContinuationOff?: boolean;
 }
 
 /** The same activity precedence applies in the Project tree and Activity view. */
