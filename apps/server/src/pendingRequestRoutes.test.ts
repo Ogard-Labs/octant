@@ -426,7 +426,29 @@ it("authenticates question deferral, refuses approval keys and never calls an an
   expect((await send({ ...change, key: "a".repeat(64) }))?.status).toBe(409);
   expect(record).not.toHaveBeenCalled();
   expect((await send(change))?.status).toBe(200);
-  expect(record).toHaveBeenCalledExactlyOnceWith(change);
+  expect(record).toHaveBeenCalledExactlyOnceWith(change, {
+    kind: "local-user",
+    actorId: "00000000-0000-4000-8000-000000000002",
+  });
+
+  // A device the host's own person paired defers as a local window does, and
+  // the journal names the device.
+  const deviceId = "00000000-0000-4000-8000-0000000008d1";
+  const paired = new Request("http://127.0.0.1/api/pending-requests/defer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  bindPrincipalRouteContext(paired, {
+    principal: { kind: "remote-device", deviceId, admittedBy: "host-person" } as never,
+    scopeId: deviceId as never,
+  });
+  expect((await route(paired))?.status).toBe(200);
+  expect(record).toHaveBeenLastCalledWith(change, {
+    kind: "remote-device",
+    actorId: deviceId,
+    deviceId,
+  });
 });
 
 it("keeps deferral bound to the current choices and access in every answerable mode", async () => {
