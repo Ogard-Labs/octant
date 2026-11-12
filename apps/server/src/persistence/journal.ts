@@ -18,6 +18,7 @@ import {
   EventPayloadInvalid,
   JournalInputInvalid,
   JournalWriteFailed,
+  isSqliteDiskFull,
   isSqliteStorageFailure,
   ReplayEventInvalid,
   ThreadIdInUse,
@@ -643,7 +644,11 @@ export class Journal {
       const isUniqueConstraint = sqliteFailure === "unique-constraint";
       const isWriteRace = sqliteFailure === "write-race";
       if (!isUniqueConstraint && !isWriteRace) {
-        throw new JournalWriteFailed({ operation: "append" });
+        throw new JournalWriteFailed(
+          isSqliteDiskFull(error)
+            ? { operation: "append", reason: "disk-full" }
+            : { operation: "append" },
+        );
       }
 
       try {

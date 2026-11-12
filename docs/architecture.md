@@ -4437,6 +4437,18 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Streamed output and a full disk.** Text and reasoning deltas are exempt
+  from a turn's event budget, so each turn also has a streamed-output budget
+  of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A
+  Chat or Code turn that streams past it keeps everything already journaled,
+  journals `[Output truncated by Octant.]` as its last text, interrupts the
+  provider, and ends (Chat: interrupted with `output-budget-exceeded`; Code:
+  failed, as at its event budget). A Work reply is held to 64 KiB with the
+  same marker, counted as it arrives and frozen once truncated. An append that
+  fails on a full disk (`SQLITE_FULL`) commits nothing and carries
+  `reason: "disk-full"`, and every service that reports a failed write says
+  the disk is full and to free space, rather than that persistence is
+  temporarily unavailable.
 - **Startup check.** Startup decodes journal rows to prove the journal is
   readable, then records a disposable watermark: the sequence it verified
   through plus a fingerprint of the exact server build (a hash of every chunk of

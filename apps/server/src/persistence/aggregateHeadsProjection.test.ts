@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
-import { JournalWriteFailed } from "./journalErrors";
+import { DISK_FULL_MESSAGE, JournalWriteFailed, persistenceFailureMessage } from "./journalErrors";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { ProjectionApplicationFailed, type Projection, ProjectionRegistry } from "./projection";
 import { databaseStatus, rebuildAll } from "./recovery";
@@ -180,6 +180,55 @@ describe("AggregateHeadsProjection", () => {
       expect(connection.prepare("SELECT count(*) AS count FROM event_quarantine").get()).toEqual({
         count: 0,
       });
+      connection.close();
+    },
+  );
+
+  it.each([false, true])(
+    "fails an append on a full disk with nothing committed and says the disk is full (derived view: %s)",
+    (derived) => {
+      const connection = openConnection();
+      connection.exec("CREATE TABLE fixture_projection (global_sequence INTEGER PRIMARY KEY)");
+      const fullDisk: Projection = {
+        name: "fixture-full-disk",
+        dependencies: [],
+        ...(derived ? { derived: true as const } : {}),
+        reset: () => undefined,
+        apply: (database, event) => {
+          database
+            .prepare("INSERT INTO fixture_projection (global_sequence) VALUES (?)")
+            .run(event.globalSequence);
+          throw Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
+        },
+      };
+      const projections = new ProjectionRegistry()
+        .register(new AggregateHeadsProjection())
+        .register(fullDisk);
+      const journal = createJournal(connection, projections);
+
+      let failure: unknown;
+      try {
+        journal.append(appendRequest());
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(JournalWriteFailed);
+      expect(failure).toMatchObject({ reason: "disk-full" });
+      expect(
+        persistenceFailureMessage(failure, "Chat persistence is temporarily unavailable."),
+      ).toBe(DISK_FULL_MESSAGE);
+      expect(DISK_FULL_MESSAGE).toContain("disk is full");
+      for (const table of [
+        "event_journal",
+        "aggregate_heads",
+        "fixture_projection",
+        "projection_checkpoints",
+        "event_quarantine",
+      ]) {
+        expect(connection.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+          count: 0,
+        });
+      }
       connection.close();
     },
   );

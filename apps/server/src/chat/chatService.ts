@@ -238,6 +238,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { readThreadIdModes } from "../persistence/threadIdentity";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -7282,7 +7283,7 @@ export class ChatService {
       return new ChatServiceError(
         decodeChatFailure({
           category: "unavailable",
-          message: "Chat persistence is temporarily unavailable.",
+          message: persistenceFailureMessage(error, "Chat persistence is temporarily unavailable."),
         }),
       );
     }
