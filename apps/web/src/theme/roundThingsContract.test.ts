@@ -66,6 +66,8 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".content-tab__attention",
   ".settings-accent__dot",
   ".thread-activity-pip__pulse",
+  ".dock-mini-card__dot",
+  '.window-chrome__button[data-activity="browser"]::after',
   ".code-project-views__color-dot",
   ".code-overview__lifecycle-mark",
   ".code-debug-breakpoint::before, .code-debug-breakpoint-unresolved::before",
@@ -80,7 +82,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark::after',
   // Count badges and numbered marks.
   ".bell .bell-count",
-  ".browser-pip__count",
   ".code-board__filter-count",
   ".sidebar-rail__badge",
   ".first-run__rail-marker",
