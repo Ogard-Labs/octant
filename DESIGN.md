@@ -151,7 +151,7 @@ nothing essential sits under 12px at the default. The roles live in
 | Body                   | 13              | 400    | 1.5     | primary     | Interface text (the interface size, `body`)                                                                                                                                                                   |
 | Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
 | Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
-| Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
+| Detail                 | 13              | 400    | 1.45    | secondary   | Row description (`oct-row-detail`); a menu's second line is Meta (`oct-menu-detail`)                                                                                                                          |
 | Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's box (`oct-meta`)                                                                                          |
 | Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
@@ -321,14 +321,14 @@ seats it, so an object is never told from the surface under it by an outline
 alone. Each level has its tokens in `styles.css`; a surface consumes them and
 never writes its own colour.
 
-| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                             |
-| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                       |
-| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow (a narrow window's tile keeps a rounded panel)                       |
-| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                               |
-| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks |
-| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                         |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it          |
+| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                          |
+| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow, no corner at any width (a narrow window's sheet holds one square tile) |
+| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                                  |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks    |
+| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                            |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it             |
 
 - **The light an edge catches is the rim** (`--octant-rim`,
   `--octant-rim-top`, `--octant-rim-low`, `--octant-rim-float`, and the
@@ -336,11 +336,7 @@ never writes its own colour.
   its lower edge too, so a card and a floating surface carry a fainter
   line inside the bottom (`--octant-rim-low`; none in light, where it cannot
   show on a white fill). A pane carries none of it: it is flat, and its edge is
-  the one line it shares with its neighbour. A narrow window's tile keeps a bright
-  band as deep as the slab's edge (`--octant-edge-light`, 7px, in
-  `--octant-panel-band`) over the long sheen; the band ends above
-  the first line of anything a panel holds, so a tile's name sits on the
-  sheen alone (meta ink 4.99:1 there in stock dark). In dark a shadow cannot be seen on a
+  the one line it shares with its neighbour. In dark a shadow cannot be seen on a
   near-black page, so the fill and the rim carry the lift (on an OLED preset
   the panel is a step toward the ink and the sheen lifts its top) and the
   shadow helps only where the surface crosses something lighter; in light the
@@ -392,9 +388,10 @@ never writes its own colour.
   and sets every rim to it, so a flat fill keeps a firmer edge than the soft
   one it had.
 - **A pane has no seat shadow.** Panes share their edges, so a shadow would
-  fall on the neighbour. In a narrow window, where a tile is still a rounded
-  panel, the seat shadow ends within 8px of the panel, so a panel looks the
-  same whatever its neighbour's order.
+  fall on the neighbour. A dock tile is square with no
+  seat shadow in a narrow window too: there the dock is a floating sheet
+  (12px corner) holding one tool, and the tile fills it with no gap or corner
+  of its own.
 - **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
   the raised elevation's white top line drew as a light seam on the dark tooltip
   in light, so it takes the two shadows alone in both modes.
@@ -1589,8 +1586,8 @@ each counted at its own width (the extensions button grows a count while the
 agent drives). When only the profile is left and the floor still fails, the
 profile's choices and its sign-out move into More as well. Back, forward and
 reload always stay. The row's inset follows the tile bar: its first glyph
-stands on the bar's 12px lead inset and its last button ends 4px from the edge,
-with 4px between controls. With no page open the row is the history buttons, the
+stands on the bar's 12px lead inset and its last button ends 8px from the edge,
+as the bar's does, with 4px between controls. With no page open the row is the history buttons, the
 empty field and the profile icon.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
@@ -1853,10 +1850,46 @@ bare pixel literal. A rem corner also shrinks with the interface font size,
 which a token does not. Adapters own button paint.
 
 Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
-toggles, comboboxes, badges) size in rem so they grow with the interface size;
-at the default 13px a button is 20, 24, 28, or 32px tall. A quarter-rem step is
-3.25px at that root, so a recipe never uses an odd step bare: it rounds it to a
-whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The shell frame runs on one
+toggles, comboboxes, badges) take their height in rem so they grow with the
+interface size; at the default 13px a button is 20, 24, 28, or 32px tall. A
+quarter-rem step is 3.25px at that root, so a height never uses an odd step
+bare: it rounds to a whole 2px (`h-[round(1.75rem,2px)]`), or a control lands
+between pixels. A field, a select and a combobox take the default button's 28,
+and a tab takes the small button's 24, so a row of them shares one height.
+
+_What scales with the interface size._ Type and control heights scale; spacing,
+icons and radii do not. The recipes' spacing utilities (`p-*`, `gap-*`, `m-*`)
+are pixels, because the theme sets Tailwind's spacing step to `--spacing: 4px`
+in `styles/tailwind.css`, the same 4px scale as the stylesheets'
+`--oct-space-*`; at the default size `px-2` is 8px, never the 6.5px a
+quarter-rem step drew. A recipe names a step that is on the scale (`gap-1`,
+`px-2`, `p-3`, `gap-4`) and never a half step (`px-2.5` is 10px, not 8); a
+contract test scans every class string for one. A width or height that follows
+the type (a menu's minimum width, a terminal's height) is written in rem on
+purpose. _Rationale._ The other way to the same whole pixels was to leave the
+step in rem and rewrite every recipe in `--oct-space-*` tokens, which keeps
+the half steps' meaning but spends 95 edits and leaves two spacing systems in
+one file; a larger interface size would also have padded a control that already
+grew with its text, so a control at 16px would have read as loose rather than
+larger. Pixel spacing is the same decision the icon sizes made.
+_One menu row._ Every in-page pick-list (dropdown, context menu, select and
+combobox options, the model list, the mode menu, the Add tool menu) draws the
+same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
+it carries a second line (`--oct-menu-row-two-h`, an `oct-menu-detail` span), an
+8px inset on a popup padded 4px, a 16px icon column and an 8px gap
+(`--oct-menu-row-gap`), the words in the Menu option role (13 / 500), and a
+group label in the Navigation group label role (12 / 400, muted). A row's words
+therefore stand 36px from the popup's edge when it has an icon and 12px when it
+has none, in every menu. A menu where any row has an icon reserves the column
+for every row, so it never has two text edges; a menu with no icons keeps the
+words on the popup's own inset. The separator is one hairline as wide as the
+rows (4px in from the popup's edge, the same inset the rows have), never a
+negative margin. A feature stylesheet may colour a menu's icons but gives its
+rows no height, gap, padding or font size. In the desktop app dropdown and
+context menus can be drawn by the system; that path is unchanged and the OS owns
+its spacing.
+
+The shell frame runs on one
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
@@ -1869,7 +1902,7 @@ thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`
 with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
-and below them (about 56px). Hover-only actions (add, more, pin, archive,
+and below them: 8 + an 18px title line + 1 + a 17px facts line + 8 is 52px, and a row stands 54px from the next with the list's 2px gap. Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. A section heading's add and more controls are the exception: the
 list's view and filter controls share that row, so they keep their width while
@@ -1878,6 +1911,51 @@ surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Alignment.** One value does one job, so no edge or gap has to be explained.
+Each of these was measured off by a pixel or more in a render before it was a
+rule:
+
+- _The title band's icon buttons_ are 28px and stand 4px apart wherever the
+  band shows a row of them: the window controls, the tool row, the sidebar's
+  header actions. The band keeps one inset at both of its ends, 8px, so Show
+  sidebar is as far from the left edge as the last toggle is from the right. A
+  slot a Project fills only sometimes (Open in, Project actions) takes no room
+  and no gap while it is empty.
+- _A tile's bar_ ends on the band's 8px, and its Arrange and Close are 24px
+  controls with one 14px glyph, centred on a whole pixel: the bar's hairline is
+  drawn inside its 32px, not as a border that takes one off the controls'
+  centreline. The Browser's row follows the bar's insets.
+- _The icon rail's_ face is its button (32px in the column, 2px
+  apart), and the first face is centred on the title rail's centreline, so it
+  stands level with the band's controls beside it (6px down in the 44px rail).
+- _A dock never clips._ The dock's own bar holds the same 8px at both ends at
+  every width, 280px and up, and reserves nothing for the title band's
+  controls: the tool row lives in the band, a wide dock's bar is an empty
+  spacer under it, and a narrow dock is a dialog that stands away from the
+  band. A reserve for the band's room left no content box at 300px.
+- _A card's inset is exactly 16px_ (a Settings card draws its edge as an
+  outline inside its box, not as a border) and a dock card's title and its rows
+  stand on one edge: a title that is a button has no border, and a row's mark,
+  whether an icon or a dot, takes one 14px slot, so every name starts on one
+  column.
+- _Rows are whole pixels._ A row whose height is the sum of its lines sets
+  them from the role leadings rounded to a pixel (`--oct-line-label`,
+  `--oct-line-detail`, `--oct-line-meta`, `--oct-line-snug`,
+  `--oct-line-tight`): a Settings row, a thread row in the sidebar (two lines,
+  52px) and a dialog's paragraph. The roles keep their sizes.
+- _The composer's columns are the same in every mode._ The row under the box
+  starts on the box's inset, so its first control stands under attach in Chat,
+  Work and Code alike (an empty leading group takes no gap). The prompt's line
+  is the transcript size times the body leading, rounded to the nearest even
+  pixel (`--oct-composer-line`), so the 28px controls centre on whole pixels
+  and the one-line box is 44px at the default 13px (46px at 14px, 48px at
+  16px).
+- _A foot ends where the rows above it end._ The account row's chevron stands
+  on the navigation inset (12px), the edge a thread's status mark ends on.
+- _At a phone's width_ the start screen's composer stands the panel's 20px from
+  each edge, as a thread's composer does (its width is the viewport less 40px),
+  with no margin or padding of its own on top.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on

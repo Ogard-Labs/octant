@@ -20,7 +20,7 @@ import { cn } from "./utils";
  * it on a flat page produces a blurred card over nothing.
  */
 const cardVariants = cva(
-  "flex flex-col gap-4 overflow-hidden rounded-xl border-0 py-4 text-card-foreground",
+  "flex flex-col gap-3 overflow-hidden rounded-xl border-0 py-3 text-card-foreground",
   {
     variants: {
       variant: {
@@ -49,7 +49,7 @@ export function Card({ className, variant, ...props }: CardProps) {
 export function CardHeader({ className, ...props }: ComponentProps<"header">) {
   return (
     <header
-      className={cn("grid auto-rows-min gap-1 px-4", className)}
+      className={cn("grid auto-rows-min gap-1 px-3", className)}
       data-slot="card-header"
       {...props}
     />
@@ -77,13 +77,13 @@ export function CardDescription({ className, ...props }: ComponentProps<"p">) {
 }
 
 export function CardContent({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("px-4", className)} data-slot="card-content" {...props} />;
+  return <div className={cn("px-3", className)} data-slot="card-content" {...props} />;
 }
 
 export function CardFooter({ className, ...props }: ComponentProps<"footer">) {
   return (
     <footer
-      className={cn("flex items-center px-4", className)}
+      className={cn("flex items-center px-3", className)}
       data-slot="card-footer"
       {...props}
     />

@@ -39,6 +39,7 @@ import {
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantPreviewCard } from "../ui/base/OctantPreviewCard";
 import {
@@ -79,42 +80,54 @@ function OpenMenu() {
             <OctantMenuGroup>
               <OctantMenuGroupLabel>Project</OctantMenuGroupLabel>
               <OctantMenuItem>
-                <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className="flex size-(--oct-icon-md) shrink-0 items-center justify-center"
+                >
                   <Pencil size={16} />
                 </span>
-                <span className="truncate font-medium">Rename</span>
+                <span className="truncate">Rename</span>
               </OctantMenuItem>
               <OctantMenuItem>
-                <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className="flex size-(--oct-icon-md) shrink-0 items-center justify-center"
+                >
                   <FolderOpen size={16} />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium">Open in Finder</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    Reveal the checkout on disk
-                  </span>
+                  <span className="truncate">Open in Finder</span>
+                  <span className="truncate oct-menu-detail">Reveal the checkout on disk</span>
                 </span>
               </OctantMenuItem>
               <OctantMenuCheckboxItem checked onCheckedChange={noop}>
-                <span className="truncate font-medium">Pinned</span>
+                <OctantMenuIconSlot />
+                <span className="truncate">Pinned</span>
               </OctantMenuCheckboxItem>
               <OctantMenuItem>
-                <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                <span
+                  aria-hidden="true"
+                  className="flex size-(--oct-icon-md) shrink-0 items-center justify-center"
+                >
                   <Copy size={16} />
                 </span>
-                <span className="truncate font-medium">Copy path</span>
+                <span className="truncate">Copy path</span>
                 <span className="oct-meta ml-auto">⌘⇧C</span>
               </OctantMenuItem>
               <OctantMenuItem disabled>
-                <span className="truncate font-medium">Archive (disabled)</span>
+                <OctantMenuIconSlot />
+                <span className="truncate">Archive (disabled)</span>
               </OctantMenuItem>
             </OctantMenuGroup>
             <OctantMenuSeparator />
             <OctantMenuItem>
-              <span aria-hidden="true" className="flex size-4 items-center justify-center">
+              <span
+                aria-hidden="true"
+                className="flex size-(--oct-icon-md) shrink-0 items-center justify-center"
+              >
                 <Trash2 size={16} />
               </span>
-              <span className="truncate font-medium">Remove</span>
+              <span className="truncate">Remove</span>
             </OctantMenuItem>
           </OctantMenuPopup>
         </OctantMenuPositioner>
@@ -242,8 +255,9 @@ export function OverlaySections() {
             "OctantMenuItem",
             "OctantMenuCheckboxItem",
             "OctantMenuSeparator",
+            "OctantMenuIconSlot",
           ]}
-          props={`open; group label, item with icon, item with a second line, checked item, item with an .oct-meta shortcut, disabled item, separator`}
+          props={`open; group label, item with icon, item with a second line, checked item, item with an .oct-meta shortcut, disabled item (checked and disabled rows reserve the icon column with OctantMenuIconSlot), separator`}
           note="no shortcut component exists, so the shortcut is a plain .oct-meta span"
         >
           <OpenStage tall>

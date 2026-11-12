@@ -147,7 +147,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
           changing them.
         </p>
       </OctantCardHeader>
-      <OctantCardContent className="grid min-w-0 gap-4">
+      <OctantCardContent className="grid min-w-0 gap-3">
         {capabilities.map(({ title, Icon, state, description, preview, settings, action }) => (
           <section key={title} className="flex min-w-0 flex-col gap-2">
             <h3 className="first-run__capability-title">
@@ -179,7 +179,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
                     bridge={props.bridge}
                   />
                 ) : (
-                  <figure className="rounded-md border border-border p-3">
+                  <figure className="rounded-md border border-border p-2">
                     <div role="img" aria-label={`Static ${title} preview`} className="text-xs">
                       {preview}
                     </div>
