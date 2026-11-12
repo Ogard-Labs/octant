@@ -152,7 +152,8 @@ describe("the library view", () => {
     for (const more of screen.queryAllByRole("button", { name: /^Show all/ })) {
       await user.click(more);
     }
-    expect(screen.getByText("Co")).toBeTruthy();
+    // Context7 and Composio both begin "Co", so the tile is not unique.
+    expect(screen.getAllByText("Co").length).toBeGreaterThan(0);
     expect(screen.getByText("De")).toBeTruthy();
     expect(monogramFor("Microsoft Learn")).toBe("Ml");
     expect(monogramFor("Stripe")).not.toBe(monogramFor("Sentry"));

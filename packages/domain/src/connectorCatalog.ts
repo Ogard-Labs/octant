@@ -545,6 +545,20 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     auth: { kind: "sign-in" },
   },
   {
+    id: "composio",
+    displayName: "Composio",
+    description: "Reach Gmail, Google Drive and many other apps through Composio's hosted service.",
+    category: "business",
+    keywords: ["gmail", "google drive", "google calendar", "email", "aggregator", "integrations"],
+    url: "https://connect.composio.dev/mcp",
+    docs: "https://docs.composio.dev/docs/composio-connect",
+    auth: {
+      kind: "sign-in",
+      permissionNotice:
+        "Composio is a third-party hosted service. It stores the sign-ins you give it for other apps, and the content the agent reads or writes in them passes through its servers, not only between this Mac and the app. Octant does not control how long Composio keeps it.",
+    },
+  },
+  {
     id: "intercom",
     displayName: "Intercom",
     description: "Search conversations, contacts, and articles.",
