@@ -160,7 +160,7 @@ describe("What's new after an update", () => {
 
   it("shows the announcement instead of the card and acknowledges it on Not now", async () => {
     const { hostBridge, acknowledgeWhatsNew } = bridge(
-      dueNotes({ announcement: { title: "Comment on a Canvas", body: "Point at a block." } }),
+      dueNotes({ announcements: [{ title: "Comment on a Canvas", body: "Point at a block." }] }),
     );
     render(<Harness hostBridge={hostBridge} />);
 
@@ -174,17 +174,22 @@ describe("What's new after an update", () => {
     await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByText("New · v0.2.0")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    expect(screen.queryByText(/ of /)).toBeNull();
   });
 
   it("opens the notes from the announcement's primary button, with its own label and picture", async () => {
     const { hostBridge, acknowledgeWhatsNew } = bridge(
       dueNotes({
-        announcement: {
-          title: "Comment on a Canvas",
-          body: "Point at a block.",
-          actionLabel: "Show me",
-          picture: { dataUrl: "data:image/png;base64,AAAA", alt: "A mark on a block" },
-        },
+        announcements: [
+          {
+            title: "Comment on a Canvas",
+            body: "Point at a block.",
+            actionLabel: "Show me",
+            picture: { dataUrl: "data:image/png;base64,AAAA", alt: "A mark on a block" },
+          },
+        ],
       }),
     );
     render(<Harness hostBridge={hostBridge} />);
@@ -237,7 +242,7 @@ describe("What's new after an update", () => {
 
   it("returns focus to the profile row when the announcement is answered", async () => {
     const { hostBridge } = bridge(
-      dueNotes({ announcement: { title: "Comment on a Canvas", body: "Point at a block." } }),
+      dueNotes({ announcements: [{ title: "Comment on a Canvas", body: "Point at a block." }] }),
     );
     render(<Harness hostBridge={hostBridge} />);
 
@@ -274,7 +279,7 @@ describe("What's new after an update", () => {
 
   it("does not show the announcement after Settings acknowledged the update", async () => {
     const { hostBridge, acknowledgeWhatsNew, readBundledWhatsNew } = settingsBridge(
-      dueNotes({ announcement: { title: "Comment on a Canvas", body: "Point at a block." } }),
+      dueNotes({ announcements: [{ title: "Comment on a Canvas", body: "Point at a block." }] }),
     );
     render(
       <AppUpdateSettings
@@ -293,5 +298,142 @@ describe("What's new after an update", () => {
     await waitFor(() => expect(readBundledWhatsNew).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog", { name: "Comment on a Canvas" })).toBeNull();
     expect(acknowledgeWhatsNew).toHaveBeenCalledOnce();
+  });
+
+  describe("with several announcements", () => {
+    const SET = [
+      { title: "First", body: "One body.", picture: { dataUrl: "data:image/png;base64,AAAA" } },
+      { title: "Second", body: "Two body.", actionLabel: "Try the second" },
+      { title: "Third", body: "Three body.", actionLabel: "Open the third" },
+    ] as const;
+
+    it("pages through them with Back, Next and a position, closing the whole set once from the last", async () => {
+      const { hostBridge, acknowledgeWhatsNew } = bridge(dueNotes({ announcements: SET }));
+      render(<Harness hostBridge={hostBridge} />);
+
+      expect(await screen.findByRole("dialog", { name: "First" })).toBeTruthy();
+      expect(screen.getByText("1 of 3")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+      // Base UI hands initial focus over one frame after it mounts.
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next" })),
+      );
+      expect(acknowledgeWhatsNew).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByRole("dialog", { name: "Second" })).toBeTruthy();
+      expect(screen.getByText("2 of 3")).toBeTruthy();
+      expect(screen.getByText("2 of 3").getAttribute("role")).toBe("status");
+      expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(screen.getByRole("dialog", { name: "First" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByRole("dialog", { name: "Third" })).toBeTruthy();
+      expect(screen.getByText("3 of 3")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open the third" }));
+      expect(acknowledgeWhatsNew).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open the third" }));
+      expect(await screen.findByRole("dialog", { name: "What's new" })).toBeTruthy();
+      await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+    });
+
+    it("describes where the person is through the dialog's description", async () => {
+      const { hostBridge } = bridge(dueNotes({ announcements: SET }));
+      render(<Harness hostBridge={hostBridge} />);
+
+      const dialog = await screen.findByRole("dialog", { name: "First" });
+      const described = (dialog.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent);
+      expect(described).toEqual(["1 of 3", "One body."]);
+    });
+
+    it("moves between them with the arrow keys and stops at the ends", async () => {
+      const { hostBridge } = bridge(dueNotes({ announcements: SET }));
+      render(<Harness hostBridge={hostBridge} />);
+      await screen.findByRole("dialog", { name: "First" });
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next" })),
+      );
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowLeft" });
+      expect(screen.getByRole("dialog", { name: "First" })).toBeTruthy();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowRight" });
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowRight" });
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowRight" });
+      expect(screen.getByRole("dialog", { name: "Third" })).toBeTruthy();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowLeft" });
+      expect(screen.getByRole("dialog", { name: "Second" })).toBeTruthy();
+    });
+
+    it("leaves the arrow keys to a text field that has focus", async () => {
+      const { hostBridge } = bridge(dueNotes({ announcements: SET }));
+      render(<Harness hostBridge={hostBridge} />);
+      await screen.findByRole("dialog", { name: "First" });
+      const field = document.createElement("input");
+      document.body.append(field);
+
+      fireEvent.keyDown(field, { key: "ArrowRight" });
+
+      expect(screen.getByRole("dialog", { name: "First" })).toBeTruthy();
+      field.remove();
+    });
+
+    it("keeps each announcement's own action label on its step and opens the notes from it", async () => {
+      const { hostBridge, acknowledgeWhatsNew } = bridge(dueNotes({ announcements: SET }));
+      render(<Harness hostBridge={hostBridge} />);
+      await screen.findByRole("dialog", { name: "First" });
+      expect(screen.queryByRole("button", { name: "Try the second" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      fireEvent.click(screen.getByRole("button", { name: "Try the second" }));
+
+      expect(await screen.findByRole("dialog", { name: "What's new" })).toBeTruthy();
+      await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+    });
+
+    it("acknowledges the whole set once when it is closed in the middle, and does not bring it back", async () => {
+      const { hostBridge, acknowledgeWhatsNew, readBundledWhatsNew } = bridge(
+        dueNotes({ announcements: SET }),
+      );
+      const { unmount } = render(<Harness hostBridge={hostBridge} />);
+      await screen.findByRole("dialog", { name: "First" });
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+
+      await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      unmount();
+      render(<Harness hostBridge={hostBridge} />);
+      await waitFor(() => expect(readBundledWhatsNew).toHaveBeenCalledTimes(2));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(acknowledgeWhatsNew).toHaveBeenCalledOnce();
+    });
+
+    it("shows the set again when a later release bundles a changed set", async () => {
+      const first = bridge(dueNotes({ announcements: SET }));
+      const { unmount } = render(<Harness hostBridge={first.hostBridge} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      unmount();
+
+      const next = bridge(
+        dueNotes({
+          version: "0.3.0",
+          announcements: [SET[0], { title: "Replaced", body: "New." }],
+        }),
+      );
+      render(<Harness hostBridge={next.hostBridge} />);
+
+      expect(await screen.findByRole("dialog", { name: "First" })).toBeTruthy();
+      expect(screen.getByText("1 of 2")).toBeTruthy();
+    });
   });
 });

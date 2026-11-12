@@ -2460,6 +2460,43 @@ CREATE INDEX validation_evidence_authority_idx
   },
   {
     version: 95,
+    name: "create_agent_access",
+    // Agent grants and the threads each agent started are journaled facts with
+    // rebuildable rows. A grant's bearer key hash and its last use are host
+    // state, not facts: they never enter the journal, and a reset forgets them
+    // the way the remote session store forgets sessions.
+    sql: `
+      CREATE TABLE agent_access_grant_projection (
+        grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 36),
+        scope_id TEXT NOT NULL UNIQUE CHECK(length(scope_id) = 36),
+        state TEXT NOT NULL CHECK(state IN ('active', 'revoked')),
+        grant_json TEXT NOT NULL CHECK(json_valid(grant_json)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE TABLE agent_access_thread_projection (
+        thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+        grant_id TEXT NOT NULL CHECK(length(grant_id) = 36),
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+        project_id TEXT CHECK(project_id IS NULL OR length(trim(project_id)) > 0),
+        started_at TEXT NOT NULL CHECK(length(trim(started_at)) > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE INDEX agent_access_thread_grant_idx
+        ON agent_access_thread_projection(grant_id, last_sequence);
+      CREATE TABLE agent_access_credential_store (
+        grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 36),
+        salt TEXT CHECK(salt IS NULL OR length(salt) = 32),
+        hash TEXT CHECK(hash IS NULL OR length(hash) = 64),
+        last_used_at TEXT,
+        last_source_class TEXT CHECK(
+          last_source_class IS NULL OR last_source_class IN ('lan-private', 'tailscale')
+        )
+      ) STRICT;
+    `,
+  },
+  {
+    version: 96,
     name: "create_journal_verification_watermark",
     // The sequence startup last verified the journal through, so the next
     // start decodes only the rows after it. Disposable: deleting the row only

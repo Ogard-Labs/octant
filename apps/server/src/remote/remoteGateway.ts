@@ -38,6 +38,7 @@ import {
   createRemoteRoutePolicy,
   REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
   REMOTE_HUB_LINK_ROUTE_IDS,
+  REMOTE_AGENT_ACCESS_ROUTE_IDS,
   REMOTE_PROTOCOL_ROUTE_IDS,
   REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
   type RemoteRouteDefinition,
@@ -100,6 +101,9 @@ const TRUST_ISSUING_PRE_AUTH_ROUTE_IDS: ReadonlySet<string> = new Set([
 ]);
 
 const HUB_LINK_ROUTE_IDS: ReadonlySet<string> = new Set(Object.values(REMOTE_HUB_LINK_ROUTE_IDS));
+const AGENT_ACCESS_ROUTE_IDS: ReadonlySet<string> = new Set(
+  Object.values(REMOTE_AGENT_ACCESS_ROUTE_IDS),
+);
 
 /**
  * How often a ready gateway ends proxy sessions past their expiry, closing their
@@ -161,6 +165,15 @@ export interface RemoteGatewayServices {
   readonly hubLink?: (
     request: Request,
     facts?: { readonly sourceKey: string },
+  ) => Promise<Response | undefined>;
+  /**
+   * An outside agent's key claim and MCP endpoint. Each request authenticates
+   * itself (a signed bridge request or a bearer agent key) and is judged by the
+   * handler with the socket's source class; undefined answers not found.
+   */
+  readonly agentAccess?: (
+    request: Request,
+    facts?: RemoteRouteFacts,
   ) => Promise<Response | undefined>;
   /** The origin of the hub's web app, when this host holds a roster naming one; see the route policy. */
   readonly hubWebOrigin?: () => string | undefined;
@@ -769,7 +782,9 @@ function assembleServices(
         ? options.designPage?.(request)
         : HUB_LINK_ROUTE_IDS.has(route.id)
           ? options.hubLink?.(request, facts)
-          : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
+          : AGENT_ACCESS_ROUTE_IDS.has(route.id)
+            ? options.agentAccess?.(request, facts)
+            : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
     hasServerProxySession: (request) => auth.hasServerProxySession(request),

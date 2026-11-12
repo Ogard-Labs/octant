@@ -28,6 +28,9 @@ export async function openAgentWindow(
         readonly thread: { readonly id: string; readonly title: string };
       },
 ): Promise<HostRefusal | { readonly kind: "opened" }> {
+  // A session with no workspace reaches thread routes the way a paired device
+  // does, by the thread and Project themselves, so there is nothing to open.
+  if (session.workspace === "none") return { kind: "opened" };
   const project =
     target.mode === "chat" ? target.project : { id: target.projectId, name: target.projectName };
   // A window keeps its workspace once registered; registering again would

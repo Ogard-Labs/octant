@@ -2123,17 +2123,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   width: 100%;
 }
 
-/* The scroll frame and its padding are the system's `.transcript-scroll`.
-   Text scrolling under the frame's top edge fades out over the frame's own
-   top padding: cut off sharp right under the waiting row, half a line of the
-   answer read as printed over that row. At rest the first line sits below
-   the fade. */
+/* The scroll frame, its padding, and the fade at its edges are the system's
+   `.transcript-scroll`. (Code alone faded the top: cut off sharp right under
+   the waiting row, half a line of the answer read as printed over that row.) */
 .code-thread-workspace__conversation {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  mask-image: linear-gradient(to bottom, transparent, var(--oct-fg) var(--oct-space-3));
 }
 
 /* The frame is a flex column, and a windowed list holds only absolutely

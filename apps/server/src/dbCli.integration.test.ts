@@ -222,6 +222,7 @@ describe("database CLI runtime composition", () => {
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "project-terminal", lastSequence: 1, lag: 0 },
         { name: "remote-server-grant", lastSequence: 1, lag: 0 },
+        { name: "agent-access", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "host-memory-limits", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },

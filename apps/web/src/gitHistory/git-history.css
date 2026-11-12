@@ -28,6 +28,13 @@
 .git-history__toolbar {
   justify-content: space-between;
 }
+/* The three views total 262px; the dock is 280px wide at its minimum and the
+   toolbar keeps 12px each side, so the last view was cut off. The group wraps
+   its items to a second row rather than clipping one. */
+.git-history__toolbar [data-slot="toggle-group"] {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
 .git-history__search input {
   min-width: 0;
   flex: 1;

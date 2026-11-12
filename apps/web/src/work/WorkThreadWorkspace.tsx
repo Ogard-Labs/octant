@@ -131,6 +131,11 @@ import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import {
+  threadImageOfferKey,
+  useThreadImageOffers,
+  type ThreadImageVerdict,
+} from "../composer/threadImageOffers";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 import {
@@ -2079,6 +2084,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       else images.attach(files);
     },
   });
+  // A picture marked up in this thread's Browser arrives here as a file and
+  // meets the same checks as one dropped on the composer.
+  useThreadImageOffers(
+    threadImageOfferKey("work", String(props.threadId)),
+    (file, arrival): ThreadImageVerdict => {
+      let reason: string | undefined;
+      if (imageSupport === false) {
+        reason = "Choose an image-capable model to attach images.";
+        images.refuse(reason);
+      } else {
+        reason = images.attach([file]);
+      }
+      if (reason !== undefined) return { status: "refused", reason };
+      if (arrival === "live") textareaRef.current?.focus();
+      return { status: "accepted" };
+    },
+  );
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;

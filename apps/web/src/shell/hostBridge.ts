@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
-import type { MovedThreadReference } from "@octant/contracts";
+import type { AgentAccessCommand, MovedThreadReference } from "@octant/contracts";
 
 export type { AppUpdateState };
 
@@ -339,6 +339,28 @@ export function hubAdministrationOf(
 }
 
 /**
+ * Settings › Agent access on a local desktop window: list grants, and send the
+ * commands that make, change, and revoke them, issue connection codes, confirm
+ * keys, and rotate a direct key. The desktop adds its secret; a paired device
+ * has no such bridge and lists and revokes through the product routes instead.
+ */
+export interface AgentAccessAdministrationBridge {
+  readonly agentAccessRequest: (
+    request:
+      | { readonly kind: "list" }
+      | { readonly kind: "command"; readonly command: AgentAccessCommand },
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+}
+
+/** Agent access administration when this window is a local desktop window, else nothing. */
+export function agentAccessAdministrationOf(
+  bridge: OctantHostBridge | undefined,
+): AgentAccessAdministrationBridge | undefined {
+  const request = bridge?.agentAccessRequest;
+  return request === undefined ? undefined : { agentAccessRequest: request };
+}
+
+/**
  * A Mac owner device's unlock key (Touch ID or the account password). The
  * desktop makes the key and returns only its public half, signs one owner
  * unlock challenge, and forgets the key. Absent outside the desktop app.
@@ -375,6 +397,7 @@ export interface OctantHostBridge
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
     Partial<HubAdministrationBridge>,
+    Partial<AgentAccessAdministrationBridge>,
     Partial<OwnerUnlockBridge> {
   /**
    * Shows a server another paired computer granted this device, served by

@@ -3470,8 +3470,13 @@ the thread it came from.
   saying paused or scheduled and opening the routine in Automation Center
   where the host can (the phone shows the card without Open). The desktop and
   web thread's Environment lists the routine in its Routines row, paused or
-  not, as it lists any routine made from the thread; the phone has no
-  Environment, and a paired device cannot read routines.
+  not, as it lists any routine made from the thread. The phone has no
+  Environment, so its Work and Code thread screen shows a read-only
+  **Scheduled** list of the routines the thread set up (name, schedule, and
+  whether it is paused). A paired device may read routines, because the remote
+  route policy classifies an Automation list as a Project overview read and
+  forwards it for the device's own host; it may not resume or edit one from the
+  phone, so a paused routine says to resume it at a window on this computer.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
@@ -4419,10 +4424,11 @@ flowchart LR
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
   the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
-  a Chat reply's streamed deltas batch into one journal commit per short burst,
-  so the authoritative journal fsyncs a bounded number of times per second
-  instead of once per token, and a power loss loses at most the burst that was
-  still open — never a committed one.
+  a Chat reply's and a Code turn's streamed deltas batch into one journal commit
+  per short burst (a Code burst also flushes before any other event of its turn
+  and when the turn ends), so the authoritative journal fsyncs a bounded number
+  of times per second instead of once per token, and a power loss loses at most
+  the burst that was still open — never a committed one.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
@@ -4673,7 +4679,8 @@ flowchart LR
     they ask: neither the MCP tool approval view nor the harness approval
     carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
-  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  tool, or the person takes with the Browser pane's Screenshot control (or
+  Draw on page, which takes the same capture to draw on), is kept
   with the thread that owns the Browser, and so is a short recording (an
   animated PNG) of the agent's page during one call that asked for it with
   `record`. The bytes live in the host's managed
@@ -13365,7 +13372,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
-  ([Hub and spokes](design/hub-and-spokes.md), built). The listener, pairing tickets, pairing
+  ([Hub and spokes](design/hub-and-spokes.md), built). An outside agent on
+  another machine on the person's own network is a third such principal, held
+  to an agent grant the person creates over the loopback administration
+  channel (`/api/desktop/agent-access`, `octant agent-access`): named Projects,
+  modes, a highest level below Full access, tools, models, limits, and expiry.
+  It reaches only `POST /api/agent-access/claim` and `POST
+/api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
+  Tailscale sources only, authenticated by a signed bridge proof or a bearer
+  agent key; each tool runs in process as a paired-device principal whose
+  device id is the grant's own scope id, after a guard that admits only the
+  routes the tools use inside the grant, so every device clamp applies too.
+  It never answers approvals or adds Projects, its threads are journaled as its
+  own and marked as outside content, and revoking the grant ends its sessions.
+  Settings › Remote access › Agent access administers grants from a local
+  window; a paired device may list them and revoke one through
+  `/api/agent-grants`, never make or widen one
+  ([Agent access from other machines](design/agent-access.md)). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the
@@ -16196,7 +16219,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
-  bundled file read from disk (with an optional bundled announcement and picture read the same way), so What's New never adds a request.
+  bundled file read from disk (with optional bundled announcements, one to five, and their pictures read the same way), so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
   relaunch they start, and install waits while agents are active (a thread
   parked on an approval or question is still an active agent) or while the

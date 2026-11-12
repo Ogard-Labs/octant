@@ -1281,7 +1281,9 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 
 .transcript-find {
   position: absolute;
-  top: var(--oct-space-2);
+  /* Below the transcript's edge fade (one space-3), which dimmed the bar's top
+     edge while the transcript was scrolled. */
+  top: var(--oct-space-3);
   right: var(--oct-space-3);
   display: flex;
   align-items: center;
