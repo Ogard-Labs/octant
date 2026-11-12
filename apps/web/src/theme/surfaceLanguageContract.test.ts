@@ -80,6 +80,20 @@ describe("surface language", () => {
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
 
+  it("sets the title band's facts, a turn's time and a sidebar group heading as their roles", () => {
+    const app = read("styles.css");
+    for (const selector of [".workspace-pane__context", ".workspace-pane__crumb"]) {
+      const rule = app.match(new RegExp(`${selector.replace(".", "\\.")} \\{[^}]*\\}`))?.[0] ?? "";
+      expect(rule).toContain("font-size: var(--oct-text-xs);");
+      expect(rule).toContain("font-weight: var(--oct-weight-regular);");
+    }
+    const heading = app.match(/\.activity-nav__group > h2 \{[^}]*\}/)?.[0] ?? "";
+    expect(heading).toContain("font-size: var(--oct-text-sm);");
+    expect(heading).toContain("font-weight: var(--oct-weight-strong);");
+    const turnTime = read("styles/octant.css").match(/\.turn-time \{[^}]*\}/)?.[0] ?? "";
+    expect(turnTime).toContain("font-size: var(--oct-text-xs);");
+  });
+
   it("keeps sidebar and menu labels in sentence case", () => {
     const sidebar = read("styles/project-threads.css").match(
       /\.project-section > \.sidebar-section \{[^}]+\}/,

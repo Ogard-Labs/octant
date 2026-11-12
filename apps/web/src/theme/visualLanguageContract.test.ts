@@ -784,14 +784,19 @@ describe("the public-block visual language", () => {
 
   it("keeps Settings navigation and explanatory text readable without shouting", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
+    // A rail group heading is the Section label role: its type is defined once,
+    // in the base rule, and the rail's rule only sets its room.
+    const sectionLabel = system.match(/(?:^|\n)\.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(navigation).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
-    expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(sectionLabel).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
+    expect(sectionLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
+    expect(sectionLabel).toMatch(/letter-spacing:\s*var\(--oct-tracking-snug\)/);
+    expect(navigation).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(navigation).toMatch(/text-transform:\s*none/);
-    expect(navigation).toMatch(/letter-spacing:\s*normal/);
     // The desktop rail shows its group labels; a quiet label is what separates
     // one group of pages from the next, not a hairline and not a hidden name.
     // Any way of hiding them counts: the sr-only recipe, display, visibility.

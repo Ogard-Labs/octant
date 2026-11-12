@@ -136,27 +136,29 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                   |
-| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
-| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)   |
-| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, on a toolbar's row (`oct-page-title`)                                   |
-| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`); a part of a dialog is headed at 15 / 600 (its `h3`)                  |
-| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                       |
-| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
-| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
-| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
-| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
-| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
-| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
+| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                                     |
+| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                   |
+| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                     |
+| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, and a thread's title in the title band (`oct-page-title`)                                 |
+| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)     |
+| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                         |
+| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), a Settings section's label, a sidebar or Settings rail group heading |
+| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option, sidebar row and thread title, an empty state's title                                      |
+| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                                            |
+| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                           |
+| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, a turn's time and "Worked for" (`oct-meta`)                |
+| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                   |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, counts, `strong`, the app's name, a destination's page title), and
-700 (`--oct-weight-title`) only for the large title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
+card titles, `strong`, the app's name, a destination's page title), and
+700 (`--oct-weight-title`) only for the large title. A count beside a label
+is Meta at 400; the one count at medium weight is a plan meter's figure, which
+stands with no label of its own (see Plan meters). The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
@@ -167,8 +169,11 @@ fact in a list is its name in muted ink and its value in primary ink. (A
 dialog's title was the body's 15px, and a reply's headings were 15/14/14 at
 medium weight: each was one more line of the text under it.)
 
-Titles and the welcome question use `--oct-tracking-tight` (-0.025em); section labels use `--oct-tracking-snug`;
-body and detail use none.
+The large title and a dialog's title use `--oct-tracking-tight` (-0.025em); the page title and
+section labels use `--oct-tracking-snug` (-0.01em), because tight tracking on 14px type closes
+the letters up; the welcome question has its own -0.012em; body and detail use none. The role
+leadings are tokens too: `--oct-leading-label` (1.35), `--oct-leading-meta` (1.4) and
+`--oct-leading-detail` (1.45) beside the heading and snug ones.
 
 ### Colour
 

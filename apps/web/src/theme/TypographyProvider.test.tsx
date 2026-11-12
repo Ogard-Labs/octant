@@ -83,8 +83,10 @@ describe("ThemeTypographyProvider", () => {
     expect(systemStyles).toMatch(
       /\.setnav-item\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
+    // The rail's rows are Row labels: the role's size token scales with the
+    // interface size through `--oct-text-step`.
     expect(settingsStyles).toMatch(
-      /\.settings-navigation \.setnav-item,[\s\S]*font-size:\s*var\(--octant-ui-font-size\);/s,
+      /\.settings-navigation \.setnav-item,[\s\S]*font-size:\s*var\(--oct-text-sm\);/s,
     );
     expect(shellStyles).toMatch(
       /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,

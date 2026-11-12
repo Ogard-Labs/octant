@@ -277,6 +277,7 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .dock-card__chevron {
@@ -324,12 +325,23 @@
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A diff figure in a card row is the mono figure it is everywhere else, not a
+   name: it keeps the regular weight and the row's own line height. */
+.dock-card__label.diffstat {
+  font-weight: var(--oct-weight-regular);
+  line-height: inherit;
+}
+
+/* The fold row's own words are a hint, not a name: they keep the regular weight. */
 .dock-card__label--meta {
   color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 
 .dock-card__meta {
