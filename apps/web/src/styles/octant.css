@@ -520,7 +520,8 @@ html[data-octant-input="pointer"] :focus-visible {
 }
 
 html[data-octant-input="pointer"] [data-slot="input"]:focus-visible,
-html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible {
+html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible,
+html[data-octant-input="pointer"] [data-slot="combobox-input-group"]:focus-within {
   border-color: var(--octant-border-strong);
 }
 

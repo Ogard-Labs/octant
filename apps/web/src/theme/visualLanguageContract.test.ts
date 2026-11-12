@@ -1678,6 +1678,28 @@ describe("shared recipes against the global stylesheets", () => {
     expect(card).toMatch(/<h2[^>]*className=\{cn\("m-0 text-base /);
   });
 
+  it("marks a combobox's frame with a stronger border under pointer focus, in the field's own rule", () => {
+    // The ring the frame once drew was its only pointer mark, since the global
+    // rule strips the outline there. A field and the combobox share one rule.
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    expect(system).toMatch(
+      /\[data-slot="input"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="textarea"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="combobox-input-group"\]:focus-within\s*\{\s*border-color: var\(--octant-border-strong\);/,
+    );
+  });
+
+  it("gives every alert that announces as an alert a tone, except a plain offer", () => {
+    // Without a tone the mark is neutral ink, so a failure would not read as one.
+    const toneless: string[] = [];
+    for (const path of sourceFiles(webRoot, ".tsx")) {
+      if (/\.test\.tsx$|[\\/](?:gallery|ui)[\\/]/.test(path)) continue;
+      const source = readFileSync(path, "utf8");
+      for (const match of source.matchAll(/<OctantAlert\b[^>]*?role="alert"[^>]*>/g))
+        if (!match[0].includes("tone=")) toneless.push(relative(webRoot, path));
+    }
+    // A cross-context offer states a fact beside the composer.
+    expect(toneless).toEqual(["shell/WorkspaceView.tsx"]);
+  });
+
   it("draws the one focus edge on every shared recipe, with no ring, halo or second outline", () => {
     const strays: string[] = [];
     for (const path of sourceFiles(join(webRoot, "ui"), ".tsx")) {
