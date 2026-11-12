@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
@@ -38,6 +38,8 @@ export interface UserServiceStatus {
 export interface UserServiceManager {
   readonly kind: ServiceManagerKind;
   install(): Promise<void>;
+  /** Stops the service and removes its descriptor; a service that is absent is left absent. */
+  uninstall(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   enable(): Promise<void>;
@@ -74,6 +76,13 @@ export interface UserServiceManagerOptions {
   readonly runtimeEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly runner?: ServiceCommandRunner;
   readonly platform?: NodeJS.Platform;
+  /**
+   * Runs `executable` with exactly these arguments instead of the CLI's
+   * `server run`, and passes no environment. The desktop app uses this to
+   * start its own host without a window: the app resolves its own paths the
+   * way it does when a person opens it.
+   */
+  readonly hostArguments?: readonly string[];
 }
 
 export function createUserServiceManager(options: UserServiceManagerOptions): UserServiceManager {
@@ -110,6 +119,18 @@ export function createLaunchdUserServiceManager(
         if (!isAlreadyLoaded(error)) throw mapManagerError(error, "launchctl");
       }
     },
+    uninstall: async () => {
+      try {
+        await runner.run("/bin/launchctl", ["bootout", `gui/${options.uid}/${LAUNCHD_LABEL}`]);
+      } catch (error) {
+        // launchctl exits 3 or 113 for a label it has not loaded, which is
+        // the state uninstall wants.
+        if (!isExpectedExit(error, [3, 113])) throw mapManagerError(error, "launchctl");
+      }
+      await rm(descriptorPath, { force: true });
+      installed = false;
+      enabled = false;
+    },
     start: async () => {
       await runManagerCommand(runner, "/bin/launchctl", [
         "kickstart",
@@ -144,6 +165,9 @@ export function createLaunchdUserServiceManager(
         ["print", `gui/${options.uid}/${LAUNCHD_LABEL}`],
         [3, 113],
       );
+      // The descriptor on disk is what a login reads, so it decides whether
+      // the service is installed, whatever this process did earlier.
+      installed = await descriptorExists(descriptorPath);
       if (result === undefined) {
         return {
           kind: "launchd",
@@ -156,7 +180,7 @@ export function createLaunchdUserServiceManager(
       }
       return {
         kind: "launchd",
-        installed: installed || result.stdout.length > 0,
+        installed,
         enabled,
         active: /\bstate\s*=\s*running\b/i.test(result.stdout),
         session: "active",
@@ -196,11 +220,20 @@ export function createSystemdUserServiceManager(
       installed = true;
       await runSystemctl(["daemon-reload"]);
     },
+    uninstall: async () => {
+      // `disable --now` on a unit systemd does not know exits 1 or 5; either
+      // way nothing is left running or enabled.
+      await runSystemctlStatus(["disable", "--now", SYSTEMD_UNIT], [1, 5]);
+      await rm(unitPath, { force: true });
+      installed = false;
+      await runSystemctl(["daemon-reload"]);
+    },
     start: () => runSystemctl(["start", SYSTEMD_UNIT]).then(() => undefined),
     stop: () => runSystemctl(["stop", SYSTEMD_UNIT]).then(() => undefined),
     enable: () => runSystemctl(["enable", SYSTEMD_UNIT]).then(() => undefined),
     disable: () => runSystemctl(["disable", SYSTEMD_UNIT]).then(() => undefined),
     status: async () => {
+      installed = await descriptorExists(unitPath);
       try {
         const [activeResult, enabledResult, session, lingering] = await Promise.all([
           // Exit 4 is systemd's "no such unit": the unit is not installed yet,
@@ -278,8 +311,9 @@ function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceIn
     options.cliEntryPoint ??
     (options.executable === undefined ? resolveCurrentCliEntryPoint() : undefined);
   const args =
-    runtimeEntryPoint === undefined ? ["server", "run"] : [runtimeEntryPoint, "server", "run"];
-  const environment = resolveServiceEnvironment(options);
+    options.hostArguments ??
+    (runtimeEntryPoint === undefined ? ["server", "run"] : [runtimeEntryPoint, "server", "run"]);
+  const environment = options.hostArguments === undefined ? resolveServiceEnvironment(options) : {};
   if (!isAbsolute(command)) {
     throw new ServiceManagerError(
       "unsafe-descriptor",
@@ -536,6 +570,15 @@ function isAlreadyLoaded(error: unknown): boolean {
   const record = error as { readonly message?: unknown; readonly stderr?: unknown };
   const text = `${typeof record.message === "string" ? record.message : ""} ${typeof record.stderr === "string" ? record.stderr : ""}`;
   return /already\s+(?:bootstrapped|loaded)|service\s+already\s+loaded/i.test(text);
+}
+
+async function descriptorExists(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isFile();
+  } catch (error) {
+    if (isMissing(error)) return false;
+    throw error;
+  }
 }
 
 function isMissing(error: unknown): boolean {

@@ -8,7 +8,13 @@ import {
   resolveWindowsDesktopHost,
   requestWindowsDesktopHostStop,
 } from "./windowsDesktopHost";
-import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import { DESKTOP_HOST_ONLY_SWITCH, resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import { createUserServiceManager } from "@octant/cli/service-manager";
+import {
+  createBackgroundHostSettings,
+  decodeBackgroundHostChange,
+  type BackgroundHostSettings,
+} from "./backgroundHost";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -3875,6 +3881,18 @@ function installIpcHandlers(): void {
     if (typeof value !== "boolean") throw new Error("Octant rejected an invalid update setting.");
     return appUpdates().setAutomaticChecks(value);
   });
+  // Only Octant's own top-level windows reach these: a paired device talks to
+  // the host over the network and a Nightly client's bridge omits them.
+  ipcMain.handle(IPC_CHANNELS.backgroundHostState, (event) => {
+    ownedTopLevelWindowContext(event);
+    return backgroundHost().read();
+  });
+  ipcMain.handle(IPC_CHANNELS.backgroundHostChange, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    const change = decodeBackgroundHostChange(value);
+    if (change === undefined) throw new Error("Octant rejected an invalid background setting.");
+    return backgroundHost().change(change);
+  });
   ipcMain.handle(IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     // Checked against the known rings rather than passed through: the ring
@@ -4796,6 +4814,35 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
     log: logQuitProblem,
   });
   finishQuit();
+}
+
+let backgroundHostSettings: BackgroundHostSettings | undefined;
+function backgroundHost(): BackgroundHostSettings {
+  // The service starts this app's windowless host, so it exists only for an
+  // installed app on a system with a per-user service manager; a development
+  // run has no stable executable to point a login service at.
+  const serviceSupported =
+    app.isPackaged &&
+    desktopWindowsHost === undefined &&
+    (process.platform === "darwin" || process.platform === "linux");
+  backgroundHostSettings ??= createBackgroundHostSettings({
+    service: serviceSupported
+      ? createUserServiceManager({
+          paths: desktopPosixHostPaths(),
+          uid: process.getuid?.() ?? 0,
+          executable: process.execPath,
+          hostArguments: [DESKTOP_HOST_ONLY_SWITCH],
+        })
+      : undefined,
+    loginItem:
+      process.platform === "darwin"
+        ? {
+            read: () => app.getLoginItemSettings().openAtLogin,
+            write: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
+          }
+        : undefined,
+  });
+  return backgroundHostSettings;
 }
 
 async function handleFatalStartup(error: unknown): Promise<void> {
