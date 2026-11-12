@@ -34,6 +34,7 @@ import {
   changeCodeProjectAgentMerge,
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectAgentMemoryWrites,
   changeProjectBrandKit,
   changeProjectColor,
   changeProjectDesignSystem,
@@ -295,6 +296,21 @@ describe("Project creation and lifecycle", () => {
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("lets a Project of any mode allow agents to write its memory without asking, which starts off", () => {
+    for (const type of ["chat", "work", "code"] as const) {
+      const project = makeProject(ids[type], "0/1", { type });
+      const allowed = changeProjectAgentMemoryWrites(project, "enabled", updatedAt);
+      expect(allowed).toMatchObject({ type, agentMemoryWrites: "enabled", version: 2 });
+      expect(changeProjectAgentMemoryWrites(allowed, "disabled", updatedAt)).toMatchObject({
+        agentMemoryWrites: "disabled",
+        version: 3,
+      });
+      expect(() => changeProjectAgentMemoryWrites(project, "disabled", updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    }
   });
 
   it("lets a Code Project allow agent comments and default-branch pushes, each off until chosen", () => {

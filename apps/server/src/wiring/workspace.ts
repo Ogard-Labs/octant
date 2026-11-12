@@ -386,6 +386,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         persistence.readProject(projectId) === undefined
           ? undefined
           : persistence.readProjectMemory(projectId),
+      agentsWriteWithoutAsking: (projectId) =>
+        persistence.readProject(projectId)?.agentMemoryWrites === "enabled",
       isHostScope: isRoutineHostScope,
       isPairedDeviceScope,
       outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),

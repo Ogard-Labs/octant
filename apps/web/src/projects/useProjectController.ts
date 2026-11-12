@@ -469,6 +469,28 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
+  /**
+   * Let a Project's agents below Full access write its memory without asking
+   * for each change, or stop that. The server is the authority and accepts it
+   * only from a window on the host.
+   */
+  async function setAgentMemoryWrites(projectId: ProjectId, enabled: boolean): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined) return false;
+    if ((project.agentMemoryWrites === "enabled") === enabled) return true;
+    return execute(
+      {
+        kind: "change-project-agent-memory-writes",
+        projectId,
+        expectedVersion: project.version,
+        agentMemoryWrites: enabled ? "enabled" : "disabled",
+      },
+      enabled
+        ? "Agents may now write this Project's memory without asking."
+        : "Agents now ask before each change to this Project's memory.",
+    );
+  }
+
   /** Set, replace, or (with an empty kit) clear the Project's brand kit. */
   async function setBrandKit(projectId: ProjectId, brandKit: CanvasDesignBrand): Promise<boolean> {
     const project = projectById.get(projectId);
@@ -1019,6 +1041,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAgentDefaultBranchPush,
     setProviderPolicy,
     setNativeProviders,
+    setAgentMemoryWrites,
     setBrandKit,
     setDesignSystem,
     setDesktopRecipe,

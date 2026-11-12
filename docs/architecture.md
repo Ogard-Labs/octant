@@ -1516,8 +1516,15 @@ authoritative.
   accepted without a confirmation, marked agent-written with its thread and
   shown in the thread; below Full access the Project setting "Agents may
   write Project memory without asking" (off by default) does the same
-  (maintainer request, 2026-11-12; not built yet: today every write is a
-  proposal at every level). Otherwise a write is a proposal: the
+  (maintainer request, 2026-11-12; built). The setting is on every mode's
+  Project, in Project Overview; a person sets it from a window on this
+  computer, a paired device is refused, and each change is journaled as
+  `project.agent-memory-writes-changed@1`. A Chat thread has no Full access,
+  so in Chat only the setting skips the card. The tool call is the thread's
+  record of such a write: its result reports `written` with the entry's
+  text. The write goes through the same memory command path and checks as a
+  confirmed one, against the memory version the agent saw. Otherwise a write
+  is a proposal: the
   thread shows the person a card with the exact change, and only their
   confirmation writes it, through the same memory command path and checks
   (archived Project, mode switched off, memory version) as the person's own
@@ -1535,12 +1542,17 @@ authoritative.
   any other, and its card names what the thread read.
 - **Agent-written provenance.** A confirmed agent write is authored by the
   person who confirmed it and marked `agent-authored` with the thread's mode
-  and id; a write accepted without a confirmation carries the same mark and
-  names no confirming person. Project Overview shows "Written by an agent in a … thread" with the
+  and id; a write accepted without a confirmation carries the same mark with
+  `unconfirmed: true` and names no confirming person: its author field holds
+  the host's local user only because every entry has one, and Project
+  Overview shows "Nobody was asked" in place of "Approved by". An agent's
+  retraction keeps the entry's own provenance and records the retracting
+  thread beside it as `retractionOrigin`. Project Overview shows "Written by an agent in a … thread" with the
   thread, and data export carries the provenance with the entry. The
   person retracts such an entry like any other. A thread purge removes the
-  thread id from the entry and keeps the entry. Older events decode unchanged:
-  the new provenance is one more variant, not a changed shape.
+  thread id from the entry, and from its retraction, and keeps the entry.
+  Older events decode unchanged: the new provenance is one more variant, and
+  the two later fields are optional.
 
 ### Person memory
 

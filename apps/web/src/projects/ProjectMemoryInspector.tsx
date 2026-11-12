@@ -269,7 +269,10 @@ function MemoryRow(props: {
       <p className="memory-row__content">{entry.content}</p>
       {entry.provenance.kind === "agent-authored" ? (
         <p className="memory-row__source">
-          {agentProvenanceLabel(entry.provenance)}. Approved by {formatActor(entry.author)}
+          {agentProvenanceLabel(entry.provenance)}.{" "}
+          {entry.provenance.unconfirmed === true
+            ? "Nobody was asked"
+            : `Approved by ${formatActor(entry.author)}`}
         </p>
       ) : (
         <p className="memory-row__source">Original author: {formatActor(entry.author)}</p>
@@ -304,7 +307,15 @@ function MemoryRow(props: {
           <p>{entry.retractionReason}</p>
           <dl>
             <dt>Retraction actor</dt>
-            <dd>{formatActor(entry.retractedBy)}</dd>
+            <dd>
+              {entry.retractionOrigin === undefined
+                ? formatActor(entry.retractedBy)
+                : `${agentRetractionLabel(entry.retractionOrigin)}. ${
+                    entry.retractionOrigin.unconfirmed === true
+                      ? "Nobody was asked"
+                      : `Approved by ${formatActor(entry.retractedBy)}`
+                  }`}
+            </dd>
             <dt>Retracted at</dt>
             <dd>{formatTimestamp(entry.retractedAt)}</dd>
           </dl>
@@ -363,6 +374,12 @@ const MODE_LABEL = { chat: "Chat", work: "Work", code: "Code" } as const;
 function agentProvenanceLabel(provenance: AgentAuthoredMemoryProvenance): string {
   const where = `Written by an agent in a ${MODE_LABEL[provenance.mode]} thread`;
   return provenance.threadId === undefined ? where : `${where} · ${provenance.threadId}`;
+}
+
+/** Who retracted an entry an agent took out, with the same thread rule as its writes. */
+function agentRetractionLabel(origin: AgentAuthoredMemoryProvenance): string {
+  const where = `Retracted by an agent in a ${MODE_LABEL[origin.mode]} thread`;
+  return origin.threadId === undefined ? where : `${where} · ${origin.threadId}`;
 }
 
 function formatActor(actor: {

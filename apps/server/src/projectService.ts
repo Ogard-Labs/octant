@@ -56,6 +56,7 @@ import {
   changeCodeProjectAgentMerge,
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectAgentMemoryWrites,
   changeProjectColor,
   changeProjectProviderPolicy,
   changeProjectNativeProviders,
@@ -381,10 +382,12 @@ export class ProjectService implements ProjectServiceApi {
   }
 
   /**
-   * Applies a memory change a thread's agent proposed and the person at a
-   * window approved, marking the entry with the thread it came from. Only the
-   * host's own approval path calls it; no route accepts agent provenance. The
-   * Project, mode, lifecycle, and version checks are the person's own.
+   * Applies a memory change a thread's agent asked for, marking the entry with
+   * the thread it came from: one the person at a window approved, or one the
+   * thread's level or the Project's setting accepts with nobody asked, which
+   * the origin then says. Only the host's own memory tool path calls it; no
+   * route accepts agent provenance. The Project, mode, lifecycle, and version
+   * checks are the person's own.
    */
   async executeAgentMemory(
     command: AgentMemoryCommand,
@@ -481,6 +484,7 @@ export class ProjectService implements ProjectServiceApi {
           actor,
           retractedAt: timestamp,
           expectedVersion: command.expectedVersion,
+          ...(agentOrigin === undefined ? {} : { agentOrigin }),
         });
         result = { kind: "memory-entry-retracted", entry };
         eventName = "memory.entry-retracted@1";
@@ -957,6 +961,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeWorkProjectActions(current, command.actions, timestamp);
           kind = "work-project-actions-changed";
           eventName = "project.work-actions-changed@1";
+        } else if (command.kind === "change-project-agent-memory-writes") {
+          project = changeProjectAgentMemoryWrites(current, command.agentMemoryWrites, timestamp);
+          kind = "project-agent-memory-writes-changed";
+          eventName = "project.agent-memory-writes-changed@1";
         } else if (command.kind === "change-project-brand-kit") {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";

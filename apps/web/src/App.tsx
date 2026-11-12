@@ -5095,6 +5095,7 @@ function LaunchedShell(
       setProjectNativeProviders: projectController.setNativeProviders,
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
+      setProjectAgentMemoryWrites: projectController.setAgentMemoryWrites,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesignSystem: projectController.setDesignSystem,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,

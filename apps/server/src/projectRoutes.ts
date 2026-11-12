@@ -392,6 +392,23 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // Memory reaches every later turn in the Project, so letting agents
+      // write it unreviewed is the person's standing permission: a paired
+      // device cannot give it on their behalf.
+      if (
+        command.kind === "change-project-agent-memory-writes" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "Whether agents may write Project memory without asking is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       return response(await dependencies.service.executeProject(windowId, command), 200, origin);
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);
