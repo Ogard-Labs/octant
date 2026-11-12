@@ -2759,10 +2759,13 @@ hold for every action in it:
   which a standing Full access grant does not stand in for; the person's own
   click in a window is that approval. A push to the default branch follows a
   Project setting (maintainer request, 2026-11-12). Built: the Code Project
-  switch **Agents may push to the default branch** (`agentDefaultBranchPush`
+  setting **Agents may push to the default branch** (`agentDefaultBranchPush`
   on the Project, `change-code-project-agent-default-branch-push`, journaled
   as `project.code-agent-default-branch-push-changed@1`), off by default and
-  set only from a window on this host (a paired device is answered 403). With
+  set only from a window on this host (a paired device is answered 403). Its
+  switch is hidden in the app until an agent push path to the default branch
+  exists; the server field, command and rule stay (maintainer decision,
+  2026-11-12). With
   it off, a push to the default branch needs the same one-act approval. With
   it on, the host, which reads the switch again at each push, lets an ordinary
   `push-git` to the default branch follow the thread's usual push rule: it

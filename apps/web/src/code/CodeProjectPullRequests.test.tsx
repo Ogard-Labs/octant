@@ -851,7 +851,7 @@ describe("CodeProjectPullRequests", () => {
     expect(trigger).toHaveFocus();
   });
 
-  it("offers the comment and default-branch permissions beside Agents may merge, each off until chosen", async () => {
+  it("offers the comment permission beside Agents may merge, off until chosen, and no default-branch push switch", async () => {
     const user = userEvent.setup();
     const setComments = vi.fn(async (_projectId: unknown, _enabled: boolean) => true);
     const setDefaultBranchPush = vi.fn(async (_projectId: unknown, _enabled: boolean) => true);
@@ -877,15 +877,17 @@ describe("CodeProjectPullRequests", () => {
     expect(setComments).toHaveBeenCalledWith(expect.anything(), true);
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
+    // No agent push path to the default branch exists yet, so its switch is
+    // not offered even to a shell that can set it.
     await user.click(trigger);
-    const push = await screen.findByRole("menuitemcheckbox", {
-      name: "Let agents push to the default branch of Octant",
+    await screen.findByRole("menuitemcheckbox", {
+      name: "Let agents comment on Octant pull requests",
     });
-    expect(push).toHaveAttribute("aria-checked", "false");
-    await user.click(push);
-    expect(setDefaultBranchPush).toHaveBeenCalledTimes(1);
-    expect(setDefaultBranchPush).toHaveBeenCalledWith(expect.anything(), true);
-    expect(setComments).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: /push to the default branch/i }),
+    ).toBeNull();
+    expect(screen.queryByText(/push to the default branch/i)).toBeNull();
+    expect(setDefaultBranchPush).not.toHaveBeenCalled();
   });
 
   it("renders no row again when the page renders with the same rows", async () => {

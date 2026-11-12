@@ -4123,8 +4123,7 @@ number in tabular numerals at the trailing edge); one quiet chip or a success
 check at the trailing edge of the title line instead of three chips; no hairline
 between rows and the control hover fill with the row radius under the pointer.
 Grouping by repository gives each group a slim header with a "..." menu holding
-Auto-refresh, Agents may merge, Agents may comment on pull requests, Agents may
-push to the default branch and Refresh. A Project that is not on GitHub is
+Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is
 one notice at the foot, never an empty block. Where agents may merge is on, the
 group shows a quiet chip and the Repository settings button a dot. The Issues
 place uses the same row, group head and Sort menu. The dock packs its search,
