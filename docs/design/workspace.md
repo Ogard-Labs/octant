@@ -40,7 +40,9 @@ before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
 connection alone do not show it. A turn a restart cut off continues by
 itself, once, as the host, unless its thread is held: Continue after restart is
-off in Settings or for the thread, its last effect is uncertain, or its provider
+off in Settings or for the thread, its last effect is uncertain (a push or pull
+request step whose outcome is unknown, or a tool call that may change something
+and has no record of finishing, which the notice names by its tool), or its provider
 cannot resume it. Only a held thread shows this notice (maintainer request,
 2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 

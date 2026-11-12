@@ -5091,7 +5091,9 @@ or .zip>` write the same files, built by one host command
   with the reason in the restart notice, when: Settings › Code › Continue after
   restart is off; the thread's own switch is off (`restartContinuationOff`);
   any of its runtime work is `ambiguous` (a push or pull request step whose
-  outcome the restart left unknown); its own automatic continuation was cut
+  outcome the restart left unknown); the cut-off turn started a tool call
+  that may change something and nothing records that it finished (the
+  `uncertain-tool-call` hold, below); its own automatic continuation was cut
   off by a restart twice (the crash-loop guard counts per thread in the host
   store, keyed by the continuation it last started, and survives the restart
   it counts); its newest provider session on the same provider and model has
@@ -5110,27 +5112,76 @@ or .zip>` write the same files, built by one host command
   threads that window can open. Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below); subagent runs, coordinator
   wakes and goal loops are not continued yet.
-  Other running Code work has no process left after a restart. A push or pull
-  request step may already have landed on the remote, so it becomes `ambiguous`
-  and keeps the thread Waiting ("could not confirm how the last step ended")
-  rather than letting it read Ready; its runtime-work record keeps the remote step
-  it makes (a push's remote, branch and commit, or the pull request action) when
-  it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
-  reading the remote branch: pointing at the pushed commit it is `completed`,
-  anywhere else or absent it is `failed` and pushing again is safe, and an
-  unreadable remote leaves it unconfirmed. Observing the pull request settles an
-  unconfirmed creation by looking for the thread's pull request, open or closed,
-  and an unconfirmed comment or review reply from the signed-in person's own
-  comments on the pull request it was posted to. Before posting, the record
-  keeps that pull request's repository and number, a SHA-256 of the text (never
-  the text), and how many of the person's comments there already carried it;
-  only a higher count now shows the post landed, so an older identical comment
-  ("Fixed.") never stands in for it. A comment record without that pull request
-  or count, or one whose branch now carries a different pull request, is never
-  judged against another pull request: it stays unconfirmed. An unconfirmed
-  update or merge stays unconfirmed.
-  File, terminal, test, review, and local Git work, whose result is in the
-  checkout, becomes `interrupted`.
+
+  A restart cuts a turn off wherever it is, and a turn cut off inside a shell
+  command, an edit or an MCP call may or may not have changed something. The
+  host therefore records every tool call before it takes effect (maintainer
+  decision, 2026-11-12). `ToolEffectLedger` appends `tool-effect-intended@1`
+  before the call runs and `tool-effect-settled@1` (`succeeded` or `failed`; a
+  refused call is reported as an error result and reads `failed`) when its
+  outcome is known, on a `turn-tool-effects` aggregate keyed by the turn as
+  its mode names it: a Code operation, a Chat attempt, a Work turn request.
+  A frame carries the thread, the turn, the call id, the tool's name, its
+  effect class and who ran it, and never arguments, paths, commands or
+  results. Each append commits before the tool starts, so a call costs two
+  small frames and nothing else. The effect class fails closed: a tool is
+  `read-only` only when `READ_ONLY_TOOLS` declares it (`read`, `grep`, `glob`,
+  `web-fetch`, `web-search`, `context-remaining`, `journal-lookup`,
+  `octant_github`, `octant_past_threads` and the side chat's three file
+  tools), and every other tool is `side-effecting`. A family with one writing
+  operation is not declared, because the record never looks at arguments. A
+  call the journal refuses to record is not run. Nothing is rebuilt at start:
+  restart recovery reads only the cut-off turn's own aggregate, and a thread
+  whose turn left a `side-effecting` call with no settled frame is held with
+  the `uncertain-tool-call` reason and the tool's name ("Octant stopped while
+  the tool "shell" was running, so it may or may not have taken effect. Check
+  it, then continue."). A record the host cannot read holds the thread too. A
+  turn whose unsettled calls are all `read-only`, or that started none,
+  continues. The person's Resume or next message continues a held thread as
+  before, and the host never runs a call again. A thread's purge takes these
+  frames by the thread id they carry.
+
+  What the record covers, by who runs the tool:
+
+  - Tools the host runs for a Chat, Work or Code turn (the harness's own
+    tools on key and endpoint providers, and Octant's app tools and selected
+    MCP servers' tools on every provider, including the runtimes that call
+    them back): the three turn runners record the call before they run it, so
+    a stop anywhere inside the call holds the thread. The intent precedes the
+    tool's own approval prompt, so a call still waiting for its approval at
+    the stop holds the thread as well.
+  - A runtime's own tools (Codex, Claude Code, ACP agents, Pi, OpenCode): each
+    adapter reports `tool-start` and `tool-success` or `tool-failure`. The
+    host records the start when it reads it, always as `side-effecting`
+    because a runtime's tool name proves nothing, and the finish when it
+    reads that. A reported start with no finish holds the thread. Not built
+    yet, and not provable from what a runtime reports: a tool the runtime
+    started that the host had not read when it stopped leaves no record, and
+    that turn continues as before.
+  - Not built yet: subagent runs, a terminal-started Browser session and
+    delegated Browser children run tools outside the three turn runners and
+    write no record.
+    Other running Code work has no process left after a restart. A push or pull
+    request step may already have landed on the remote, so it becomes `ambiguous`
+    and keeps the thread Waiting ("could not confirm how the last step ended")
+    rather than letting it read Ready; its runtime-work record keeps the remote step
+    it makes (a push's remote, branch and commit, or the pull request action) when
+    it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
+    reading the remote branch: pointing at the pushed commit it is `completed`,
+    anywhere else or absent it is `failed` and pushing again is safe, and an
+    unreadable remote leaves it unconfirmed. Observing the pull request settles an
+    unconfirmed creation by looking for the thread's pull request, open or closed,
+    and an unconfirmed comment or review reply from the signed-in person's own
+    comments on the pull request it was posted to. Before posting, the record
+    keeps that pull request's repository and number, a SHA-256 of the text (never
+    the text), and how many of the person's comments there already carried it;
+    only a higher count now shows the post landed, so an older identical comment
+    ("Fixed.") never stands in for it. A comment record without that pull request
+    or count, or one whose branch now carries a different pull request, is never
+    judged against another pull request: it stays unconfirmed. An unconfirmed
+    update or merge stays unconfirmed.
+    File, terminal, test, review, and local Git work, whose result is in the
+    checkout, becomes `interrupted`.
 
   The host does not wait for those looks. Once restart reconciliation has run,
   it settles every thread's unconfirmed push and pull request steps once, in the
@@ -5211,7 +5262,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   through the same blockers a person's Resume checks, because admission refuses
   a session still recovery-required); or admission refuses the send. Chat and
   Work keep no journaled push or pull
-  request step, so the uncertain-external-action hold reads nothing there; the
+  request step, so the uncertain-external-action hold reads nothing there. A
+  Chat answer or Work turn that left a tool call nobody saw finish is held with
+  the `uncertain-tool-call` reason exactly as a Code turn is (Code restart
+  recovery, above); for the rest the
   continuation message tells the agent to inspect before repeating. Queued
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
