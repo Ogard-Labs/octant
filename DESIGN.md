@@ -3198,6 +3198,9 @@ and Tooltip. Composition rules:
   region, message, optional title, and explicit actions. Warning and danger
   announce as `alert`; neutral, accent, and success announce as `status`.
   Placement belongs to the feature; the callout recipe owns its appearance.
+  The mark is in neutral ink for the neutral tone, composer notices included;
+  the warning tone draws it in the warning ink and the danger tone in the
+  danger ink.
   Permission decisions and confirmation side effects stay with the host and
   their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
   feature source fails `bun run ui:check` unless it is a recorded exception:

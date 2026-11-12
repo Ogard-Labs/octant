@@ -1009,14 +1009,15 @@ html {
   flex: 0 0 auto;
 }
 /* A leading status mark sits with the sentence; the half-line offset keeps
-   it on the first line's optical axis for multi-line text. Most callouts
-   warn, so the mark borrows the warning text role unless the tone says
-   otherwise - hue alone must never be the only signal (DESIGN.md colour
-   roles pair each status surface with its text role). */
+   it on the first line's optical axis for multi-line text. A neutral notice
+   states a fact, so its mark is in neutral ink (a yellow icon on a message
+   that is not a warning is wrong); only a tone that means something takes its
+   text role - hue alone must never be the only signal (DESIGN.md colour roles
+   pair each status surface with its text role). */
 .callout > svg {
   flex: 0 0 auto;
   margin-top: 1px;
-  color: var(--oct-warn-fg);
+  color: var(--oct-meta);
 }
 .callout .callout-title {
   font-family: var(--oct-font-display);
@@ -1054,6 +1055,10 @@ html {
 .callout[data-tone="danger"] {
   background: var(--oct-danger-soft);
   border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
+}
+.callout-warn > svg,
+.callout[data-tone="warning"] > svg {
+  color: var(--oct-warn-fg);
 }
 .callout-danger > svg,
 .callout[data-tone="danger"] > svg {
@@ -5131,12 +5136,6 @@ input.switch:checked::after {
 /* The mark sits on the first line's axis, however many lines follow. */
 .callout.composer-notice > svg {
   margin-top: calc((1lh - 16px) / 2);
-}
-/* A note that only states a fact (a saved draft, a locked task) draws its
-   mark in meta ink. The callout's default mark is the warning ink, which made
-   "nothing has been sent" read as a warning. */
-.callout.composer-notice[data-tone="neutral"] > svg {
-  color: var(--oct-meta);
 }
 .callout.composer-notice > .callout__body {
   flex: 1 1 200px;
