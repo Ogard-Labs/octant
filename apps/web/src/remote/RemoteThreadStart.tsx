@@ -244,6 +244,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
   return (
     <form
       className="flex flex-col gap-1"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
