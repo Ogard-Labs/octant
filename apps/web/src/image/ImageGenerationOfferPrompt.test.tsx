@@ -60,10 +60,11 @@ function client(
   return fake as unknown as ImageGenerationClient & typeof fake;
 }
 
-function renderPrompt(fake: ImageGenerationClient) {
+function renderPrompt(fake: ImageGenerationClient, keptIn: "project" | "thread" = "project") {
   return render(
     <ImageGenerationOfferPrompt
       client={fake}
+      keptIn={keptIn}
       profiles={profiles}
       scopeId={scopeId}
       threadKind="code-thread"
@@ -84,13 +85,23 @@ describe("ImageGenerationOfferPrompt", () => {
     );
   });
 
-  it("generates with the model the person picks and keeps it for the thread when they ask", async () => {
+  it("says the choice is kept for the thread alone on a thread outside a Project", async () => {
+    renderPrompt(client([offer()]), "thread");
+    expect(
+      await screen.findByRole("checkbox", { name: "Don't ask again in this thread" }),
+    ).not.toBeChecked();
+    expect(
+      screen.queryByRole("checkbox", { name: "Don't ask again in this Project" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("generates with the model the person picks and keeps it for the Project when they ask", async () => {
     const user = userEvent.setup();
     const fake = client([offer()]);
     renderPrompt(fake);
     await user.click(await screen.findByRole("combobox", { name: "Image model" }));
     await user.click(await screen.findByRole("option", { name: "Gemini · gemini-3-pro-image" }));
-    await user.click(screen.getByRole("checkbox", { name: "Don't ask again in this thread" }));
+    await user.click(screen.getByRole("checkbox", { name: "Don't ask again in this Project" }));
     await user.click(screen.getByRole("button", { name: "Generate" }));
     await waitFor(() =>
       expect(fake.decideOffer).toHaveBeenCalledExactlyOnceWith({

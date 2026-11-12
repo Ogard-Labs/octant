@@ -54,7 +54,7 @@ import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "imageGenerationOffers" | "windowAuthorityStore"> &
-  Pick<WorkspaceWiring, "projectService" | "shellService"> &
+  Pick<WorkspaceWiring, "keptImageChoices" | "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<WorkWiring, "workThreadService"> &
@@ -68,6 +68,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     credentialResolver,
     imageGenerationOffers,
     imageJobService,
+    keptImageChoices,
     options,
     persistence,
     projectService,
@@ -173,6 +174,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   const imageRoutes = createImageRouteHandler({
     jobs: imageJobService,
     offers: imageGenerationOffers,
+    kept: keptImageChoices,
     listInstances: () => persistence.readProviderInstances(),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,

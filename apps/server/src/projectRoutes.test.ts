@@ -325,6 +325,13 @@ describe("Project routes", () => {
     },
     { kind: "change-code-project-agent-default-branch-push", agentDefaultBranchPush: "enabled" },
     { kind: "change-project-agent-memory-writes", agentMemoryWrites: "enabled" },
+    {
+      kind: "change-project-image-generation-choice",
+      imageGenerationChoice: {
+        profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+        modelId: "gpt-image-2",
+      },
+    },
   ] as const)(
     "refuses a paired device turning on $kind while a local window keeps the route",
     async (setting) => {

@@ -5796,8 +5796,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
   The agent's tool is offered in Chat, Work, and Code turns whose provider
-  carries app-managed tools (never a Side Chat or a routine's turn, which has
-  nobody to answer), and only while an enabled image profile exists; every
+  carries app-managed tools (never a Side Chat; in a turn the host runs as
+  itself, such as a routine's, only where the Project holds a kept choice
+  when the turn starts, since nobody could answer its card), and only while
+  an enabled image profile exists; every
   provider is also told, in the turn's tool host lines, to call it for a
   picture instead of drawing one as SVG or HTML. A call spends nothing by
   itself: the host holds an image offer for the window whose turn asked, and
@@ -5806,11 +5808,22 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   profile and model the host can run when the answer arrives, checked again
   before the job is queued. The "do not ask again" choice keeps that
   profile and model, is journaled per Project and survives a restart, and a
-  routine in that Project may use it (maintainer request, 2026-11-12; not
-  built yet: today "Don't ask again in this thread" keeps the choice for the
-  thread in host memory only, so a restart asks again, and a routine's turn
-  is not offered the tool). A kept choice the host can no longer run is
-  dropped and asked again rather than swapped. An offer lives at most ten minutes and is given
+  routine in that Project may use it (maintainer request, 2026-11-12). It is
+  the Project's `imageGenerationChoice`, changed by
+  `project.image-generation-choice-changed@1`: the host journals it when the
+  card's answer asks, every thread of the Project then generates with it
+  without a card at every level, and Project Overview names the kept model
+  with "Ask again", which drops it. The Project command that sets or drops
+  it is refused from a paired device, as the other standing permissions are;
+  the card itself is answered only at a window on the host. A Chat thread
+  outside a Project has no Project to hold a choice and keeps it for that
+  thread in host memory, so a restart asks again there. At Full access a
+  call with no kept choice also skips the card when exactly one image
+  profile is ready, and generates on that profile's default model: the
+  agent's own model suggestion is not a person's choice
+  (`imageGenerationWithoutAsking` in `@octant/domain`). A kept choice the
+  host can no longer run is dropped and asked again rather than swapped, at
+  Full access too; in a turn nobody attends the call then starts nothing. An offer lives at most ten minutes and is given
   up when its turn stops or its window goes away; Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job

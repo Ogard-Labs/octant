@@ -313,7 +313,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
-  Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<
+    WorkspaceWiring,
+    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+  > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
   Pick<
@@ -462,6 +465,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
+    keptImageChoices,
     projectService,
     providerDataDirectory,
     providerRuntimeRegistry,
@@ -500,15 +504,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeToolContributors.push(contributor);
     };
     // A routine's turn has nobody at a window to answer the image card, so it
-    // is not offered the tool.
+    // is offered the tool only where its Project keeps a choice.
     contributeCodeTools(({ windowId, thread, readThread, folders }) => {
-      if (isRoutineHostScope(windowId)) return undefined;
       const checkoutRoot = folders[0];
+      // The journaled level and the running one are both read and the
+      // stricter wins, as for the save below.
+      const level = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
       return createThreadImageAgentTools({
         windowId,
+        unattended: isRoutineHostScope(windowId),
         threadKind: "code-thread",
         scopeId: decodeImageGenerationScopeId(String(thread.id)),
         offers: imageGenerationOffers,
+        kept: keptImageChoices,
+        fullAccess: () => level() === "full-access",
         jobs: imageJobService,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
@@ -520,21 +533,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
             ?.inputModalities.includes("image") === true,
         // A file edit at the turn's level, under the checkout the turn
-        // works in. The journaled posture and the running one are both
-        // read and the stricter wins, so a session-only grant never lets
-        // this write through without asking.
+        // works in. The stricter of the journaled and running postures
+        // decides, so a session-only grant never lets this write through
+        // without asking.
         ...(checkoutRoot === undefined
           ? {}
           : {
               save: {
                 posture: () => {
-                  const level = clampTurnAccessPosture({
-                    requested: readThread()?.executionPolicy ?? thread.executionPolicy,
-                    thread:
-                      persistence.readCodeThread(thread.id)?.executionPolicy ??
-                      thread.executionPolicy,
-                  });
-                  return level === "plan" ? "refuse" : level === "approval-gated" ? "ask" : "allow";
+                  const current = level();
+                  return current === "plan"
+                    ? "refuse"
+                    : current === "approval-gated"
+                      ? "ask"
+                      : "allow";
                 },
                 write: (relativePath: string, bytes: Uint8Array) =>
                   saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),

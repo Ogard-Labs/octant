@@ -57,6 +57,7 @@ import {
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectAgentMemoryWrites,
+  changeProjectImageGenerationChoice,
   changeProjectColor,
   changeProjectProviderPolicy,
   changeProjectNativeProviders,
@@ -965,6 +966,14 @@ export class ProjectService implements ProjectServiceApi {
           project = changeProjectAgentMemoryWrites(current, command.agentMemoryWrites, timestamp);
           kind = "project-agent-memory-writes-changed";
           eventName = "project.agent-memory-writes-changed@1";
+        } else if (command.kind === "change-project-image-generation-choice") {
+          project = changeProjectImageGenerationChoice(
+            current,
+            command.imageGenerationChoice,
+            timestamp,
+          );
+          kind = "project-image-generation-choice-changed";
+          eventName = "project.image-generation-choice-changed@1";
         } else if (command.kind === "change-project-brand-kit") {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";

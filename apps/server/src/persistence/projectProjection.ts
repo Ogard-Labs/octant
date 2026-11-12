@@ -25,6 +25,7 @@ import {
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
   decodeProjectAgentMemoryWritesChanged,
+  decodeProjectImageGenerationChoiceChanged,
   decodeProjectBrandKitChanged,
   decodeProjectDesignSystemChanged,
   decodeWorkProjectDeveloperToolsChanged,
@@ -210,6 +211,8 @@ const projectDecoders = {
     decodeWorkProjectActionsChanged(payload).project,
   "project.agent-memory-writes-changed@1": (payload: unknown) =>
     decodeProjectAgentMemoryWritesChanged(payload).project,
+  "project.image-generation-choice-changed@1": (payload: unknown) =>
+    decodeProjectImageGenerationChoiceChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
   "project.design-system-changed@1": (payload: unknown) =>

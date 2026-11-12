@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
-| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
+| [Providers](#providers)                                                               | 7         | 6       | 1            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
+| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1292,10 +1292,10 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - A provider credential goes only over HTTPS to hosts the driver declares, or to the origin of a base URL the person configured.
 - A custom image source is a provider, model and label from a bounded list. A request is accepted only for an exact listed pair, and a removed or disabled instance fails with a reason, never falling back. _Here only._
 - An image driver that cannot honour a requested image count or reference images fails closed as invalid configuration. A per-image safety failure turns the whole result into a refusal with no partial success. _Here only._
-- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice is journaled per Project and survives a restart, and a routine in that Project may use it. At Full access the card is skipped when the Project holds that choice or exactly one image profile is ready (maintainer request, 2026-11-12). Not built yet: today every call asks at every level, the choice lives in host memory until a restart and the tool is never offered in a routine's turn. The tool is offered only while an image profile is ready, never in Plan or a Side Chat, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07). A call waits up to two minutes for the image and hands the finished image to a model that reads images; the thread shows each image after the turn that made it. In Work and Code the agent can save a finished image as a new file under the folder its turn works in, at the turn's level, confined and never overwriting.
+- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice is journaled per Project and survives a restart, and a routine in that Project may use it. At Full access the card is skipped when the Project holds that choice or exactly one image profile is ready, which then generates on that profile's default model (maintainer request, 2026-11-12). A kept choice the host can no longer run is dropped and asked again, at Full access too; Project Overview names the kept model and takes it back with "Ask again", from a window on the host only; and a Chat thread outside a Project keeps its choice for that thread in host memory. The tool is offered only while an image profile is ready, never in Plan or a Side Chat, in a turn the host runs as itself only where the Project holds a choice, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07). A call waits up to two minutes for the image and hands the finished image to a model that reads images; the thread shows each image after the turn that made it. In Work and Code the agent can save a finished image as a new file under the folder its turn works in, at the turn's level, confined and never overwriting.
 - Voice persists nothing. A paired device reaches transcription but never synthesis.
 
-Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ## Context and usage
 

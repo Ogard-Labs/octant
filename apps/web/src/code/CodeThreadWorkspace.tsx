@@ -2356,6 +2356,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         <ImageGenerationOfferPrompt
           className="thread-column"
           client={props.imageGenerationClient}
+          keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
           threadKind="code-thread"

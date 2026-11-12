@@ -409,6 +409,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // A kept image choice lets every later agent call in the Project spend at
+      // the person's image provider without a card, so it is the person's
+      // standing permission like the ones above. The image card that normally
+      // sets it is answered only at a window on the host.
+      if (
+        command.kind === "change-project-image-generation-choice" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "The image model agents use without asking is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       return response(await dependencies.service.executeProject(windowId, command), 200, origin);
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);

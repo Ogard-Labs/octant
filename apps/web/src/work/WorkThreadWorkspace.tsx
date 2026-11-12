@@ -2712,6 +2712,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         <ImageGenerationOfferPrompt
           className="thread-column"
           client={props.imageGenerationClient}
+          keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
           threadKind="work-thread"

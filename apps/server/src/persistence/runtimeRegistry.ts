@@ -79,6 +79,7 @@ import {
   CodeProjectPullRequestWatchRecorded,
   WorkProjectStatusFileChanged,
   ProjectAgentMemoryWritesChanged,
+  ProjectImageGenerationChoiceChanged,
   ProjectBrandKitChanged,
   ProjectDesignSystemChanged,
   WorkProjectDeveloperToolsChanged,
@@ -538,6 +539,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-permission-mode-changed@1", 1, WorkProjectPermissionModeChanged)
     .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.agent-memory-writes-changed@1", 1, ProjectAgentMemoryWritesChanged)
+    .register("project.image-generation-choice-changed@1", 1, ProjectImageGenerationChoiceChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.design-system-changed@1", 1, ProjectDesignSystemChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
