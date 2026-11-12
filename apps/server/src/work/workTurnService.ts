@@ -494,6 +494,16 @@ export interface WorkTurnServiceDependencies {
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
+  /**
+   * The agent messages waiting for a Work thread, rechecked, marked on the
+   * thread, and framed as data for the turn about to start. Absent, Work
+   * turns carry no messages.
+   */
+  readonly carryAgentMessages?: (
+    threadId: string,
+  ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
+  /** Journals delivery of carried messages once a provider has the turn's context. */
+  readonly confirmAgentMessagesDelivered?: (messageIds: ReadonlyArray<string>) => Promise<void>;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
@@ -590,6 +600,8 @@ export class WorkTurnService {
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
   readonly #peekIssueContextFramed: WorkTurnServiceDependencies["peekIssueContextFramed"];
   readonly #consumeIssueContextFramed: WorkTurnServiceDependencies["consumeIssueContextFramed"];
+  readonly #carryAgentMessages: WorkTurnServiceDependencies["carryAgentMessages"];
+  readonly #confirmAgentMessagesDelivered: WorkTurnServiceDependencies["confirmAgentMessagesDelivered"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
@@ -653,6 +665,8 @@ export class WorkTurnService {
     if (dependencies.consumeIssueContextFramed !== undefined) {
       this.#consumeIssueContextFramed = dependencies.consumeIssueContextFramed;
     }
+    this.#carryAgentMessages = dependencies.carryAgentMessages;
+    this.#confirmAgentMessagesDelivered = dependencies.confirmAgentMessagesDelivered;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
@@ -1375,6 +1389,16 @@ export class WorkTurnService {
       const priorTranscript = nativeConversation
         ? []
         : this.#priorTranscriptContributions(command.threadId);
+      // A sibling Work thread's messages reach this thread's next turn, as a
+      // Code thread's do. Carrying marks the thread as having read outside
+      // content before the text is returned. A failed read costs the turn its
+      // messages, not the person their turn; the messages wait for the next.
+      const agentMessages =
+        thread === undefined
+          ? []
+          : await (
+              this.#carryAgentMessages?.(String(command.threadId)) ?? Promise.resolve([])
+            ).catch(() => []);
       const planned = planWorkTurnContext({
         threadId: command.threadId,
         providerInstanceId: command.authority.providerInstanceId,
@@ -1476,6 +1500,16 @@ export class WorkTurnService {
             command.threadId,
           )),
           ...this.#issueContextContribution(command.threadId),
+          ...agentMessages.map(
+            (message): WorkTurnContextContribution => ({
+              text: message.text,
+              sourceKind: "message",
+              referenceId: `agent-message:${message.messageId}`,
+              category: "workspace-context",
+              posture: "required",
+              block: { kind: "user-message", text: message.text },
+            }),
+          ),
           ...(externalData === undefined
             ? []
             : [
@@ -1675,6 +1709,7 @@ export class WorkTurnService {
         ...(preparedFeedback === undefined ? {} : { preparedProductFeedback: preparedFeedback }),
         contextPlan: planned,
         sessionHolds,
+        agentMessageIds: agentMessages.map((message) => message.messageId),
         admissionCurrent: () =>
           folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
         ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
@@ -2096,6 +2131,8 @@ export class WorkTurnService {
      * unchanged, and the context it sends names no entries.
      */
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
+    /** Agent messages this turn's context carries, confirmed delivered once sent. */
+    readonly agentMessageIds: ReadonlyArray<string>;
     readonly admissionCurrent?: () => boolean;
     readonly routineRun?: AutomationRunReference;
     readonly signal: AbortSignal;
@@ -2378,6 +2415,14 @@ export class WorkTurnService {
             }),
         onPromptSent: () => {
           promptSent = true;
+          // A message is delivered when a provider has it, not when the turn
+          // was accepted: until the send it stays waiting, and a turn that
+          // never reaches a provider leaves it for the next one.
+          if (input.agentMessageIds.length > 0) {
+            void this.#confirmAgentMessagesDelivered?.(input.agentMessageIds).catch(
+              () => undefined,
+            );
+          }
         },
         ...(this.#contextHarness === undefined
           ? {}

@@ -56,10 +56,9 @@ read-only gate is a maintainer live check.
   since the board leaves coordinators out, that read no longer lists the
   planner's own card.
 - **Code only.** A Work thread may message a sibling (maintainer request,
-  2026-11-12). Not built yet: today Work threads neither send nor receive
-  messages, because only Code turns carry them, so a Work coordinator could
-  start workers but never follow up with them. Work coordinators wait until a
-  Work turn carries a message.
+  2026-11-12), and a Work turn carries the messages left for it, but no message
+  wakes a Work thread, so a Work coordinator could start workers and never
+  hear back while idle. Work coordinators are not in this design.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
 the mode's authority and the thread's posture exactly as they were, which

@@ -361,16 +361,28 @@ describe("messaging through the threads tool", () => {
     });
   });
 
-  it("offers a Work turn no messaging and refuses a send from one without storing anything", async () => {
-    const { tools, operations, sendMessage, recordRefusedSend } = fixture({ mode: "work" });
+  it("lets a Work turn message a sibling of its own Project, and still refuses another Project's thread", async () => {
+    const { tools, operations, sendMessage } = fixture({ mode: "work" });
 
-    expect(operations()).toEqual(["help", "list", "read", "wait"]);
-    expect(await tools.execute(send())).toMatchObject({
-      isError: true,
-      result: { status: "refused", reason: "policy" },
-    });
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(recordRefusedSend).not.toHaveBeenCalled();
+    expect(operations()).toEqual([
+      "help",
+      "list",
+      "read",
+      "wait",
+      "send",
+      "acknowledge",
+      "receipts",
+    ]);
+    expect((await tools.execute(send())).result).toEqual([
+      expect.objectContaining({ status: "sent", recipient }),
+    ]);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(
+      await tools.execute(
+        send({ recipients: [`${recipientThreadId}@40000000-0000-4000-8000-0000000000ff`] }),
+      ),
+    ).toMatchObject({ isError: true });
+    expect(sendMessage).toHaveBeenCalledOnce();
   });
 
   it("journals a send that names a recipient but carries no message, and one with an unreadable recipient next to a good one", async () => {

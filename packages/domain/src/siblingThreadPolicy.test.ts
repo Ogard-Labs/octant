@@ -257,10 +257,22 @@ describe("sibling thread policy", () => {
       expect(threadsToolOperations({ ...code, profileAllowsSend: false })).not.toContain("send");
     });
 
-    it("offers a Work turn only the read operations, whatever the host could carry", () => {
+    it("offers a Work turn messaging where the host carries messages into Work turns, and never board or start", () => {
+      const work = { ...code, mode: "work", posture: undefined, plannerThread: true } as const;
       expect(
-        threadsToolOperations({ ...code, mode: "work", posture: undefined, plannerThread: true }),
-      ).toEqual(["help", "list", "read", "wait"]);
+        threadsToolOperations({
+          ...work,
+          coordinatorLevel: "full-access",
+          profileAllowsStart: true,
+        }),
+      ).toEqual(["help", "list", "read", "wait", "send", "acknowledge", "receipts"]);
+      expect(threadsToolOperations({ ...work, messagingCarried: false })).toEqual([
+        "help",
+        "list",
+        "read",
+        "wait",
+      ]);
+      expect(threadsToolOperations({ ...work, profileAllowsSend: false })).not.toContain("send");
     });
 
     it("offers board only to the designated planner whose profile names it", () => {
