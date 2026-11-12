@@ -1038,6 +1038,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "disposable desktop cloud billed spend cap budget money monthly limit cost",
         },
+        {
+          id: settingId("desktop-confirm-billed"),
+          label: "Confirm each billed desktop",
+          scope: "host",
+          keywords:
+            "disposable desktop cloud billed confirm ask approve start transfer off machine",
+        },
+        {
+          id: settingId("desktop-leases-per-thread"),
+          label: "Desktops per thread",
+          scope: "host",
+          keywords: "disposable desktop lease limit count thread how many",
+        },
+        {
+          id: settingId("desktop-leases-on-host"),
+          label: "Desktops on this host",
+          scope: "host",
+          keywords: "disposable desktop lease limit count host local how many",
+        },
       ],
     },
     {

@@ -54,6 +54,14 @@ function post(
   return request;
 }
 
+const leaseSettingsOf = (
+  change: Parameters<DesktopLeaseService["setLeaseSettings"]>[0]["change"],
+) => ({
+  confirmBilledDesktops: change.confirmBilledDesktops ?? true,
+  leasesPerThread: change.leasesPerThread ?? 2,
+  hostLocalLeasesPerHost: change.hostLocalLeasesPerHost ?? 2,
+});
+
 function routes(
   recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"],
   previews?: Parameters<typeof createDesktopPaneRouteHandler>[0]["previews"],
@@ -123,6 +131,16 @@ function routes(
             },
           }
         : { status: "refused", reason: "spend-cap-local-only" },
+    ),
+    leaseSettings: vi.fn<DesktopLeaseService["leaseSettings"]>(({ actor }) =>
+      actor.kind === "local-user"
+        ? { status: "lease-settings", settings: leaseSettingsOf({}) }
+        : { status: "refused", reason: "not-permitted" },
+    ),
+    setLeaseSettings: vi.fn<DesktopLeaseService["setLeaseSettings"]>(({ actor, change }) =>
+      actor.kind === "local-user"
+        ? { status: "lease-settings", settings: leaseSettingsOf(change) }
+        : { status: "refused", reason: "not-permitted" },
     ),
     destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
       status: "leasable",
@@ -314,6 +332,36 @@ describe("Desktop pane routes", () => {
     );
     expect(namesActor?.status).toBe(400);
     expect(service.setSpendCap).toHaveBeenCalledTimes(2);
+  });
+
+  it("changes the lease settings only for a person at a local window, never for a paired device", async () => {
+    const { handler, service } = routes();
+    const set = { kind: "set-lease-settings", confirmBilledDesktops: false, leasesPerThread: 4 };
+    const local = await handler(post("/api/code/desktops", set));
+    await expect(local?.json()).resolves.toEqual({
+      status: "lease-settings",
+      settings: { confirmBilledDesktops: false, leasesPerThread: 4, hostLocalLeasesPerHost: 2 },
+    });
+    const remote = await handler(post("/api/code/desktops", set, { remote: true }));
+    await expect(remote?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    expect(service.setLeaseSettings.mock.calls.map(([input]) => input.actor.kind)).toEqual([
+      "local-user",
+      "remote-device",
+    ]);
+    const read = await handler(
+      post("/api/code/desktops", { kind: "lease-settings" }, { remote: true }),
+    );
+    await expect(read?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    // A count outside what a person may set, or a body naming its own actor,
+    // is refused before the service hears it.
+    for (const body of [
+      { kind: "set-lease-settings", leasesPerThread: 0 },
+      { kind: "set-lease-settings", hostLocalLeasesPerHost: 9 },
+      { ...set, actor: { kind: "agent", actorId: localActorId } },
+    ]) {
+      expect((await handler(post("/api/code/desktops", body)))?.status).toBe(400);
+    }
+    expect(service.setLeaseSettings).toHaveBeenCalledTimes(2);
   });
 
   it("says whether a Project's recipe has its key, never the key, to a window or a paired device", async () => {

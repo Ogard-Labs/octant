@@ -2,7 +2,8 @@ import { Schema } from "effect";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderExecutionPolicy } from "./providers";
 import { WindowId } from "./shell";
-import { DesktopLeaseId } from "./desktopLease";
+import { DESKTOP_LEASE_MAXIMUM_MINUTES, DesktopLeaseId } from "./desktopLease";
+import { UtcTimestamp } from "./events";
 export { ComputerUseSettings, decodeComputerUseSettings } from "./computerUseSettings";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -109,6 +110,17 @@ export const ComputerSendFileCommand = Schema.Struct({
 }).annotations(strict);
 export type ComputerSendFileCommand = typeof ComputerSendFileCommand.Type;
 
+/**
+ * An agent's request to keep its bound desktop running longer. It never
+ * reaches a driver as a command: the host's lease service decides whether
+ * the agent may, asks when it must, and moves the provider's clock first.
+ */
+export const ComputerExtendDesktopCommand = Schema.Struct({
+  operation: Schema.Literal("extend"),
+  minutes: Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_MAXIMUM_MINUTES)),
+}).annotations(strict);
+export type ComputerExtendDesktopCommand = typeof ComputerExtendDesktopCommand.Type;
+
 export const ComputerUseImage = Schema.Struct({
   mimeType: Schema.Literal("image/png", "image/jpeg"),
   data: text(2_097_152).pipe(Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/)),
@@ -156,6 +168,11 @@ export const ComputerControlResult = Schema.Union(
     size: Schema.Int.pipe(Schema.nonNegative()),
     sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
   }).annotations(strict),
+  /** The bound desktop's lease now ends at this time, as the provider confirmed. */
+  Schema.Struct({
+    kind: Schema.Literal("extended"),
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused", "failed"),
     reason: text(128),
@@ -188,4 +205,7 @@ export const decodeComputerControlCommand = Schema.decodeUnknownSync(ComputerCon
 export const decodeComputerControlResult = Schema.decodeUnknownSync(ComputerControlResult);
 export const decodeComputerUseOwner = Schema.decodeUnknownSync(ComputerUseOwner);
 export const decodeComputerSendFileCommand = Schema.decodeUnknownSync(ComputerSendFileCommand);
+export const decodeComputerExtendDesktopCommand = Schema.decodeUnknownSync(
+  ComputerExtendDesktopCommand,
+);
 export const decodeComputerUseStatus = Schema.decodeUnknownSync(ComputerUseStatus);

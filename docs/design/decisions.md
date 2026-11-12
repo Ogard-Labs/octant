@@ -65,9 +65,9 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
 | [Hubs and Nightly](#hubs-and-nightly)                                                 | 5         | 1       | 4            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
-| [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
+| [Disposable desktops](#disposable-desktops)                                           | 4         | 2       | 2            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **162** | **80**       | **5**               |
+| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
 
 ## Principles and hard lines
 
@@ -3214,12 +3214,12 @@ Status: Partly built. Since: 2026-10-27. Detail: [Language services: debugger au
 
 A Project owns at most one desktop recipe that only a person edits, and a thread leases a throwaway desktop from it. The server checks every lease command against the thread's current authority before any provider call.
 
-- A lease belongs to one thread, a thread holds at most two by default, and only Work and Code threads may lease. The per-thread and per-host counts are recipe or Settings defaults (maintainer request, 2026-11-12); not built yet: today they are constants.
+- A lease belongs to one thread, a thread holds at most two by default, and only Work and Code threads may lease. The per-thread and per-host counts are Settings defaults a person at a local window changes, each from one to eight (maintainer request, 2026-11-12).
 - Failures are named refusal values, never throws or hangs.
 - Teardown runs on a host-owned path that stays authorized after thread archive, recipe removal or plugin disable, and can only release, verify and list.
 - Any client that may open the thread may view and operate its desktop; the person's own input needs no approval and is journaled.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposable-desktops.md#model) and [authority](disposable-desktops.md#authority).
+Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposable-desktops.md#model) and [authority](disposable-desktops.md#authority).
 
 ### Desktop isolation and transfer
 
@@ -3228,7 +3228,7 @@ A desktop holds no host credential and no checkout. Host files enter only throug
 - A host-local desktop runs in a dedicated Linux sandbox with its own network namespace and no host loopback, and gets network through a filtered egress proxy that refuses loopback, private and host addresses (maintainer request, 2026-11-12). Not built yet: today it never has network, a recipe that asks for it is refused, and only a cloud recipe without a placement may allow network.
 - A cloud desktop's key stays in the host credential store and never enters the desktop.
 - Nothing is copied back except screenshots and recordings as host-held evidence.
-- A transfer to a cloud desktop asks unless the person turned "Confirm each billed desktop" off, and Plan refuses transfers (maintainer request, 2026-11-12); not built yet: today it always asks, in every posture.
+- A transfer to a cloud desktop asks unless the person turned "Confirm each billed desktop" off, and Plan refuses transfers (maintainer request, 2026-11-12).
 - A local person may review and grant one healthy Octant-owned dev-server port from the Code task's own worktree to its ready host-local Linux lease. The portable provider seam exposes only bounded HTTP/WebSocket operations; an authenticated exact-socket IPC exception preserves the guest's separate network namespace and denies other host ports. Permissions expire with the original lease, invalidate with authority/binding/window/provider loss, never restore after restart and block replacement grants while cleanup is unconfirmed. E2B and Cua report this capability unavailable. The actual production-launch namespace proof is mandatory before enabling the new path.
 - The local adapter and grant path are covered by the required hosted production-launch namespace proof; packaged desktop GUI acceptance remains separate.
 
@@ -3238,18 +3238,18 @@ Status: Partly built. Since: 2026-10-26; host-local lease-bound preview 2026-11-
 
 Every lease has a hard expiry, and ending a lease always destroys the desktop and verifies it is gone.
 
-- A lease expires after 30 minutes and an idle lease is released after 15 minutes by default, both recipe or Settings defaults; a person may extend a lease to the recipe maximum of 4 hours, and an agent may extend a host-local lease up to the recipe's maximum, while a billed lease keeps a hard expiry (maintainer request, 2026-11-12). Not built yet: today the lease length and idle release are constants and an agent cannot extend.
+- A lease expires after 30 minutes and an idle lease is released after 15 minutes by default, both recipe defaults a person changes; a person may extend a lease to the recipe maximum of 4 hours, and an agent may extend a host-local lease up to the recipe's maximum under the rules acquiring one follows, never one that bills or runs off this machine, while a billed lease keeps a hard expiry (maintainer request, 2026-11-12).
 - The host journals a lease before calling the provider and tags the resource, so a crash leaves something findable.
 - On restart the host destroys every unreleased lease and orphaned tagged resource before admitting a new one.
 - Release counts only when the provider confirms the resource is absent; otherwise the lease stays release-failed and blocks new leases on that provider.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Disposable desktops: lifecycle and teardown](disposable-desktops.md#lifecycle-and-teardown).
+Status: Built. Since: 2026-10-26. Detail: [Disposable desktops: lifecycle and teardown](disposable-desktops.md#lifecycle-and-teardown).
 
 ### Desktop providers and billed placements
 
 Desktop providers are plugin contributions through the `desktop-provider` seam; the host owns leases, authority and teardown, and the driver only translates. Cloud desktops run only on the person's own account, and Octant operates no cloud.
 
-- A billed or off-machine lease is confirmed by a person unless they turned the confirmation off. Inside the monthly cap the per-lease confirmation of a billed or off-machine lease, and of a transfer to a cloud desktop, is the setting "Confirm each billed desktop", on by default, and the cap stays mandatory (maintainer request, 2026-11-12); not built yet: today the confirmation cannot be switched off.
+- A billed or off-machine lease is confirmed by a person unless they turned the confirmation off. Inside the monthly cap the per-lease confirmation of a billed or off-machine lease, and of a transfer to a cloud desktop, is the setting "Confirm each billed desktop", on by default, changed only by a person at a local window and journaled, and the cap stays mandatory (maintainer request, 2026-11-12).
 - Billed desktops are off until a person sets a monthly spend cap; each lease is estimated first, refused over the cap, and agents and paired devices cannot change the cap.
 - A billed provider must set a provider-side expiry, or the host destroys the desktop.
 - A daemon-backed placement is chosen per recipe; Octant stores no credential for the daemon and never installs or starts it.

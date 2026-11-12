@@ -159,6 +159,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
@@ -1191,10 +1192,16 @@ function ActiveSectionContent({
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
           {props.desktopPaneClient === undefined ? null : (
-            <DesktopSpendCapSettings
-              client={props.desktopPaneClient}
-              focusedSetting={focusedSetting}
-            />
+            <>
+              <DesktopSpendCapSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+              <DesktopLeaseSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+            </>
           )}
         </>
       );
