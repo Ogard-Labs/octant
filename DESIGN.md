@@ -3054,6 +3054,27 @@ and Tooltip. Composition rules:
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
 
+### Component gallery
+
+A development-only gallery draws the system in one place: the type roles with
+the size, weight and leading the browser computes for them, the semantic colour
+roles, the spacing and radius tokens, the icon scale, every shared `Octant*`
+adapter in its variants, sizes and states, and a few patterns composed only
+from those pieces (a sidebar slice, a Settings row group, a card, an empty
+state, the title band's buttons). It mounts the real adapters under the real
+stylesheet entry and the real theme provider, with no host, thread or server
+behind it, so what it shows is what the app ships. It has controls for dark
+and light, the glass material, and the interface size. Read it to judge
+whether controls, fields, menus and rows agree before a change to any of them.
+
+The gallery is `apps/web/component-gallery.html` with its source in
+`apps/web/src/gallery/`. The page is not an input of the production build, so
+it is served by the Vite dev server only (`/component-gallery.html`) and is
+absent from the packaged app. It is not a product surface: it has no entry in
+navigation, Settings or the command palette. A new shared adapter in
+`apps/web/src/ui/base/` must appear in it, or be named in the test's
+not-shown list with a reason; `Gallery.test.tsx` fails otherwise.
+
 ### Product-owned surfaces
 
 `octant.css` and the feature stylesheets own shell grid, Project/thread tree,
