@@ -411,11 +411,13 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestMergeWhenReadyCommand,
     signal: AbortSignal,
     caller: "local-window" | "remote-device",
+    actor: EventActor,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
   readonly setProjectPullRequestAutoFix?: (
     authenticatedWindowId: WindowId,
     command: CodeProjectPullRequestAutoFixCommand,
     initiator: "user" | "agent",
+    actor: EventActor,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
   /** A window's person is composing in a Code thread; Auto-fix holds back. */
   readonly noteComposerActivity?: (
@@ -1967,6 +1969,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                   command,
                   request.signal,
                   callerAuthority,
+                  callerActor,
                 ),
               ),
               200,
@@ -1992,6 +1995,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 command,
                 operationInitiator,
+                callerActor,
               ),
             ),
             200,

@@ -2984,6 +2984,7 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "local-window",
+      expect.objectContaining({ kind: "local-user" }),
     );
     expect(setProjectPullRequestMergeWhenReady).toHaveBeenNthCalledWith(
       2,
@@ -2991,8 +2992,18 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "remote-device",
+      expect.objectContaining({
+        kind: "remote-device",
+        deviceId: "00000000-0000-4000-8000-000000000917",
+      }),
     );
     expect(setProjectPullRequestAutoFix).toHaveBeenCalledTimes(1);
+    expect(setProjectPullRequestAutoFix).toHaveBeenCalledWith(
+      windowId,
+      bodies["/api/code/project-pull-requests/auto-fix"],
+      "user",
+      expect.objectContaining({ kind: "local-user" }),
+    );
   });
 });
 

@@ -199,6 +199,40 @@ describe("Merge when ready", () => {
     });
   });
 
+  it("journals both switches a device the host's own person paired sets with the device as actor, and a local window's as the local user", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000d2";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const switchedBy = async (actor?: never) => {
+      const f = fixture();
+      // The route judges such a device as a local window and passes its actor.
+      await f.service.setMergeWhenReady(
+        windowId,
+        { kind: "enable", target, headSha: "a1" },
+        "local-window",
+        signal,
+        actor,
+      );
+      await f.service.setMergeWhenReady(
+        windowId,
+        { kind: "disable", target },
+        "local-window",
+        signal,
+        actor,
+      );
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user", actor);
+      await f.service.setAutoFix(windowId, { kind: "disable", target }, "user", actor);
+      return [...f.recorded(MERGE_WHEN_READY), ...f.recorded(AUTO_FIX)].map((event) => event.actor);
+    };
+
+    expect(await switchedBy(device)).toEqual([device, device, device, device]);
+    expect((await switchedBy()).map((actor) => actor.kind)).toEqual([
+      "local-user",
+      "local-user",
+      "local-user",
+      "local-user",
+    ]);
+  });
+
   it("lets a paired device turn auto-merge off without a confirmation", async () => {
     const f = fixture();
     await f.service.setMergeWhenReady(

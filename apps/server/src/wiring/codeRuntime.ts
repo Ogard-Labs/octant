@@ -2014,10 +2014,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
-      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller) =>
-        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal),
-      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
-        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
+      setProjectPullRequestAutoFix: (windowId, command, initiator, actor) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };
