@@ -32,7 +32,7 @@ export const AGENT_ACCESS_ORIGIN = "octant-agent-access";
 export interface AgentSessionDependencies {
   readonly service: Pick<
     AgentAccessService,
-    "threadOwner" | "recordThreadStarted" | "threadsOf" | "takeTurn"
+    "threadOwner" | "recordThreadStarted" | "threadsOf" | "takeTurn" | "holdTurnStart"
   >;
   readonly dispatch: (
     handoff: AuthenticatedProductDispatchHandoff,
@@ -43,9 +43,27 @@ export interface AgentSessionDependencies {
    * undefined for a thread the host does not have.
    */
   readonly threadProject: (threadId: string) => { readonly projectId?: string } | undefined;
-  /** Marks a thread an outside agent started as having taken in outside content. */
+  /**
+   * The access a thread runs at now, so a turn the agent starts on it is held
+   * to the grant as it reads now, not as it read when the thread was made.
+   */
+  readonly threadAccess: (threadId: string) => AgentThreadAccess | undefined;
+  /**
+   * Marks a thread as having taken in outside content. Throws when the mark
+   * could not be recorded, and the agent's prompt is then not sent.
+   */
   readonly markOutsideContent: (threadId: string, grant: AgentGrant) => void;
 }
+
+export type AgentThreadAccess =
+  | {
+      readonly kind: "code";
+      readonly executionPolicy: string;
+      readonly autoApprove: boolean;
+      readonly fullAccessSandbox: boolean;
+    }
+  | { readonly kind: "work"; readonly access: string; readonly fullAccessSandbox: boolean }
+  | { readonly kind: "chat" };
 
 /**
  * The in-process session an outside agent's tool calls run in. Every request
@@ -88,6 +106,18 @@ export function createAgentSession(input: {
           ? guardStopRequest({ grant, request, deps })
           : guardAgentRequest({ grant, request, deps });
       if (checked.kind === "refused") return refusal(403, checked.message);
+      if (checked.marksThread !== undefined) {
+        // Marked before the prompt is sent, so the thread is never shown it
+        // unmarked; a mark that cannot be recorded stops the send.
+        try {
+          deps.markOutsideContent(checked.marksThread, grant);
+        } catch {
+          return refusal(
+            503,
+            "Octant could not mark that thread for outside content; nothing was sent.",
+          );
+        }
+      }
       const product = new Request(new URL(request.path, "http://127.0.0.1"), {
         method: request.method,
         headers: {
@@ -138,21 +168,31 @@ export function agentToolPolicy(
     threadAllowed: (threadId) => threadInScope(grant, threadId, deps),
     defaultAccess: grant.scope.highestLevel,
     beforeTurn: async (session) => {
-      // Running turns are counted from the agent's own newest threads, read
-      // as the agent would read them; the daily count is the service's.
-      let running = 0;
+      // The place is held before anything is read, so a start checked at the
+      // same moment counts this one. Running turns are counted from the
+      // agent's own newest threads, read as the agent would read them; the
+      // daily count is the service's.
+      const hold = deps.service.holdTurnStart(String(grant.grantId));
+      const refuse = (message: string) => {
+        hold.release();
+        return { kind: "refused" as const, message };
+      };
+      let running = hold.startingAlready;
       for (const thread of deps.service.threadsOf(String(grant.grantId)).slice(0, 20)) {
+        if (running >= grant.scope.limits.runningTurns) break;
         const snapshot = await agentThreadPort(session, thread.mode, thread.threadId)
           .read()
           .catch(() => undefined);
         if (isAgentSnapshotRunning(snapshot)) running += 1;
-        if (running >= grant.scope.limits.runningTurns) {
-          return `This agent already has ${running} turns running, its limit; wait for one to end.`;
-        }
+      }
+      if (running >= grant.scope.limits.runningTurns) {
+        return refuse(
+          `This agent already has ${running} turns running or starting, its limit; wait for one to end.`,
+        );
       }
       return deps.service.takeTurn(String(grant.grantId))
-        ? undefined
-        : `This agent has used its ${grant.scope.limits.turnsPerDay} turns for today.`;
+        ? { kind: "admitted", release: hold.release }
+        : refuse(`This agent has used its ${grant.scope.limits.turnsPerDay} turns for today.`);
     },
   };
 }
@@ -166,6 +206,8 @@ type GuardResult =
         readonly projectId?: string;
         readonly threadId?: string;
       };
+      /** A prompt or answer for an existing thread: mark it before sending. */
+      readonly marksThread?: string;
     }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -192,7 +234,7 @@ const THREAD_READS: ReadonlyArray<RegExp> = [
 export function guardAgentRequest(input: {
   readonly grant: AgentGrant;
   readonly request: LocalControlRequest;
-  readonly deps: Pick<AgentSessionDependencies, "service" | "threadProject">;
+  readonly deps: Pick<AgentSessionDependencies, "service" | "threadProject" | "threadAccess">;
 }): GuardResult {
   const { grant, request, deps } = input;
   if (grant.state !== "active") return refused("This agent's grant is revoked.");
@@ -204,6 +246,20 @@ export function guardAgentRequest(input: {
     typeof threadId === "string" && threadInScope(grant, threadId, deps);
   const thread = (threadId: unknown): GuardResult =>
     inScope(threadId) ? { kind: "allowed" } : refused("That thread is not in this agent's grant.");
+  // Text the agent sends a thread (a prompt or an answer) is outside content,
+  // and starts work at the thread's own access, which must still be within the
+  // grant: lowering a grant lowers what its agent can run on threads it made.
+  const prompt = (threadId: unknown): GuardResult => {
+    if (typeof threadId !== "string" || !inScope(threadId)) {
+      return refused("That thread is not in this agent's grant.");
+    }
+    if (!withinCeiling(grant, deps.threadAccess(threadId))) {
+      return refused(
+        `That thread runs above this agent's grant, which now allows at most ${grant.scope.highestLevel}; the person can lower the thread's access in Octant.`,
+      );
+    }
+    return { kind: "allowed", marksThread: threadId };
+  };
   const body = (request.body ?? {}) as Readonly<Record<string, unknown>>;
 
   if (method === "GET") {
@@ -225,7 +281,7 @@ export function guardAgentRequest(input: {
     if (!scope.tools.includes("answer_question")) {
       return refused("This agent's grant does not include answering questions.");
     }
-    return thread(decodeURIComponent(question[1] ?? ""));
+    return prompt(decodeURIComponent(question[1] ?? ""));
   }
   const kind = body["kind"];
   if (path === "/api/chat/commands") {
@@ -243,14 +299,13 @@ export function guardAgentRequest(input: {
         },
       };
     }
-    if (kind === "send-chat-turn" || kind === "interrupt-chat-turn") {
-      return thread(body["threadId"]);
-    }
+    if (kind === "send-chat-turn") return prompt(body["threadId"]);
+    if (kind === "interrupt-chat-turn") return thread(body["threadId"]);
     if (kind === "answer-chat-turn-question") {
       if (!scope.tools.includes("answer_question")) {
         return refused("This agent's grant does not include answering questions.");
       }
-      return thread(body["threadId"]);
+      return prompt(body["threadId"]);
     }
     if (kind === "change-chat-provider") {
       if (!modelAllowed(grant, body["modelId"]))
@@ -287,7 +342,7 @@ export function guardAgentRequest(input: {
     return refused("This agent may not do that.");
   }
   if (path === "/api/work/turns" && kind === "start-work-thread-turn")
-    return thread(body["threadId"]);
+    return prompt(body["threadId"]);
   if (path === "/api/work/turns/cancel" && kind === "cancel-work-turn")
     return thread(body["threadId"]);
   if (path === "/api/code/commands") {
@@ -325,9 +380,8 @@ export function guardAgentRequest(input: {
         },
       };
     }
-    if (kind === "start-provider-turn" || kind === "cancel-provider-turn") {
-      return thread(body["threadId"]);
-    }
+    if (kind === "start-provider-turn") return prompt(body["threadId"]);
+    if (kind === "cancel-provider-turn") return thread(body["threadId"]);
     return refused("This agent may not do that.");
   }
   return refused("This agent may not do that.");
@@ -376,10 +430,25 @@ function threadInScope(
   deps: Pick<AgentSessionDependencies, "service" | "threadProject">,
 ): boolean {
   const owner = deps.service.threadOwner(threadId);
-  if (owner !== undefined) return owner.grantId === String(grant.grantId);
-  if (grant.scope.threads !== "project") return false;
+  if (owner !== undefined && owner.grantId !== String(grant.grantId)) return false;
+  if (owner === undefined && grant.scope.threads !== "project") return false;
+  // A thread the agent started stays inside the grant as it reads now: taking
+  // a Project or a mode out of the grant takes that thread out too.
+  if (owner !== undefined && !grant.scope.modes.includes(owner.mode)) return false;
   const project = deps.threadProject(threadId);
-  return project?.projectId !== undefined && projectAllowed(grant, project.projectId);
+  if (project === undefined) return false;
+  return project.projectId === undefined
+    ? owner?.mode === "chat"
+    : projectAllowed(grant, project.projectId);
+}
+
+function withinCeiling(grant: AgentGrant, access: AgentThreadAccess | undefined): boolean {
+  if (access === undefined) return false;
+  if (access.kind === "chat") return true;
+  if (access.fullAccessSandbox) return false;
+  return access.kind === "code"
+    ? codeAccessAllowed(grant.scope.highestLevel, access.executionPolicy, access.autoApprove)
+    : workAccessAllowed(grant.scope.highestLevel, access.access);
 }
 
 function projectAllowed(grant: AgentGrant, projectId: unknown): boolean {

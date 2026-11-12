@@ -120,6 +120,8 @@ export class AgentAccessService {
   readonly #options: AgentAccessServiceOptions;
   readonly #now: () => number;
   readonly #randomBytes: (size: number) => Uint8Array;
+  /** Turn starts admitted but not yet started, per grant. */
+  readonly #turnStarts = new Map<string, number>();
   readonly #tickets = new Map<string, Ticket>();
   readonly #pending = new Map<string, Map<string, PendingKey>>();
   readonly #nonces = new Map<string, Map<string, number>>();
@@ -327,6 +329,31 @@ export class AgentAccessService {
         startedAt: iso(this.#now()),
       },
     );
+  }
+
+  /**
+   * Holds one of a grant's running-turn places from the limit check until the
+   * turn has started or failed to. Running turns are read from the threads,
+   * which show a turn only once it starts, so two starts checked at the same
+   * moment would otherwise both see room for one.
+   */
+  holdTurnStart(grantId: string): {
+    readonly startingAlready: number;
+    readonly release: () => void;
+  } {
+    const startingAlready = this.#turnStarts.get(grantId) ?? 0;
+    this.#turnStarts.set(grantId, startingAlready + 1);
+    let released = false;
+    return {
+      startingAlready,
+      release: () => {
+        if (released) return;
+        released = true;
+        const left = (this.#turnStarts.get(grantId) ?? 1) - 1;
+        if (left <= 0) this.#turnStarts.delete(grantId);
+        else this.#turnStarts.set(grantId, left);
+      },
+    };
   }
 
   threadOwner(threadId: string): AgentThreadRecord | undefined {

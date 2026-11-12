@@ -289,9 +289,18 @@ export interface AgentToolPolicy {
   readonly threadAllowed: (threadId: string) => boolean;
   /** The level a new Work or Code thread starts at when the call names none. */
   readonly defaultAccess: PermissionMode;
-  /** A refusal when the caller's limits do not allow another turn now. */
-  readonly beforeTurn: (session: OpenedLocalControlSession) => Promise<string | undefined>;
+  /**
+   * Whether the caller's limits allow another turn now. An admitted turn holds
+   * its place against the limits until `release`, which the caller calls once
+   * the turn has started or failed to, so turns started at the same moment
+   * count each other.
+   */
+  readonly beforeTurn: (session: OpenedLocalControlSession) => Promise<TurnAdmission>;
 }
+
+export type TurnAdmission =
+  | { readonly kind: "admitted"; readonly release: () => void }
+  | { readonly kind: "refused"; readonly message: string };
 
 export interface AgentToolCallOptions {
   readonly openSession: () => Promise<LocalControlSession>;
@@ -802,8 +811,8 @@ async function startWork(
   }
   // Limits are checked before anything is created, so a refused turn leaves
   // no empty thread behind.
-  const limited = await policy?.beforeTurn(session);
-  if (limited !== undefined) return { value: limited, isError: true };
+  const admission = await policy?.beforeTurn(session);
+  if (admission?.kind === "refused") return { value: admission.message, isError: true };
   const created = await createAgentThread(session, {
     mode,
     title: call.title ?? titleFromPrompt(call.prompt),
@@ -812,13 +821,16 @@ async function startWork(
     model: call.model,
     access: call.access ?? (mode === "chat" ? undefined : policy?.defaultAccess),
   });
-  if (created.kind === "refused") return refused(created);
+  if (created.kind === "refused") {
+    admission?.release();
+    return refused(created);
+  }
   const thread = {
     threadId: created.threadId,
     mode: created.mode,
     ...(created.projectName === undefined ? {} : { projectName: created.projectName }),
   };
-  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal, undefined);
+  const answer = await sendAndFollow(session, thread, call.prompt, call, poll, signal, admission);
   if (addedProject === undefined || typeof answer.value === "string") return answer;
   return { ...answer, value: { ...answer.value, addedProject } };
 }
@@ -834,16 +846,22 @@ async function sendAndFollow(
   options: { readonly wait: boolean; readonly timeoutSeconds: number },
   poll: { readonly pollIntervalMs?: number },
   signal: AbortSignal,
-  /** Absent when the caller already checked the limits for this turn. */
-  policy: AgentToolPolicy | undefined,
+  /** The policy to admit this turn, or the admission the caller already holds for it. */
+  limits: AgentToolPolicy | TurnAdmission | undefined,
 ): Promise<ToolAnswer> {
-  const limited = await policy?.beforeTurn(session);
-  if (limited !== undefined) return { value: limited, isError: true };
-  const started = await startAgentTurn(
-    agentThreadPort(session, thread.mode, thread.threadId),
-    prompt,
-    poll,
-  );
+  const admission =
+    limits === undefined || "kind" in limits ? limits : await limits.beforeTurn(session);
+  if (admission?.kind === "refused") return { value: admission.message, isError: true };
+  let started: Awaited<ReturnType<typeof startAgentTurn>>;
+  try {
+    started = await startAgentTurn(
+      agentThreadPort(session, thread.mode, thread.threadId),
+      prompt,
+      poll,
+    );
+  } finally {
+    admission?.release();
+  }
   if (started.kind === "refused") {
     return {
       value: `${started.message} (thread ${thread.threadId})`,

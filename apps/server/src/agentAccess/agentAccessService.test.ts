@@ -223,6 +223,18 @@ describe("agent grants", () => {
     expect(service.read(grantId)?.state).toBe("revoked");
   });
 
+  it("holds a grant's turn starts until each is released, once", () => {
+    const { service } = harness();
+    const first = service.holdTurnStart("g");
+    const second = service.holdTurnStart("g");
+    expect([first.startingAlready, second.startingAlready]).toEqual([0, 1]);
+    expect(service.holdTurnStart("other").startingAlready).toBe(0);
+    first.release();
+    first.release();
+    second.release();
+    expect(service.holdTurnStart("g").startingAlready).toBe(0);
+  });
+
   it("refuses a grant for a Project that is not there, and one without the Project's mode", () => {
     const { service } = harness();
     const unknown = service.execute(
