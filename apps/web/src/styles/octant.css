@@ -4947,6 +4947,12 @@ input.switch:checked::after {
 .callout.composer-notice > svg {
   margin-top: calc((1lh - 16px) / 2);
 }
+/* A note that only states a fact (a saved draft, a locked task) draws its
+   mark in meta ink. The callout's default mark is the warning ink, which made
+   "nothing has been sent" read as a warning. */
+.callout.composer-notice[data-tone="neutral"] > svg {
+  color: var(--oct-meta);
+}
 .callout.composer-notice > .callout__body {
   flex: 1 1 200px;
 }
