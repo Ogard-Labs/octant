@@ -192,6 +192,15 @@ describe("textNamesProtectedPath", () => {
     );
   });
 
+  it("finds a protected file a JSON command names just before a newline or a tab", () => {
+    for (const command of [
+      "cat ~/.ssh/id_ed25519\nprintf done",
+      "cat\t/home/person/.aws/credentials\t| head",
+    ]) {
+      expect(textNamesProtectedPath(JSON.stringify({ command }), protectedPath)).toBe(true);
+    }
+  });
+
   it("answers no for ordinary paths and for text that names no path", () => {
     expect(textNamesProtectedPath("cat /home/person/project/README.md", protectedPath)).toBe(false);
     expect(textNamesProtectedPath('{"query":"aws credentials"}', protectedPath)).toBe(false);

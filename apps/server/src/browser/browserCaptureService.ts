@@ -122,6 +122,9 @@ export class BrowserCaptureService {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #capturesPerThread: () => number;
+  /** The setting when recovery last swept every thread, and at each thread's last drop since. */
+  readonly #keptAtStart: number;
+  readonly #keptAtLastDrop = new Map<string, number>();
 
   constructor(options: BrowserCaptureServiceOptions) {
     this.#store = options.store;
@@ -135,6 +138,7 @@ export class BrowserCaptureService {
         MAX_BROWSER_CAPTURES_PER_THREAD,
         Math.max(1, options.capturesPerThread?.() ?? DEFAULT_BROWSER_CAPTURES_PER_THREAD),
       );
+    this.#keptAtStart = this.#capturesPerThread();
   }
 
   /**
@@ -432,21 +436,28 @@ export class BrowserCaptureService {
   }
 
   async #dropOlderThan(threadId: BrowserThreadId, headVersion: number): Promise<void> {
-    const droppedVersion =
-      browserCaptureRetention(headVersion, this.#capturesPerThread()).firstRetainedVersion - 1;
+    const kept = this.#capturesPerThread();
+    const droppedVersion = browserCaptureRetention(headVersion, kept).firstRetainedVersion - 1;
+    const keptBefore = this.#keptAtLastDrop.get(String(threadId)) ?? this.#keptAtStart;
+    this.#keptAtLastDrop.set(String(threadId), kept);
     if (droppedVersion < 1) return;
-    const [dropped] = this.#journal.replayAggregate({
+    // The window normally advances by one capture a keep. After the person
+    // lowers the number it jumps, and every version it passed over goes, or
+    // raising the number again would list captures that were dropped.
+    const firstDropped = kept < keptBefore ? 1 : droppedVersion;
+    const dropped = this.#journal.replayAggregate({
       aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
       aggregateId: String(threadId),
-      afterVersion: droppedVersion - 1,
-      limit: 1,
+      afterVersion: firstDropped - 1,
+      limit: droppedVersion - firstDropped + 1,
     });
-    if (dropped === undefined) return;
     // A removal that fails here is not lost: the journal already no longer
     // retains the capture, so the next recovery pass removes it.
-    await this.#store
-      .remove(threadId, decodeBrowserCapture(dropped.payload).captureId)
-      .catch(() => undefined);
+    for (const event of dropped) {
+      await this.#store
+        .remove(threadId, decodeBrowserCapture(event.payload).captureId)
+        .catch(() => undefined);
+    }
   }
 
   /**

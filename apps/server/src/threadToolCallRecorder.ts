@@ -44,13 +44,38 @@ export function textNamesProtectedPath(
   protectedPath: (path: string) => boolean,
 ): boolean {
   let judged = 0;
-  for (const word of text.split(/[\s"'`=,;:()[\]<>|&]+/)) {
+  for (const word of decodedStrings(text).split(/[\s"'`=,;:()[\]<>|&]+/)) {
     if (!PATH_SHAPED.test(word)) continue;
     if (protectedPath(word)) return true;
     judged += 1;
     if (judged >= MAX_JUDGED_PATHS) return false;
   }
   return false;
+}
+
+/**
+ * A JSON input's string values as the tool receives them. Judged raw, a
+ * command's newline is the two characters `\\n` and stays glued to the path
+ * before it, so `cat ~/.docker/config.json` followed by a second line named
+ * no protected file. Text that is not JSON is judged as it is.
+ */
+function decodedStrings(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  const strings: string[] = [];
+  const pending: unknown[] = [parsed];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === "string") strings.push(value);
+    else if (Array.isArray(value)) pending.push(...value);
+    else if (typeof value === "object" && value !== null)
+      pending.push(...Object.keys(value), ...Object.values(value));
+  }
+  return strings.join("\n");
 }
 
 /**

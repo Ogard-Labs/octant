@@ -234,6 +234,24 @@ describe("BrowserCaptureService", () => {
     expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
   });
 
+  it("removes every capture a lowered number passes over at the next keep, so raising it brings none back", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    ids.push(kept(await service.keep(request({ title: "After lowering" }))));
+
+    for (const id of ids.slice(0, -3)) {
+      expect(existsSync(captureDirectory(directory, threadA, id))).toBe(false);
+    }
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+  });
+
   it("keeps the newest 200 captures when the person chose no number", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-browser-capture-"));
     directories.push(directory);
