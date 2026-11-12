@@ -607,159 +607,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   font-size: var(--oct-text-xs);
 }
 
-/* The Browser preview: a small live picture of the page, resting in one corner
-   of the thread and shown only while the Browser itself is out of sight. It
-   ranks below the window chrome (7), and its bottom corners clear the composer
-   by the height the component measures into --browser-pip-bottom. */
-.browser-pip {
-  --browser-pip-inset: 16px;
-  --browser-pip-bottom: var(--browser-pip-inset);
-  position: absolute;
-  z-index: 6;
-  width: min(264px, calc(100% - 2 * var(--browser-pip-inset)));
-  touch-action: none;
-  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.browser-pip[data-corner^="top"] {
-  top: var(--browser-pip-inset);
-}
-
-.browser-pip[data-corner^="bottom"] {
-  bottom: var(--browser-pip-bottom);
-}
-
-.browser-pip[data-corner$="left"] {
-  left: var(--browser-pip-inset);
-}
-
-.browser-pip[data-corner$="right"] {
-  right: var(--browser-pip-inset);
-}
-
-.browser-pip[data-dragging] {
-  cursor: grabbing;
-  animation: none;
-}
-
-.browser-pip__open {
-  position: relative;
-  display: block;
-  width: 100%;
-  /* The button recipe fixes a control height that would clip the picture. */
-  height: auto;
-  padding: 0;
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-inset);
-  border: 1px solid var(--octant-glass-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
-  cursor: default;
-}
-
-.browser-pip[data-dragging] .browser-pip__open {
-  cursor: grabbing;
-}
-
-/* The ratio lives on this inner box, not on the button: a button ignores it. */
-.browser-pip__frame {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: var(--browser-pip-aspect, 1.6);
-}
-
-.browser-pip__picture {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top center;
-  user-select: none;
-}
-
-.browser-pip__skeleton {
-  position: absolute;
-  inset: 0;
-  border-radius: 0;
-}
-
-/* Name and count ride the picture's edges; the page's title or host shows only
-   under the pointer or keyboard focus, so nothing sits over the page at rest. */
-.browser-pip__caption,
-.browser-pip__count,
-.browser-pip__profile,
-.browser-pip__close {
-  background: var(--octant-glass-bg);
-  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-}
-
-.browser-pip__caption {
-  position: absolute;
-  inset: auto 0 0;
-  padding: 4px 8px;
-  overflow: hidden;
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity var(--oct-motion-fast) ease;
-}
-
-.browser-pip__open:hover .browser-pip__caption,
-.browser-pip__open:focus-visible .browser-pip__caption {
-  opacity: 1;
-}
-
-/* A signed-in page names its profile at rest, because it acts as the person's
-   account; the page's own title still waits for the pointer. */
-.browser-pip__profile {
-  position: absolute;
-  bottom: 6px;
-  left: 6px;
-  padding: 0 var(--oct-space-1);
-  color: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-}
-
-.browser-pip__count {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  min-width: 20px;
-  padding: 0 4px;
-  color: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  text-align: center;
-}
-
-.browser-pip__close {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  padding: 0;
-  border-radius: var(--oct-radius-pill);
-  opacity: 0;
-  transition: opacity var(--oct-motion-fast) ease;
-}
-
-.browser-pip:hover .browser-pip__close,
-.browser-pip:focus-within .browser-pip__close {
-  opacity: 1;
-}
-
 @keyframes thread-activity-pip-enter {
   from {
     opacity: 0;
@@ -807,8 +654,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-activity-pip,
-  .browser-pip {
+  .thread-activity-pip {
     animation: none;
   }
 }
@@ -971,7 +817,7 @@ h6 {
   color: var(--octant-text-primary);
   background: var(--octant-float);
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
   outline: 0;
 }
@@ -1550,7 +1396,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 /* Reader rails replace the pane rather than opening beside it. Their opaque
    surface sits at z5, while the native pane tab must stay at z6 so it can
    outrank the workspace in the normal view. Hide that tab while a rail is
-   open; otherwise the title/path pill bleeds through the rail's top edge on
+   open; otherwise the title/path chip bleeds through the rail's top edge on
    native windows (most visibly on Image generator and Archive). */
 html[data-octant-native-host="true"]
   .primary-workspace-layer:has(
@@ -1751,7 +1597,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 }
 
-/* A turn is executing. The pill keeps its width while the chips shrink, so
+/* A turn is executing. The chip keeps its width while the chips shrink, so
    the state stays readable in a narrow pane. */
 .workspace-pane__status {
   display: inline-flex;
@@ -1761,9 +1607,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 0 var(--oct-space-2);
   color: var(--oct-fg-2);
   /* A neutral wash, as the open thread row and tab are: the selection role
-     carries the theme's hue and drew a green pill on Onyx. */
+     carries the theme's hue and drew a green chip on Onyx. */
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   line-height: 18px;
@@ -1844,7 +1690,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 4px;
   background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -1942,9 +1788,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: auto;
 }
 
-/* The row takes the strip's width so the pills share it, shrinking toward
+/* The row takes the strip's width so the chips share it, shrinking toward
    their minimum before anything scrolls; sized to its content, three tabs
-   asked for 604px and scrolled in a 400px pane instead of sharing it. Pills
+   asked for 604px and scrolled in a 400px pane instead of sharing it. Chips
    at their minimum overflow the row, and the strip scrolls them. */
 .workspace-content-tabs__list {
   width: 100%;
@@ -2136,7 +1982,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* Readiness in words. Colour marks only the states that need attention, so a
-   list of ready providers reads as quiet text rather than a row of pills. */
+   list of ready providers reads as quiet text rather than a row of chips. */
 .prov-state {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -2828,7 +2674,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-1);
   padding-left: var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
 }
 
 .endpoint-chip__label {
@@ -2883,7 +2729,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* "Chat only · Verify tools": the same words wherever a model has not been
-   seen calling a tool. The dashed pill matches the tag it replaced. */
+   seen calling a tool. The dashed chip matches the tag it replaced. */
 .chat-only-verify {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2894,7 +2740,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .chat-only-verify__label {
   padding: 0 var(--oct-space-2);
   border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
   white-space: nowrap;
@@ -3057,7 +2903,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .endpoint-tag {
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
   white-space: nowrap;
@@ -5421,7 +5267,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   cursor: default;
   font: inherit;
   font-size: var(--oct-text-xs);
@@ -6955,7 +6801,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: var(--oct-space-1);
   padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-1) 8px;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   background: transparent;
   font-size: var(--oct-text-detail);
@@ -7415,7 +7261,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   margin: 4px 0 0;
   padding: var(--oct-space-2);
   border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   background: var(--octant-surface-raised);
 }
 
@@ -7782,10 +7628,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .content-tab:has([aria-selected="true"]) > .content-tab__close {
   opacity: 1;
 }
-/* A pane's conversation tabs are a row of equal pills: each open thread is
+/* A pane's conversation tabs are a row of equal chips: each open thread is
    its own soft card at a shared width, so the row reads as a set of open
    conversations rather than a line of links with one highlighted. The open
-   one is the brighter pill with a hairline edge; the rest sit a step back.
+   one is the brighter chip with a hairline edge; the rest sit a step back.
    Dock tool tabs keep the bare recipe above. */
 .workspace-content-tabs .content-tab {
   flex: 0 1 196px;
@@ -7807,7 +7653,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: color-mix(in oklab, var(--oct-fg) 11%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 9%, transparent);
 }
-/* The tab's own button spans the whole pill, with the × laid over its end,
+/* The tab's own button spans the whole chip, with the × laid over its end,
    so the shared keyboard focus edge outlines the whole tab: on the label
    alone it boxed the title and left the × outside. */
 .workspace-content-tabs .content-tab {

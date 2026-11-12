@@ -14,7 +14,7 @@ import { cn } from "./utils";
  *
  * An outline button rests on the page colour, unless the shell names another
  * rest fill: under Glass the page colour is opaque while the page around the
- * button is not, and every outline button drew a black pill on the grey
+ * button is not, and every outline button drew a black chip on the grey
  * glass of an OLED preset.
  */
 const buttonVariants = cva(
@@ -46,10 +46,10 @@ const buttonVariants = cva(
         // focus handling, and disabled state and draws nothing of its own, so
         // the feature never fights a ghost hover fill or a fixed height.
         bare: "h-auto rounded-none p-0 text-inherit",
-        // A small outlined pill that suggests something to type or pick: a
+        // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
-        chip: "rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground",
+        chip: "border-border bg-transparent text-muted-foreground hover:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between

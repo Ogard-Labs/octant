@@ -879,7 +879,7 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      // The first turn's status is a card above the pill, with its Cancel.
+      // The first turn's status is a card above the box, with its Cancel.
       // It is shown for the whole first turn (one mount, one unmount per
       // creation) and carries an action, so it stays a named card.
       const status = screen.getByRole("status", { name: "First-turn status" });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { OctantBadge } from "./OctantBadge";
 
 describe("OctantBadge", () => {
-  it("renders a status as a filled pill sized on the type ramp", () => {
+  it("renders a status as a filled chip sized on the type ramp", () => {
     render(<OctantBadge variant="warning">Waiting</OctantBadge>);
 
     const badge = screen.getByText("Waiting");

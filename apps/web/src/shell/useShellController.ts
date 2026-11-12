@@ -97,7 +97,14 @@ export interface ShellControllerOptions {
    * false when the announcing thread is not the dock's subject — the caller
    * then falls back to a pane reveal.
    */
-  readonly openDockBrowser?: (input: { readonly threadId: string }) => boolean;
+  readonly openDockBrowser?: (input: {
+    readonly threadId: string;
+    /**
+     * An offer for a new session, not a request: the dock leaves a Browser the
+     * person minimised minimised, since its card says the session is there.
+     */
+    readonly offered: boolean;
+  }) => boolean;
   readonly serverUrl: string;
   readonly windowCapability?: string;
   readonly windowId: WindowId;
@@ -866,7 +873,7 @@ export function useShellController(options: ShellControllerOptions) {
     if (browserActivityAnnouncements.remember(input.threadId, input.sessionIds) === "ignore") {
       return;
     }
-    openThreadBrowser(input);
+    openThreadBrowser({ ...input, offered: true });
   }
 
   /**
@@ -874,7 +881,11 @@ export function useShellController(options: ShellControllerOptions) {
    * thread is the dock's subject, else in the pane the request came from.
    * Unlike an offer, a request the person made is never remembered away.
    */
-  function openThreadBrowser(input: { readonly paneId?: PaneId; readonly threadId: string }): void {
+  function openThreadBrowser(input: {
+    readonly paneId?: PaneId;
+    readonly threadId: string;
+    readonly offered?: boolean;
+  }): void {
     const latest = committedShell.current;
     if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
       return;
@@ -882,7 +893,12 @@ export function useShellController(options: ShellControllerOptions) {
     // The dock is the thread-scoped home for a live tool: when the session
     // belongs to the subject the dock already describes, it opens there
     // instead of replacing the pane the person is reading.
-    if (options.openDockBrowser?.({ threadId: input.threadId }) === true) {
+    if (
+      options.openDockBrowser?.({
+        threadId: input.threadId,
+        offered: input.offered === true,
+      }) === true
+    ) {
       return;
     }
     void (input.paneId === undefined

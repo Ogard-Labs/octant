@@ -296,7 +296,7 @@ ul.board-col-body {
   gap: var(--oct-space-1);
   min-width: 0;
   padding: 0 var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
   font-family: var(--oct-font-mono);
 }

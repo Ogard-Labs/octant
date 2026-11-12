@@ -606,7 +606,7 @@
 
 /* Each control is a quiet chip: the meta tone at rest, a fill only under the
    pointer or while its menu is open, the same as the access and model
-   controls in the row under the prompt. Filled pills at rest made the row
+   controls in the row under the prompt. Filled chips at rest made the row
    louder than the message, and a filled "Create from…" beside ghost ones
    looked like a second kind of control. */
 .composer-tray--start .composer-tray__leading > *,

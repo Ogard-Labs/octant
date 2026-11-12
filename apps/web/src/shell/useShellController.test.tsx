@@ -170,7 +170,12 @@ function mintedCodeThreadSurface(threadId: CodeThreadId, title: string): Workspa
 
 async function readyBoundCodeShell(
   id = windowId,
-  options?: { readonly openDockBrowser?: (input: { readonly threadId: string }) => boolean },
+  options?: {
+    readonly openDockBrowser?: (input: {
+      readonly threadId: string;
+      readonly offered: boolean;
+    }) => boolean;
+  },
 ) {
   const initial = codeBootstrap();
   const server = statefulClient({
@@ -773,7 +778,7 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId) });
+    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
     expect(server.execute.mock.calls.length).toBe(executeCalls);
     expect(
       panes(result.current.workspace!.layouts.code).filter(
@@ -795,7 +800,7 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId) });
+    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
     const browserPanes = panes(result.current.workspace!.layouts.code).filter(
       (pane) => pane.surface.kind === "browser",
     );
@@ -840,6 +845,12 @@ describe("useShellController", () => {
 
     await act(async () => result.current.openThreadBrowser({ paneId, threadId: String(threadId) }));
     expect(openDockBrowser).toHaveBeenCalledTimes(2);
+    // What the person asked for (or the sign-in hand-over) is not an offer, so
+    // the dock restores a minimised Browser for it.
+    expect(openDockBrowser).toHaveBeenLastCalledWith({
+      threadId: String(threadId),
+      offered: false,
+    });
   });
 
   it("does not reopen the same session after the thread returns to the pane", async () => {

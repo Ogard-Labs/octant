@@ -31,7 +31,7 @@ export interface ComposerThreadAction {
  * line. In the macOS desktop app the plus opens a menu of two ways to attach,
  * a file or a capture of an open window; everywhere else it opens the file
  * chooser directly. It is a plus on a quiet round fill: it adds to the
- * message, by more than one route, and it mirrors send at the pill's other
+ * message, by more than one route, and it mirrors send at the box's other
  * end.
  */
 export function ComposerAttachButton(props: ComposerAttachButtonProps) {

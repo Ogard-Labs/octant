@@ -1727,7 +1727,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-display);
 }

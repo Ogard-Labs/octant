@@ -351,7 +351,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const laidOut = useMemo(() => {
     if (!wall) return sorted;
     const tiles = planZenWall(props.space.elements.length, surfaceSize, {
-      // The spaces pill floats over the top of the surface and the Navigator
+      // The spaces bar floats over the top of the surface and the Navigator
       // bar over the bottom; a wall that filled the whole area would put its
       // first and last rows underneath them.
       insetTop: ZEN_WALL_INSET_TOP,
@@ -1325,8 +1325,8 @@ type ResolvedZenBackground = {
 /* The theme's workspace ground. Used whenever no user choice paints the
    surface, so the safe fallback is the same ground every other surface
    stands on rather than a colour of Zen's own. */
-/* Room the wall leaves for the surface's own floating chrome: the spaces pill
-   above, and the Navigator bar (or its collapsed pill) below. */
+/* Room the wall leaves for the surface's own floating chrome: the spaces bar
+   above, and the Navigator bar (or its collapsed bar) below. */
 const ZEN_WALL_INSET_TOP = 56;
 const ZEN_WALL_INSET_BOTTOM = 88;
 const ZEN_WALL_INSET_BOTTOM_COLLAPSED = 64;
