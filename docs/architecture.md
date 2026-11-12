@@ -1394,8 +1394,13 @@ after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
-`forceStop` unsupported: the command is refused, the UI never offers it, and
-Stop settles the attempt at once as before. For a provider that supports it, a
+`forceStop` unsupported: the command is refused and the UI never offers it. In
+Chat, its Stop still waits for the runtime to confirm the turn ended before the
+attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
+attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
+confirmed. The provider may still be running this response."), which frees the
+thread without claiming the work stopped. While a Stop is unanswered the
+composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
 (`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
@@ -1418,7 +1423,11 @@ paused; with the slice, a Stop issued into that flood settled the turn at p95
 returns `stop-requested` while its exact request-owned supported runtime is
 still ending. Its force command requires the same request/thread/turn and an already-aborted owned controller. Code's force
 command additionally names the original turn operation, rejects replacement
-operations and requires that Stop already reached that controller. Neither path
+operations and requires that Stop already reached that controller. Code's Stop
+names the turn it was pressed for too: a Stop that names a turn no longer current
+is refused and leaves the newer turn running, so a Stop that arrives late cannot
+end a queued message the host sent on. A Stop that names no turn, from a client
+built before the field, still ends the live turn. Neither path
 accepts a PID or kills a shared runtime; the provider owns process verification.
 The normal turn lifecycle records completion/cancellation, preserving queued
 messages and history. A kill failure leaves an explicit recovery error.
@@ -5060,6 +5069,19 @@ or .zip>` write the same files, built by one host command
   provider session cursors, or earlier events. Already settled turns remain settled;
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
+  Other running Code work has no process left after a restart. A push or pull
+  request step may already have landed on the remote, so it becomes `ambiguous`
+  and keeps the thread Waiting ("could not confirm how the last step ended")
+  rather than letting it read Ready; its runtime-work record keeps the remote step
+  it makes (a push's remote, branch and commit, or the pull request action) when
+  it opens. Observing the checkout (the Git tab) settles an unconfirmed push by
+  reading the remote branch: pointing at the pushed commit it is `completed`,
+  anywhere else or absent it is `failed` and pushing again is safe, and an
+  unreadable remote leaves it unconfirmed. Observing the pull request settles an
+  unconfirmed creation by looking for the thread's pull request, open or closed.
+  An unconfirmed update, comment or merge stays unconfirmed. File, terminal,
+  test, review, and local Git work, whose result is in the checkout, becomes
+  `interrupted`.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed

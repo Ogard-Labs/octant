@@ -2818,6 +2818,12 @@ export function useCodeController(options: CodeControllerOptions) {
           restoreFailedPrompt();
           return false;
         }
+        // The running turn's identity is what Stop names, so a Stop that lands
+        // after this turn is replaced cannot stop the next one.
+        activeTurnOperations.current.set(String(view.thread.id), {
+          operationId,
+          status: "running",
+        });
         setTurnStatus("running");
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
@@ -3155,6 +3161,7 @@ export function useCodeController(options: CodeControllerOptions) {
       return false;
     }
     const cancellationThreadId = String(view.thread.id);
+    const stoppingTurn = activeTurnOperations.current.get(cancellationThreadId)?.operationId;
     const scope = {
       operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
       threadId: view.thread.id,
@@ -3169,6 +3176,10 @@ export function useCodeController(options: CodeControllerOptions) {
       const result = await client.executeOperation({
         kind: "cancel-provider-turn",
         ...scope,
+        // Naming the turn keeps a Stop that lands after this turn was replaced
+        // from stopping the one that replaced it. A turn this window has not
+        // learned the identity of yet is stopped as before.
+        ...(stoppingTurn === undefined ? {} : { turnOperationId: stoppingTurn }),
       });
       if (result.kind === "operation-failed") {
         setCancellationError(result.failure.message);

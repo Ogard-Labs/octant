@@ -102,6 +102,8 @@ interface MutationPort {
     input: Parameters<GitMutationPort["releaseCheckpoint"]>[0],
     signal?: AbortSignal,
   ): Promise<void>;
+  /** Optional: a mutation fake without it cannot settle a push the host lost. */
+  remoteHead?: GitMutationPort["remoteHead"];
   /** Optional: a mutation fake without it refuses to bring a run home. */
   mergeBranch?: (
     input: Parameters<GitMutationPort["mergeBranch"]>[0],
@@ -665,6 +667,15 @@ export class GitService {
         signal,
       );
     });
+  }
+
+  /** Where a remote branch points now, read without changing the checkout. */
+  async remoteHead(
+    input: Parameters<GitMutationPort["remoteHead"]>[0],
+    signal?: AbortSignal,
+  ): ReturnType<GitMutationPort["remoteHead"]> {
+    if (this.#mutation.remoteHead === undefined) return { status: "unavailable" };
+    return this.#mutation.remoteHead(input, signal);
   }
 
   push(

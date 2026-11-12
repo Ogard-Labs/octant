@@ -53,6 +53,7 @@ import {
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
+  decodeCodeRuntimeWorkId,
   decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
@@ -630,6 +631,110 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it.each([
+    ["points at the pushed commit", { status: "found", oid: "a".repeat(40) }, "completed"],
+    ["points elsewhere", { status: "found", oid: "c".repeat(40) }, "failed"],
+    ["has no such branch", { status: "absent" }, "failed"],
+    ["cannot be read", { status: "unavailable" }, "ambiguous"],
+  ] as const)(
+    "settles a push the host lost when the remote branch %s, on the next look at the checkout",
+    async (_case, remote, settled) => {
+      const remoteHead = vi.fn(async () => remote);
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        const pushId = "90000000-0000-4000-8000-0000000000e1";
+        fixture.appendRuntimeWork({
+          id: pushId,
+          kind: "git",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "push",
+            remote: "origin",
+            remoteRef: "refs/heads/feature",
+            commitOid: "a".repeat(40),
+          },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-git",
+          operationId: operationId(41),
+          threadId,
+          checkoutId,
+          gitOperationId: operationId(42),
+          maxDiffBytes: 1_024,
+        });
+        expect(remoteHead).toHaveBeenCalledWith(
+          expect.objectContaining({ remote: "origin", remoteRef: "refs/heads/feature" }),
+          undefined,
+        );
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === pushId)
+            .at(-1)?.state,
+        ).toBe(settled);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it.each([
+    ["exists", { status: "found" }, "completed"],
+    ["is nowhere", { status: "none" }, "failed"],
+  ] as const)(
+    "settles a pull request the host lost while creating it when the thread's pull request %s",
+    async (_case, located, settled) => {
+      const locate = vi.fn(async () =>
+        located.status === "found"
+          ? {
+              status: "found" as const,
+              pullRequest: {
+                number: 7,
+                url: "https://github.com/octant/octant/pull/7",
+                baseRepository: "octant/octant",
+                baseBranch: "main",
+                headOwner: "octant",
+                headBranch: "feature",
+              },
+            }
+          : located,
+      );
+      const fixture = runtimeFixture({
+        pullRequestPort: {
+          ensure: async () => ({ status: "unavailable" }),
+          locate,
+          observeReview: async () => ({ status: "unavailable" }),
+        },
+      });
+      try {
+        const createId = "90000000-0000-4000-8000-0000000000e2";
+        fixture.appendRuntimeWork({
+          id: createId,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "create" },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          operationId: operationId(43),
+          threadId,
+          checkoutId,
+          maxDiffBytes: 1_024,
+        });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === createId)
+            .at(-1)?.state,
+        ).toBe(settled);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
     const runs = 10;
     const latencies: number[] = [];
@@ -688,6 +793,48 @@ describe("CodeOperationRuntime", () => {
     const p95 = latencies[Math.ceil(runs * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
     expect(p95).toBeLessThan(1_000);
   }, 30_000);
+
+  it("refuses a Stop meant for an earlier turn and leaves the newer turn running", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(23),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      // A Stop the person pressed for a turn that has since been replaced
+      // arrives late, naming that earlier turn.
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(24),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(20),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(25),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(23),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it.each(["restore", "discard"] as const)(
     "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
@@ -6094,7 +6241,8 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.boardActivity()).toMatchObject({
       executing: false,
       awaitingInput: true,
-      blockingReason: "Octant could not confirm how the last step ended.",
+      blockingReason:
+        "Octant could not confirm how the last step ended. Opening the thread's Git or pull request tab checks the remote again.",
     });
     fixture.close();
   });
@@ -9404,6 +9552,10 @@ function runtimeFixture(options: {
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
   >;
+  /** Where a remote branch points, for settling a push the host lost. */
+  remoteHead?: NonNullable<
+    NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["remoteHead"]
+  >;
   gitRemotes?: ReadonlyArray<{
     readonly name: string;
     readonly fetchUrl: string;
@@ -9690,6 +9842,7 @@ function runtimeFixture(options: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
+      readCodeRuntimeWorks: (id) => readCodeRuntimeWorks(connection, id),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: (id) => readCodeReviewFinding(connection, id),
@@ -9934,6 +10087,7 @@ function runtimeFixture(options: {
     },
     gitMutationPort: options.liveGit?.mutation ?? {
       ...(options.hunkApply === undefined ? {} : { applyHunks: options.hunkApply }),
+      ...(options.remoteHead === undefined ? {} : { remoteHead: options.remoteHead }),
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
@@ -9973,6 +10127,29 @@ function runtimeFixture(options: {
       gitObservationReadHook = hook;
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
+    /** Journal a runtime work record directly, as an earlier process left it. */
+    appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
+      journal.append({
+        aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
+        expectedVersion: readCodeRuntimeWorkAggregateVersion(
+          connection,
+          decodeCodeRuntimeWorkId(work.id),
+        ),
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            eventName: "code.runtime-work-updated@1",
+            eventVersion: 1,
+            correlationId: crypto.randomUUID(),
+            actor: { kind: "system", actorId: "90000000-0000-4000-8000-0000000000ff" },
+            occurredAt: now,
+            payload: {
+              kind: "runtime-work-updated",
+              work: { threadId, updatedAt: now, ...work },
+            },
+          },
+        ],
+      }),
     directory,
     selectConversation,
     selectForkConversation,
