@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   decideRemotePullRequestMerge,
   type RequiredChecksState,
@@ -150,7 +151,16 @@ export interface CodeProjectPullRequestMergePort {
 export function journalPullRequestMerge(
   journal: Pick<Journal, "append">,
   record: CodeProjectPullRequestMergeRecorded,
-  options: { readonly uuid: () => string; readonly clock: () => string },
+  options: {
+    readonly uuid: () => string;
+    readonly clock: () => string;
+    /**
+     * Who asked, as the route resolved it from the authenticated principal: a
+     * paired device's act is journaled as that device. Absent means the
+     * person at this host.
+     */
+    readonly actor?: EventActor;
+  },
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-project-pull-request-merge", aggregateId: options.uuid() },
@@ -161,7 +171,7 @@ export function journalPullRequestMerge(
         eventName: CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
         eventVersion: 1,
         correlationId: options.uuid(),
-        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        actor: options.actor ?? { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         occurredAt: options.clock(),
         payload: record,
       },
@@ -230,7 +240,9 @@ export class CodeProjectPullRequestService {
   readonly #list: CodeProjectPullRequestListPort;
   readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #merge: CodeProjectPullRequestMergePort;
-  readonly #recordMerge: ((record: CodeProjectPullRequestMergeRecorded) => void) | undefined;
+  readonly #recordMerge:
+    | ((record: CodeProjectPullRequestMergeRecorded, actor?: EventActor) => void)
+    | undefined;
   readonly #requiredChecks:
     | ((
         request: { readonly owner: string; readonly name: string; readonly number: number },
@@ -295,7 +307,10 @@ export class CodeProjectPullRequestService {
      * mutation of the person's repository, so Octant keeps its own record of
      * which head was approved and how the attempt ended, beside GitHub's.
      */
-    readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
+    readonly recordMerge?: (
+      record: CodeProjectPullRequestMergeRecorded,
+      actor?: EventActor,
+    ) => void;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
@@ -573,22 +588,28 @@ export class CodeProjectPullRequestService {
     command: CodeProjectPullRequestMergeCommand,
     signal: AbortSignal,
     caller: "local-window" | "remote-device" = "local-window",
+    // Who the journal names. A device the host's own person paired is judged
+    // as a local window is, so `caller` alone does not tell the two apart.
+    actor?: EventActor,
   ): Promise<CodeProjectPullRequestMergeOutcome> {
     const projects = await this.#resolveProjects(windowId);
     const authorized = this.#authorizedConnection(projects, command);
     const record = (result: CodeProjectPullRequestMergeRecorded["result"]) =>
-      this.#recordMerge?.({
-        projectId: command.projectId,
-        repositoryOwner: command.repositoryOwner,
-        repositoryName: command.repositoryName,
-        number: command.number,
-        method: command.method,
-        headSha: command.headSha,
-        // Absent means the local window, as every record was before paired
-        // clients could merge.
-        ...(caller === "remote-device" ? { caller } : {}),
-        result,
-      });
+      this.#recordMerge?.(
+        {
+          projectId: command.projectId,
+          repositoryOwner: command.repositoryOwner,
+          repositoryName: command.repositoryName,
+          number: command.number,
+          method: command.method,
+          headSha: command.headSha,
+          // Absent means the local window, as every record was before paired
+          // clients could merge.
+          ...(caller === "remote-device" ? { caller } : {}),
+          result,
+        },
+        actor,
+      );
     // A paired client, or a merge that says the person confirmed it, is held
     // to the repository's required checks. The local window's own review
     // already shows them and its Confirm step is the person's choice.

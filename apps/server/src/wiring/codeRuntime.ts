@@ -1998,17 +1998,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // A paired phone or web client merges under the same head and
       // required-check rules as the desktop window; it must also carry the
       // person's confirmation, which the service enforces.
-      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+      mergeProjectPullRequest: (windowId, command, signal, caller, actor) =>
         projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
           caller,
+          actor,
         ),
-      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
-      actOnProjectPullRequest: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.act(windowId, command, signal, caller),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller, actor),
+      actOnProjectPullRequest: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>

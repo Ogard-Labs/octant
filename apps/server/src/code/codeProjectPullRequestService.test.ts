@@ -177,10 +177,11 @@ function serviceFixture(options: {
     ...(mergeJournal === undefined
       ? {}
       : {
-          recordMerge: (record) =>
+          recordMerge: (record, actor) =>
             journalPullRequestMerge(mergeJournal, record, {
               uuid: () => crypto.randomUUID(),
               clock: () => now,
+              ...(actor === undefined ? {} : { actor }),
             }),
         }),
     threads: {
@@ -327,6 +328,32 @@ describe("CodeProjectPullRequestService", () => {
         expect(events).toHaveLength(1);
         expect(events[0]?.actor.kind).toBe("local-user");
         expect(events[0]?.payload).toEqual({ ...mergeCommand, result: { status: "merged" } });
+      } finally {
+        store.close();
+      }
+    });
+
+    it("journals a merge from a device the host's own person paired with the device as its actor", async () => {
+      const store = openJournal();
+      try {
+        const deviceId = "00000000-0000-4000-8000-0000000000d1";
+        const device = { kind: "remote-device", actorId: deviceId, deviceId };
+        const fixture = serviceFixture({
+          merge: { mergeByIdentity: async () => ({ status: "merged" }) },
+          mergeJournal: store.journal,
+        });
+
+        // Such a device is judged as a local window is; only the actor differs.
+        const outcome = await fixture.service.merge(
+          windowId,
+          mergeCommand,
+          new AbortController().signal,
+          "local-window",
+          device as never,
+        );
+
+        expect(outcome.status).toBe("merged");
+        expect(store.recorded().map((event) => event.actor)).toEqual([device]);
       } finally {
         store.close();
       }

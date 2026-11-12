@@ -376,6 +376,7 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestMergeCommand,
     signal: AbortSignal | undefined,
     caller: "local-window" | "remote-device",
+    actor?: EventActor,
   ) => Promise<CodeProjectPullRequestMergeOutcome> | CodeProjectPullRequestMergeOutcome;
   /** Merge a whole stack in one step, from the bottom. */
   readonly mergeProjectPullRequestStack?: (
@@ -383,6 +384,7 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestStackMergeCommand,
     signal: AbortSignal,
     caller: "local-window" | "remote-device",
+    actor?: EventActor,
   ) => Promise<CodeProjectPullRequestStackMergeOutcome>;
   /** The person's labels, comment, review reply, close, and reopen. */
   readonly actOnProjectPullRequest?: (
@@ -390,6 +392,7 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestActionCommand,
     signal: AbortSignal,
     caller: "local-window" | "remote-device",
+    actor?: EventActor,
   ) => Promise<CodeProjectPullRequestActionOutcome>;
   /** The labels and review threads the person's pull-request controls name. */
   readonly readProjectPullRequestActionContext?: (
@@ -1744,6 +1747,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 command,
                 request.signal,
                 callerAuthority,
+                callerActor,
               ),
             ),
             200,
@@ -1784,6 +1788,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 command,
                 request.signal,
                 callerAuthority,
+                callerActor,
               ),
             ),
             200,
@@ -1870,6 +1875,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 command,
                 request.signal,
                 callerAuthority,
+                callerActor,
               ),
             ),
             200,

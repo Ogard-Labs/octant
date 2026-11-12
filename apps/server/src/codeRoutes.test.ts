@@ -2568,6 +2568,7 @@ describe("Code project pull-request detail routes", () => {
       { ...detailQuery, method: "squash", headSha: mergeHeadSha },
       expect.any(AbortSignal),
       "local-window",
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
     );
   });
 
@@ -2629,6 +2630,12 @@ describe("Code project pull-request detail routes", () => {
       { ...detailQuery, method: "squash", headSha: mergeHeadSha, confirmed: true },
       expect.any(AbortSignal),
       "remote-device",
+      // The journal names the device.
+      {
+        kind: "remote-device",
+        actorId: "00000000-0000-4000-8000-000000000917",
+        deviceId: "00000000-0000-4000-8000-000000000917",
+      },
     );
   });
 
@@ -2855,6 +2862,7 @@ describe("Code project pull-request detail routes", () => {
       comment,
       expect.any(AbortSignal),
       "local-window",
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
     );
   });
 
