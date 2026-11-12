@@ -3604,6 +3604,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   padding: 0;
 }
 
+/* The rows keep their content's height. In a short tile they were squeezed
+   below it and the note printed over the server cards. */
+.browser-workspace__start:not(:has(> .browser-workspace__empty)) {
+  grid-auto-rows: max-content;
+}
+
 /* With nothing to suggest, the invitation fills the page as before. */
 .browser-workspace__start:has(> .browser-workspace__empty) {
   align-content: stretch;
