@@ -20,7 +20,10 @@ export function FieldGroup({ className, ...props }: ComponentProps<"div">) {
 export function Field({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("group/field flex flex-col gap-1.5 data-disabled:opacity-50", className)}
+      className={cn(
+        "group/field flex flex-col gap-1.5 data-disabled:opacity-(--oct-disabled-opacity)",
+        className,
+      )}
       data-slot="field"
       {...props}
     />

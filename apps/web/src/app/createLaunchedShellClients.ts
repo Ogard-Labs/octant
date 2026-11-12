@@ -1,4 +1,5 @@
 import {
+  createAgentGrantClient,
   createAgentProfileClient,
   createBenchmarksClient,
   createAutomationClient,
@@ -232,6 +233,7 @@ export interface LaunchedShellClients {
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
+  readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
   readonly diskCleanupClient: DiskCleanupClient;
@@ -403,6 +405,7 @@ export function createLaunchedShellClients(
     benchmarksClient: createBenchmarksClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
+    agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),

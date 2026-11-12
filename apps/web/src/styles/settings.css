@@ -330,9 +330,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.2;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: var(--oct-leading-snug);
 }
 
 /* flex: none, because the sidebar is a scrolling flex column: when the nav
@@ -529,11 +529,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-section {
   margin-top: 0;
   padding: 4px 8px;
-  color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
-  letter-spacing: normal;
   text-transform: none;
 }
 
@@ -552,9 +548,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-view__back {
   min-height: 28px;
   font-family: var(--oct-font-display);
-  font-size: var(--octant-ui-font-size);
+  font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: 1.2;
+  line-height: var(--oct-leading-label);
   justify-content: flex-start;
 }
 
@@ -1392,7 +1388,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: 1.3;
+  line-height: var(--oct-leading-label);
 }
 
 .setrow-hint {
@@ -1400,7 +1396,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  line-height: 1.4;
+  line-height: var(--oct-leading-detail);
 }
 
 /* The app's own primitives reach the same column. A switch is not a value
@@ -1767,7 +1763,14 @@ textarea.settings-view__text-input {
 .settings-view .profile-editor__hint,
 .settings-view .profile-editor__notice {
   font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  line-height: var(--oct-leading-meta);
+}
+
+/* A hint is Meta: regular weight in the muted ink, full strength. */
+.settings-view .profile-editor__hint {
+  color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
+  opacity: 1;
 }
 
 .settings-theme-editor .setgroup > .settings-view__field:first-child {

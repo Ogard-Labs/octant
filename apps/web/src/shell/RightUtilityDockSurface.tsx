@@ -305,7 +305,7 @@ function DockQuickTools(props: {
         <OctantButton
           aria-description={props.disabledReason}
           aria-label={`Open ${surface.label}`}
-          className="dock-quick-tools__tool window-no-drag"
+          className="dock-quick-tools__tool window-no-drag rounded-lg"
           data-labelled={surface.id === "environment" ? "true" : undefined}
           disabled={props.disabledReason !== undefined}
           key={surface.id}

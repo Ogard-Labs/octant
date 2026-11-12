@@ -52,7 +52,8 @@ export interface StagedWorkImage {
 export interface WorkComposerImages {
   readonly staged: ReadonlyArray<StagedWorkImage>;
   readonly message: string | undefined;
-  readonly attach: (files: ReadonlyArray<File>) => void;
+  /** Answers the reason nothing was attached, or undefined when an image was. */
+  readonly attach: (files: ReadonlyArray<File>) => string | undefined;
   /** Restore image files detached for a send the host refused. */
   readonly restore: (files: ReadonlyArray<File>) => void;
   readonly refuse: (message: string) => void;
@@ -166,20 +167,25 @@ export function useWorkComposerImages(): WorkComposerImages {
   );
 
   const attach = useCallback(
-    (files: ReadonlyArray<File>) => {
-      if (files.length === 0) return;
+    (files: ReadonlyArray<File>): string | undefined => {
+      if (files.length === 0) return "No image was given.";
       const images = files.filter((file) => SUPPORTED.has(file.type));
       if (images.length === 0) {
-        setMessage("Only PNG, JPEG, WebP, and GIF images can be attached.");
-        return;
+        const reason = "Only PNG, JPEG, WebP, and GIF images can be attached.";
+        setMessage(reason);
+        return reason;
       }
+      let attached = false;
+      let refusal: string | undefined;
       for (const file of images) {
         if (file.size === 0 || file.size > MAX_WORK_ATTACHMENT_BYTES) {
-          setMessage(`${pastedImageName(file)} is too large to attach.`);
+          refusal = `${pastedImageName(file)} is too large to attach.`;
+          setMessage(refusal);
           continue;
         }
         if (current.current.length >= MAX_WORK_TURN_ATTACHMENTS) {
-          setMessage(`A turn carries at most ${MAX_WORK_TURN_ATTACHMENTS} images.`);
+          refusal = `A turn carries at most ${MAX_WORK_TURN_ATTACHMENTS} images.`;
+          setMessage(refusal);
           break;
         }
         const previewUrl = URL.createObjectURL(file);
@@ -193,8 +199,10 @@ export function useWorkComposerImages(): WorkComposerImages {
             previewUrl,
           },
         ]);
+        attached = true;
         setMessage(undefined);
       }
+      return attached ? undefined : refusal;
     },
     [apply],
   );

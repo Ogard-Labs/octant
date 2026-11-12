@@ -44,6 +44,7 @@
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
     "./pending-requests": "./src/pendingRequests.ts",
+    "./agent-access": "./src/agentAccess.ts",
     "./fleet-activity": "./src/fleetActivity.ts",
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
@@ -179,6 +180,8 @@
     "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

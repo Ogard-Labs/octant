@@ -26,7 +26,7 @@ export function ContextMenuContent({
 }: ComponentProps<typeof ContextMenuPrimitive.Popup>) {
   return (
     <ContextMenuPrimitive.Portal>
-      <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
+      <ContextMenuPrimitive.Positioner className="z-[var(--oct-z-popup)] outline-none window-no-drag">
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
@@ -121,7 +121,7 @@ export function ContextMenuSubContent({
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Positioner
         align="start"
-        className="outline-none window-no-drag"
+        className="z-[var(--oct-z-popup)] outline-none window-no-drag"
         side="right"
         sideOffset={0}
       >

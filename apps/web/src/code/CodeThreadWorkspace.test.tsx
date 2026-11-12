@@ -1,3 +1,4 @@
+import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
@@ -1921,6 +1922,53 @@ describe("CodeThreadWorkspace", () => {
     );
     // Sending is not a discard: the image belongs to the turn that carried it.
     expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("attaches a picture marked up in this thread's Browser through the composer's own upload", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000002",
+      displayName: "browser-markup.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    // Offered before the composer is open: it waits for the thread's composer.
+    threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({})}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByAltText("browser-markup.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+    // A later offer to the open composer is taken at once and focuses its prompt.
+    const live = await threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    expect(live).toEqual({ status: "added" });
+    expect(putAttachment).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Follow-up message")).toHaveFocus();
+  });
+
+  it("answers an offered picture with the composer's refusal when the host takes no attachments", async () => {
+    render(<CodeThreadWorkspace controller={controller({})} threadId={threadId} />);
+    const result = await threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    expect(result).toEqual({
+      status: "refused",
+      reason: "Image attachments are unavailable on this host.",
+    });
   });
 
   it("uploads an image chosen from the composer before the turn and sends it by the host's own reference", async () => {

@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "vite build && bun run build:canvas-preview",
     "build:canvas-preview": "vite build --config vite.canvas-preview.config.ts",
     "dev": "vite",

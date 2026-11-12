@@ -86,6 +86,7 @@ export * from "./hostDataMap";
 export * from "./hostExport";
 export * from "./remoteAccess";
 export * from "./hubAndSpokes";
+export * from "./agentAccess";
 export * from "./hubThreadMove";
 export * from "./hubDelegation";
 export * from "./hubMembership";

@@ -7,6 +7,7 @@ import {
 } from "@octant/contracts";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import { Effect } from "effect";
+import { readAgentThreadName } from "../persistence/agentAccessProjection";
 import { ThreadNotificationDeliveryService } from "../remote/threadNotificationDeliveryService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ServerStart } from "./serverShape";
@@ -50,7 +51,7 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
     // A thread a paired device could read: it still exists, is not being
     // deleted, is not a hidden lane, and its mode is on. Anything else names
     // nothing to the phone.
-    const readThread = (
+    const readVisibleThread = (
       threadId: string,
     ): { readonly mode: OctantMode; readonly title: string } | undefined => {
       const modes = enabledModes(
@@ -74,6 +75,18 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
       const code = codeId === undefined ? undefined : persistence.readCodeThread(codeId);
       if (code !== undefined && modes.includes("code")) return { mode: "code", title: code.title };
       return undefined;
+    };
+    // A thread an outside agent started says so on the phone, as it does in
+    // Needs you, so an approval it raised is not mistaken for the person's own.
+    const readThread = (
+      threadId: string,
+    ): { readonly mode: OctantMode; readonly title: string } | undefined => {
+      const thread = readVisibleThread(threadId);
+      if (thread === undefined) return undefined;
+      const agentName = readAgentThreadName(persistence.connection, threadId);
+      return agentName === undefined
+        ? thread
+        : { ...thread, title: `${agentName} · ${thread.title}` };
     };
     const threadNotifications = new ThreadNotificationDeliveryService({
       journal: persistence.journal,

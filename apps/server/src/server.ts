@@ -112,6 +112,7 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { createAgentGrantRouteSlot } from "./agentAccess/agentGrantRoutes";
 import { createThreadMoveHolds } from "./hub/threadMoveHolds";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
@@ -1664,7 +1665,9 @@ export function startOctantServer(
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
+    const agentGrantRouteSlot = createAgentGrantRouteSlot();
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
+      agentGrantRoutes: agentGrantRouteSlot.routes,
       conversationInputRoutes,
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
@@ -1779,6 +1782,7 @@ export function startOctantServer(
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
+      agentAccessAdministrationRoutes,
       privateListenerAdministrationRoutes,
       privateListenerController,
       privateListenerSetting,
@@ -1787,6 +1791,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      agentGrantRouteSlot,
       workRequestRuntime,
       workRequestService,
       chatService,
@@ -1954,6 +1959,7 @@ export function startOctantServer(
                 (await secretStoresRoutes(request)) ??
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
+                (await agentAccessAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
