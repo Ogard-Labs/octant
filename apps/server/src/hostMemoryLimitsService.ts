@@ -6,6 +6,7 @@ import {
   HOST_MEMORY_LIMITS_EVENT_NAME,
   LOCAL_HOST_ID,
   UtcTimestamp,
+  type EventActor,
   type HostMemoryLimits,
   type SetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
@@ -68,6 +69,8 @@ export class HostMemoryLimitsService {
   set(
     request: SetHostMemoryLimitsRequest,
     principalKind: PrincipalKind,
+    /** The paired device that asked. Absent, the change is the local person's. */
+    actor?: EventActor,
   ): SetHostMemoryLimitsOutcome {
     const decision = decideHostMemoryLimits({ principalKind, limits: request.limits });
     if (decision.kind === "refused") {
@@ -95,7 +98,7 @@ export class HostMemoryLimitsService {
           eventVersion: 1,
           hostId: LOCAL_HOST_ID,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user" as const, actorId: decodeActorId(LOCAL_ACTOR_ID) },
+          actor: actor ?? { kind: "local-user" as const, actorId: decodeActorId(LOCAL_ACTOR_ID) },
           occurredAt: changedAt,
           payload: {
             kind: "memory-limits-changed",

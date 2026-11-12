@@ -78,7 +78,9 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/folders",
   "/api/extensions/skills",
   "/api/providers/discovery",
-  "/api/host-control",
+  // The whole host's export: bulk data with no bound of its own for a remote
+  // caller. Every other host-control route is forwarded below.
+  "/api/host-control/export",
   "/api/replica-store",
   "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
@@ -974,6 +976,24 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     kind: "exact" as const,
     path,
     methods: ["POST"] as const,
+  })),
+  // Host control, for a device the host's own person paired: status, the
+  // data map and the retention windows are reads; service lifecycle, backup,
+  // memory limits, retention and purge are changes the route holds to 8 KiB.
+  ...["status", "data-map", "thread-retention"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: name === "thread-retention" ? (["GET", "POST"] as const) : (["GET"] as const),
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
   })),
   // Paired devices and pairing requests, for a device the host's own person
   // paired: the lists are reads, every change a POST.

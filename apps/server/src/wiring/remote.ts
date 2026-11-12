@@ -2502,6 +2502,7 @@ export function wireRemote(deps: RemoteDependencies) {
   deps.pairedDeviceRouteSlot.bind([
     providerCredentialRoutes,
     localDeviceAdministrationRoutes,
+    hostControlRoutes,
     externalContentRoutes,
   ]);
   return {

@@ -65,9 +65,9 @@ export interface RemoteShellSurfaceDescriptor {
   readonly catalogAction: string;
   /**
    * Set where the host forwards none of the surface's routes to any device, a
-   * person-paired one included: the desktop bridge, host control, and the
-   * secret stores sit behind the private listener's local-only prefixes. Such
-   * a surface stays unavailable to every session.
+   * person-paired one included: the desktop bridge and the secret stores sit
+   * behind the private listener's local-only prefixes. Such a surface stays
+   * unavailable to every session.
    */
   readonly keptOnHost?: true;
 }
@@ -161,10 +161,10 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
   {
     id: "host-controls",
     label: "Host controls",
-    description: "Start, stop, restart, and startup policy stay on the local host.",
+    description:
+      "Stop and restart the host, its startup policy, backups, memory limits, and retention.",
     availability: "local-host-only",
     catalogAction: "host.service.stop",
-    keptOnHost: true,
   },
 ];
 

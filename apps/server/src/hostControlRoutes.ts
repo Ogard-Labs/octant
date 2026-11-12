@@ -1,4 +1,5 @@
 import { principalAuthorityKind } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import {
   decodeHostBackupRequest,
   decodeHostLifecycleRequest,
@@ -38,10 +39,10 @@ import {
 } from "@octant/domain";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRoutePrincipal, authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { HostExportPage } from "@octant/contracts/host-export";
-import type { WindowId } from "@octant/contracts";
+import type { EventActor, WindowId } from "@octant/contracts";
 
 /**
  * The one authenticated web entry point for host
@@ -53,13 +54,16 @@ import type { WindowId } from "@octant/contracts";
  * - loopback only, allow-listed renderer origin, and the window-capability
  *   header as the local-authenticated-user gate (mirrors
  *   `./diagnosticsExportRoutes.ts`);
- * - `authorizeHostControlAction` re-checks the shared least-authority
- *   catalogue before every effect, so a remote device can never reach a
- *   lifecycle mutation even if transport policy regressed;
- * - the handler is registered only on the loopback route chain, outside the
- *   shared product dispatch used by the remote gateway, and
- *   `/api/host-control` is a remote local-only prefix — three independent
- *   layers keep this surface off the remote listener.
+ * - a device the host's own person paired is that person (maintainer
+ *   decision, 2026-11-12): the private listener forwards every route here but
+ *   the export, and the request arrives with the device bound as its
+ *   principal;
+ * - `authorizeHostControlAction` judges that principal against the shared
+ *   least-authority catalogue before every effect, so a hub-introduced device
+ *   or an unproved pairing is refused here even if transport policy
+ *   regressed. Memory limits, retention, purge and the export are judged by
+ *   their own service against the same catalogue, which answers a typed
+ *   refusal.
  *
  * Status, lifecycle, backup, and restore never carry secrets or raw host
  * paths: the control endpoint and backup destination stay in local
@@ -129,6 +133,7 @@ export interface HostControlRouteDependencies {
     readonly set: (
       request: SetHostMemoryLimitsRequest,
       principalKind: PrincipalKind,
+      actor?: EventActor,
     ) => SetHostMemoryLimitsOutcome;
   };
   /**
@@ -191,30 +196,43 @@ export function createHostControlRouteHandler(
       }
     }
 
+    let caller: HostControlCaller;
     try {
-      authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      caller = {
+        principalKind: principalAuthorityKind(context.principal),
+        // Named only for a device: a window's change keeps each service's own
+        // record of the local person.
+        ...(context.principal.kind === "remote-device"
+          ? { actor: eventActorForPrincipal(context.principal) }
+          : {}),
+      };
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Host control is unauthorized.", 401, origin);
       }
       return failure("Host control request is invalid.", 400, origin);
     }
+    const authorized = (
+      operation: HostControlOperation,
+      handle: () => Response | Promise<Response>,
+    ) => authorizedFor(caller.principalKind, operation, origin, handle);
 
     if (route === ROUTES.status) {
-      return authorized("status", origin, () => handleStatus(dependencies, origin));
+      return authorized("status", () => handleStatus(dependencies, origin));
     }
     if (route === ROUTES.dataMap) {
-      return authorized("data-map", origin, () => handleDataMap(dependencies, origin));
+      return authorized("data-map", () => handleDataMap(dependencies, origin));
     }
     if (route === ROUTES.export) {
-      return authorized("export", origin, () => handleExport(dependencies, request, origin, now()));
+      return handleExport(dependencies, request, origin, now());
     }
     if (route === ROUTES.retention && request.method === "GET") {
-      return authorized("retention", origin, () => handleReadRetention(dependencies, origin));
+      return authorized("retention", () => handleReadRetention(dependencies, origin));
     }
 
     const decoded = await readJson(request, BODY_LIMIT);
@@ -232,7 +250,7 @@ export function createHostControlRouteHandler(
       } catch {
         return failure("Host lifecycle request is invalid.", 400, origin);
       }
-      return authorized(body.action, origin, () =>
+      return authorized(body.action, () =>
         handleLifecycle(dependencies, body.action, origin, scheduleStop),
       );
     }
@@ -243,9 +261,7 @@ export function createHostControlRouteHandler(
       } catch {
         return failure("Host backup request is invalid.", 400, origin);
       }
-      return authorized("backup", origin, () =>
-        handleBackup(dependencies, body.label ?? "manual", origin),
-      );
+      return authorized("backup", () => handleBackup(dependencies, body.label ?? "manual", origin));
     }
     if (route === ROUTES.memoryLimits) {
       let body;
@@ -254,9 +270,7 @@ export function createHostControlRouteHandler(
       } catch {
         return failure("Memory limits request is invalid.", 400, origin);
       }
-      return authorized("memory-limits", origin, () =>
-        handleSetMemoryLimits(dependencies, request, body, origin, now()),
-      );
+      return handleSetMemoryLimits(dependencies, caller, body, origin);
     }
     if (route === ROUTES.retention) {
       let body;
@@ -265,7 +279,7 @@ export function createHostControlRouteHandler(
       } catch {
         return failure("Thread retention request is invalid.", 400, origin);
       }
-      return authorized("retention", origin, () => handleSetRetention(dependencies, body, origin));
+      return handleSetRetention(dependencies, caller, body, origin);
     }
     if (route === ROUTES.purge) {
       let body;
@@ -274,29 +288,36 @@ export function createHostControlRouteHandler(
       } catch {
         return failure("Thread purge request is invalid.", 400, origin);
       }
-      return authorized("purge", origin, () => handlePurgeThreads(dependencies, body, origin));
+      return handlePurgeThreads(dependencies, caller, body, origin);
     }
     if (!isEmptyRecord(decoded.value)) {
       return failure("Host restore request is invalid.", 400, origin);
     }
-    return authorized("restore", origin, () => handleRestore(origin));
+    return authorized("restore", () => handleRestore(origin));
   };
 }
 
+/** Who asked, as the catalogue judges them, and the device to name in the journal. */
+interface HostControlCaller {
+  readonly principalKind: PrincipalKind;
+  readonly actor?: EventActor;
+}
+
 /**
- * Defense in depth: the window-capability check already guarantees a local
- * window, but every effectful path must be provably gated by the shared
- * least-authority catalogue used by remote-device, provider, and extension
- * callers.
+ * Every effectful path is gated by the shared least-authority catalogue used
+ * by remote-device, provider, and extension callers: a local window and a
+ * device the host's own person paired pass, and every other authenticated
+ * caller is refused.
  */
-async function authorized(
+async function authorizedFor(
+  principalKind: PrincipalKind,
   operation: HostControlOperation,
   origin: string | null,
   handle: () => Response | Promise<Response>,
 ): Promise<Response> {
-  const decision = authorizeHostControlAction({ principalKind: "local-window", operation });
+  const decision = authorizeHostControlAction({ principalKind, operation });
   if (decision.kind === "deny") {
-    return failure("Host control is unauthorized.", 401, origin);
+    return failure("Host control is unauthorized.", 403, origin);
   }
   return handle();
 }
@@ -551,29 +572,17 @@ function handleBackup(
 
 function handleSetMemoryLimits(
   dependencies: HostControlRouteDependencies,
-  request: Request,
+  caller: HostControlCaller,
   body: SetHostMemoryLimitsRequest,
   origin: string | null,
-  now: number,
 ): Response {
   if (dependencies.memoryLimits === undefined) {
     return failure("Memory limits are unavailable while the owner is starting.", 503, origin);
   }
-  let principalKind: PrincipalKind;
-  try {
-    const context = authenticateRoutePrincipal({
-      request,
-      store: dependencies.windowAuthorityStore,
-      now,
-    });
-    principalKind = principalAuthorityKind(context.principal);
-  } catch (error) {
-    if (error instanceof WindowAuthorityError) {
-      return failure("Host control is unauthorized.", 401, origin);
-    }
-    return failure("Host control request is invalid.", 400, origin);
-  }
-  const outcome = dependencies.memoryLimits.set(body, principalKind);
+  const outcome =
+    caller.actor === undefined
+      ? dependencies.memoryLimits.set(body, caller.principalKind)
+      : dependencies.memoryLimits.set(body, caller.principalKind, caller.actor);
   const unauthorized = outcome.kind === "refused" && outcome.code === "unauthorized";
   return json(outcome, unauthorized ? 403 : 200, origin);
 }
@@ -590,25 +599,35 @@ function handleReadRetention(
 
 function handleSetRetention(
   dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
   request: SetThreadRetentionRequest,
   origin: string | null,
 ): Response {
   if (dependencies.threadRetention === undefined) {
     return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
   }
-  const outcome = dependencies.threadRetention.setWindow(request, "local-window");
+  const outcome = dependencies.threadRetention.setWindow(
+    request,
+    caller.principalKind,
+    caller.actor,
+  );
   return json(outcome, "kind" in outcome ? 403 : 200, origin);
 }
 
 async function handlePurgeThreads(
   dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
   request: PurgeThreadsRequest,
   origin: string | null,
 ): Promise<Response> {
   if (dependencies.threadRetention === undefined) {
     return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
   }
-  const outcome = await dependencies.threadRetention.purge(request, "local-window");
+  const outcome = await dependencies.threadRetention.purge(
+    request,
+    caller.principalKind,
+    caller.actor,
+  );
   return json(outcome, "kind" in outcome ? 403 : 200, origin);
 }
 

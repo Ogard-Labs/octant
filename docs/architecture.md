@@ -508,10 +508,14 @@ the pair with two sizes in GB of 1024³ bytes, the same unit as the default
 (0.5 to 64, very low above low) that apply as
 given on any machine, without the small-machine scaling: the person chose them
 knowing what else the machine runs. The limits are a host setting in Settings >
-Host, changed only by a local window: `POST /api/host-control/memory-limits`
-sits on the loopback host-control surface, behind the `host.service.memory-limits`
-action that a paired device is denied, so a paired device can neither read nor
-change it. Each change is one journaled event
+Host, changed by a local window or a device the host's own person paired
+(maintainer decision, 2026-11-12): `POST /api/host-control/memory-limits`
+sits on the host-control surface, behind the `host.service.memory-limits`
+action, which a hub-introduced device and an agent grant are denied. The
+private listener forwards host control (status, data map, service lifecycle,
+backup, memory limits, retention and purge) for the product dispatch to judge,
+and keeps the whole host's export on the host, which has no bound for a remote
+caller. Each change is one journaled event
 (`host-memory-limits.changed@1`) naming who made it, when, and the values
 before and after; the `host_memory_limits_projection` row is rebuilt from those
 events, and saving the values already in force records nothing. A pair that is

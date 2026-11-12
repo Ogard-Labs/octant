@@ -277,13 +277,8 @@ describe("remote route policy", () => {
       "/api/shell/launch-session",
       "/api/desktop/launch-sessions",
       "/api/desktop/window-authorities",
-      "/api/host-control/status",
-      "/api/host-control/lifecycle",
-      "/api/host-control/backup",
-      "/api/host-control/restore",
-      "/api/host-control/thread-retention",
-      "/api/host-control/thread-purge",
-      "/api/host-control/data-map",
+      // The host's whole export is bulk data with no bound for a remote
+      // caller, so it alone of host control stays on the host.
       "/api/host-control/export",
       "/api/replica-store/settings",
       "/api/replica-store/commands",
@@ -935,6 +930,51 @@ describe("remote route policy", () => {
     });
   });
 
+  it("forwards host control by each route's own method for the product dispatch to judge, and keeps the host export on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const path of ["status", "data-map", "thread-retention"]) {
+      expect(inspect(`/api/host-control/${path}`, "GET")).toMatchObject(forwarded);
+    }
+    for (const path of [
+      "lifecycle",
+      "backup",
+      "restore",
+      "memory-limits",
+      "thread-retention",
+      "thread-purge",
+    ]) {
+      expect(inspect(`/api/host-control/${path}`, "POST")).toMatchObject({
+        ...forwarded,
+        maxBodyBytes: 8_192,
+      });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(
+        classifyProductAction(
+          new Request(`${origin}/api/host-control/${path}`, { method: "POST" }),
+        ),
+      ).toBeUndefined();
+    }
+    expect(inspect("/api/host-control/status", "POST")).toMatchObject({ kind: "reject" });
+    expect(inspect("/api/host-control/export", "GET")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
@@ -1202,10 +1242,10 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "host-control",
-            match: { kind: "prefix", path: "/api/host-control" },
+            id: "host-control-export",
+            match: { kind: "exact", path: "/api/host-control/export" },
             surface: "authenticated-product",
-            methods: ["POST"],
+            methods: ["GET"],
           },
         ],
       }),

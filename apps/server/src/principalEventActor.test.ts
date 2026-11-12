@@ -32,10 +32,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
  * Modules whose changes still name their services' fixed actor for a device.
  * The list only shrinks: threading the actor through one removes it here.
  */
-const STILL_NAMES_A_FIXED_ACTOR: ReadonlyArray<string> = [
-  "browserAutomationRoutes.ts",
-  "hostControlRoutes.ts",
-];
+const STILL_NAMES_A_FIXED_ACTOR: ReadonlyArray<string> = ["browserAutomationRoutes.ts"];
 
 function sourceModules(directory: string): ReadonlyArray<string> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
