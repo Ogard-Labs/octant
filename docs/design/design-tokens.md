@@ -14,7 +14,7 @@ export and states the rules a consumer needs, with the section that owns each.
 | File          | What it is                                                                                                |
 | ------------- | --------------------------------------------------------------------------------------------------------- |
 | `tokens.css`  | Generated. Plain custom properties, dark by default, light under `[data-theme="light"]` and the OS choice |
-| `tokens.json` | Generated. The same values in the Design Tokens Community Group format, with the light value alongside    |
+| `tokens.json` | Generated. The same values in the Design Tokens Format Module 2025.10, with the light value alongside     |
 | `recipes.css` | Hand-written. The minimum recipes in the appendix, built from the tokens only                             |
 | `demo.html`   | A page that loads only `tokens.css` and `recipes.css` and shows the recipes in both themes                |
 
@@ -52,15 +52,35 @@ export have the same name and there is no mapping table to maintain:
   a group (`radius.oct-radius-md`). The group list is in the file.
 
 A token that is defined in terms of another keeps the reference in
-`tokens.css`, so it follows the active theme. In `tokens.json`, `$value` is the
-**dark** value resolved to a literal wherever it can be computed without a
-browser (`calc()` over lengths, `color-mix()` over colours, references).
-`$extensions["com.octant"]` carries the CSS name, the source file, the `light`
-value when it differs, and `cssValue` when the original was an expression. A
-value that depends on the viewport (`clamp()` with `vw`) has no literal; it is
-kept as the expression and marked `expression: true` with a description saying
-so. Shadows are multi-layer CSS strings with no DTCG type; the string is the
-value. Types follow the draft's string form (`"12px"`, `"150ms"`).
+`tokens.css`, so it follows the active theme. `tokens.json` follows the Design
+Tokens Format Module 2025.10, in which a typed value is an object, not a CSS
+string. `$value` is the **dark** value resolved to a literal wherever it can be
+computed without a browser (`calc()` over lengths, `color-mix()` over colours,
+references). `$extensions["com.octant"]` carries the CSS name, the source file,
+the `light` value (in the same form as `$value`) when it differs, and `cssValue`
+when the original was an expression.
+
+```json
+"oct-fill-1": {
+  "$type": "color",
+  "$value": { "colorSpace": "srgb", "components": [0.9608, 0.9608, 0.9686], "alpha": 0.14, "hex": "#f5f5f7" }
+},
+"oct-radius-md": { "$type": "dimension", "$value": { "value": 12, "unit": "px" } },
+"oct-dur-base": { "$type": "duration", "$value": { "value": 0.15, "unit": "s" } }
+```
+
+- Colours are sRGB with components in 0 to 1, rounded to four places from whole
+  8-bit channels, `alpha` only when it is below 1, and `hex` as the opaque
+  fallback. Alpha is rounded to four places.
+- Dimensions are `px` or `rem`; durations are `ms` or `s`. Shadows are shadow
+  objects (an array for layered shadows, `inset` when set); easings are four
+  numbers; font families are arrays of names; weights are numbers.
+- The format has no untyped token and forbids guessing a type, so a value it
+  cannot express is not a token. That covers a length in `em` or `%` (the
+  tracking steps, the glass saturation), a `clamp()` that depends on the
+  viewport (the display sizes), and `none`. Each is listed with its CSS value and
+  the reason under the root `$extensions["com.octant"].cssOnly`, and stays in
+  `tokens.css`.
 
 Values the app does not make theme-dependent (the type scale, spacing, radii,
 motion) are the same in both modes. The interface size is a user setting in the

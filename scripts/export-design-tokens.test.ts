@@ -164,12 +164,109 @@ describe("choosing what to export", () => {
     expect(light).not.toContain("--oct-fg");
   });
 
-  it("types dimensions, colours, durations and easings for the DTCG file", () => {
-    expect(dtcgValue("12px").type).toBe("dimension");
-    expect(dtcgValue("#1a1a1a").type).toBe("color");
-    expect(dtcgValue("150ms").type).toBe("duration");
+  it("writes a translucent colour as sRGB components, an alpha and an opaque hex", () => {
+    expect(dtcgValue("rgba(245, 245, 247, 0.14)")).toEqual({
+      type: "color",
+      value: {
+        colorSpace: "srgb",
+        components: [0.9608, 0.9608, 0.9686],
+        alpha: 0.14,
+        hex: "#f5f5f7",
+      },
+    });
+    expect(dtcgValue("#ffffff")?.value).toEqual({
+      colorSpace: "srgb",
+      components: [1, 1, 1],
+      hex: "#ffffff",
+    });
+  });
+
+  it("writes lengths in px and rem and durations as objects with a unit", () => {
+    expect(dtcgValue("12px")).toEqual({ type: "dimension", value: { value: 12, unit: "px" } });
+    expect(dtcgValue("0.75rem")).toEqual({
+      type: "dimension",
+      value: { value: 0.75, unit: "rem" },
+    });
+    expect(dtcgValue("150ms")).toEqual({ type: "duration", value: { value: 150, unit: "ms" } });
+    expect(dtcgValue("1.6s")).toEqual({ type: "duration", value: { value: 1.6, unit: "s" } });
     expect(dtcgValue("ease")).toEqual({ type: "cubicBezier", value: [0.25, 0.1, 0.25, 1] });
-    expect(dtcgValue("0 1px 2px red").type).toBeUndefined();
+  });
+
+  it("writes a layered shadow as shadow objects and leaves a value the format cannot express out", () => {
+    const shadow = dtcgValue("inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px #000000");
+    expect(shadow?.type).toBe("shadow");
+    expect(Array.isArray(shadow?.value) ? shadow.value.length : 0).toBe(2);
+    expect(dtcgValue("-0.025em")).toBeUndefined();
+    expect(dtcgValue("clamp(56px, 11vw, 132px)")).toBeUndefined();
+    expect(dtcgValue("150%")).toBeUndefined();
+    expect(dtcgValue("none")).toBeUndefined();
+  });
+});
+
+describe("the committed tokens.json", () => {
+  const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  const isNumber = (value: unknown): boolean => typeof value === "number" && Number.isFinite(value);
+  const unit = (value: unknown, units: ReadonlyArray<string>): boolean =>
+    isRecord(value) && isNumber(value["value"]) && units.includes(String(value["unit"]));
+  const colour = (value: unknown): boolean =>
+    isRecord(value) &&
+    value["colorSpace"] === "srgb" &&
+    Array.isArray(value["components"]) &&
+    value["components"].length === 3 &&
+    value["components"].every((part) => isNumber(part) && Number(part) >= 0 && Number(part) <= 1) &&
+    (value["alpha"] === undefined || (isNumber(value["alpha"]) && Number(value["alpha"]) < 1)) &&
+    /^#[0-9a-f]{6}$/.test(String(value["hex"]));
+  const shadow = (value: unknown): boolean =>
+    Array.isArray(value)
+      ? value.length > 0 && value.every(shadow)
+      : isRecord(value) &&
+        colour(value["color"]) &&
+        ["offsetX", "offsetY", "blur", "spread"].every((key) => unit(value[key], ["px", "rem"]));
+  const FORMS: Readonly<Record<string, (value: unknown) => boolean>> = {
+    color: colour,
+    dimension: (value) => unit(value, ["px", "rem"]),
+    duration: (value) => unit(value, ["ms", "s"]),
+    number: isNumber,
+    fontWeight: (value) => isNumber(value) && Number(value) >= 1 && Number(value) <= 1000,
+    fontFamily: (value) =>
+      Array.isArray(value) && value.length > 0 && value.every((name) => typeof name === "string"),
+    cubicBezier: (value) =>
+      Array.isArray(value) &&
+      value.length === 4 &&
+      value.every(isNumber) &&
+      Number(value[0]) >= 0 &&
+      Number(value[0]) <= 1 &&
+      Number(value[2]) >= 0 &&
+      Number(value[2]) <= 1,
+    shadow,
+  };
+
+  it("holds every typed token, and its light value, in the form its type requires", () => {
+    const json = JSON.parse(
+      readFileSync(new URL("../packages/theme/tokens/tokens.json", import.meta.url), "utf8"),
+    ) as unknown;
+    const problems: string[] = [];
+    let typed = 0;
+    for (const [groupName, group] of Object.entries(isRecord(json) ? json : {})) {
+      if (groupName.startsWith("$") || !isRecord(group)) continue;
+      for (const [name, token] of Object.entries(group)) {
+        if (name.startsWith("$") || !isRecord(token)) continue;
+        typed += 1;
+        const form = FORMS[String(token["$type"])];
+        const extension = isRecord(token["$extensions"])
+          ? token["$extensions"]["com.octant"]
+          : undefined;
+        const light = isRecord(extension) ? extension["light"] : undefined;
+        if (form === undefined) problems.push(`${name}: unknown type ${String(token["$type"])}`);
+        else if (!form(token["$value"]))
+          problems.push(`${name}: $value is not a ${String(token["$type"])}`);
+        else if (light !== undefined && !form(light))
+          problems.push(`${name}: light is not a ${String(token["$type"])}`);
+      }
+    }
+    expect(typed).toBeGreaterThan(200);
+    expect(problems).toEqual([]);
   });
 });
 

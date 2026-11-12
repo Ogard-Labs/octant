@@ -200,7 +200,7 @@ export function cascade(blocks: ReadonlyArray<CascadeBlock>): ReadonlyMap<string
 
 // ─── colour and length arithmetic ──────────────────────────────────────────
 
-interface Rgba {
+export interface Rgba {
   readonly r: number;
   readonly g: number;
   readonly b: number;
@@ -832,52 +832,120 @@ const DTCG_BEZIER: Readonly<Record<string, ReadonlyArray<number>>> = {
 };
 
 export interface DtcgValue {
-  readonly type: string | undefined;
+  readonly type: string;
   readonly value: unknown;
 }
 
-/** The DTCG type and value for a resolved CSS value; no type when the value has no DTCG form. */
-export function dtcgValue(resolved: string): DtcgValue {
-  const value = resolved.trim();
-  if (parseColor(value) !== undefined) return { type: "color", value };
-  if (/^-?\d*\.?\d+(?:px|rem|em)$/.test(value)) return { type: "dimension", value };
-  if (/^-?\d*\.?\d+m?s$/.test(value)) return { type: "duration", value };
-  const bezier = /^cubic-bezier\(([^)]*)\)$/.exec(value)?.[1];
-  if (bezier !== undefined) {
-    return { type: "cubicBezier", value: bezier.split(",").map((part) => parseFloat(part)) };
-  }
-  const keyword = DTCG_BEZIER[value];
-  if (keyword !== undefined) return { type: "cubicBezier", value: keyword };
-  if (/^-?\d*\.?\d+$/.test(value)) return { type: "number", value: parseFloat(value) };
-  return { type: undefined, value };
+function round(value: number, places: number): number {
+  const scale = 10 ** places;
+  return Math.round(value * scale) / scale;
 }
 
-const STILL_EXPRESSION = /color-mix\(|calc\(|clamp\(|\b\d+(?:\.\d+)?v[wh]\b/;
-
-export interface KeptExpression {
-  readonly name: string;
-  readonly mode: Mode;
-  readonly value: string;
-}
-
-export function keptExpressions(
-  exported: ReadonlyArray<ExportedToken>,
-): ReadonlyArray<KeptExpression> {
-  return exported.flatMap((token) =>
-    (["dark", "light"] as const)
-      .filter(
-        (mode) =>
-          STILL_EXPRESSION.test(mode === "dark" ? token.darkResolved : token.lightResolved) &&
-          (mode === "dark" ||
-            token.light !== token.dark ||
-            token.darkResolved !== token.lightResolved),
-      )
-      .map((mode) => ({
-        name: token.name,
-        mode,
-        value: mode === "dark" ? token.darkResolved : token.lightResolved,
-      })),
+/**
+ * A colour in the format's object form: sRGB components in 0 to 1, rounded to
+ * four places from whole 8-bit channels (so the hex fallback and the components
+ * agree), an alpha rounded to four places when it is not 1, and the opaque hex.
+ */
+export function dtcgColor(colour: Rgba): Record<string, unknown> {
+  const bytes = [colour.r, colour.g, colour.b].map((part) =>
+    Math.min(255, Math.max(0, Math.round(part))),
   );
+  const value: Record<string, unknown> = {
+    colorSpace: "srgb",
+    components: bytes.map((part) => round(part / 255, 4)),
+  };
+  const alpha = round(colour.a, 4);
+  if (alpha < 1) value["alpha"] = alpha;
+  value["hex"] = `#${bytes.map((part) => part.toString(16).padStart(2, "0")).join("")}`;
+  return value;
+}
+
+function dtcgLength(text: string): Record<string, unknown> | undefined {
+  if (text === "0") return { value: 0, unit: "px" };
+  const match = /^(-?\d*\.?\d+)(px|rem)$/.exec(text);
+  return match === null ? undefined : { value: parseFloat(match[1] ?? ""), unit: match[2] };
+}
+
+/** One shadow layer: offsets, optional blur and spread, a colour, and `inset`. */
+function dtcgShadowLayer(layer: string): Record<string, unknown> | undefined {
+  const parts = splitTopLevel(layer.trim(), " ").filter((part) => part !== "");
+  const inset = parts.includes("inset");
+  const rest = parts.filter((part) => part !== "inset");
+  const colour = rest.map((part) => parseColor(part)).find((parsed) => parsed !== undefined);
+  const lengths = rest
+    .filter((part) => parseColor(part) === undefined)
+    .map((part) => dtcgLength(part));
+  if (colour === undefined || lengths.length < 2 || lengths.length > 4) return undefined;
+  if (lengths.some((length) => length === undefined)) return undefined;
+  const [offsetX, offsetY, blur, spread] = lengths;
+  const zero = { value: 0, unit: "px" };
+  const shadow: Record<string, unknown> = {
+    color: dtcgColor(colour),
+    offsetX,
+    offsetY,
+    blur: blur ?? zero,
+    spread: spread ?? zero,
+  };
+  if (inset) shadow["inset"] = true;
+  return shadow;
+}
+
+/**
+ * The DTCG type and value (Design Tokens Format Module 2025.10) for a resolved
+ * CSS value, or undefined when the format cannot express it: a length in `em`
+ * or `%`, a `clamp()`, `none`, and the like. The format forbids guessing a type
+ * and has no untyped token, so such a value is not emitted as a token.
+ */
+export function dtcgValue(resolved: string, group = ""): DtcgValue | undefined {
+  const value = resolved.trim();
+  if (group === "type-family") {
+    const names = splitTopLevel(value, ",").map((name) =>
+      name.trim().replace(/^(["'])(.*)\1$/, "$2"),
+    );
+    return names.every((name) => /^[^()]+$/.test(name) && name !== "")
+      ? { type: "fontFamily", value: names }
+      : undefined;
+  }
+  if (group === "type-weight") {
+    const weight = Number(value);
+    return /^\d+$/.test(value) && weight >= 1 && weight <= 1000
+      ? { type: "fontWeight", value: weight }
+      : undefined;
+  }
+  const colour = parseColor(value);
+  if (colour !== undefined) return { type: "color", value: dtcgColor(colour) };
+  const length = dtcgLength(value);
+  if (length !== undefined) return { type: "dimension", value: length };
+  const duration = /^(-?\d*\.?\d+)(ms|s)$/.exec(value);
+  if (duration !== null) {
+    return { type: "duration", value: { value: parseFloat(duration[1] ?? ""), unit: duration[2] } };
+  }
+  const bezier = /^cubic-bezier\(([^)]*)\)$/.exec(value)?.[1];
+  const curve = bezier?.split(",").map((part) => parseFloat(part)) ?? DTCG_BEZIER[value];
+  if (curve !== undefined) {
+    return curve.length === 4 &&
+      curve.every((part) => Number.isFinite(part)) &&
+      [curve[0], curve[2]].every((x) => x !== undefined && x >= 0 && x <= 1)
+      ? { type: "cubicBezier", value: curve }
+      : undefined;
+  }
+  if (/^-?\d*\.?\d+$/.test(value)) return { type: "number", value: parseFloat(value) };
+  if (value !== "none") {
+    const layers = splitTopLevel(value, ",").map((layer) => dtcgShadowLayer(layer));
+    if (layers.length > 0 && layers.every((layer) => layer !== undefined)) {
+      return { type: "shadow", value: layers.length === 1 ? layers[0] : layers };
+    }
+  }
+  return undefined;
+}
+
+function whyNotTyped(resolved: string): string {
+  if (/clamp\(|calc\(|\b\d+(?:\.\d+)?v[wh]\b/.test(resolved)) {
+    return "depends on the viewport or on a value only the browser knows";
+  }
+  if (/^-?\d*\.?\d+(?:em|%)$/.test(resolved.trim()))
+    return "a length in em or % has no DTCG dimension";
+  return "the format has no type for this value";
 }
 
 export function renderJson(
@@ -887,32 +955,43 @@ export function renderJson(
 ): string {
   const labels = new Map(groups.map((group) => [group.id, group.label]));
   labels.set("support", "Support: tokens an exported value reads");
+  const cssOnly: Record<string, unknown> = {};
   const tree: Record<string, unknown> = {
-    $description: `Octant design tokens in the Design Tokens Community Group format. Generated by \`${REGENERATE}\` from ${sources.join(", ")}. $value is the dark default; the light value is in $extensions["com.octant"].light. A token's key is its CSS custom property name without the leading dashes.`,
+    $description: `Octant design tokens in the Design Tokens Format Module 2025.10. Generated by \`${REGENERATE}\` from ${sources.join(", ")}. $value is the dark default; the light value, in the same form, is in $extensions["com.octant"].light. A token's key is its CSS custom property name without the leading dashes. Values the format cannot express are not tokens; they are listed under the root $extensions["com.octant"].cssOnly with their CSS value.`,
+    $extensions: { "com.octant": { cssOnly } },
   };
   for (const token of exported) {
+    const key = token.name.replace(/^--/, "");
+    // A type role's family and weight are read with the family and weight rules.
+    const kind = /^oct-role-.*-family$/.test(key)
+      ? "type-family"
+      : /^oct-role-.*-weight$/.test(key)
+        ? "type-weight"
+        : token.group;
+    const dark = dtcgValue(token.darkResolved, kind);
+    const light = dtcgValue(token.lightResolved, kind);
+    if (dark === undefined || light === undefined || dark.type !== light.type) {
+      const unsupported = dark === undefined ? token.darkResolved : token.lightResolved;
+      const entry: Record<string, unknown> = {
+        reason: whyNotTyped(unsupported),
+        dark: token.darkResolved,
+      };
+      if (token.lightResolved !== token.darkResolved) entry["light"] = token.lightResolved;
+      cssOnly[key] = entry;
+      continue;
+    }
     const group = (tree[token.group] ??= {
       $description: labels.get(token.group) ?? token.group,
     }) as Record<string, unknown>;
-    const dark = dtcgValue(token.darkResolved);
-    const light = dtcgValue(token.lightResolved);
-    const expression = [token.darkResolved, token.lightResolved].some((value) =>
-      STILL_EXPRESSION.test(value),
-    );
-    const differs = token.lightResolved !== token.darkResolved;
     const extension: Record<string, unknown> = { css: token.name, source: token.file };
-    if (differs) extension["light"] = light.value;
-    if (expression) extension["expression"] = true;
+    if (JSON.stringify(light.value) !== JSON.stringify(dark.value))
+      extension["light"] = light.value;
     if (token.dark !== token.darkResolved) extension["cssValue"] = token.dark;
-    const entry: Record<string, unknown> = {};
-    if (dark.type !== undefined) entry["$type"] = dark.type;
-    entry["$value"] = dark.value;
-    if (expression) {
-      entry["$description"] =
-        "Kept as a CSS expression: it depends on the viewport or on a value only the browser knows, so it has no static literal.";
-    }
-    entry["$extensions"] = { "com.octant": extension };
-    group[token.name.replace(/^--/, "")] = entry;
+    group[key] = {
+      $type: dark.type,
+      $value: dark.value,
+      $extensions: { "com.octant": extension },
+    };
   }
   return `${JSON.stringify(tree, null, 2)}\n`;
 }
