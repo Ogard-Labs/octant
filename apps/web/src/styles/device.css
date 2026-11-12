@@ -22,7 +22,7 @@
   --device-bezel: 12px;
   /* Room kept under the device for its caption. */
   --device-caption-room: 24px;
-  container-type: inline-size;
+  container: device-pane / inline-size;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
@@ -97,10 +97,22 @@
 
 /* In a narrow tile the tile's own bar already names the tool, so the name
    gives way and the state keeps its words ("Not set up" read as "N…"). */
-@container (max-width: 479px) {
+@container device-pane (max-width: 339px) {
+  /* Under 340px the name has no room for even one whole letter (a cut "A" was
+     drawn), so it stays for assistive technology and leaves the eye; the tile's
+     bar already names the tool. */
+  .device-toolbar__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@container device-pane (max-width: 479px) {
   .device-toolbar__device {
     max-width: none;
-    flex: 1 1 auto;
   }
 
   .device-toolbar__meta {
