@@ -62,11 +62,20 @@ describe("the public-block visual language", () => {
     // corner also shrinks with the interface font size while a token does not.
     const corner =
       /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl)|octant-sheet-corner-outer)\))$/;
+    // A part inside a control or a container is that radius less the gap
+    // between them, written as one calc(), never below 2px for a control.
+    const derived = /(?:max\(2px,\s*)?calc\(var\(--oct-radius-(?:sm|md)\) - \d+px\)\)?/g;
     const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
     const strays = cssFiles(webRoot).flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(declaration)]
         .map((match) => (match[1] ?? "").trim())
-        .filter((value) => !value.split(/[\s/]+/).every((part) => corner.test(part)))
+        .filter(
+          (value) =>
+            !value
+              .replace(derived, "0")
+              .split(/[\s/]+/)
+              .every((part) => corner.test(part)),
+        )
         .map((value) => `${relative(webRoot, path)}: ${value}`),
     );
 
@@ -364,11 +373,10 @@ describe("the public-block visual language", () => {
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(body).toMatch(/flex:\s*1 1 200px/);
     expect(actions).toMatch(/margin-inline-start:\s*auto/);
-    // The corner is the callout's own (12px), not the pill's 22px: no radius is
-    // set on the card here, so a bar with the pill's corner cannot come back.
+    // The corner is the callout's own (12px), the same as the composer's: no
+    // radius is set on the card here, so a second corner cannot come back.
     expect(card).not.toMatch(/border-radius/);
     expect(css).toMatch(/--oct-radius-md:\s*12px/);
-    expect(css).toMatch(/--oct-radius-composer:\s*22px/);
     expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
       /border-radius:\s*var\(--oct-radius-md\)/,
     );
