@@ -32,7 +32,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 1            | 1                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
-| [Release scope](#release-scope)                                                       | 7         | 1       | 5            | 1                   |
+| [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
+| **All areas**                                                                         | **247**   | **165** | **77**       | **5**               |
 
 ## Principles and hard lines
 
@@ -412,9 +412,9 @@ An update installs only after its feed signature and artifact hash verify, and o
 - The release must be strictly newer and name this app (Octant or Octant Nightly), platform, architecture and ring; a release for the other app is refused as the wrong app.
 - Anything unverifiable is refused, never downgraded; macOS adds the platform code-signature check, and a Linux AppImage replaces only the image it was launched from.
 - Rings are stable, preview and candidate. Octant follows stable or, by the person's in-app choice, candidate (shown as Preview or, with the Nightly install row, Nightly); the Octant Nightly app follows preview.
-- Install waits while agents are active; automatic checks default to off until the person opts in, including stores that never recorded a choice. First run asks once whether to check for updates (maintainer request, 2026-11-12); not built yet: today no first-run question is asked. A check carries only version, platform and architecture.
+- Install waits while agents are active; automatic checks default to off until the person opts in, including stores that never recorded a choice. First run asks once whether to check for updates (maintainer request, 2026-11-12). A check carries only version, platform and architecture.
 
-Status: Partly built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ### Scope hold until the Full access rule is built
 

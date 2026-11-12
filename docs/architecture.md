@@ -16489,7 +16489,9 @@ Work and Code below Full access remain refused until their native confinement bo
   that never recorded the choice decodes to off, and the host starts with
   them off until the persisted choice arrives — then checks daily once the
   person turns the switch on. First run asks once whether to check for
-  updates (maintainer request, 2026-11-12; not built yet: today nothing asks). A check is a
+  updates (maintainer request, 2026-11-12): the readiness view of setup in
+  the desktop app carries the question, off until answered, and writes the
+  same setting. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
 

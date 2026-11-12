@@ -8188,6 +8188,20 @@ function LaunchedShell(
                     : undefined,
               });
             },
+            // Only the desktop app can check for its own updates. Where it
+            // keeps the preference itself the answer goes straight to it;
+            // otherwise the shell setting carries it and the sync above tells
+            // the host.
+            onSetUpdateChecks:
+              props.hostBridge?.setAutomaticAppUpdateChecks === undefined
+                ? undefined
+                : (allowed) =>
+                    props.hostBridge?.appUpdatePreferenceScope === "local"
+                      ? (props.hostBridge.setAutomaticAppUpdateChecks?.(allowed).then(
+                          () => true,
+                          () => false,
+                        ) ?? Promise.resolve(false))
+                      : controller.updateSettings({ automaticUpdateChecks: allowed }),
             workEnabled: controller.settings?.workEnabled ?? true,
             workModel:
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
