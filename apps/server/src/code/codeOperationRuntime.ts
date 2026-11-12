@@ -4766,7 +4766,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       });
     }
     if (this.#owned(input.thread, input.checkoutRoot) !== active) return turnState("interrupted");
-    const lostText = this.#flushBeforeStop(active);
+    const lostText = this.#flushBeforeStop(active) ?? this.#lostTextNote(active);
     const forcedMessage = "The provider attempt was stopped by force.";
     active.interruptMessage =
       lostText === undefined ? forcedMessage : `${forcedMessage} ${lostText}`;
@@ -5703,9 +5703,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   async #failOnTimedFlush(active: ActiveTurn, error: unknown): Promise<void> {
-    if (active.state !== "running" && active.state !== "waiting") return;
+    const stillOpen = (): boolean =>
+      (active.state === "running" || active.state === "waiting") &&
+      (active.lastPersistedState === undefined ||
+        active.lastPersistedState === "running" ||
+        active.lastPersistedState === "waiting");
+    if (!stillOpen()) return;
     // The change list goes in ahead of the terminal state, as for any outcome.
     await this.#recordChangedFiles(active);
+    // A cancel or forced stop may have settled the turn while that await ran.
+    if (!stillOpen()) return;
     try {
       this.#persistOutcome(active, "failed", evidenceCapacityFailure(error));
     } catch {
@@ -5766,10 +5773,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return undefined;
     } catch (error) {
       this.#abandonBurst(active);
-      return (
-        evidenceCapacityFailure(error)?.message ?? "Some streamed reply text could not be saved."
-      );
+      active.deltaFlushFailure ??= { error };
+      return this.#lostTextNote(active);
     }
+  }
+
+  /** The stop's note that streamed reply text was lost, once any flush has failed. */
+  #lostTextNote(active: ActiveTurn): string | undefined {
+    if (active.deltaFlushFailure === undefined) return undefined;
+    return (
+      evidenceCapacityFailure(active.deltaFlushFailure.error)?.message ??
+      "Some streamed reply text could not be saved."
+    );
   }
 
   /** The one way a turn's events reach the journal, behind any open burst. */
@@ -6102,13 +6117,24 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       outcome = "failed";
       failure = evidenceCapacityFailure(active.deltaFlushFailure.error);
     }
+    // One terminal frame per turn: the runner settles an aborted turn after a
+    // failure was already journaled, and its `interrupted` must not stack on it.
+    const journaledTerminal =
+      active.lastPersistedState === "completed" ||
+      active.lastPersistedState === "failed" ||
+      active.lastPersistedState === "interrupted"
+        ? active.lastPersistedState
+        : undefined;
+    const supersededTerminal = journaledTerminal !== undefined && journaledTerminal !== outcome;
+    if (journaledTerminal !== undefined) outcome = journaledTerminal;
     active.state = outcome;
     if (outcome === "failed" || outcome === "interrupted") this.#revokeBrowserGrants(active);
     // The provider's own terminal event already journaled this state, reason
     // and all; a second frame would only repeat it. The settle below is not
     // part of that dedupe: the board reads runtime work, not this journal.
     const alreadyJournaled =
-      active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message;
+      supersededTerminal ||
+      (active.lastPersistedState === outcome && active.lastPersistedFailure === failure?.message);
     if (!alreadyJournaled) {
       const frame = this.#appendTurnEvent(active, {
         event: {

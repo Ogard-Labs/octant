@@ -9615,6 +9615,8 @@ function runtimeFixture(options: {
       });
     },
     runtimeWorkFailures,
+    /** The journal under the runtime, so a test can make an append fail. */
+    journal,
     /**
      * The store the service writes a turn's opening frame through, so a test
      * can put a prior turn on the journal the runtime reads.
@@ -13816,9 +13818,10 @@ describe("streamed reply text in a Code turn", () => {
   async function streamingTurn(
     id: number,
     options: Omit<Parameters<typeof runtimeFixture>[0], "provider"> = {},
+    connectionOverrides: Partial<ProviderConnection> = {},
   ) {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = providerConnection(queue);
+    const connection = { ...providerConnection(queue), ...connectionOverrides };
     const fixture = runtimeFixture({ ...options, provider: providerDriver(connection) });
     await fixture.runtime.execute(windowId, {
       kind: "start-provider-turn",
@@ -13853,12 +13856,21 @@ describe("streamed reply text in a Code turn", () => {
           ? [`${frame.event.channel}:${fixture.evidenceValues.get(frame.event.content.contentId)}`]
           : [],
       );
+    const terminalStates = () =>
+      frames().flatMap((frame) =>
+        frame.event.kind === "operation-state" &&
+        ["completed", "failed", "interrupted"].includes(frame.event.state)
+          ? [frame.event.state]
+          : [],
+      );
     return {
       fixture,
+      connection,
       offer,
       frames,
       kinds,
       texts,
+      terminalStates,
       evidenceRows: () => fixture.evidenceValues.size - evidenceBefore,
       finish: async () => {
         vi.useRealTimers();
@@ -14071,6 +14083,175 @@ describe("streamed reply text in a Code turn", () => {
       expect(turn.frames()).toHaveLength(settled);
       expect(turn.texts()).toEqual(["message:done"]);
       expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals exactly one terminal state when a cancel races a failed timer flush", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(312, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      full = true;
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      // Fire the timer, then cancel before the failed flush has finished.
+      vi.advanceTimersByTime(100);
+      const stopping = turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(398),
+        threadId,
+        checkoutId,
+      });
+      for (let step = 0; step < 40; step += 1) await vi.advanceTimersByTimeAsync(0);
+      await stopping;
+      expect(turn.terminalStates()).toHaveLength(1);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("fails the turn when the journal append, not the evidence put, fails during a flush", async () => {
+    const turn = await streamingTurn(313);
+    try {
+      const append = turn.fixture.journal.append.bind(turn.fixture.journal);
+      let failing = true;
+      vi.spyOn(turn.fixture.journal, "append").mockImplementation((input) => {
+        if (failing && JSON.stringify(input).includes("provider-content"))
+          throw new Error("journal unavailable");
+        return append(input);
+      });
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      await vi.advanceTimersByTimeAsync(100);
+      for (let step = 0; step < 20; step += 1) await vi.advanceTimersByTimeAsync(0);
+      failing = false;
+      expect(turn.terminalStates()).toEqual(["failed"]);
+      expect(turn.texts()).toEqual([]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("ends the turn as failed when a caller that swallows errors hit the failed flush", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(314, {
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // The reviewed-approval path swallows a journal refusal.
+      turn.fixture.runtime.recordShieldReview?.({
+        threadId: String(threadId),
+        summary: "Bash · git status",
+        decision: { kind: "allow" } as never,
+      });
+      full = false;
+      await turn.offer({ kind: "completed" });
+      expect(turn.terminalStates()).toEqual(["failed"]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("still stops the turn on a forced stop and records the loss when the flush fails", async () => {
+    let full = false;
+    let rows = 9000;
+    const gate = Effect.runSync(Deferred.make<void>());
+    const turn = await streamingTurn(
+      315,
+      {
+        evidencePut: (content) => {
+          if (full) throw new CodeEvidenceCapacityExceeded();
+          return storedEvidence(++rows, content);
+        },
+      },
+      {
+        interrupt: vi.fn(() => Deferred.await(gate)),
+        forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+      },
+    );
+    try {
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      // The cancel's flush fails; the forced stop that follows keeps that loss.
+      const stopping = turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(396),
+        threadId,
+        checkoutId,
+      });
+      await vi.waitFor(() => expect(turn.connection.interrupt).toHaveBeenCalled());
+      const result = await turn.fixture.runtime.execute(windowId, {
+        kind: "force-stop-provider-turn",
+        operationId: operationId(397),
+        turnOperationId: operationId(315),
+        threadId,
+        checkoutId,
+      });
+      expect(result).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      await stopping;
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await turn.finish();
+    }
+  });
+
+  it("still stops the turn on the third denial and records the loss when the flush fails", async () => {
+    let full = false;
+    let rows = 9000;
+    const turn = await streamingTurn(316, {
+      approvalValidator: false,
+      evidencePut: (content) => {
+        if (full) throw new CodeEvidenceCapacityExceeded();
+        return storedEvidence(++rows, content);
+      },
+    });
+    try {
+      for (const requestId of ["d-1", "d-2", "d-3"])
+        await turn.offer({
+          kind: "approval-request",
+          requestId,
+          action: "write",
+          description: `Modify src/${requestId}.ts`,
+        });
+      const approvals = turn
+        .frames()
+        .flatMap((frame) =>
+          frame.event.kind === "approval-requested" ? [frame.event.approvalId] : [],
+        );
+      expect(approvals).toHaveLength(3);
+      const answer = (index: number) =>
+        turn.fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(380 + index),
+          threadId,
+          checkoutId,
+          approvalId: approvals[index] ?? "",
+          decision: "denied",
+        });
+      await answer(0);
+      await answer(1);
+      await turn.offer({ kind: "text-delta", text: "lost" });
+      full = true;
+      expect(await answer(2)).toMatchObject({ state: "interrupted" });
+      full = false;
+      await turn.offer();
+      expect(turn.terminalStates()).toEqual(["interrupted"]);
+      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
     } finally {
       await turn.finish();
     }
