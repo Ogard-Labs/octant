@@ -47,7 +47,6 @@ import type {
   CodeMergeStandingSource,
   CodeOperationCommand,
   CodeOperationResult,
-  CodeProjectPullRequestSwitchTarget,
   CodeTerminalId,
   CodeThread,
   EventActor,
@@ -93,11 +92,14 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
-import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
+import {
+  decidePullRequestComment,
+  pullRequestChangeNeedsPerActApproval,
+} from "@octant/domain/code-pull-request-action-policy";
 import { isRoutineHostScope } from "../routineHostScope";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
-import type { PullRequestWatchAnswer, PullRequestWatchOutcome } from "./pullRequestWatchPort";
+import type { PullRequestWatchOutcome } from "./pullRequestWatchPort";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 // A pull-request body is often longer than any other tool input.
@@ -122,7 +124,7 @@ const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment always asks the person first, at every access level, because it acts under their name; merge asks unless a stored choice allows it. watch asks the person, at every access level, to let Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling; unwatch stops that without asking. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -259,7 +261,7 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment asks the person for each act at every access level. merge asks too, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and asks the person, at every access level, to let it start a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. Approving, requesting changes, creating labels, and deleting the branch are not available.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment posts under the person's name: at Full access it does not ask, and below Full access it asks the person for each post unless this Project lets agents comment on pull requests. merge asks at every access level, unless the person stored a choice that lets agents merge in this Project or this routine; use it only when the person asked for it or that stored choice covers it. watch takes nothing: the host finds this thread's own open pull request and, without asking, starts a new turn here when the checks on the head finish (passed or failed), the review decision changes, a new review or comment arrives, or a merge conflict appears; everything from one look arrives in one turn, as outside content. Use it instead of polling after a push or when waiting on reviewers. A watch ends when the pull request merges or closes, after 10 wakes, after 3 days, or with unwatch, which takes nothing and never asks. Plan mode refuses watch, and so does a turn the host started on its own, such as a wake. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -459,21 +461,19 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly standingMerge?: () => CodeMergeStandingSource | undefined;
   /**
+   * Whether this thread's Project lets agents comment on pull requests without
+   * asking for each post. It matters only below Full access, and like a merge
+   * choice the tool only names it; the host reads it again before posting.
+   */
+  readonly projectAllowsComments?: () => boolean;
+  /**
    * This thread's watch on its own pull request. The host resolves which pull
-   * request and checks the window before it calls `ask`; `request` asks the
-   * person in the thread to allow this one watch. Absent on a host that cannot
-   * watch, where watch and unwatch are refused.
+   * request and checks the window; nobody is asked. Absent on a host that
+   * cannot watch, where watch and unwatch are refused.
    */
   readonly pullRequestWatch?: {
-    readonly watch: (
-      ask: (target: CodeProjectPullRequestSwitchTarget) => Promise<PullRequestWatchAnswer>,
-      signal?: AbortSignal,
-    ) => Promise<PullRequestWatchOutcome>;
+    readonly watch: (signal?: AbortSignal) => Promise<PullRequestWatchOutcome>;
     readonly unwatch: () => Promise<PullRequestWatchOutcome>;
-    readonly request: (
-      target: CodeProjectPullRequestSwitchTarget,
-      signal?: AbortSignal,
-    ) => Promise<PullRequestWatchAnswer>;
   };
   readonly executeOperation: (
     windowId: WindowId,
@@ -795,7 +795,9 @@ type PullRequestToolInput =
  * The head is never the agent's to choose: the host resolves it from the
  * thread's delivery target. Plan refuses; an approval-gated posture asks the
  * person in the thread and sends the host's one-use approval for exactly this
- * command; Full access runs it as the person's standing choice. The operation
+ * command; Full access runs it as the person's standing choice. A merge asks
+ * at every level unless a stored choice allows it, and below Full access a
+ * comment skips its ask only on the Project's stored choice. The operation
  * service checks that authority again before `gh` runs and journals the
  * result on the thread.
  */
@@ -812,6 +814,15 @@ async function pullRequestTool(
   const posture = currentPosture(options);
   if (posture === "plan") return failure("plan-mode-read-only", postureRefusal("plan"));
   if (input.operation === "watch") return watchPullRequestTool(options, signal);
+  // Read once, before anything is asked: the answer to a prompt must not be
+  // spent on a different rule than the one that raised it.
+  const comment =
+    input.operation === "comment"
+      ? decidePullRequestComment({
+          fullAccess: posture === "full-access",
+          projectAllowsComments: options.projectAllowsComments?.() === true,
+        })
+      : undefined;
   const scope = {
     operationId: operationId(options),
     threadId: options.thread.id,
@@ -866,13 +877,17 @@ async function pullRequestTool(
   if (standing !== undefined && unauthorized.kind === "merge-pull-request") {
     command = { ...unauthorized, authorization: { kind: "standing", allowedBy: standing } };
   }
-  // A comment posts under the person's name and a merge cannot be taken back, so
-  // both ask for this one act even at Full access.
+  // The Project's choice stands in for the per-post ask below Full access.
+  else if (comment === "post-on-project-choice" && unauthorized.kind === "comment-pull-request") {
+    command = { ...unauthorized, authorization: { kind: "standing", allowedBy: "project" } };
+  }
+  // A merge cannot be taken back, so it asks for this one act even at Full
+  // access. A comment at Full access posts as the person's standing choice.
   else if (
-    decidesCodeEffectsByApproval(posture) ||
-    pullRequestChangeNeedsPerActApproval(
-      input.operation === "comment" || input.operation === "merge" ? input.operation : "labels",
-    )
+    comment === undefined
+      ? decidesCodeEffectsByApproval(posture) ||
+        pullRequestChangeNeedsPerActApproval(input.operation === "merge" ? "merge" : "labels")
+      : comment === "ask"
   ) {
     const outcome = await options.pullRequestApproval.request(unauthorized, signal);
     if (outcome.status !== "approved") {
@@ -936,10 +951,10 @@ async function pullRequestTool(
 
 /**
  * Lets the host wake this thread when its own pull request changes. The host
- * resolves which pull request; the person allows each watch, at every level,
- * because it lets the host start turns here later, when nobody may be watching
- * the thread. A turn the host started on its own has nobody to ask, and a
- * watch from a wake would let one watch renew itself, so it is refused there.
+ * resolves which pull request, and nobody is asked at any level: a watch
+ * changes nothing on the forge and ends by its own wake and lifetime limits.
+ * Those limits hold only if a wake cannot start the next watch, so a turn the
+ * host started on its own is refused.
  */
 async function watchPullRequestTool(options: CodeAppManagedToolsOptions, signal?: AbortSignal) {
   const port = options.pullRequestWatch;
@@ -947,22 +962,12 @@ async function watchPullRequestTool(options: CodeAppManagedToolsOptions, signal?
   if (isRoutineHostScope(options.windowId)) {
     return failure(
       "automation-recursion",
-      "A turn Octant started on its own, such as a watch wake or a routine's run, cannot start a watch: nobody is there to allow it. Mention it in your reply instead.",
+      "A turn Octant started on its own, such as a watch wake or a routine's run, cannot start a watch: a wake must not renew its own watch. Mention it in your reply instead.",
     );
   }
   let outcome: PullRequestWatchOutcome;
   try {
-    outcome = await port.watch(async (target) => {
-      if (!pullRequestChangeNeedsPerActApproval("watch")) return "approved";
-      const answer = await port.request(target, signal);
-      if (answer !== "approved") return answer;
-      // The person answered while the thread could have moved on.
-      const changed =
-        currentThreadIdentityFailure(options) !== undefined ||
-        currentPosture(options) === "plan" ||
-        signal?.aborted === true;
-      return changed ? "cancelled" : "approved";
-    }, signal);
+    outcome = await port.watch(signal);
   } catch {
     return failure("pull-request-watch-unavailable");
   }
@@ -997,13 +1002,6 @@ function pullRequestWatchResult(outcome: PullRequestWatchOutcome) {
       return { result: { status: "unwatched", number: outcome.target.number }, isError: false };
     case "not-watching":
       return { result: { status: "not-watching" }, isError: false };
-    case "declined":
-      return failure(
-        `pull-request-watch-${outcome.answer}`,
-        outcome.answer === "denied"
-          ? "The person declined the watch. Nothing is watched."
-          : undefined,
-      );
     case "refused":
       return failure(
         `pull-request-watch-${outcome.reason}`,

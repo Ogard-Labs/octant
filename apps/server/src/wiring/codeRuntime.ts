@@ -6,7 +6,7 @@ import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthorit
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
-import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
+import { projectForgeChoicesFor, standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
@@ -1498,6 +1498,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 : persistence.automationProjection.getDefinition(run.automationId),
           });
         },
+        projectForgeChoices: (thread) =>
+          projectForgeChoicesFor(persistence.readProject(thread.projectId)),
         // The switch service wakes threads through this runtime, so it is
         // built after it; a watch asked for before then is unavailable.
         pullRequestWatch: {

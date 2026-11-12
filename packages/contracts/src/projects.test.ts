@@ -211,6 +211,31 @@ describe("Project read contracts", () => {
     ).toMatchObject({ codeAccessPersistence: "project-default" });
   });
 
+  it("reads a Code Project stored before agents could be let to comment or push to the default branch", () => {
+    const stored = decodeProject(codeProject);
+    expect(stored).not.toHaveProperty("agentPullRequestComments");
+    expect(stored).not.toHaveProperty("agentDefaultBranchPush");
+    expect(
+      decodeProject({
+        ...codeProject,
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "disabled",
+      }),
+    ).toMatchObject({ agentPullRequestComments: "enabled", agentDefaultBranchPush: "disabled" });
+    expect(() => decodeProject({ ...codeProject, agentPullRequestComments: "always" })).toThrow();
+    expect(() => decodeProject({ ...workProject, agentDefaultBranchPush: "enabled" })).toThrow();
+    for (const setting of [
+      {
+        kind: "change-code-project-agent-pull-request-comments",
+        agentPullRequestComments: "enabled",
+      },
+      { kind: "change-code-project-agent-default-branch-push", agentDefaultBranchPush: "enabled" },
+    ] as const) {
+      const command = { ...setting, projectId: ids.project, expectedVersion: 1 };
+      expect(decodeProjectCommand(command)).toMatchObject(command);
+    }
+  });
+
   it("keeps binding audit history out of compact Project summaries", () => {
     const { bindingHistory: _, ...summary } = workProject;
     expect(decodeProjectSummary({ ...summary, bindingRevisionId: ids.revision })).toMatchObject({

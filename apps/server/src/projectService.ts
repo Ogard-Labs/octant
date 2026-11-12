@@ -52,7 +52,9 @@ import {
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
+  changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
+  changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
@@ -865,6 +867,22 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAgentMerge(current, command.agentMerge, timestamp);
           kind = "code-project-agent-merge-changed";
           eventName = "project.code-agent-merge-changed@1";
+        } else if (command.kind === "change-code-project-agent-pull-request-comments") {
+          project = changeCodeProjectAgentPullRequestComments(
+            current,
+            command.agentPullRequestComments,
+            timestamp,
+          );
+          kind = "code-project-agent-pull-request-comments-changed";
+          eventName = "project.code-agent-pull-request-comments-changed@1";
+        } else if (command.kind === "change-code-project-agent-default-branch-push") {
+          project = changeCodeProjectAgentDefaultBranchPush(
+            current,
+            command.agentDefaultBranchPush,
+            timestamp,
+          );
+          kind = "code-project-agent-default-branch-push-changed";
+          eventName = "project.code-agent-default-branch-push-changed@1";
         } else if (command.kind === "change-code-project-actions") {
           project = changeCodeProjectActions(current, command.actions, timestamp);
           kind = "code-project-actions-changed";

@@ -30,7 +30,9 @@ import {
   changeCodeProjectPermissionMode,
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
+  changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
+  changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
   changeProjectColor,
@@ -293,6 +295,32 @@ describe("Project creation and lifecycle", () => {
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("lets a Code Project allow agent comments and default-branch pushes, each off until chosen", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const comments = changeCodeProjectAgentPullRequestComments(project, "enabled", updatedAt);
+    expect(comments).toMatchObject({ agentPullRequestComments: "enabled", version: 2 });
+    expect(comments).not.toHaveProperty("agentDefaultBranchPush");
+    const pushes = changeCodeProjectAgentDefaultBranchPush(comments, "enabled", updatedAt);
+    expect(pushes).toMatchObject({
+      agentPullRequestComments: "enabled",
+      agentDefaultBranchPush: "enabled",
+      version: 3,
+    });
+    expect(() => changeCodeProjectAgentPullRequestComments(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() => changeCodeProjectAgentDefaultBranchPush(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    const work = makeProject(ids.work, "0/1", { type: "work" });
+    expect(() => changeCodeProjectAgentPullRequestComments(work, "enabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() => changeCodeProjectAgentDefaultBranchPush(work, "enabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
   });
 
   it("lets a Work Project opt into a status file, which starts off for every Project", () => {

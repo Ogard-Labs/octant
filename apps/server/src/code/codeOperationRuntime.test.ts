@@ -6037,6 +6037,10 @@ describe("CodeOperationRuntime", () => {
       overrides: Partial<CodeOperationPullRequestActions> & {
         readonly approved?: boolean;
         readonly standing?: ReadonlyArray<"project" | "routine">;
+        readonly projectForgeChoices?: {
+          readonly comments: boolean;
+          readonly defaultBranchPush: boolean;
+        };
         readonly nativeApproval?: boolean;
         readonly resolvePullRequestTarget?: Parameters<
           typeof createCodeOperationRuntime
@@ -6077,6 +6081,9 @@ describe("CodeOperationRuntime", () => {
           : { resolvePullRequestTarget: overrides.resolvePullRequestTarget }),
         approvalValidator: overrides.nativeApproval ? false : () => overrides.approved ?? true,
         ...(overrides.standing === undefined ? {} : { standingMergeAllowance: overrides.standing }),
+        ...(overrides.projectForgeChoices === undefined
+          ? {}
+          : { projectForgeChoices: overrides.projectForgeChoices }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
           update: async () => ({ status: "none" }),
@@ -6187,19 +6194,106 @@ describe("CodeOperationRuntime", () => {
       fixture.close();
     });
 
-    it("posts a comment or a review reply only with an approval for that act", async () => {
-      const { fixture, actions } = actionFixture({});
-      const refused = await fixture.runtime.execute(windowId, {
+    it("posts a comment and a review reply unasked at Full access", async () => {
+      const { fixture, actions } = actionFixture({ approved: false });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "comment-pull-request",
+          ...scope(140),
+          body: "Looks right.",
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      await fixture.runtime.execute(windowId, {
         kind: "comment-pull-request",
-        ...scope(150),
-        body: "Looks right.",
+        ...scope(141),
+        body: "Fixed in the next commit.",
+        reviewThreadId: "PRRT_abc",
         authorization: { kind: "full-access" },
       });
-      expect(refused).toMatchObject({
-        kind: "operation-failed",
-        failure: { category: "unauthorized" },
+      expect(actions.comment).toHaveBeenCalledTimes(1);
+      expect(actions.replyToReviewThread).toHaveBeenCalledTimes(1);
+      fixture.close();
+    });
+
+    it.each(["approval-gated", "auto-accept-edits"] as const)(
+      "posts nothing from a %s thread that claims Full access, even where the Project lets agents comment",
+      async (executionPolicy) => {
+        // An approval validator that says yes to everything stands in for a
+        // gate that let the claim through; the post itself still checks the level.
+        for (const comments of [false, true]) {
+          const { fixture, actions } = actionFixture({
+            projectForgeChoices: { comments, defaultBranchPush: false },
+          });
+          fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+          expect(
+            await fixture.runtime.execute(windowId, {
+              kind: "comment-pull-request",
+              ...scope(142),
+              body: "Looks right.",
+              authorization: { kind: "full-access" },
+            }),
+          ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+          expect(actions.comment).not.toHaveBeenCalled();
+          fixture.close();
+        }
+      },
+    );
+
+    it("posts a comment below Full access on the Project's choice only while that choice is still stored", async () => {
+      const base = {
+        kind: "comment-pull-request" as const,
+        body: "Looks right.",
+        authorization: { kind: "standing", allowedBy: "project" } as const,
+      };
+      const gated = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+      const allowed = actionFixture({
+        approved: false,
+        projectForgeChoices: { comments: true, defaultBranchPush: false },
       });
-      expect(actions.comment).not.toHaveBeenCalled();
+      allowed.fixture.setThread(gated);
+      expect(
+        await allowed.fixture.runtime.execute(windowId, { ...base, ...scope(143) }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(allowed.actions.comment).toHaveBeenCalledTimes(1);
+
+      // Switched off, or never stored: the command's word is not enough, and
+      // a merge choice or a default-branch choice is not a comment choice.
+      for (const off of [
+        actionFixture({ approved: false }),
+        actionFixture({
+          approved: false,
+          standing: ["project"],
+          projectForgeChoices: { comments: false, defaultBranchPush: true },
+        }),
+      ]) {
+        off.fixture.setThread(gated);
+        expect(
+          await off.fixture.runtime.execute(windowId, { ...base, ...scope(144) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(off.actions.comment).not.toHaveBeenCalled();
+        off.fixture.close();
+      }
+
+      // Plan stays read-only whatever the Project chose.
+      const plan = actionFixture({
+        projectForgeChoices: { comments: true, defaultBranchPush: false },
+      });
+      plan.fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+      for (const authorization of [base.authorization, { kind: "full-access" } as const]) {
+        expect(
+          await plan.fixture.runtime.execute(windowId, { ...base, ...scope(145), authorization }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+      }
+      expect(plan.actions.comment).not.toHaveBeenCalled();
+      allowed.fixture.close();
+      plan.fixture.close();
+    });
+
+    it("posts a comment or a review reply below Full access with an approval for that act", async () => {
+      const { fixture, actions } = actionFixture({});
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }));
 
       await fixture.runtime.execute(windowId, {
         kind: "comment-pull-request",
@@ -6463,6 +6557,31 @@ describe("CodeOperationRuntime", () => {
             kind: "operation-failed",
             failure: { category: "unauthorized" },
           });
+        }
+        fixture.close();
+      });
+
+      it("lets an ordinary push reach the default branch when the Project allows it, never a force", async () => {
+        const fixture = runtimeFixture({
+          projectForgeChoices: { comments: false, defaultBranchPush: true },
+        });
+        const allowed = await fixture.runtime.execute(windowId, {
+          ...to("development"),
+          ...scope(196),
+          gitOperationId: operationId(197),
+          authorization: { kind: "full-access" },
+        } as never);
+        // The fixture's Git stub fails the push itself; the policy did not refuse it.
+        expect(allowed).not.toMatchObject({ failure: { category: "unauthorized" } });
+        for (const [index, force] of [{ mode: "plain" } as const, lease].entries()) {
+          expect(
+            await fixture.runtime.execute(windowId, {
+              ...to("development", force),
+              ...scope(198 + index * 2),
+              gitOperationId: operationId(199 + index * 2),
+              authorization: { kind: "full-access" },
+            } as never),
+          ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
         }
         fixture.close();
       });
@@ -8959,6 +9078,8 @@ function runtimeFixture(options: {
   >[0]["resolvePullRequestTarget"];
   /** The standing merge permissions the stored choices give the thread. */
   standingMergeAllowance?: ReadonlyArray<"project" | "routine">;
+  /** The Project's stored choices for comments and default-branch pushes. */
+  projectForgeChoices?: { readonly comments: boolean; readonly defaultBranchPush: boolean };
   repositoryTestDiscovery?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["repositoryTestDiscovery"];
@@ -9387,6 +9508,12 @@ function runtimeFixture(options: {
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
+    ...(options.projectForgeChoices === undefined
+      ? {}
+      : {
+          projectForgeChoices: () =>
+            options.projectForgeChoices ?? { comments: false, defaultBranchPush: false },
+        }),
     resolvePullRequestTarget:
       options.resolvePullRequestTarget ??
       (async () =>

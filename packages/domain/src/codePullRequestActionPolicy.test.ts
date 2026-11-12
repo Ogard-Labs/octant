@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decidePullRequestComment,
   decidePushBranch,
   decideRemotePullRequestMerge,
   decideStackMerge,
@@ -126,16 +127,61 @@ describe("pull-request merge policy", () => {
     ).toEqual({ decision: "refuse", reason: "not-authorized" });
   });
 
-  it("asks for the person at every level for a merge and a comment, not for a label", () => {
+  it("asks for the person at every level for a merge only", () => {
     expect(pullRequestChangeNeedsPerActApproval("merge")).toBe(true);
-    expect(pullRequestChangeNeedsPerActApproval("comment")).toBe(true);
+    expect(pullRequestChangeNeedsPerActApproval("comment")).toBe(false);
     expect(pullRequestChangeNeedsPerActApproval("labels")).toBe(false);
     expect(pullRequestChangeNeedsPerActApproval("close")).toBe(false);
   });
 
-  it("asks the person at every level before a thread watches its pull request, not to stop watching", () => {
-    expect(pullRequestChangeNeedsPerActApproval("watch")).toBe(true);
+  it("never asks before a thread watches its pull request or stops watching", () => {
+    expect(pullRequestChangeNeedsPerActApproval("watch")).toBe(false);
     expect(pullRequestChangeNeedsPerActApproval("unwatch")).toBe(false);
+  });
+
+  it("posts a comment unasked at Full access whatever the Project chose", () => {
+    for (const projectAllowsComments of [true, false]) {
+      expect(decidePullRequestComment({ fullAccess: true, projectAllowsComments })).toBe("post");
+    }
+  });
+
+  it("asks for each comment below Full access until the Project's choice stands in for the ask", () => {
+    expect(decidePullRequestComment({ fullAccess: false, projectAllowsComments: false })).toBe(
+      "ask",
+    );
+    expect(decidePullRequestComment({ fullAccess: false, projectAllowsComments: true })).toBe(
+      "post-on-project-choice",
+    );
+  });
+
+  it("opens the default branch to an ordinary push when the Project allows it, never to a force", () => {
+    const toBase = { ...branches, remoteBranch: "main", approvedForThisAct: false } as const;
+    expect(decidePushBranch({ ...toBase, defaultBranchAllowedByProject: false })).toEqual({
+      decision: "refuse",
+      reason: "needs-the-persons-request",
+    });
+    expect(decidePushBranch({ ...toBase, defaultBranchAllowedByProject: true })).toEqual({
+      decision: "allow",
+    });
+    for (const force of [
+      { mode: "plain" } as const,
+      { mode: "with-lease", expectedRemoteOid: "c".repeat(40) } as const,
+    ]) {
+      expect(decidePushBranch({ ...toBase, force, defaultBranchAllowedByProject: true })).toEqual({
+        decision: "refuse",
+        reason: "needs-the-persons-request",
+      });
+    }
+    // The Project's choice is about the default branch alone.
+    expect(
+      decidePushBranch({
+        ...branches,
+        remoteBranch: "feature/a",
+        force: { mode: "plain" },
+        approvedForThisAct: false,
+        defaultBranchAllowedByProject: true,
+      }),
+    ).toEqual({ decision: "refuse", reason: "needs-the-persons-request" });
   });
 });
 
