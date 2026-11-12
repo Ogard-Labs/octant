@@ -12497,6 +12497,7 @@ describe("continuing a Chat answer a restart cut off", () => {
       chat: fixture.service,
       enabled: () => true,
       connection: fixture.persistence.connection,
+      liftHarnessRecovery: async () => ({ kind: "none" as const }),
       releaseQueue,
       ...overrides,
     });
@@ -12539,6 +12540,7 @@ describe("continuing a Chat answer a restart cut off", () => {
       chat: fixture.service,
       enabled: () => true,
       connection: fixture.persistence.connection,
+      liftHarnessRecovery: async () => ({ kind: "none" }),
       releaseQueue: async () => {},
     });
     expect(fixture.service.read(thread.id).turns).toHaveLength(2);
@@ -12557,6 +12559,47 @@ describe("continuing a Chat answer a restart cut off", () => {
     expect(recovery.continued).toEqual([]);
     expect(releaseQueue).not.toHaveBeenCalled();
     expect(fixture.service.read(thread.id).turns).toHaveLength(1);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("lifts the thread's harness session out of restart recovery before continuing it", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const order: string[] = [];
+    const liftHarnessRecovery = vi.fn(async (threadId: string) => {
+      order.push(`lift:${threadId}`);
+      return { kind: "lifted" as const };
+    });
+    const releaseQueue = vi.fn(async (threadId: string) => {
+      order.push(`release:${threadId}`);
+    });
+
+    const { recovery } = await restart(fixture, { liftHarnessRecovery, releaseQueue });
+
+    expect(recovery.continued).toEqual([{ mode: "chat", threadId: String(thread.id) }]);
+    expect(order).toEqual([`lift:${String(thread.id)}`, `release:${String(thread.id)}`]);
+  });
+
+  it("holds a cut-off answer whose harness session a blocker keeps in restart recovery", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const { recovery, releaseQueue } = await restart(fixture, {
+      liftHarnessRecovery: async () => ({
+        kind: "held",
+        detail: "Not ready to resume: the thread is paused.",
+      }),
+    });
+
+    expect(recovery.held).toMatchObject([
+      {
+        mode: "chat",
+        threadId: String(thread.id),
+        reason: "refused",
+        detail: "Not ready to resume: the thread is paused.",
+      },
+    ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
     expect(continuationTurns(fixture)).toHaveLength(0);
   });
 

@@ -5161,8 +5161,11 @@ or .zip>` write the same files, built by one host command
   thread id, which is unique across modes); its provider keeps its own
   conversation and the cut-off turn carries no resume cursor; the Work turn was
   still only accepted, or the Chat answer's provider-owned session had not
-  replied yet, so its message may never have reached the provider; or
-  admission refuses the send. Chat and Work keep no journaled push or pull
+  replied yet, so its message may never have reached the provider; its native
+  harness session's restart recovery is blocked (the host lifts it first,
+  through the same blockers a person's Resume checks, because admission refuses
+  a session still recovery-required); or admission refuses the send. Chat and
+  Work keep no journaled push or pull
   request step, so the uncertain-external-action hold reads nothing there; the
   continuation message tells the agent to inspect before repeating. Queued
   messages follow the continuation under the same release as Code. A Chat

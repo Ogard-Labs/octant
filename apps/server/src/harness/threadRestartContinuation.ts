@@ -61,6 +61,16 @@ export interface ThreadRestartContinuationPorts {
   ) => Promise<
     { readonly kind: "dispatched" } | { readonly kind: "refused"; readonly detail: string }
   >;
+  /**
+   * Lifts the thread's native harness session out of the recovery the restart
+   * put it in, through the blockers a person's Resume checks. Without it the
+   * turn admission refuses a session that still reads recovery-required.
+   */
+  readonly liftHarnessRecovery: (
+    threadId: string,
+  ) => Promise<
+    { readonly kind: "none" | "lifted" } | { readonly kind: "held"; readonly detail: string }
+  >;
   /** Lets the thread's queued messages follow the continuation. */
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
@@ -121,6 +131,14 @@ export async function continueThreadTurnsCutOffByRestart(
     }
     if (readiness.cannotResume !== undefined) {
       hold(turn.threadId, "cannot-resume", readiness.cannotResume);
+      continue;
+    }
+    const lifted = await ports.liftHarnessRecovery(turn.threadId).catch(() => ({
+      kind: "held" as const,
+      detail: "The thread's harness session could not be resumed.",
+    }));
+    if (lifted.kind === "held") {
+      hold(turn.threadId, "refused", lifted.detail);
       continue;
     }
     const continuation = threadRestartContinuationId(ports.mode, turn);

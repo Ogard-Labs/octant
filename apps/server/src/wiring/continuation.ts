@@ -28,6 +28,7 @@ import {
 import {
   continueThreadTurnsCutOffByRestart,
   mergeRestartRecoveries,
+  type ThreadRestartContinuationPorts,
 } from "../harness/threadRestartContinuation";
 import {
   ChatServiceError,
@@ -302,6 +303,7 @@ function startRestartContinuation(
         chat: deps.chatService,
         enabled: () => deps.persistence.readChatSettings()?.settings.restartContinuation !== false,
         connection: deps.persistence.connection,
+        liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -322,6 +324,7 @@ function startRestartContinuation(
             deps.persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ).includes("work"),
         connection: deps.persistence.connection,
+        liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -348,6 +351,8 @@ export interface ChatRestartContinuationDependencies {
   readonly enabled: () => boolean;
   /** The store the crash-loop guard counts in. */
   readonly connection: SqliteConnection;
+  /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
+  readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
@@ -367,6 +372,7 @@ export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
     },
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
+    liftHarnessRecovery: deps.liftHarnessRecovery,
     // A host continuation is an ordinary send under its one submission
     // identity: a repeated recovery finds the turn the first one made, and
     // the send's own admission rechecks the thread's authority and spend.
@@ -416,6 +422,8 @@ export interface WorkRestartContinuationDependencies {
   readonly modeEnabled: () => boolean;
   /** The store the crash-loop guard counts in. */
   readonly connection: SqliteConnection;
+  /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
+  readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
@@ -440,6 +448,7 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
     },
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
+    liftHarnessRecovery: deps.liftHarnessRecovery,
     dispatch: async (turn, continuation, prompt) => {
       if (!deps.modeEnabled())
         return { kind: "refused", detail: "Work is turned off on this host." };

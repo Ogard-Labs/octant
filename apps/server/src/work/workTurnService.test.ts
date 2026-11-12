@@ -6210,6 +6210,7 @@ describe("continuing a Work turn a restart cut off", () => {
       enabled: () => true,
       modeEnabled: () => true,
       connection,
+      liftHarnessRecovery: async () => ({ kind: "none" as const }),
       releaseQueue,
       ...options.recovery,
     });
@@ -6262,6 +6263,31 @@ describe("continuing a Work turn a restart cut off", () => {
 
     expect(recovery.held).toMatchObject([
       { mode: "work", threadId: String(ids.thread), reason: "turned-off" },
+    ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn whose harness session a blocker keeps in restart recovery", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const liftHarnessRecovery = vi.fn(async (_threadId: string) => ({
+      kind: "held" as const,
+      detail: "Not ready to resume: the spend ceiling is reached.",
+    }));
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { liftHarnessRecovery },
+    });
+
+    expect(liftHarnessRecovery).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(recovery.held).toMatchObject([
+      {
+        mode: "work",
+        threadId: String(ids.thread),
+        reason: "refused",
+        detail: "Not ready to resume: the spend ceiling is reached.",
+      },
     ]);
     expect(releaseQueue).not.toHaveBeenCalled();
     expect(continuations(host)).toHaveLength(0);
