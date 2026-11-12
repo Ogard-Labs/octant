@@ -740,8 +740,20 @@
      tree drawn over Vitals), and its rounded corners are the clip. */
   overflow: hidden;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-panel-sheen), var(--octant-panel-surface);
-  box-shadow: var(--octant-shadow-panel);
+  background: var(--octant-panel-fill);
+  box-shadow: var(--octant-shadow-panel-seat);
+}
+
+/* The rim is drawn above the tool: an inset shadow on the tile itself is
+   painted over by anything the tool fills. */
+.dock-tile::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--octant-shadow-panel-rim);
+  content: "";
+  pointer-events: none;
 }
 
 /* The tool gets a definite height to scroll within: the tile's body flexes to

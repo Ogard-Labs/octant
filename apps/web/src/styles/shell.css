@@ -54,7 +54,11 @@
     var(--octant-text-primary)
   );
   --octant-panel-surface: var(--octant-panel-opaque);
-  --octant-thread-underlay: linear-gradient(transparent, transparent);
+  /* Every panel (the thread, a tool tile, the bottom panel, the dock's
+     overview) is this one fill, so the glass reads as one material. */
+  --octant-panel-fill:
+    var(--octant-panel-sheen),
+    linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -77,13 +81,10 @@ html[data-octant-theme-mode="light"] .shell {
   --octant-stage-surface: var(--octant-workspace-translucent);
   /* Panels are a tint of the theme colour over the window's native material,
      not a blur of it: the packaged window's material is not re-blurred by a
-     backdrop filter. The thread's panel takes a second layer of the tint, so
-     the text a person reads stays on a quieter ground than a tool tile. */
+     backdrop filter. Every panel (the thread, a tile, the bottom panel) is
+     this one tint, over a ground that is itself a tint, so text reads on a
+     saturated desktop. */
   --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 90%, transparent);
-  --octant-thread-underlay: linear-gradient(
-    var(--octant-sheet-surface),
-    var(--octant-sheet-surface)
-  );
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
@@ -118,7 +119,6 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
   --octant-panel-surface: var(--octant-panel-opaque);
-  --octant-thread-underlay: linear-gradient(transparent, transparent);
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -142,7 +142,6 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
     --octant-panel-surface: var(--octant-panel-opaque);
-    --octant-thread-underlay: linear-gradient(transparent, transparent);
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
@@ -2049,9 +2048,8 @@ html[data-octant-native-host="true"]
     grid-row: 1;
     margin-top: var(--oct-title-rail-h);
     border-radius: var(--oct-radius-md);
-    background:
-      var(--octant-panel-sheen), var(--octant-panel-surface), var(--octant-thread-underlay);
-    box-shadow: var(--octant-shadow-panel);
+    background: var(--octant-panel-fill);
+    box-shadow: var(--octant-shadow-panel-seat);
     content: "";
     pointer-events: none;
   }
@@ -2074,8 +2072,33 @@ html[data-octant-native-host="true"]
     z-index: -1;
     inset: var(--oct-title-rail-h) 0 0 var(--octant-sheet-inset);
     border-radius: var(--oct-radius-md);
-    background: var(--octant-panel-sheen), var(--octant-panel-surface);
-    box-shadow: var(--octant-shadow-panel);
+    background: var(--octant-panel-fill);
+    box-shadow: var(--octant-shadow-panel-seat);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* A panel's content paints over its own inset shadow, so the rim is drawn
+     again above the content by a pseudo-element: the edge catches light along
+     the top and the corner is one clean curve, with no line of the content's
+     own beside it. The thread's rim follows its column like its fill. */
+  .shell-frame > .workspace-layer::after {
+    z-index: 4;
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: var(--oct-title-rail-h);
+    border-radius: var(--oct-radius-md);
+    box-shadow: var(--octant-shadow-panel-rim);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::after {
+    position: absolute;
+    z-index: 4;
+    inset: var(--oct-title-rail-h) 0 0 var(--octant-sheet-inset);
+    border-radius: var(--oct-radius-md);
+    box-shadow: var(--octant-shadow-panel-rim);
     content: "";
     pointer-events: none;
   }
@@ -2109,8 +2132,18 @@ html[data-octant-native-host="true"]
 
   .shell-frame .bottom-utility-panel {
     border-radius: var(--oct-radius-md);
-    background: var(--octant-panel-sheen), var(--octant-panel-surface);
-    box-shadow: var(--octant-shadow-panel);
+    background: var(--octant-panel-fill);
+    box-shadow: var(--octant-shadow-panel-seat);
+  }
+
+  .shell-frame .bottom-utility-panel::after {
+    position: absolute;
+    z-index: 4;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--octant-shadow-panel-rim);
+    content: "";
+    pointer-events: none;
   }
 
   /* The window controls float over the workspace's first rail. A reader
@@ -2169,26 +2202,11 @@ html[data-octant-native-host="true"]
 
   /* The pane header does not share the traffic lights' compact centreline,
      so it takes the title rail the dock head already uses and the two heads
-     close on one line. The line is drawn by the pane, not the header: the
-     header stops short of the window controls by a margin, and a border on
-     it would stop there too. It is the sheet's soft hairline, the same line
-     the sidebar's piece draws at this height: in the stronger border the rule
-     under the band changed shade exactly at the sidebar's edge. */
+     close on one line. The panels start at the rail's bottom edge, which is
+     the line between the band and them; no hairline is drawn there, since the
+     panel's own top rim is that edge and a second line doubled it. */
   .shell-frame .workspace-pane__header {
     min-height: var(--oct-title-rail-h);
-  }
-
-  .shell-frame .workspace-pane:not([data-header="false"])::after,
-  .shell-frame .right-utility-dock:has(.right-utility-dock__toolbar)::after {
-    position: absolute;
-    z-index: 3;
-    top: var(--oct-title-rail-h);
-    right: 0;
-    left: 0;
-    height: 1px;
-    background: var(--octant-border-soft);
-    content: "";
-    pointer-events: none;
   }
 
   .shell-frame .right-utility-dock {

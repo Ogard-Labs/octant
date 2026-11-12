@@ -112,7 +112,7 @@
      lift is the fill and the rim; the shadow helps where a surface crosses
      something lighter. Light is a token, not a colour in a recipe, so a
      preset or a custom accent changes it in one place. */
-  --octant-rim: rgb(255 255 255 / 8%);
+  --octant-rim: rgb(255 255 255 / 7%);
   --octant-rim-top: rgb(255 255 255 / 17%);
   --octant-rim-float: rgb(255 255 255 / 24%);
   --octant-sheen: rgb(255 255 255 / 4%);
@@ -132,9 +132,14 @@
     0 1px 0 rgb(255 255 255 / 7%);
   /* Level 1: a panel. */
   --octant-panel-sheen: linear-gradient(180deg, var(--octant-sheen), transparent 72px);
-  --octant-shadow-panel:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim), 0 0 0 0.5px #000,
-    0 1px 1px rgb(0 0 0 / 60%), 0 18px 36px -20px #000;
+  /* The rim and the seat are two tokens: a panel's own content paints over
+     an inset shadow, so the rim is also drawn by a pseudo-element above the
+     content (see shell.css), and the seat stays on the panel's box. */
+  --octant-shadow-panel-rim:
+    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim);
+  --octant-shadow-panel-seat:
+    0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 18px 36px -20px #000;
+  --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
   /* Level 2: a card on a panel. A card is a hair smaller in shadow than a
      control's tile: it lies on the panel instead of standing on it. */
   --octant-shadow-xs:
@@ -179,8 +184,16 @@
   --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 56px);
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 88%, transparent);
   --octant-float-blur: blur(30px) saturate(170%);
-  /* The primary action: the accent as a gradient with a soft glow under it. */
-  --octant-accent-sheen: linear-gradient(180deg, rgb(255 255 255 / 16%), rgb(0 0 0 / 10%));
+  /* The primary action: the accent as a gradient with a soft glow under it.
+     The gradient only ever moves the fill away from the label's colour (the
+     label is dark on a light accent, so the fill lightens; it is light on a
+     dark accent, so the fill darkens), so a label is never less legible on any
+     stop than on the flat accent. The ink is the opposite of the label. */
+  --octant-accent-sheen: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--octant-text-primary) 18%, transparent),
+    color-mix(in srgb, var(--octant-text-primary) 4%, transparent)
+  );
   --octant-shadow-primary:
     inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 22%),
     inset 0 0 0 1px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 45%),
@@ -316,10 +329,15 @@ html[data-octant-theme-mode="light"] {
   --octant-well: rgb(16 24 40 / 5%);
   --octant-shadow-well:
     inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
-  --octant-shadow-panel:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
+  --octant-shadow-panel-seat:
     0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
     0 20px 38px -22px rgb(16 24 40 / 34%);
+  /* A white label on a dark accent: the fill only darkens toward the bottom. */
+  --octant-accent-sheen: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--octant-text-primary) 14%, transparent)
+  );
   --octant-shadow-xs:
     inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
     0 1px 2px rgb(16 24 40 / 8%);
