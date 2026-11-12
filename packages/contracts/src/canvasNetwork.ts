@@ -18,6 +18,27 @@ export const CANVAS_NETWORK_ACCESS_SCHEMA_VERSION = 1 as const;
  */
 export const CANVAS_NETWORK_PROXY_PATH_PREFIX = "/api/canvas/network/";
 
+/**
+ * Where a page drawn by the desktop app's prototype host asks instead:
+ * `octant-prototype://network/<surface id>/fetch?url=`. It is an address of
+ * the prototype host's private scheme, which no network serves; the desktop
+ * relays what arrives there to the proxy path above under a token the page
+ * never holds.
+ */
+export const CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX = "octant-prototype://network/";
+
+/**
+ * Sent by the desktop's main process with its bridge secret when it asks for
+ * a design page: the surface the prototype host will draw the page on.
+ */
+export const CANVAS_PROTOTYPE_SURFACE_HEADER = "x-octant-prototype-surface";
+
+/**
+ * Answered to the desktop's main process alone: the network token of the page
+ * it asked for, which it keeps and the page is never given.
+ */
+export const CANVAS_NETWORK_TOKEN_HEADER = "x-octant-canvas-network-token";
+
 /** A person turns one Canvas's network on or off. */
 export const CanvasNetworkAccessCommand = Schema.Struct({
   schemaVersion: Schema.Literal(CANVAS_NETWORK_ACCESS_SCHEMA_VERSION),

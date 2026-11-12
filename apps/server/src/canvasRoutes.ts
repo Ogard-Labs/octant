@@ -100,11 +100,15 @@ import type { CanvasNetworkAccessService } from "./canvas/canvasNetworkAccessSer
 import { canvasNetworkProxyResponse, type CanvasNetworkProxy } from "./canvas/canvasNetworkProxy";
 import {
   CANVAS_NETWORK_PROXY_PATH_PREFIX,
+  CANVAS_NETWORK_TOKEN_HEADER,
+  CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX,
+  CANVAS_PROTOTYPE_SURFACE_HEADER,
   decodeCanvasNetworkAccessCommand,
   decodeCanvasNetworkAccessResult,
   decodeCanvasNetworkAccessView,
   type CanvasNetworkAccessRefusalReason,
 } from "@octant/contracts/canvas-network";
+import { admitDesktopBroker } from "./desktopBrokerAdmission";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -190,6 +194,12 @@ export interface CanvasRouteDependencies {
     readonly access: CanvasNetworkAccessService;
     readonly proxy: Pick<CanvasNetworkProxy, "fetch">;
   };
+  /**
+   * The secret the desktop's main process proves itself with. With it, a
+   * network-capable design page the desktop asks for its prototype host is
+   * served with a token; absent, only a browser frame's page is.
+   */
+  readonly desktopBridgeSecret?: string;
   /**
    * The host's snapshot of a page a Work or Code thread published, when the
    * window may read that thread. Absent leaves published pages unrunnable.
@@ -2455,20 +2465,69 @@ async function serveDesignPage(
     dependencies.resolveDesignAssets === undefined
       ? []
       : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
-  // A token is minted only for a frame a browser on this machine is loading:
-  // the desktop's prototype host has no route to this host, so its page keeps
-  // the policy that names nothing. The switch is read again here, since it
-  // may have gone off after the ticket was issued.
+  // A token is minted for a frame a browser on this machine is loading, and
+  // for a page the desktop's main process asks for its prototype host. The
+  // switch is read again here, since it may have gone off after the ticket
+  // was issued.
+  const desktopSurface =
+    destination === null ? desktopPrototypeSurface(dependencies, request, url) : undefined;
   const token =
-    grant.network === true && grant.canvasId !== undefined && destination === "iframe"
+    grant.network === true &&
+    grant.canvasId !== undefined &&
+    (destination === "iframe" || desktopSurface !== undefined)
       ? dependencies.canvasNetwork?.access.issueToken(grant.canvasId)
       : undefined;
+  // A browser's page is told the proxy path under its token. A desktop page
+  // is told an address of the prototype host's own scheme, and the token goes
+  // to the main process in a header, so that page holds nothing to send out.
   const networkBase =
-    token === undefined ? undefined : canvasDesignPageNetworkBase(url.origin, token);
+    token === undefined
+      ? undefined
+      : desktopSurface === undefined
+        ? canvasDesignPageNetworkBase(url.origin, token)
+        : `${CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX}${desktopSurface}/`;
   return new Response(
     renderCanvasDesignPage(grant.block, grant.startFrameId, assets, networkBase),
-    { status: 200, headers: canvasDesignPageHeaders("text/html; charset=utf-8", networkBase) },
+    {
+      status: 200,
+      headers: {
+        ...canvasDesignPageHeaders("text/html; charset=utf-8", networkBase),
+        ...(token === undefined || desktopSurface === undefined
+          ? {}
+          : { [CANVAS_NETWORK_TOKEN_HEADER]: token }),
+      },
+    },
   );
+}
+
+const PROTOTYPE_SURFACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The prototype-host surface a design page is asked for, when the desktop's
+ * own main process is asking: the request carries the desktop bridge secret,
+ * on the loopback address the desktop reaches this host at. The admission
+ * refuses a request with an `Origin` (a browser's script), one a session
+ * carried here (a paired device's), and a native window's main, which this
+ * route is not brokered to. Anything else is not the desktop.
+ */
+function desktopPrototypeSurface(
+  dependencies: CanvasRouteDependencies,
+  request: Request,
+  url: URL,
+): string | undefined {
+  const surface = request.headers.get(CANVAS_PROTOTYPE_SURFACE_HEADER);
+  if (surface === null || !PROTOTYPE_SURFACE_ID.test(surface)) return undefined;
+  if (dependencies.desktopBridgeSecret === undefined || url.hostname !== "127.0.0.1") {
+    return undefined;
+  }
+  const admission = admitDesktopBroker({
+    request,
+    desktopBridgeSecret: dependencies.desktopBridgeSecret,
+    now: Date.now(),
+  });
+  return admission.status === "admitted" && admission.kind === "desktop-bridge"
+    ? surface
+    : undefined;
 }
 
 const NETWORK_PROXY_ROUTE_PREFIX = CANVAS_NETWORK_PROXY_PATH_PREFIX.slice("/api/canvas/".length);

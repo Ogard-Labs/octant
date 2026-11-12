@@ -1284,6 +1284,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasProjection: persistence.canvasProjection,
     canvasService,
     canvasNetwork: { access: canvasNetworkAccess, proxy: canvasNetworkProxy },
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
     listDesignSystems: async (projectId) => {
       const project = persistence.readProject(decodeProjectId(projectId));
       const folders = project === undefined ? undefined : designSystemFolders(project);

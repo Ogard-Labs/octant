@@ -115,6 +115,8 @@ function createRevisionRoute(
     readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
     readonly threadReadAuthority?: ThreadReadAuthority;
     readonly resolveDesignSystem?: CanvasRouteDependencies["resolveDesignSystem"];
+    /** The secret the desktop's main process proves itself with; absent, no desktop is attached. */
+    readonly desktopBridgeSecret?: string;
     /** Handed the route's network switch and every connection its proxy made. */
     readonly network?: (parts: {
       readonly access: CanvasNetworkAccessService;
@@ -288,6 +290,9 @@ function createRevisionRoute(
     canvasProjection: projection,
     canvasService,
     designRunTickets: new CanvasDesignRunTickets(() => 1),
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
     canvasNetwork: {
       access: canvasNetworkAccess,
       proxy: new CanvasNetworkProxy({
@@ -3047,10 +3052,190 @@ describe("canvas network routes", () => {
   it("mints no token for a page that is not loaded by a browser frame", async () => {
     const { route } = networkRoute();
     await setSwitch(route, true);
-    // The desktop's main process asks for the page without a fetch destination.
+    // A request with no fetch destination and no proof of who sent it.
     const page = await runPage(route, {});
     expect(page.policy).toBe(BASE_POLICY);
     expect(page.html).not.toContain("/api/canvas/network/");
+  });
+
+  describe("for the desktop app's prototype host", () => {
+    const secret = "desktop-bridge-secret-for-this-test";
+    const surfaceId = "9f3c2a10-5b7e-4c1d-8e2f-0a1b2c3d4e5f";
+    const relayBase = `octant-prototype://network/${surfaceId}/`;
+    const proof = { "x-octant-desktop-secret": secret, "x-octant-prototype-surface": surfaceId };
+    const runRequest = () =>
+      new Request("http://127.0.0.1/api/canvas/design-run", {
+        method: "POST",
+        headers: windowHeaders,
+        body: JSON.stringify({ canvasId: String(canvasId), versionId, blockId: "live" }),
+      });
+    const device = () => ({
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    /** Runs the prototype as a local window and asks for its page as the desktop's main process does. */
+    async function desktopPage(
+      route: ReturnType<typeof createRevisionRoute>,
+      headers: Record<string, string>,
+      address = "http://127.0.0.1",
+    ) {
+      const ready = JSON.parse(await (await answer(route, runRequest())).text());
+      expect(ready.kind).toBe("ready");
+      const page = await answer(
+        route,
+        new Request(`${address}${ready.page as string}`, { method: "GET", headers }),
+      );
+      return {
+        policy: page.headers.get("content-security-policy") ?? "",
+        token: page.headers.get("x-octant-canvas-network-token"),
+        html: await page.text(),
+      };
+    }
+
+    it("mints a token for the desktop's main process and keeps it out of the page", async () => {
+      const { route, connections } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const page = await desktopPage(route, proof);
+      expect(page.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      // The page is told the prototype host's own address, never the host's or the token.
+      expect(page.policy).toBe(
+        BASE_POLICY.replace("connect-src 'none'", `connect-src ${relayBase}`),
+      );
+      expect(page.html).toContain(`${relayBase}fetch?url=`);
+      expect(page.html).not.toContain(page.token ?? "missing");
+      expect(page.html).not.toContain("/api/canvas/network/");
+      expect(page.policy).not.toContain("127.0.0.1");
+
+      // What the main process relays: the token's path and nothing else.
+      const relayed = await answer(
+        route,
+        new Request(
+          `http://127.0.0.1/api/canvas/network/${page.token ?? ""}/fetch?url=${encodeURIComponent("https://api.example.com/data")}`,
+          { method: "GET" },
+        ),
+      );
+      expect(relayed.status).toBe(200);
+      expect(connections().map((connection) => connection.url)).toEqual([
+        "https://api.example.com/data",
+      ]);
+    });
+
+    it("mints nothing without the desktop's proof, and the page keeps the policy that names nothing", async () => {
+      const { route } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const unproven: ReadonlyArray<Record<string, string>> = [
+        { "x-octant-prototype-surface": surfaceId },
+        { ...proof, "x-octant-desktop-secret": "another-secret" },
+        // A browser's script cannot send the secret unseen: it says where it is from.
+        { ...proof, origin: "http://127.0.0.1" },
+        { "x-octant-desktop-secret": secret },
+        { ...proof, "x-octant-prototype-surface": "not-a-surface" },
+        { ...proof, "x-octant-prototype-surface": `${surfaceId}/../x` },
+      ];
+      for (const headers of unproven) {
+        const page = await desktopPage(route, headers);
+        expect(page.token).toBeNull();
+        expect(page.policy).toBe(BASE_POLICY);
+        expect(page.html).not.toContain("octant-prototype://network/");
+      }
+      // The proof counts only on the loopback address the desktop reaches.
+      const elsewhere = await desktopPage(route, proof, "http://octant.example");
+      expect(elsewhere.token).toBeNull();
+      expect(elsewhere.policy).not.toContain("octant-prototype:");
+      expect(elsewhere.html).not.toContain("octant-prototype://network/");
+    });
+
+    it("mints nothing on a host no desktop is attached to", async () => {
+      const { route } = networkRoute();
+      await setSwitch(route, true);
+      const page = await desktopPage(route, proof);
+      expect(page.token).toBeNull();
+      expect(page.policy).toBe(BASE_POLICY);
+    });
+
+    it("mints nothing while the switch is off, or once it went off after the ticket", async () => {
+      const { route, access } = networkRoute({ desktopBridgeSecret: secret });
+      const off = await desktopPage(route, proof);
+      expect(off.token).toBeNull();
+      expect(off.policy).toBe(BASE_POLICY);
+
+      await setSwitch(route, true);
+      const ready = JSON.parse(await (await answer(route, runRequest())).text());
+      access.set(canvasId, false);
+      const late = await answer(
+        route,
+        new Request(`http://127.0.0.1${ready.page as string}`, { method: "GET", headers: proof }),
+      );
+      expect(late.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(late.headers.get("content-security-policy")).toBe(BASE_POLICY);
+    });
+
+    it("mints nothing for a page a paired device asked for, whoever redeems its ticket", async () => {
+      const threadReadAuthority = createThreadReadAuthority({
+        chat: (id) => {
+          if (String(id) !== threadId) throw new Error("Chat thread was not found.");
+          return { projectId };
+        },
+        work: async () => undefined,
+        code: async () => undefined,
+      });
+      const { route } = networkRoute({
+        desktopBridgeSecret: secret,
+        threadReadAuthority,
+        activeContextResolver: async (readerId) =>
+          String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined,
+      });
+      await setSwitch(route, true);
+      // The device's ticket, redeemed with the desktop's own proof.
+      const asked = runRequest();
+      bindPrincipalRouteContext(asked, device());
+      const ready = JSON.parse(await (await answer(route, asked)).text());
+      expect(ready.kind).toBe("ready");
+      const redeemed = await answer(
+        route,
+        new Request(`http://127.0.0.1${ready.page as string}`, { method: "GET", headers: proof }),
+      );
+      expect(redeemed.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(redeemed.headers.get("content-security-policy")).toBe(BASE_POLICY);
+
+      // A local window's ticket, redeemed by a request a device's session carried.
+      const local = JSON.parse(await (await answer(route, runRequest())).text());
+      const forwarded = new Request(`http://127.0.0.1${local.page as string}`, {
+        method: "GET",
+        headers: proof,
+      });
+      bindPrincipalRouteContext(forwarded, device());
+      const carried = await answer(route, forwarded);
+      expect(carried.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(carried.headers.get("content-security-policy")).toBe(BASE_POLICY);
+    });
+
+    it("revokes the desktop page's token the moment the switch is turned off", async () => {
+      const { route, connections } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const { token } = await desktopPage(route, proof);
+      expect(token).not.toBeNull();
+      await setSwitch(route, false);
+      const refused = await answer(
+        route,
+        new Request(
+          `http://127.0.0.1/api/canvas/network/${token ?? ""}/fetch?url=https%3A%2F%2Fapi.example.com%2F`,
+          { method: "GET" },
+        ),
+      );
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ refused: "token-not-live" });
+      expect(connections()).toEqual([]);
+    });
   });
 
   it("gives a thread's published page no proxy, whatever any Canvas's switch says", async () => {
