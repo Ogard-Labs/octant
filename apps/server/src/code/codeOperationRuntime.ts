@@ -6036,6 +6036,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const diff = this.#options.evidence.put(bounded.text, {
       truncated: bounded.truncated || result.capture.diff.truncated,
     });
+    // The capture's cursor must equal its own event's cursor, so journal any
+    // buffered reply text first; flushing later would advance the cursor past it.
+    this.#flushDelta(active);
     const capture = decodeCodeTurnReviewCapture({
       checkoutId: active.thread.checkoutId,
       version: (active.reviewLatest?.version ?? 0) + 1,
