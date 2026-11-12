@@ -242,9 +242,11 @@ Canvas owned by its thread (a chat provenance with no Project) at version
 `flow` block at version 23, the mockup library at version 24 (its new
 components, a node's `progress` and `defId` fields, and a block's
 `definitions`), the `deck` block at version 25, flow callouts at
-version 26, the `choice` block at version 27, and a document's `designSystem`
+version 26, the `choice` block at version 27, a document's `designSystem`
 at version 28 (the design system its typed blocks draw their colours from; see
-[Project design systems](design-systems.md#where-it-is-used)), so a document that
+[Project design systems](design-systems.md#where-it-is-used)), and a choice
+block's `sections` and per-question `allowNote` at version 29 (see
+[Decision forms](#decision-forms)), so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -874,8 +876,9 @@ version-21 design and diagram fields, so it names blocks up to version 21.
 Version 22 adds only a chart's title, subtitle, and point callouts, which a
 share still strips: a shared chart leaves as its readings and is named as
 version 21. Share version 12 carries the flow block, so it names blocks up
-to Canvas version 23, and share version 16 carries the choice block, so it
-names blocks up to Canvas version 27 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`);
+to Canvas version 23, share version 16 carries the choice block, and share
+version 17 carries a decision form's sections and notes, so it names blocks up
+to Canvas version 29 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`);
 the share service must learn each before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
@@ -891,6 +894,7 @@ with share version 12, the mockup library with share version 13, the deck
 block with share version 14 (a deck's presenter notes stay behind, as a
 design's frame notes do), flow callouts with share version 15, and the
 choice block with share version 16 (whose blocks may name Canvas version 27),
+and a decision form's sections with share version 17 (Canvas version 29),
 so a share
 that declares an older version
 and carries one is refused as a future version.
@@ -995,8 +999,10 @@ sends, so a retry after an unconfirmed send is the same message and the queue
 answers it as a duplicate, while a deliberate second send is a new one. After
 the host confirms, the block shows the sent answers; a refusal keeps the draft
 and shows the host's reason. A reload shows the question afresh, since the
-answer lives in the thread rather than the Canvas. [Decision forms](#decision-forms)
-are the designed change that saves answers on the Canvas.
+answer lives in the thread rather than the Canvas. On a host that serves saved
+answers, a choice block is drawn as a [decision form](#decision-forms), which
+saves them on the Canvas; the plain block above is the fallback where the host
+does not, and the only drawing on a surface with no runtime.
 
 The block reads only, listing its questions and options with one line saying
 why, wherever it cannot send: a window without a message queue for the thread
@@ -1023,8 +1029,7 @@ description and the always-visible Canvas description both point there too.
 
 ## Decision forms
 
-Status: designed, not built, except the unlimited question count above, which
-is built. A decision form is a `choice` block that an agent uses when it needs
+Status: built. A decision form is a `choice` block that an agent uses when it needs
 many decisions at once: a list the person works through, leaves, and returns
 to, and that the agent reads back. It is the same block, not a new kind, so
 the question schema stays one schema. What it adds is sections, a note on each
@@ -1148,9 +1153,11 @@ own, wherever the choice block draws today; the thread still shows a card.
 ### What the agent reads
 
 The `octant_canvas` `read` operation returns, for each choice block, a
-`choiceAnswers` object: the counts answered and total, the time of the last
-confirmed send, and for each question its selected option ids and labels, written
-answer, note, `acceptedRecommendation`, `stale`, and answer time. Only the
+`choiceAnswers` object: the counts answered and total and, for each question,
+its `status` (`answered`, `unanswered`, `skipped`, or `stale`) and, when
+answered, the selected options with their labels, the written answer, the note,
+`acceptedRecommendation`, and the answer time. It is absent until a person has
+answered something. Only the
 Canvas's owning thread and its managed children receive it, as with
 `requestedChanges`; another thread that can read the Canvas gets none. The
 `describe` guidance tells the agent to wait for the person's Send, read the
@@ -1178,21 +1185,19 @@ comments' path is.
 - _Agent-visible answers on every read._ Answers are the person's; only the
   owning thread reads them.
 
-### Build and verification plan
+### Verification
 
-Delivered in slices so each is reviewable. One: the unlimited question count
-and the agent guidance (built). Two: the version-29 contract fields, the
-aggregate, events, reducer, admission policy, and route. Three: the form
-(sections, saving states, progress, notes, accept recommendations). Four: the
-Send message, `read` output, and `describe` guidance. Five: share and export of
-sections. Each slice carries focused red/green policy and contract tests;
-slice two adds journal replay, concurrent-write, stale-fingerprint, and
-authority negatives (a paired client and a named agent actor are refused);
-slice three adds renderer tests and rendered QA of a 24-question form at the
-sidebar, page, and narrow widths, in light and dark and under forced colours;
-slice four adds a real-provider smoke in which an agent builds a 24-question
-form and reads the answers, a maintainer live check where credentials are
-needed.
+Focused tests hold the contract (the version-29 gate, section placement, a
+40-question block, the share's version 17), the pure policy (admission, the
+reducer, stale fingerprints, recommendations, progress), the service (journal
+replay after a restart, a 24-answer batch, stale sequence, an unauthorized
+workspace, a forged actor), the routes (a host window saves, a paired device
+reads and cannot write), the form (saving as made, accept recommendations,
+Send gating, a refused save, read-only), the Send message, the owning-thread
+`read`, and both renderers. Not yet exercised: rendered QA of a 24-question
+form at the sidebar, page, and narrow widths in light, dark, and forced colours,
+and a real-provider smoke in which an agent builds a 24-question form and reads
+the answers back. The second needs credentials and is a maintainer live check.
 
 ## Diagram boards and comments
 

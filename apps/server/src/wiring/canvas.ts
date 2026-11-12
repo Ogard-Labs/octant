@@ -950,6 +950,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     canvas: canvasService,
     commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
+    choiceAnswers: (canvasId) => canvasChoiceAnswerService.answersForAgent(canvasId),
     markReader: ({ readerId, canvasId }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return { status: "refused" };

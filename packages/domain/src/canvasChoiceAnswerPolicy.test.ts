@@ -11,7 +11,10 @@ import {
 } from "./canvasChoiceAnswerPolicy";
 
 const canvasId = "11111111-1111-4111-8111-111111111111";
-const person = decodeCanvasActor({ kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" });
+const person = decodeCanvasActor({
+  kind: "local-user",
+  actorId: "22222222-2222-4222-8222-222222222222",
+});
 const at = "2026-11-12T10:00:00.000Z" as never;
 
 const block = decodeCanvasBlock({

@@ -84,7 +84,7 @@ import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
-import { canvasChoiceMessage } from "./canvasChoiceMessage";
+import { canvasChoiceMessage, canvasDecisionFormMessage } from "./canvasChoiceMessage";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
@@ -497,6 +497,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     tipVersionId,
   ]);
 
+  // A decision form's saved answers, when the host serves them; bound once so
+  // the form's loading effect does not re-run on every render.
+  const choiceAnswers = useMemo(() => {
+    const load = props.client?.choiceAnswers;
+    const revise = props.client?.reviseChoiceAnswers;
+    if (load === undefined || revise === undefined) return undefined;
+    return {
+      canvasId: props.tab.canvasId,
+      load: () => load(props.tab.canvasId),
+      revise,
+    };
+  }, [props.client, props.tab.canvasId]);
+
   // Comments are offered only when the host journals them; the transport's
   // methods are bound once so the panel's effects do not re-run per render.
   const commentsClient = useMemo(() => {
@@ -822,19 +835,59 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // own authority. Where the window holds no queue or the host gave no scope
   // for the Canvas, its thread cannot be reached from here, and the choice
   // says so instead of offering a send the host would refuse.
+  const answersField = choiceAnswers === undefined ? {} : { answers: choiceAnswers };
   const choiceRuntime: CanvasChoiceRuntime =
     queueClient === undefined
-      ? { kind: "read-only", reason: "This window cannot send to this Canvas's thread." }
+      ? {
+          kind: "read-only",
+          reason: "This window cannot send to this Canvas's thread.",
+          ...answersField,
+        }
       : reviseBase === null || selectedVersionId === undefined
-        ? { kind: "read-only", reason: "This Canvas's thread cannot be reached from here." }
+        ? {
+            kind: "read-only",
+            reason: "This Canvas's thread cannot be reached from here.",
+            ...answersField,
+          }
         : String(selectedVersionId) !== tipVersionId || expectedSequence < headSequence
           ? {
               kind: "read-only",
               reason: "An older version is on screen; answer on the current one.",
+              ...answersField,
             }
           : {
               kind: "can-send",
               threadLabel: `the ${CHOICE_MODE_NAMES[reviseBase.mode]} thread`,
+              ...answersField,
+              onSendForm: async (block, answers) => {
+                const answer = [
+                  String(props.tab.canvasId),
+                  String(block.blockId),
+                  JSON.stringify(answers),
+                ].join(":");
+                const id = unconfirmedChoiceSends.current.get(answer) ?? crypto.randomUUID();
+                unconfirmedChoiceSends.current.set(answer, id);
+                const sent = await enqueueCanvasCommentTurn(queueClient, {
+                  mode: reviseBase.mode,
+                  threadId: String(reviseBase.originThreadId),
+                  prompt: canvasDecisionFormMessage({
+                    canvasTitle: definition.title,
+                    canvasId: String(props.tab.canvasId),
+                    block,
+                    answers,
+                  }),
+                  attemptKey: `${answer}:${id}`,
+                  canvasSelection: {
+                    canvasId: props.tab.canvasId,
+                    versionId: selectedVersionId,
+                    sequence: expectedSequence,
+                    displayName: definition.title,
+                    scope: "whole-canvas",
+                  },
+                });
+                if (sent.status === "sent") unconfirmedChoiceSends.current.delete(answer);
+                return sent;
+              },
               onSend: async (block, response) => {
                 const answer = [
                   String(props.tab.canvasId),

@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 11        | 9       | 2            | 0                   |
+| [Canvas](#canvas)                                                                     | 11        | 10      | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
@@ -2580,15 +2580,15 @@ Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choic
 
 A `choice` block is also how an agent asks for many decisions at once: no question limit, sections, a note on each question, answers that save on the Canvas as they are made, a progress count, an action that accepts the agent's recommendations, and a `read` the agent uses to get the answers.
 
-- The Canvas choice block has no limit on how many questions it holds, and its answer has no count or size ceiling; only the inline `ask-user` questionnaire keeps four questions. The two use separate schemas. _Built._
-- Agents are told to use a choice block for more than four decisions (the block's `describe` text, the Canvas tool description, and `ask-user`). _Built._
-- Sections, per-question notes, and `allowNote` arrive with Canvas schema version 29, and the form changes no document shape for a block that carries none of them. _Not built yet._
-- Answers are journaled facts of a `canvas-choice-answers` aggregate per Canvas, not document versions. The host stamps the `local-user` author; no agent operation writes an answer; a paired client reads and cannot write. A question an agent revised keeps its answer only when its fingerprint is unchanged. _Not built yet._
-- Each pick saves as made; Send answers is the explicit act that wakes the agent, through the thread's message queue under its existing authority, and is never an approval. _Not built yet._
-- _Accept every recommendation not yet answered_ answers only the questions with an unambiguous recommendation, never replaces an answer, and marks what it made. _Not built yet._
-- The owning thread's `read` returns the answers; shares, public links, exports, and artifact sync do not carry answers or notes. _Not built yet._
+- The Canvas choice block has no limit on how many questions it holds, and its answer has no count or size ceiling; only the inline `ask-user` questionnaire keeps four questions. The two use separate schemas.
+- Agents are told to use a choice block for more than four decisions (the block's `describe` text, the Canvas tool description, and `ask-user`).
+- Sections, per-question notes, and `allowNote` arrive with Canvas schema version 29, and the form changes no document shape for a block that carries none of them.
+- Answers are journaled facts of a `canvas-choice-answers` aggregate per Canvas, not document versions. The host stamps the `local-user` author; no agent operation writes an answer; a paired client reads and cannot write. A question an agent revised keeps its answer only when its fingerprint is unchanged.
+- Each pick saves as made; Send answers is the explicit act that wakes the agent, through the thread's message queue under its existing authority, and is never an approval.
+- _Accept every recommendation not yet answered_ answers only the questions with an unambiguous recommendation, never replaces an answer, and marks what it made.
+- The owning thread's `read` returns the answers (a question reworded after it was answered reads `stale`); shares, public links, exports, and artifact sync do not carry answers or notes.
 
-Status: Partly built. Since: 2026-11-12. Detail: [Canvas: Decision forms](canvas.md#decision-forms).
+Status: Built. Since: 2026-11-12. Live checks owed: rendered QA of a 24-question form and a real-provider smoke of an agent building and reading one. Detail: [Canvas: Decision forms](canvas.md#decision-forms).
 
 ### Canvas shares and exports
 
