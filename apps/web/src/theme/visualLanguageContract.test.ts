@@ -1650,32 +1650,28 @@ describe("the public-block visual language", () => {
       expect(dock).not.toContain("dock-tile__caption");
     });
 
-    it("draws a tile square and flat from the shared tokens from 681px up, with one line on its top and left", () => {
-      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tiles {"));
-      const inWide = (selector: string) => {
-        const start = wide.indexOf(`${selector} {`);
-        expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
-        return wide.slice(start, wide.indexOf("}", start));
-      };
-      expect(inWide(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
-      const tile = inWide(".dock-tile");
+    it("draws a tile square and flat on the pane fill at every width, with no gap to a neighbour", () => {
+      expect(body(".dock-tiles")).toMatch(/--octant-tile-inset:\s*0px/);
+      const tile = body(".dock-tile");
       expect(tile).toMatch(/border-radius:\s*0/);
       expect(tile).toMatch(/background:\s*var\(--octant-pane-fill\)/);
-      expect(tile).toMatch(/box-shadow:\s*none/);
-      const line = inWide(".dock-tile::after");
+      expect(tile).not.toMatch(/box-shadow|--oct-radius/);
+      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
+      const rim = body(".dock-tile::after");
+      expect(rim).toMatch(/border-radius:\s*0/);
+      expect(rim).not.toMatch(/box-shadow/);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
+      // No rule narrows the window to give a tile back a corner, a rim or a gap.
+      expect(dock).not.toMatch(/--octant-tile-inset:\s*[1-9]/);
+      expect(dock).not.toMatch(/panel-seat|panel-rim|octant-panel-fill/);
+    });
+
+    it("draws the one line on a tile's top and left from 681px up, where the window is a grid of panes", () => {
+      const wide = dock.slice(dock.indexOf("@media (min-width: 681px) {\n  .dock-tile::after"));
+      const line = wide.slice(wide.indexOf(".dock-tile::after {"), wide.indexOf("}"));
       expect(line).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
       expect(line).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
       expect(line).not.toMatch(/border-(right|bottom)/);
-      expect(tile).not.toMatch(/rgb\(|#[0-9a-f]{3,6}/i);
-      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
-    });
-
-    it("keeps a narrow window's tile a rounded panel with a seat shadow and a rim", () => {
-      const tile = body(".dock-tile");
-      expect(tile).toMatch(/background:\s*var\(--octant-panel-fill\)/);
-      expect(tile).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
-      expect(tile).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-seat\)/);
-      expect(body(".dock-tile::after")).toMatch(/box-shadow:\s*var\(--octant-shadow-panel-rim\)/);
     });
   });
 
