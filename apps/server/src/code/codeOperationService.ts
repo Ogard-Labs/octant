@@ -268,10 +268,15 @@ export interface CodeOperationAuthorityPort {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
   ) => Awaitable<string | undefined>;
+  /**
+   * `signal`, when given, stops the probe: its repository reads are killed and
+   * it answers nothing once aborted. Absent, the probe runs to its answer.
+   */
   readonly resolveCheckoutRoot: (
     windowId: WindowId,
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
+    signal?: AbortSignal,
   ) => Awaitable<
     | Readonly<{
         checkoutRoot: string;
@@ -4761,10 +4766,15 @@ export class CodeOperationService {
       return { status: "skipped", reason: "checkout-unavailable" };
     // Resolving the root probes the folder and its repository, which a stalled
     // mount can hold indefinitely; the step's bound covers it too, so a stuck
-    // probe neither occupies a worker nor holds shutdown.
+    // probe neither occupies a worker nor holds shutdown. The same signal goes
+    // into the probe, so an abandoned probe's Git is killed rather than left
+    // running behind the step.
+    const signal = stepSignal();
     const root = await untilAborted(
-      stepSignal(),
-      Promise.resolve(this.#options.authority.resolveCheckoutRoot(scopeId, thread, checkout)),
+      signal,
+      Promise.resolve(
+        this.#options.authority.resolveCheckoutRoot(scopeId, thread, checkout, signal),
+      ),
     );
     if (root === undefined) return { status: "skipped", reason: "checkout-unavailable" };
     // A server thread's Git runs on its server, as its Git tab's does.

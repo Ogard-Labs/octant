@@ -1106,8 +1106,8 @@ export function createCodeOperationRuntime(
       const context = await approvalContext(options, command, thread, checkout);
       return context === undefined ? undefined : approvalContextDigest(context);
     },
-    resolveCheckoutRoot: async (windowId, thread, checkout) => {
-      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout);
+    resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {
+      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout, signal);
       const folders = extraFoldersOf(thread.projectId);
       const root =
         resolved === undefined || folders.length === 0
