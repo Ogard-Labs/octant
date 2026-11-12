@@ -16,6 +16,8 @@ describe("closed tool catalog", () => {
       .sort();
     expect(ids).toEqual([
       "browser-automation",
+      "code-debug",
+      "code-debug-evaluate",
       "code-language",
       "computer-use",
       "harness-ask-user",

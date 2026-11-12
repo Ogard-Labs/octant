@@ -1,5 +1,9 @@
 import { Schema } from "effect";
 import { BrowserContextPolicy } from "./browserAutomation";
+import {
+  decodeCodeDebugEvaluateToolArguments,
+  decodeCodeDebugSessionToolArguments,
+} from "./codeDebug";
 import { decodeCodeLanguageToolArguments } from "./codeLanguage";
 import { ComputerUsePolicy } from "./computerUse";
 import { ExtensionCapability } from "./extensions";
@@ -372,6 +376,39 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     resultTaintsThread: false,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeCodeLanguageToolArguments(value),
+  }),
+  // The agent's debug tool. Starting a session runs the configuration's
+  // program in the thread's capsule, so it is policed as a shell command is:
+  // refused in Plan, asked below Full access, unasked at it. An approved
+  // session is then controlled and read without asking, on a marked thread
+  // too: stepping runs only the program the approval named. What a session
+  // shows is the program's own data, so every read marks the thread.
+  entry({
+    capabilityId: "code-debug",
+    version: 1,
+    owner: "core",
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: false,
+    resultTaintsThread: true,
+    requiresAppManagedTools: true,
+    decodeArguments: (value) => decodeCodeDebugSessionToolArguments(value),
+  }),
+  // An expression is code the agent wrote, run inside the program. The
+  // session's approval covers it until the thread has read outside content;
+  // after that each one is confirmed afresh, as each shell command is.
+  entry({
+    capabilityId: "code-debug-evaluate",
+    version: 1,
+    owner: "core",
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: true,
+    resultTaintsThread: true,
+    requiresAppManagedTools: true,
+    decodeArguments: (value) => decodeCodeDebugEvaluateToolArguments(value),
   }),
   entry({
     capabilityId: "mcp-tool",
