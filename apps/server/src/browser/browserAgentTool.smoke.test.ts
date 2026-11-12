@@ -75,6 +75,8 @@ const pages: Record<string, string> = {
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
     <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
     <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
+    <button id="name" onclick="document.title = 'Name ' + prompt('Your name?')">Name</button>
+    <button id="secret" onclick="document.title = 'Secret ' + prompt('Enter your password')">Secret</button>
     <fieldset disabled><input id="locked" aria-label="Locked"></fieldset>
     <p>Width <span id="width"></span></p>
     <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
@@ -946,9 +948,59 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const asked = await tool.call({ operation: "click", selector: "#ask" });
     expect(asked.result.page?.title).toBe("Kept");
     expect(asked.result.page?.dialogs).toEqual([
-      { type: "confirm", message: "Delete everything?", answer: "dismissed" },
-      { type: "alert", message: "kept", answer: "accepted" },
+      { type: "confirm", message: "Delete everything?", answer: "dismissed", answeredBy: "rule" },
+      { type: "alert", message: "kept", answer: "accepted", answeredBy: "rule" },
     ]);
+    await tool.stop();
+  });
+
+  it("answers the dialog an action raises as the agent said, and never types a secret into a prompt", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    const agreed = await tool.call({
+      operation: "click",
+      selector: "#ask",
+      dialog: { action: "accept" },
+    });
+    expect(agreed.result.page?.title).toBe("Deleted");
+    // The agent's answer is for the first dialog; the alert after it takes the rule.
+    expect(agreed.result.page?.dialogs).toEqual([
+      { type: "confirm", message: "Delete everything?", answer: "accepted", answeredBy: "agent" },
+      { type: "alert", message: "deleted", answer: "accepted", answeredBy: "rule" },
+    ]);
+    const named = await tool.call({
+      operation: "click",
+      selector: "#name",
+      dialog: { action: "accept", text: "Ada" },
+    });
+    expect(named.result.page?.title).toBe("Name Ada");
+    const secret = await tool.call({
+      operation: "click",
+      selector: "#secret",
+      dialog: { action: "accept", text: "hunter2" },
+    });
+    expect(secret.result.page?.title).toBe("Secret null");
+    expect(secret.result.page?.dialogs).toEqual([
+      {
+        type: "prompt",
+        message: "Enter your password",
+        answer: "dismissed",
+        answeredBy: "rule",
+        textWithheld: "credential-protected",
+      },
+    ]);
+    // An answer left over from one call never reaches a later call's dialog.
+    const later = await tool.call({ operation: "click", selector: "#ask" });
+    expect(later.result.page?.title).toBe("Kept");
+    // A read raises no dialog of its own, so it takes no answer.
+    const read = await tool.call({ operation: "snapshot", dialog: { action: "accept" } });
+    expect(read.result).toEqual({ error: "invalid-browser-input" });
+    const malformed = await tool.call({
+      operation: "click",
+      selector: "#ask",
+      dialog: { action: "maybe" },
+    });
+    expect(malformed.result).toEqual({ error: "invalid-browser-input" });
     await tool.stop();
   });
 

@@ -25,6 +25,7 @@ import type {
 import type {
   BrowserActionRequest,
   BrowserContextId,
+  BrowserDialogReport,
   BrowserDownloadReport,
   BrowserContextPolicy,
   BrowserEmulationReport,
@@ -51,12 +52,8 @@ export interface BrowserRuntimeObservation {
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;
-  /** The page's own dialogs since the last action, as the fixed policy answered them. */
-  readonly dialogs?: ReadonlyArray<{
-    readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
-    readonly message: string;
-    readonly answer: "accepted" | "dismissed";
-  }>;
+  /** The page's own dialogs since the last action, and how each was answered. */
+  readonly dialogs?: ReadonlyArray<BrowserDialogReport>;
   /** Only a tab action fills this: the context's tabs as they now stand. */
   readonly tabs?: ReadonlyArray<{
     readonly tabId: string;
@@ -259,6 +256,7 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "diagnosticsSince"
       | "diagnosticsWarnings"
       | "auditKind"
+      | "dialog"
     >
   > & {
     /**

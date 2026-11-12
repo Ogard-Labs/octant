@@ -526,6 +526,20 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
               flows: browserFlows,
+              // A routine's turn is unattended, and its tool is lent no script runner.
+              ...(input.routineRun !== undefined
+                ? {}
+                : {
+                    pageScript: {
+                      level: () => {
+                        const current = workThreadProjection.read(input.thread.id);
+                        return current === undefined || current.access !== input.thread.access
+                          ? undefined
+                          : workThreadAccessOf(current.access).executionPolicy;
+                      },
+                      run: (command) => browserAutomationService.runScript(command),
+                    },
+                  }),
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
               uuid: randomUUID,

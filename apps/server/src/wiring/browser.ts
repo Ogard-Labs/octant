@@ -66,6 +66,7 @@ import {
   defaultShellSettings,
   enabledModes,
   isBrowserProfileSiteRemembered,
+  workThreadAccessOf,
 } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
@@ -87,7 +88,7 @@ import {
 import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
 import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
-import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
+import { decodeAgentRunId, decodeWorkThreadId, type AgentRun } from "@octant/contracts";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -666,11 +667,18 @@ export function wireBrowser(deps: BrowserDependencies) {
       runtime: browserRuntime,
       pageScriptPolicy: (windowId, threadId, mode) => {
         if (
-          mode !== "code" ||
+          mode === "chat" ||
           isRoutineHostScope(windowId) ||
           !windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId))
         )
           return undefined;
+        if (mode === "work") {
+          // Work has no scoped script permission, so only its Full access admits one.
+          const work = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
+          return work?.lifecycle === "active"
+            ? workThreadAccessOf(work.access).executionPolicy
+            : undefined;
+        }
         const thread = persistence.readCodeThread(decodeCodeThreadId(String(threadId)));
         return thread?.lifecycle === "active"
           ? codeSessionAuthority.effectiveThread(windowId, thread).executionPolicy

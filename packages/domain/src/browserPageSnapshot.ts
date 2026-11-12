@@ -1474,6 +1474,49 @@ export function dialogType(value: string): keyof typeof BROWSER_DIALOG_POLICY {
   return value === "confirm" || value === "prompt" || value === "beforeunload" ? value : "alert";
 }
 
+/**
+ * The words a credential field is known by, read here from a prompt's own
+ * message: a prompt has no field to inspect, so what it asks for is the only
+ * evidence of what its text would be.
+ */
+const CREDENTIAL_PROMPT =
+  /(?:password|passcode|passphrase|one-time|otp|\bpin\b|credit|card|ssn|secret|token|api.?key)/i;
+
+export interface BrowserDialogDecision {
+  readonly answer: "accepted" | "dismissed";
+  readonly answeredBy: "agent" | "rule";
+  /** The text an accepted prompt receives. */
+  readonly promptText?: string;
+  /** The agent's text was not typed, and the fixed rule answered instead. */
+  readonly textWithheld?: "credential-protected";
+}
+
+/**
+ * How one dialog is answered. The agent's answer is stated with the action
+ * that raises the dialog, never after it opens, so no dialog waits on a model
+ * turn while it blocks its page. Without one the fixed rule answers. Text for
+ * a prompt that asks for a credential is withheld and the rule answers, the
+ * same refusal typing into a credential field gets.
+ */
+export function answerBrowserDialog(
+  type: keyof typeof BROWSER_DIALOG_POLICY,
+  message: string,
+  agent: { readonly action: "accept" | "dismiss"; readonly text?: string | undefined } | undefined,
+): BrowserDialogDecision {
+  if (agent === undefined) return { answer: BROWSER_DIALOG_POLICY[type], answeredBy: "rule" };
+  if (agent.action === "dismiss") return { answer: "dismissed", answeredBy: "agent" };
+  if (type !== "prompt" || agent.text === undefined)
+    return { answer: "accepted", answeredBy: "agent" };
+  if (CREDENTIAL_PROMPT.test(message)) {
+    return {
+      answer: BROWSER_DIALOG_POLICY[type],
+      answeredBy: "rule",
+      textWithheld: "credential-protected",
+    };
+  }
+  return { answer: "accepted", answeredBy: "agent", promptText: agent.text };
+}
+
 /** The conditions a page checks, with element targets the host already resolved. */
 export function browserPageConditions(waitFor: {
   readonly conditions: ReadonlyArray<
