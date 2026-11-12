@@ -115,6 +115,11 @@ type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly egressHosts?: ReadonlyArray<string>;
   /** Tool names the catalog entry lists as ask-every-call, from the same vouched source. */
   readonly askEveryCall?: ReadonlyArray<string>;
+  /**
+   * The server keeps one login in its plugin data, which two processes must not
+   * share (a second refresh revokes it), so at most one process runs at a time.
+   */
+  readonly exclusive?: true;
 };
 
 export interface AgentPluginMcpSessionManagerOptions {
@@ -152,6 +157,7 @@ export interface AgentPluginMcpSessionManagerOptions {
   /** The catalog's listed hosts for a package the host wrote for a command connector. */
   readonly egressHostsForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
   readonly askEveryCallForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
+  readonly exclusiveForSource?: (sourceRef: string) => boolean;
   readonly resolveUserAddedSecrets?: (
     launch: AgentPluginsMcpLaunchSpec,
     target: { readonly extensionId: string; readonly componentId: string },
@@ -177,6 +183,9 @@ export class AgentPluginMcpSessionManager {
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
   readonly #egressHostsForSource: AgentPluginMcpSessionManagerOptions["egressHostsForSource"];
   readonly #askEveryCallForSource: AgentPluginMcpSessionManagerOptions["askEveryCallForSource"];
+  readonly #exclusiveForSource: AgentPluginMcpSessionManagerOptions["exclusiveForSource"];
+  /** Packages whose one process is running or starting, by package and component. */
+  readonly #exclusiveHolders = new Set<string>();
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #bindUserAddedAuthentication: AgentPluginMcpSessionManagerOptions["bindUserAddedAuthentication"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
@@ -231,6 +240,7 @@ export class AgentPluginMcpSessionManager {
     this.#isUserAddedSource = options.isUserAddedSource;
     this.#egressHostsForSource = options.egressHostsForSource;
     this.#askEveryCallForSource = options.askEveryCallForSource;
+    this.#exclusiveForSource = options.exclusiveForSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
     this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
   }
@@ -598,6 +608,9 @@ export class AgentPluginMcpSessionManager {
             this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
           ...(egressHosts === undefined || egressHosts.length === 0 ? {} : { egressHosts }),
           ...(askEveryCall === undefined || askEveryCall.length === 0 ? {} : { askEveryCall }),
+          ...(sourceRef !== undefined && this.#exclusiveForSource?.(sourceRef) === true
+            ? { exclusive: true as const }
+            : {}),
         };
         desired.set(sessionKey(key), key);
       }
@@ -842,6 +855,18 @@ export class AgentPluginMcpSessionManager {
                 target,
                 platform: this.#platform,
                 ...(target.egressHosts === undefined ? {} : { egressHosts: target.egressHosts }),
+                ...(target.exclusive === true
+                  ? {
+                      exclusive: {
+                        acquire: () => {
+                          const key = `${target.extensionId}:${target.packageId}:${target.componentId}`;
+                          if (this.#exclusiveHolders.has(key)) return undefined;
+                          this.#exclusiveHolders.add(key);
+                          return () => void this.#exclusiveHolders.delete(key);
+                        },
+                      },
+                    }
+                  : {}),
               }),
             }),
       });
@@ -1120,6 +1145,8 @@ function supervisedStdioProcessPort(input: {
   readonly target: AgentPluginMcpSessionKey;
   readonly platform: NodeJS.Platform;
   readonly egressHosts?: ReadonlyArray<string>;
+  /** Returns a release, or undefined when another process already holds the one slot. */
+  readonly exclusive?: { readonly acquire: () => (() => void) | undefined };
 }): AgentPluginMcpStdioProcessPort {
   return {
     start: async (launch, signal) => {
@@ -1148,6 +1175,12 @@ function supervisedStdioProcessPort(input: {
           insidePlugin
             ? shebangCommandRefusal(launch.name)
             : launcherCommandRefusal(launch.name, launch.command),
+        );
+      }
+      const release = input.exclusive?.acquire();
+      if (input.exclusive !== undefined && release === undefined) {
+        throw new Error(
+          "This connector keeps one login for the whole computer and is already running for another thread. It frees up when that thread's connection closes.",
         );
       }
       const proxy =
@@ -1198,11 +1231,13 @@ function supervisedStdioProcessPort(input: {
         started = await input.supervisor.startInteractive(runtime, signal);
       } catch (error) {
         await proxy?.stop();
+        release?.();
         throw error;
       }
       if (started.process.stdin === undefined || started.process.stdout === undefined) {
         await started.process.stop().catch(() => undefined);
         await proxy?.stop();
+        release?.();
         throw new Error("Supervised MCP process did not expose stdio.");
       }
       return {
@@ -1213,11 +1248,13 @@ function supervisedStdioProcessPort(input: {
             await started.process.stop();
           } finally {
             await proxy?.stop();
+            release?.();
           }
         },
         once: (_event, listener) =>
           started.process.once("exit", () => {
             void proxy?.stop();
+            release?.();
             listener();
           }),
       };

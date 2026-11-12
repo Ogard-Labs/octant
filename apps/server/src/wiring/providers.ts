@@ -1032,6 +1032,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         egressHostsForSource: (sourceRef) => userAddedMcpServers.egressHosts(sourceRef),
         askEveryCallForSource: (sourceRef) => userAddedMcpServers.askEveryCall(sourceRef),
+        exclusiveForSource: (sourceRef) => userAddedMcpServers.exclusive(sourceRef),
         bindUserAddedAuthentication: (launch, target) =>
           mcpServerSignInHolder.current?.bindAuthentication(
             target.extensionId,
@@ -1126,6 +1127,12 @@ export function wireProviders(deps: ProvidersDependencies) {
           (() => undefined),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
+          // Stop the package's processes first, so nothing rewrites its state,
+          // then drop the state it kept (a connector's stored login).
+          await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(
+            extensionLifecycleService.snapshot(),
+          );
+          await extensionPackageStore.removePluginData(extensionId);
           await userAddedMcpServers.remove(sourceRef);
         },
       },

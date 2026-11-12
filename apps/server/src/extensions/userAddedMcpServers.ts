@@ -323,6 +323,19 @@ export class UserAddedMcpServerStore {
     return hosts === undefined || hosts.length === 0 ? undefined : hosts;
   }
 
+  /** Whether this vouched connector folder keeps a login that only one process may use. */
+  exclusive(
+    sourceRef: string,
+    lookup: (id: string) => { readonly auth: ConnectorAuth } | undefined = connectorById,
+  ): boolean {
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return false;
+    const name = basename(registered.absolutePath);
+    if (!name.startsWith(CONNECTOR_PACKAGE_PREFIX)) return false;
+    const auth = lookup(name.slice(CONNECTOR_PACKAGE_PREFIX.length))?.auth;
+    return auth?.kind === "command" && auth.stateFileEnv !== undefined;
+  }
+
   /** Tools the catalog marks ask-every-call for this vouched connector folder. */
   askEveryCall(
     sourceRef: string,

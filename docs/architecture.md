@@ -10929,9 +10929,14 @@ anything the catalog does not name. Connect is still the host window only.
   start it is never used again; Octant leaves it in the broker (removed on
   uninstall) rather than rewriting the package.
 - **State.** The server's token store is `${PLUGIN_DATA}/tokens.json`: inside
-  the plugin data folder the sandbox already confines writes to, removed with
-  the package. Because the server allows one process per store, a session for
-  this component is one process shared by threads, not one per thread.
+  the plugin data folder the sandbox already confines writes to. Uninstalling
+  stops the package's processes and then removes that folder
+  (`removePluginData`), so a reinstall starts with no login. A second process on
+  the same store would refresh the same token and revoke the session, and the
+  host starts one process per thread scope, so this connector is `exclusive`:
+  while one thread's process runs, another thread's start is refused with a
+  message that it frees up when that connection closes. Sharing one process
+  across scopes is a later change.
 - **Approvals.** The server starts read-only (`JOTTACLOUD_READ_ONLY=1`); the
   catalog does not turn write tools on. `delete_file` and `create_share_link`
   are listed as ask-every-call: they publish or remove data, so no remembered
