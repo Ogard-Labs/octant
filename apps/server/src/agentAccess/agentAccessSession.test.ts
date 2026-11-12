@@ -418,3 +418,39 @@ describe("threads the person made in a granted Project", () => {
     expect(turned).toEqual([{ threadId: projectThread, mode: "code" }]);
   });
 });
+
+describe("stopping a revoked agent's turns", () => {
+  it("reaches a thread the person made once the agent ran a turn there, and no other", async () => {
+    const { service, threadProject, threadAccess } = deps();
+    const turnedService: AgentSessionDependencies["service"] = {
+      ...service,
+      turnThreadsOf: () => [{ threadId: projectThread, mode: "code" }],
+    };
+    const sent: string[] = [];
+    const session = createAgentSession({
+      grant: grant(),
+      signal: new AbortController().signal,
+      stopOnly: true,
+      deps: {
+        service: turnedService,
+        threadProject,
+        threadAccess,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent: () => undefined,
+        dispatch: async ({ request }) => {
+          sent.push(new URL(request.url).pathname);
+          return Response.json({});
+        },
+      },
+    });
+    const cancel = (threadId: string) =>
+      session.send({
+        path: "/api/code/commands",
+        method: "POST",
+        body: { kind: "cancel-provider-turn", threadId },
+      });
+    expect((await cancel(projectThread)).status).toBe(200);
+    expect((await cancel(strangerThread)).status).toBe(403);
+    expect(sent).toEqual(["/api/code/commands"]);
+  });
+});

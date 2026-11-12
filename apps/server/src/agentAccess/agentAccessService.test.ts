@@ -179,6 +179,37 @@ describe("agent grants", () => {
     ).toEqual({ kind: "refused" });
   });
 
+  it("lets an unconfirmed claim lapse with its connection code", () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Home bot", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { code, publicKey, fingerprint } = enroll(service, grantId);
+    expect(
+      service.claim({
+        ticketId: code.ticketId,
+        ticketProof: code.ticketProof,
+        publicKey,
+        fingerprint,
+        label: "laptop",
+      }).kind,
+    ).toBe("pending");
+    expect(service.list()[0]?.pendingClaims).toHaveLength(1);
+
+    clock.now += 6 * 60 * 1_000;
+    expect(service.list()[0]?.pendingClaims).toEqual([]);
+    expect(
+      service.execute(
+        { kind: "confirm-key", grantId: grantId as never, fingerprint },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    ).toMatchObject({ kind: "refused", reason: "not-pending" });
+    expect(service.read(grantId)?.keys).toEqual([]);
+  });
+
   it("ends the agent's sessions and refuses its key the moment the grant is revoked", () => {
     const { service, clock } = harness();
     const grantId = created(

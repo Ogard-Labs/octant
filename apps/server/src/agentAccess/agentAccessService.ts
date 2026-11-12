@@ -108,6 +108,8 @@ interface PendingKey {
   readonly label: string;
   readonly publicKey: string;
   readonly claimedAt: UtcTimestamp;
+  /** The claimed code's deadline: an unconfirmed claim lapses with its code. */
+  readonly expiresAt: number;
 }
 
 /**
@@ -209,6 +211,7 @@ export class AgentAccessService {
       label: request.label,
       publicKey: facts.canonicalPem,
       claimedAt: iso(this.#now()),
+      expiresAt: ticket.expiresAt,
     });
     this.#pending.set(ticket.grantId, pending);
     return { kind: "pending", grantId: ticket.grantId };
@@ -523,6 +526,13 @@ export class AgentAccessService {
     if (record === undefined) return refused("not-found", "No agent grant has that id.");
     if (!isActive(record.grant)) return refused("revoked", "That agent grant is revoked.");
     const pending = this.#pending.get(grantId)?.get(fingerprint);
+    if (pending !== undefined && pending.expiresAt <= this.#now()) {
+      this.#pending.get(grantId)?.delete(fingerprint);
+      return refused(
+        "not-pending",
+        "That key claimed a connection code that has since expired. Make a new code and join again.",
+      );
+    }
     if (pending === undefined) {
       return refused("not-pending", "No key with that fingerprint is waiting to be confirmed.");
     }
@@ -707,14 +717,17 @@ export class AgentAccessService {
   #view(grant: AgentGrant): AgentGrantView {
     const grantId = String(grant.grantId);
     const stored = this.#credential(grantId);
+    const now = this.#now();
     const pending: ReadonlyArray<AgentPendingClaim> = [
       ...(this.#pending.get(grantId)?.entries() ?? []),
-    ].map(([fingerprint, entry]) => ({
-      grantId: grant.grantId,
-      fingerprint,
-      label: entry.label,
-      claimedAt: entry.claimedAt,
-    }));
+    ]
+      .filter(([, entry]) => entry.expiresAt > now)
+      .map(([fingerprint, entry]) => ({
+        grantId: grant.grantId,
+        fingerprint,
+        label: entry.label,
+        claimedAt: entry.claimedAt,
+      }));
     return {
       grant,
       pendingClaims: pending,

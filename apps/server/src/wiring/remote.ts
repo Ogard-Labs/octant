@@ -2080,8 +2080,12 @@ export function wireRemote(deps: RemoteDependencies) {
       deps: agentSessionDependencies,
       stopOnly: true,
     });
-    for (const thread of agentAccessService.threadsOf(grantId)) {
-      await stopAgentTurn(session, thread.threadId).catch(() => undefined);
+    const threadIds = new Set([
+      ...agentAccessService.threadsOf(grantId).map((thread) => thread.threadId),
+      ...agentAccessService.turnThreadsOf(grantId).map((thread) => thread.threadId),
+    ]);
+    for (const threadId of threadIds) {
+      await stopAgentTurn(session, threadId).catch(() => undefined);
     }
   };
   const agentAccessAdministrationRoutes = createAgentAccessAdministrationRouteHandler({

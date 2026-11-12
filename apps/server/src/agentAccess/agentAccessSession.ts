@@ -431,9 +431,14 @@ function guardStopRequest(input: {
   readonly deps: Pick<AgentSessionDependencies, "service" | "threadProject">;
 }): GuardResult {
   const { grant, request, deps } = input;
+  // Its own threads and every thread it ran a turn on, so stopping a revoked
+  // agent reaches the turns it started on threads the person made.
   const own = (threadId: unknown) =>
     typeof threadId === "string" &&
-    deps.service.threadOwner(threadId)?.grantId === String(grant.grantId);
+    (deps.service.threadOwner(threadId)?.grantId === String(grant.grantId) ||
+      deps.service
+        .turnThreadsOf(String(grant.grantId))
+        .some((thread) => thread.threadId === threadId));
   const path = new URL(request.path, "http://127.0.0.1").pathname;
   if (request.method === "GET") {
     if (READS.some((pattern) => pattern.test(path))) return { kind: "allowed" };
