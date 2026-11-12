@@ -688,8 +688,8 @@ export function wireWork(deps: WorkDependencies) {
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
             });
-        // Work has no Plan posture, so nothing refuses its writes but the
-        // person's answer.
+        // Work has no Plan posture, so nothing refuses its writes; the turn's
+        // level and the Project's setting decide whether one asks first.
         const projectMemoryTools = !browserSupported
           ? undefined
           : projectMemoryAccess.toolsFor({
@@ -697,6 +697,8 @@ export function wireWork(deps: WorkDependencies) {
               mode: "work",
               threadId: String(input.thread.id),
               projectId: String(input.thread.projectId),
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
             });
         if (
           pastThreads === undefined &&

@@ -46,6 +46,7 @@ describe("provider registry contracts", () => {
       "provider.instance-data-tags-changed@1",
       "provider.instance-enabled-changed@1",
       "provider.instance-native-setup-changed@1",
+      "provider.instance-own-memory-changed@1",
       "provider.instance-removed@1",
       "provider.defaults-updated@1",
       "provider.catalog-updated@1",

@@ -324,6 +324,7 @@ describe("Project routes", () => {
       agentPullRequestComments: "enabled",
     },
     { kind: "change-code-project-agent-default-branch-push", agentDefaultBranchPush: "enabled" },
+    { kind: "change-project-agent-memory-writes", agentMemoryWrites: "enabled" },
   ] as const)(
     "refuses a paired device turning on $kind while a local window keeps the route",
     async (setting) => {

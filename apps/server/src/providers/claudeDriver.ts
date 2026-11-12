@@ -71,9 +71,11 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
+import { providerOwnMemoryLaunches } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
+  claudeOwnMemoryLaunchEnvironment,
   disablesNonessentialTraffic,
 } from "./claudeAccountIsolation";
 import {
@@ -320,7 +322,7 @@ function claudeNativeToolAnswer(
  * keep the SDK's built-in subagents off, which is also what Claude Code's
  * own general-purpose and Explore subagents are, so that one guard goes.
  * Every channel switch (telemetry, error reports, self-update, memory)
- * stays as it was.
+ * stays as it was: memory follows the account's own setting, never this one.
  */
 function claudeNativeLaunchEnvironment(
   environment: NodeJS.ProcessEnv,
@@ -699,6 +701,11 @@ export interface ClaudeDriverOptions {
    * so turning it off holds for a session already running. Absent is off.
    */
   readonly artifactDelivery?: () => boolean;
+  /**
+   * The person's current switch for this account's own memory, read at each
+   * launch. Absent is off.
+   */
+  readonly ownMemory?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
@@ -2508,6 +2515,16 @@ function makeConnection(
           }
           return decide();
         };
+        const artifactEnvironment = offersArtifacts
+          ? claudeArtifactLaunchEnvironment(environment.environment)
+          : environment.environment;
+        // Read at each launch, like the artifact switch: the next turn after
+        // the person turns the account's memory off launches guarded again.
+        const keepsOwnMemory = providerOwnMemoryLaunches({
+          accountAllows: options.ownMemory?.() === true,
+          mode,
+          executionPolicy: input.executionPolicy,
+        });
         // The runtime initializes with the first turn, so a new session's id
         // is assigned here and the initialized message is later held to it.
         const assignedSessionId = resumeSessionId === undefined ? randomUUID() : undefined;
@@ -2519,9 +2536,9 @@ function makeConnection(
               ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
               authEnvironment: withServerAccess(
                 claudeNativeLaunchEnvironment(
-                  offersArtifacts
-                    ? claudeArtifactLaunchEnvironment(environment.environment)
-                    : environment.environment,
+                  keepsOwnMemory
+                    ? claudeOwnMemoryLaunchEnvironment(artifactEnvironment)
+                    : artifactEnvironment,
                   nativeSetup,
                 ),
                 servers,

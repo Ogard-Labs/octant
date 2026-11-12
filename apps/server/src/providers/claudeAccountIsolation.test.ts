@@ -9,6 +9,7 @@ import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
+  claudeOwnMemoryLaunchEnvironment,
   ensureClaudeAccountConfigDirectory,
   isolatedClaudeAccountEnvironment,
 } from "./claudeAccountIsolation";
@@ -86,6 +87,26 @@ describe("isolatedClaudeAccountEnvironment", () => {
     const directory = join(parent, "account");
     await ensureClaudeAccountConfigDirectory(directory);
     expect(await readdir(directory)).toEqual([]);
+  });
+});
+
+describe("claudeOwnMemoryLaunchEnvironment", () => {
+  it("goes without only the auto-memory guard, so telemetry and the self-update stay off", () => {
+    const { CLAUDE_CODE_DISABLE_AUTO_MEMORY: _lifted, ...kept } = ISOLATED_CLAUDE_LAUNCH_GUARDS;
+    const environment = claudeOwnMemoryLaunchEnvironment(
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment: { PATH: "/usr/bin", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+        configDirectory: "/Users/provider-user/.claude-accounts/personal",
+        authentication: "subscription",
+      }),
+    );
+    expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_AUTO_MEMORY");
+    expect(environment).toEqual(expect.objectContaining(kept));
+    expect(environment).toMatchObject({
+      DISABLE_TELEMETRY: "1",
+      DISABLE_AUTOUPDATER: "1",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    });
   });
 });
 

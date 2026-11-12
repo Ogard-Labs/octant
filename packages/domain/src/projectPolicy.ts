@@ -15,6 +15,7 @@ import {
   type CodeProject,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type ProjectAgentMemoryWrites,
   type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
@@ -597,6 +598,23 @@ export function changeWorkProjectStatusFile(
     reject("invalid-lifecycle", "Work Project status file setting is already selected");
   }
   return { ...project, statusFile, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Let agents below Full access write this Project's memory without the person
+ * confirming each change, or stop that. Absence reads as disabled. Every mode's
+ * Project has memory, so every mode's Project takes the setting. Rejects a
+ * no-op change so the journal never carries an event that changed nothing.
+ */
+export function changeProjectAgentMemoryWrites(
+  project: Project,
+  agentMemoryWrites: ProjectAgentMemoryWrites,
+  updatedAt: UtcTimestamp,
+): Project {
+  if ((project.agentMemoryWrites ?? "disabled") === agentMemoryWrites) {
+    reject("invalid-lifecycle", "Project agent memory writes is already selected");
+  }
+  return { ...project, agentMemoryWrites, version: nextVersion(project), updatedAt };
 }
 
 /**

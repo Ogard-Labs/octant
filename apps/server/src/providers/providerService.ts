@@ -83,6 +83,7 @@ import {
   renameProvider,
   setClaudeArtifactDelivery,
   setProviderNativeSetup,
+  setProviderOwnMemory,
   isKeyProviderDriverKind,
   setProviderEnabled,
   setProviderDataTags,
@@ -1158,6 +1159,17 @@ export class ProviderService implements ProviderServiceApi {
             // stay as they are; the next turn starts with the new setup.
             keepsRuntime = true;
             eventName = "provider.instance-native-setup-changed@1";
+          } else if (command.kind === "set-provider-own-memory") {
+            if (current.driverKind !== "claude" && current.driverKind !== "codex") {
+              throw this.#unsupported(
+                "Only a Claude Code or Codex account has a memory of its own to turn on.",
+              );
+            }
+            instance = setProviderOwnMemory(current, { enabled: command.enabled, updatedAt });
+            // Each driver reads the switch when it launches a process, so a
+            // running one, its sign-in, and its models stay as they are.
+            keepsRuntime = true;
+            eventName = "provider.instance-own-memory-changed@1";
           } else if (command.kind === "rename-provider") {
             instance = renameProvider(current, {
               displayName: command.displayName,

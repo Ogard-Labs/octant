@@ -291,6 +291,7 @@ export type ShellActions = {
   readonly setProjectNativeProviders: ProjectController["setNativeProviders"];
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
+  readonly setProjectAgentMemoryWrites: ProjectController["setAgentMemoryWrites"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesignSystem: ProjectController["setDesignSystem"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];

@@ -981,6 +981,30 @@ const KeyProviderInstanceFields = {
   nativeSetup: Schema.optional(Schema.Literal(true)),
 } as const;
 
+/**
+ * The key providers whose runtime keeps a memory of its own behind a switch
+ * Octant sets at launch: Claude Code's auto-memory and Codex's memories.
+ * OpenCode and Mistral Vibe have no such memory, so their accounts carry no
+ * setting for one.
+ */
+export const OWN_MEMORY_PROVIDER_DRIVER_KINDS = [
+  "claude",
+  "codex",
+] as const satisfies ReadonlyArray<KeyProviderDriverKind>;
+export type OwnMemoryProviderDriverKind = (typeof OWN_MEMORY_PROVIDER_DRIVER_KINDS)[number];
+
+/**
+ * A Claude Code or Codex account the person let keep the provider's own
+ * memory: the runtime reads and writes it by its own rules, across Projects
+ * and outside Octant's journal, in the account's Work and Code sessions
+ * outside Plan. Absent is off. Only `set-provider-own-memory`, sent from a
+ * window on this host, changes it; "Run as itself" and Full access never do.
+ */
+const OwnMemoryProviderInstanceFields = {
+  ...KeyProviderInstanceFields,
+  ownMemory: Schema.optional(Schema.Literal(true)),
+} as const;
+
 export const OpenCodeProviderInstance = Schema.Struct({
   ...KeyProviderInstanceFields,
   driverKind: Schema.Literal("opencode"),
@@ -988,13 +1012,13 @@ export const OpenCodeProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type OpenCodeProviderInstance = typeof OpenCodeProviderInstance.Type;
 export const CodexProviderInstance = Schema.Struct({
-  ...KeyProviderInstanceFields,
+  ...OwnMemoryProviderInstanceFields,
   driverKind: Schema.Literal("codex"),
   configuration: CodexProviderConfiguration,
 }).annotations(strict);
 export type CodexProviderInstance = typeof CodexProviderInstance.Type;
 export const ClaudeProviderInstance = Schema.Struct({
-  ...KeyProviderInstanceFields,
+  ...OwnMemoryProviderInstanceFields,
   driverKind: Schema.Literal("claude"),
   configuration: ClaudeProviderConfiguration,
 }).annotations(strict);
@@ -1275,6 +1299,11 @@ export const ProviderInstanceNativeSetupChanged = Schema.Struct({
   ),
 }).annotations(strict);
 export type ProviderInstanceNativeSetupChanged = typeof ProviderInstanceNativeSetupChanged.Type;
+/** A person turned a Claude Code or Codex account's own memory on or off from a local window. */
+export const ProviderInstanceOwnMemoryChanged = Schema.Struct({
+  instance: Schema.Union(CodexProviderInstance, ClaudeProviderInstance),
+}).annotations(strict);
+export type ProviderInstanceOwnMemoryChanged = typeof ProviderInstanceOwnMemoryChanged.Type;
 export const ProviderInstanceRemoved = Schema.Struct({
   instanceId: ProviderInstanceId,
   version: AggregateVersion,
@@ -1295,6 +1324,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-native-setup-changed@1",
+  "provider.instance-own-memory-changed@1",
   "provider.instance-removed@1",
   "provider.defaults-updated@1",
   "provider.catalog-updated@1",
@@ -2300,6 +2330,15 @@ export const ProviderRegistryCommand = Schema.Union(
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
   }).annotations(strict),
+  /**
+   * Turns the provider's own memory on or off for one Claude Code or Codex
+   * account. Only a person at the Octant window on this host sends it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-provider-own-memory"),
+    ...ProviderInstanceCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-provider-data-tags"),
     ...ProviderInstanceCommandFields,
@@ -3099,6 +3138,9 @@ export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
 );
 export const decodeProviderInstanceNativeSetupChanged = Schema.decodeUnknownSync(
   ProviderInstanceNativeSetupChanged,
+);
+export const decodeProviderInstanceOwnMemoryChanged = Schema.decodeUnknownSync(
+  ProviderInstanceOwnMemoryChanged,
 );
 export const decodeProviderNativeSetup = Schema.decodeUnknownSync(ProviderNativeSetup);
 export const decodeProviderInstanceDataTagsChanged = Schema.decodeUnknownSync(

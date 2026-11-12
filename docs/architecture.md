@@ -1485,12 +1485,34 @@ environment.
 
 Provider-owned memory stays off in every mode unless the person turns it on
 for that key provider account, a setting that is off by default (maintainer
-request, 2026-11-12; not built yet: today it is off with no setting). A provider's global memory
-follows its own rules into every Project, outside Octant's controls: Codex runs
+request, 2026-11-12). A provider's global memory
+follows its own rules into every Project, outside Octant's controls: with the
+setting off Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
-sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
+sandbox's readable roots, and Claude runs with its auto-memory guard and no
+setting sources. Octant keeps
 two memories of its own instead: Project memory, scoped to one Project, and
 person memory below.
+
+The setting is **Use <provider>'s own memory** in Settings › Providers, beside
+Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
+provider account, changed only by `set-provider-own-memory` from a window on
+this computer (a paired device is refused) and journaled as
+`provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
+and Full access never turn it on. Each driver reads it when it launches a
+process: a Claude Code launch goes without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`
+and keeps every other guard, and a Codex process is leased without the
+`features.memories=false` override, so Codex's own configuration decides and
+Octant never forces the feature on; that lease is a process of its own, like
+the one that runs Codex's subagents. It applies to Work and Code sessions
+outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+nothing a later session would load, and the runtime's memory folder is exactly
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
+sets, so their accounts carry no setting. Not built yet: Chat, where a
+provider's memory stays off at every setting, because no confined Chat launch
+has been run with it on. Live check owed: no real Claude Code or Codex turn
+has yet run with the setting on.
 
 ### Project memory
 
@@ -1516,8 +1538,15 @@ authoritative.
   accepted without a confirmation, marked agent-written with its thread and
   shown in the thread; below Full access the Project setting "Agents may
   write Project memory without asking" (off by default) does the same
-  (maintainer request, 2026-11-12; not built yet: today every write is a
-  proposal at every level). Otherwise a write is a proposal: the
+  (maintainer request, 2026-11-12; built). The setting is on every mode's
+  Project, in Project Overview; a person sets it from a window on this
+  computer, a paired device is refused, and each change is journaled as
+  `project.agent-memory-writes-changed@1`. A Chat thread has no Full access,
+  so in Chat only the setting skips the card. The tool call is the thread's
+  record of such a write: its result reports `written` with the entry's
+  text. The write goes through the same memory command path and checks as a
+  confirmed one, against the memory version the agent saw. Otherwise a write
+  is a proposal: the
   thread shows the person a card with the exact change, and only their
   confirmation writes it, through the same memory command path and checks
   (archived Project, mode switched off, memory version) as the person's own
@@ -1535,12 +1564,17 @@ authoritative.
   any other, and its card names what the thread read.
 - **Agent-written provenance.** A confirmed agent write is authored by the
   person who confirmed it and marked `agent-authored` with the thread's mode
-  and id; a write accepted without a confirmation carries the same mark and
-  names no confirming person. Project Overview shows "Written by an agent in a … thread" with the
+  and id; a write accepted without a confirmation carries the same mark with
+  `unconfirmed: true` and names no confirming person: its author field holds
+  the host's local user only because every entry has one, and Project
+  Overview shows "Nobody was asked" in place of "Approved by". An agent's
+  retraction keeps the entry's own provenance and records the retracting
+  thread beside it as `retractionOrigin`. Project Overview shows "Written by an agent in a … thread" with the
   thread, and data export carries the provenance with the entry. The
   person retracts such an entry like any other. A thread purge removes the
-  thread id from the entry and keeps the entry. Older events decode unchanged:
-  the new provenance is one more variant, not a changed shape.
+  thread id from the entry, and from its retraction, and keeps the entry.
+  Older events decode unchanged: the new provenance is one more variant, and
+  the two later fields are optional.
 
 ### Person memory
 
@@ -12584,8 +12618,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
   built-in agents, and marketplace auto-install. The provider's own memory
   alone has a setting per key provider account, off by default, that turns
-  it on (maintainer request, 2026-11-12; not built yet: today it is off on
-  every launch); telemetry and self-update stay off. The runtime's release-note,
+  it on (maintainer request, 2026-11-12; built for Work and Code launches
+  outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
+  without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
+  (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
+  account's configuration directory, in `projects/<session folder>/memory/`.
+  A Plan launch, a Chat launch, and the version read keep the guard.
+  Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
   Feature-flag fetching stays off: Anthropic's environment-variable reference

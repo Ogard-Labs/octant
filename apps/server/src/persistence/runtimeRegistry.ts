@@ -78,6 +78,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   CodeProjectPullRequestWatchRecorded,
   WorkProjectStatusFileChanged,
+  ProjectAgentMemoryWritesChanged,
   ProjectBrandKitChanged,
   ProjectDesignSystemChanged,
   WorkProjectDeveloperToolsChanged,
@@ -150,6 +151,7 @@ import {
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
   ProviderInstanceNativeSetupChanged,
+  ProviderInstanceOwnMemoryChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -535,6 +537,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
     .register("project.work-permission-mode-changed@1", 1, WorkProjectPermissionModeChanged)
     .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
+    .register("project.agent-memory-writes-changed@1", 1, ProjectAgentMemoryWritesChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.design-system-changed@1", 1, ProjectDesignSystemChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
@@ -554,6 +557,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
     .register("provider.instance-native-setup-changed@1", 1, ProviderInstanceNativeSetupChanged)
+    .register("provider.instance-own-memory-changed@1", 1, ProviderInstanceOwnMemoryChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)

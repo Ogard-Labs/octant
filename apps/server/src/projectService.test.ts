@@ -1108,6 +1108,27 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Project of any mode lets agents write its memory without asking", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    for (const [index, id] of [chatId, workId].entries()) {
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "change-project-agent-memory-writes",
+          projectId: id,
+          expectedVersion: 1,
+          agentMemoryWrites: "enabled",
+        }),
+      ).resolves.toMatchObject({
+        kind: "project-agent-memory-writes-changed",
+        project: { agentMemoryWrites: "enabled", version: 2 },
+      });
+      expect(fixture.append.mock.calls[index]?.[0]?.events?.[0]?.eventName).toBe(
+        "project.agent-memory-writes-changed@1",
+      );
+    }
+    expect(fixture.append).toHaveBeenCalledTimes(2);
+  });
+
   it("journals one event when a Code Project lets agents comment on pull requests or push to the default branch", async () => {
     const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
     await expect(

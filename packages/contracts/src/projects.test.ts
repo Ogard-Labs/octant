@@ -495,6 +495,12 @@ describe("Project memory contracts", () => {
       decodeMemoryEntry({ ...userMemory, provenance: { kind: "agent-authored", mode: "work" } })
         .provenance,
     ).toEqual({ kind: "agent-authored", mode: "work" });
+    // A write nobody was asked about says so, and only as `true`.
+    const unasked = { ...provenance, unconfirmed: true } as const;
+    expect(decodeMemoryEntry({ ...userMemory, provenance: unasked }).provenance).toEqual(unasked);
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, unconfirmed: false } }),
+    ).toThrow();
     expect(() =>
       decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, mode: "plan" } }),
     ).toThrow();

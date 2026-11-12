@@ -1465,8 +1465,10 @@ export function startOctantServer(
         projectId: String(thread.projectId),
         writeRefusal: () =>
           (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
-            ? "Plan mode cannot change Project memory. Leave Plan mode to propose the change."
+            ? "Plan mode cannot change Project memory. Leave Plan mode to make the change."
             : undefined,
+        fullAccess: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "full-access",
       }),
     );
     const credentialRequestRoutes = createCredentialRequestRoutes(
