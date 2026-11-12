@@ -12379,6 +12379,53 @@ approval-gated` command that undoes it. The terminal shows no one-time
   owner, never a widening of the automatic admission rule, and the refusal
   says what clears it where the person is, not only in a log. "Sign in with
   the account command in Settings." is the shape.
+- **Which clock an expiry runs on.** A grant or prompt that lives only in the
+  server process expires on the process authority clock
+  (`ProcessAuthorityClock`): wall time read once when the process starts,
+  then advanced only by elapsed time since boot. A wall clock set back cannot
+  extend one, and a sleep counts against it. A restart drops every such grant
+  and starts a fresh epoch, so no stored clock value can block startup. On it
+  today: Code operation approvals, window and launch sessions, managed-root
+  grants, simulator input grants, extension tool approvals, routine proposals
+  and image generation offers (their stated request time), computer-use owners
+  and five-minute app grants, Claude's pre-tool grants, credential command
+  requests, Browser upload and download permissions (which are not restored
+  after a restart), and server preview tunnels. A grant that is stored and
+  must outlive a restart cannot use a process epoch and stays on wall time,
+  stated in UTC: a paired device's registration expiry, and any stored
+  `expiresAt` a later process reads back. Such a grant stays revocable by the
+  person at any time, which is what bounds it when the clock is wrong. Not
+  yet moved: Browser tool approvals, session grants and credential use read
+  wall time though they live in the process. Routine proposals and image
+  generation offers end on a timer alone; a timer is Node's monotonic clock,
+  which on Linux does not count a suspend.
+  _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
+  (`CLOCK_BOOTTIME`): it counts suspend and ignores clock changes. On macOS
+  both libuv (`uv_uptime` in `src/unix/darwin.c`, used by Electron's Node)
+  and Bun (`getSystemUptime` in `src/darwin_c.zig`, read at Bun 1.2) compute
+  `time(NULL)` minus the `kern.boottime`
+  sysctl. That counts sleep, since the calendar advances across sleep while
+  the boot time does not, and it ignores a clock change, because XNU's
+  `clock_set_calendar_microtime` (`osfmk/kern/clock.c`) shifts the boot time
+  by the same delta, forward or backward, whenever the calendar is set. It
+  differs from the code's assumption in two small ways: it has whole-second
+  resolution, so an expiry lands up to a second late or early, and a read
+  that races a clock change can see one value off by that change for one
+  read, because the boot time and the calendar are two separate reads. A
+  high-water mark in `ProcessAuthorityClock` would close the second; it is
+  not built.
+- **Escape probes run where the sandbox ships.** The macOS CI job runs the
+  darwin-gated Seatbelt suites against the real `sandbox-exec`: the
+  confinement profile's write, Keychain, home and egress denials; a confined
+  child that starts its own session; a wrapped runtime's network; the secret
+  guard; a credential command; and an outside provider driver's escape tests.
+  The Linux client-trust job installs Bubblewrap and proves a provider
+  runtime's capsule cannot read the person's credentials beside its Project
+  or inside a home opened as one. The packaged Work confinement gate (App
+  Sandbox, its XPC broker and a security-scoped folder) runs as
+  `bun run smoke:packaged-work-confinement` in its own macOS workflow, which
+  needs a runner that already allows UI scripting. Layer details are in the
+  escape suite's `README.md` beside its fixtures.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
   provider `--version` read launch through one shared confinement port
   (`ProcessConfinementPort`), and so do provider runtimes except where the

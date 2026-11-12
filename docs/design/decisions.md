@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 1       | 5            | 1                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 5       | 2            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **248**   | **163** | **80**       | **5**               |
+| **All areas**                                                                         | **248**   | **162** | **81**       | **5**               |
 
 ## Principles and hard lines
 
@@ -447,10 +447,11 @@ The desktop main process owns native windows, menus, the system keychain and all
 - A picker hands the server the chosen path under the desktop bridge secret and gives the renderer only a single-use receipt bound to its window.
 - The server listens on one canonical loopback endpoint, and every mutation goes through services that append to the journal.
 - A paired browser mounts the remote shell; the desktop's window-bound sidebar, dock and Settings are not served remotely.
-- Process-local approvals and grants use process-monotonic elapsed time, and a host restart discards them. No persisted local-authority epoch or wall-clock value may block local startup. _Here only._
+- Process-local approvals and grants expire on the process authority clock (wall time once at start, then suspend-aware elapsed time), so a wall clock set back cannot extend one, and a host restart discards them. A stored grant that must outlive a restart, such as a paired device's expiry, stays on wall time. No persisted local-authority epoch or wall-clock value may block local startup. Detail: [Security and authority, Which clock an expiry runs on](../architecture.md#security-and-authority).
+- Browser tool approvals, session grants and credential use are process-local but still read wall time (not built yet).
 - Shared product state is host-owned; window bounds, panes, focus, scroll and unsaved drafts stay client-context state. _Here only._
 
-Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+Status: Partly built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
 ### Local client context and loopback trust
 
@@ -1728,7 +1729,7 @@ Every launch that could affect the machine goes through one shared confinement p
 - Every confined Linux launch drops all capabilities and binds `/proc/sys` read-only; Full access's deny-only bind refuses a setuid sandbox helper as incompatible.
 - Plan and Chat on Linux also load a seccomp filter that denies process creation, and fail closed as incompatible where it cannot be loaded.
 - Path checks alone are never the boundary: confined reads open a handle and verify identity against what containment resolved.
-- Escape probes are part of the test suite, and a confinement release gate is that they fail closed. _Here only._
+- Escape probes are part of the test suite, and a confinement release gate is that they fail closed. The macOS CI job runs the darwin-gated Seatbelt probes, the Linux client-trust job proves under real Bubblewrap that a provider runtime cannot read the person's credentials, and the packaged Work confinement gate runs in its own macOS workflow ([Security and authority, Escape probes run where the sandbox ships](../architecture.md#security-and-authority)).
 - A Plan launch's temporary directory is made for that launch alone, removed when it exits or is refused, and never the shared temp root; a temp root inside the checkout is refused. _Here only._
 - A terminal launch may read metadata, never data, on each exact ancestor of its own shell-state directory, so other threads' histories stay unreadable. _Here only._
 - A macOS launch whose egress is allow may reach the system trust daemon and system keychain roots so TLS clients verify certificates; user keychains and offline launches stay denied. _Here only._
