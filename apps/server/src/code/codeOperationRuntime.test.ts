@@ -626,6 +626,65 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
+    const runs = 10;
+    const latencies: number[] = [];
+    for (let run = 0; run < runs; run += 1) {
+      // A provider streaming as fast as it can: every pull is answered at once.
+      let streamed = 0;
+      const flood = Stream.repeatEffect(
+        Effect.sync(() => {
+          streamed += 1;
+          return providerEvent({ kind: "text-delta", text: "x" });
+        }),
+      );
+      const connection = {
+        ...providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>())),
+        subscribe: Effect.succeed(flood),
+      };
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        const start = operationId(4_000 + run * 2);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: start,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(streamed).toBeGreaterThan(1_000), { interval: 1 });
+        const stopIssued = performance.now();
+        const stopped = await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(4_001 + run * 2),
+          threadId,
+          checkoutId,
+        });
+        expect(stopped).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+        await vi.waitFor(
+          async () => {
+            expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+              kind: "operation-state",
+              state: "interrupted",
+            });
+          },
+          { timeout: 5_000, interval: 5 },
+        );
+        latencies.push(performance.now() - stopIssued);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    }
+    latencies.sort((left, right) => left - right);
+    const p95 = latencies[Math.ceil(runs * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    expect(p95).toBeLessThan(1_000);
+  }, 30_000);
+
   it.each(["restore", "discard"] as const)(
     "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
     async (action) => {
@@ -3336,6 +3395,138 @@ describe("CodeOperationRuntime", () => {
         }),
       ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
       await stopping;
+      expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("records a Stop the runtime never confirms as unconfirmed and frees the thread", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    // A runtime that shares its process: no Force stop, and its interrupt does
+    // not answer until the test ends.
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      stopConfirmationMs: 50,
+    });
+    try {
+      const start = operationId(720);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: start,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const stopIssued = performance.now();
+      const stopped = await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(721),
+        threadId,
+        checkoutId,
+      });
+      expect(performance.now() - stopIssued).toBeLessThan(5_000);
+      const unconfirmed = "Stop was not confirmed. The provider may still be running this turn.";
+      expect(stopped).toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+        failure: { message: unconfirmed },
+      });
+      await vi.waitFor(async () =>
+        expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+          kind: "operation-state",
+          state: "interrupted",
+          failure: { message: unconfirmed },
+        }),
+      );
+      // What the runtime sends after the turn was recorded as ended is not journaled.
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "tool-start", toolCallId: "late", name: "Bash" })),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+        kind: "operation-state",
+        state: "interrupted",
+      });
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(722),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    } finally {
+      await Effect.runPromise(Deferred.succeed(gate, undefined));
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("answers a Stop the runtime has not confirmed in time and leaves Force stop to the person", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const gate = Effect.runSync(Deferred.make<void>());
+    const connection = {
+      ...providerConnection(queue),
+      interrupt: vi.fn(() => Deferred.await(gate)),
+      forceStop: vi.fn(() => Deferred.succeed(gate, undefined).pipe(Effect.asVoid)),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      stopConfirmationMs: 50,
+    });
+    try {
+      const start = operationId(730);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: start,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(731),
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+        failure: {
+          message:
+            "Stop was not confirmed. The provider may still be running this turn. Force stop can end it.",
+        },
+      });
+      expect(await lastOperationEvent(fixture.runtime, start)).not.toMatchObject({
+        kind: "operation-state",
+        state: "interrupted",
+      });
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "force-stop-provider-turn",
+          operationId: operationId(732),
+          turnOperationId: start,
+          threadId,
+          checkoutId,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
       expect(connection.forceStop).toHaveBeenCalledWith(sessionId);
     } finally {
       await Effect.runPromise(Deferred.succeed(gate, undefined));
@@ -9009,6 +9200,7 @@ function runtimeFixture(options: {
   waitProjectAccess?: () => Promise<void>;
   projectAccessCurrent?: () => boolean;
   planner?: Parameters<typeof createCodeOperationRuntime>[0]["planner"];
+  stopConfirmationMs?: number;
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
@@ -9246,6 +9438,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.stopConfirmationMs === undefined
+      ? {}
+      : { stopConfirmationMs: options.stopConfirmationMs }),
     ...(options.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(directory) }),
@@ -9654,6 +9849,22 @@ function providerConnection(
     answerUserInput: vi.fn(() => Effect.void),
     answerTool: vi.fn(() => Effect.void),
   };
+}
+
+/** The newest event journaled for an operation, read page by page. */
+async function lastOperationEvent(
+  runtime: ReturnType<typeof runtimeFixture>["runtime"],
+  operation: CodeOperationId,
+) {
+  let cursor = 0;
+  let last: OperationFrame["event"] | undefined;
+  for (;;) {
+    const page = await runtime.subscribe(windowId, threadId, operation, cursor, 200);
+    const final = page.at(-1);
+    if (final === undefined) return last;
+    cursor = final.cursor;
+    last = final.event;
+  }
 }
 
 function providerDriver(connection: ProviderConnection): ProviderDriver {

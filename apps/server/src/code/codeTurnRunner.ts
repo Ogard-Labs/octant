@@ -45,6 +45,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
+  makeEventLoopShare,
   makeIdleTimeout,
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
@@ -455,6 +456,7 @@ export class CodeTurnRunner {
       }
 
       const idle = yield* makeIdleTimeout(timeoutMs);
+      const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
@@ -469,6 +471,7 @@ export class CodeTurnRunner {
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                yield* shareEventLoop;
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;

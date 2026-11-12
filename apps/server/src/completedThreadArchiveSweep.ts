@@ -8,6 +8,14 @@ import { ConcurrencyConflict } from "./persistence/journalErrors";
 /** Once an hour is plenty for a window measured in days. */
 export const COMPLETED_THREAD_ARCHIVE_SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
 
+/**
+ * How many threads one batch of a pass looks at before it hands the event
+ * loop back. Every archive is a synchronous journal write on the host's one
+ * thread, so a pass over thousands of completed threads in one go held Stop
+ * and approval answers until it finished.
+ */
+export const COMPLETED_THREAD_ARCHIVE_SWEEP_BATCH = 50;
+
 export type CompletedThreadArchiveOutcome =
   | { readonly status: "archived" }
   | { readonly status: "skipped"; readonly reason: "not-found" | "not-due" };
@@ -38,6 +46,8 @@ export interface CompletedThreadArchiveSweepOptions {
   /** Epoch milliseconds. */
   readonly clock?: () => number;
   readonly intervalMs?: number;
+  /** Threads examined between yields; defaults to {@link COMPLETED_THREAD_ARCHIVE_SWEEP_BATCH}. */
+  readonly batchSize?: number;
 }
 
 /**
@@ -63,15 +73,19 @@ export interface CompletedThreadArchiveSweepSummary {
  * Archiving is the only thing this timer does. It never purges, and the
  * rule that a retention window never deletes on its own still stands: an
  * archived thread keeps its transcript, checkout, and journal. Passes never
- * overlap — the chain schedules the next only after this one returns — and a
- * pass that throws is dropped so the timer outlives one bad read.
+ * overlap — the chain schedules the next only after this one settles — and a
+ * pass that throws is dropped so the timer outlives one bad read. A pass
+ * works in bounded batches and yields to the event loop between them, so a
+ * large sweep cannot starve Stop or approval handling.
  */
 export class CompletedThreadArchiveSweep {
   readonly #sources: ReadonlyArray<CompletedThreadArchiveSource>;
   readonly #archiveAfterDays: CompletedThreadArchiveSweepOptions["archiveAfterDays"];
   readonly #clock: () => number;
   readonly #intervalMs: number;
+  readonly #batchSize: number;
   #timer: ReturnType<typeof setTimeout> | undefined;
+  #running = false;
   #stopped = false;
 
   constructor(options: CompletedThreadArchiveSweepOptions) {
@@ -82,13 +96,13 @@ export class CompletedThreadArchiveSweep {
       options.intervalMs ?? COMPLETED_THREAD_ARCHIVE_SWEEP_INTERVAL_MS,
       1_000,
     );
+    this.#batchSize = Math.max(options.batchSize ?? COMPLETED_THREAD_ARCHIVE_SWEEP_BATCH, 1);
   }
 
   /** Runs one pass now, then one per interval. Idempotent. */
   start(): void {
-    if (this.#stopped || this.#timer !== undefined) return;
-    this.#runPass();
-    this.#scheduleNextPass();
+    if (this.#stopped || this.#timer !== undefined || this.#running) return;
+    void this.#runPassThenSchedule();
   }
 
   stop(): void {
@@ -98,7 +112,7 @@ export class CompletedThreadArchiveSweep {
   }
 
   /** One sweep over every mode's threads. Exposed so a test can drive it without the timer. */
-  pass(): CompletedThreadArchiveSweepSummary {
+  async pass(): Promise<CompletedThreadArchiveSweepSummary> {
     const afterDays = this.#archiveAfterDays();
     const archived: Array<{ mode: OctantMode; threadId: string }> = [];
     const skipped: Array<{
@@ -108,8 +122,13 @@ export class CompletedThreadArchiveSweep {
     }> = [];
     if (afterDays === null) return { archived, skipped };
     const now = new Date(this.#clock()).toISOString();
+    let examined = 0;
     for (const source of this.#sources) {
       for (const thread of source.threads()) {
+        if (examined > 0 && examined % this.#batchSize === 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        examined += 1;
         if (this.#stopped) return { archived, skipped };
         if (
           !completedThreadArchiveDue({
@@ -146,20 +165,19 @@ export class CompletedThreadArchiveSweep {
     return { archived, skipped };
   }
 
-  #runPass(): void {
+  async #runPassThenSchedule(): Promise<void> {
+    this.#running = true;
     try {
-      this.pass();
+      await this.pass();
     } catch {
       // One unreadable pass must not end the timer; the next interval retries.
+    } finally {
+      this.#running = false;
     }
-  }
-
-  #scheduleNextPass(): void {
     if (this.#stopped) return;
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
-      this.#runPass();
-      this.#scheduleNextPass();
+      void this.#runPassThenSchedule();
     }, this.#intervalMs);
   }
 }

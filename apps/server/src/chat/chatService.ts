@@ -384,6 +384,14 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
 const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
 
 /**
+ * The most deltas one burst holds before it commits, whatever the window
+ * says. A provider streaming as fast as it can filled one 100 ms window with
+ * nearly 600 deltas, and the single commit that held them (the Stop's own
+ * attempt persist among them) took 1.4 s, so Stop waited that long to settle.
+ */
+const STREAMED_DELTA_BATCH_MAX_DELTAS = 64;
+
+/**
  * The thread as one route actually runs it.
  *
  * Multi-model pool routing can send a turn to a different provider instance or
@@ -6347,7 +6355,11 @@ export class ChatService {
         appendedBatchStartedAtMs = nowMs;
         return;
       }
-      if (nowMs - appendedBatchStartedAtMs < STREAMED_DELTA_BATCH_WINDOW_MS) return;
+      if (
+        nowMs - appendedBatchStartedAtMs < STREAMED_DELTA_BATCH_WINDOW_MS &&
+        appendedBatch.length < STREAMED_DELTA_BATCH_MAX_DELTAS
+      )
+        return;
       journalAppendedBatch();
     };
 

@@ -1,7 +1,12 @@
 import { decodeProviderRuntimeEvent, type ProviderRuntimeEvent } from "@octant/contracts";
 import { Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { countsTowardTurnEventBudget, makeIdleTimeout, makeTurnTextParagraphs } from "./turnBudget";
+import {
+  countsTowardTurnEventBudget,
+  makeEventLoopShare,
+  makeIdleTimeout,
+  makeTurnTextParagraphs,
+} from "./turnBudget";
 
 let sequence = 0;
 function runtimeEvent(fields: Record<string, unknown>): ProviderRuntimeEvent {
@@ -25,6 +30,26 @@ function answerText(events: ReadonlyArray<Record<string, unknown>>): string {
 }
 
 describe("turn budget", () => {
+  it("lets a waiting timer run once a turn has held the event loop for its slice", async () => {
+    let clock = 0;
+    const share = makeEventLoopShare(10, () => clock);
+    let timerRan = false;
+    setTimeout(() => {
+      timerRan = true;
+    }, 0);
+    // Within the slice the turn keeps going without waiting for anything.
+    clock = 9;
+    await Effect.runPromise(share);
+    const before = timerRan;
+    clock = 10;
+    for (let event = 0; event < 10_000 && !timerRan; event += 1) {
+      clock += 10;
+      await Effect.runPromise(share);
+    }
+    expect(before).toBe(false);
+    expect(timerRan).toBe(true);
+  });
+
   it("does not count an app-owned action as provider inactivity", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {

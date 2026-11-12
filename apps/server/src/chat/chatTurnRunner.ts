@@ -69,6 +69,7 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  makeEventLoopShare,
   makeIdleTimeout,
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
@@ -960,6 +961,7 @@ export class ChatTurnRunner {
             );
 
       const idle = yield* makeIdleTimeout(timeoutMs);
+      const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
           Effect.flatMap(() =>
@@ -1000,6 +1002,7 @@ export class ChatTurnRunner {
             ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                yield* shareEventLoop;
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
