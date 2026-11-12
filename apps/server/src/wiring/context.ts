@@ -54,6 +54,7 @@ import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { BrowserWiring } from "./browser";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { CodeToolingWiring } from "./codeTooling";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { HarnessWiring } from "./harness";
@@ -90,6 +91,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "liveProjectBrowsers"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
+  Pick<CodeToolingWiring, "pairedMergeUnlockSlot"> &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workTurnService"> &
   Pick<
@@ -120,6 +122,7 @@ export function wireContext(deps: ContextDependencies) {
     codeOperationRuntime,
     codeSessionAuthority,
     codeSessionConversation,
+    pairedMergeUnlockSlot,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -879,6 +882,8 @@ export function wireContext(deps: ContextDependencies) {
   });
   onWindowRevoked((windowId) => flowRuns.revokeWindow(windowId));
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
+    // The hub side is wired after this and binds the owner unlock into the slot.
+    ownerActionUnlock: pairedMergeUnlockSlot.current,
     agentAvailability: (windowId, threadId) => readBrowserAvailability(windowId, String(threadId)),
     service: browserAutomationService,
     taskProfiles: {

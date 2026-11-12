@@ -12102,9 +12102,11 @@ access` agree); a thread's own change is journaled as
   revoked on the thread's next mode change. A paired device may lower a
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
-  access is chosen in the Octant window on this host." An owner device the
-  person marked may do both (maintainer request, 2026-11-12; not built yet:
-  today it is refused as any paired device is). `octant agent` keeps
+  access is chosen in the Octant window on this host, or on one of its owner
+  devices after a fresh unlock." An owner device the
+  person marked may do both (maintainer request, 2026-11-12): the route takes
+  its own fresh unlock for that exact command. Not built yet: no client
+  attaches the unlock. `octant agent` keeps
   sending Full access exactly when the Project remembers it, and
   `octant agent --access <mode>` asks for any mode on a new thread:
   `full-access` is remembered for the Code Project through the same
@@ -13649,8 +13651,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   ride the five-minute unlock session by default; an unlock for each answer is
   a setting. Every other paired device keeps the limits above
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Not built yet: today these four are refused to an owner device as to any
-  other paired device.
+  Session-riding approval answers and their setting are built. The host side
+  of the Full access choice, of profile site approvals, and of navigate and
+  type is built and no client sends them yet; the terminal write is not
+  built.
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget

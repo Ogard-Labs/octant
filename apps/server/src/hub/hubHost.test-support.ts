@@ -42,13 +42,14 @@ import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingS
 import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
-import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
+import { createHubOwnerRouteHandler, type OwnerSiteApprovalHost } from "./hubOwnerRoutes";
 import type { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
 import { PairedMergeUnlockService } from "./pairedMergeUnlock";
+import { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity, type HubPairingPort } from "./hubService";
 import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
@@ -205,6 +206,8 @@ export interface HubTestHost {
   readonly spokeSignIn: SpokeSignInService;
   /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
   readonly pairedMergeUnlock: PairedMergeUnlockService;
+  /** Whether each owner approval answer needs its own unlock here, as a window on this host sets it. */
+  readonly ownerApprovalAnswerUnlock: OwnerApprovalAnswerUnlock;
   /** Whether the provider's own app on this host holds each sign-in; a test changes it as the person would in a terminal. */
   readonly accounts: Record<HubSignInKind, SignInAccountState>;
   /** The sign-in command this host's provider settings would show for each kind; unset means none. */
@@ -246,6 +249,7 @@ export interface HubTestHost {
 
 export async function startHubTestHost(input: {
   readonly ownerApprovals?: OwnerApprovalHost;
+  readonly ownerSiteApprovals?: OwnerSiteApprovalHost;
   readonly ownerBrowser?: OwnerBrowserControlService;
   readonly name: string;
   readonly address: string;
@@ -712,6 +716,10 @@ export async function startHubTestHost(input: {
     unlock: ownerUnlock,
     record: (change) => records.push(change),
   });
+  const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
+    state,
+    record: (change) => records.push(change),
+  });
   const threadMoveRecords: string[] = [];
   const recordStep = (name: string) => () => {
     threadMoveRecords.push(name);
@@ -780,6 +788,8 @@ export async function startHubTestHost(input: {
   input.cleanups.push(() => threadMovesFromWindow.close());
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     ...(input.ownerApprovals === undefined ? {} : { approvals: input.ownerApprovals }),
+    approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
+    ...(input.ownerSiteApprovals === undefined ? {} : { siteApprovals: input.ownerSiteApprovals }),
     ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
     spoke,
@@ -922,6 +932,7 @@ export async function startHubTestHost(input: {
     signIn,
     spokeSignIn,
     pairedMergeUnlock,
+    ownerApprovalAnswerUnlock,
     accounts,
     signInCommands,
     accountGate,

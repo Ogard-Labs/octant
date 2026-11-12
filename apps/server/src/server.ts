@@ -1180,6 +1180,7 @@ export function startOctantServer(
       flowRuns,
     } = wireContext({
       onWindowRevoked,
+      pairedMergeUnlockSlot,
       browserCredentialUseService,
       browserSessionGrants,
       browserUploadPermissions,
@@ -1357,6 +1358,7 @@ export function startOctantServer(
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
+      pairedMergeUnlockSlot,
       persistence,
       projectService,
       providerDataDirectory,
@@ -1815,6 +1817,7 @@ export function startOctantServer(
       browserExtensionService,
       browserFlowService,
       browserProfileService,
+      browserToolApprovalService,
       canvasPublicShareService,
       threadExportService,
       threadHandOffProvider,

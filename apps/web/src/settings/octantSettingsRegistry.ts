@@ -1551,6 +1551,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub owner unlock merge pull request phone browser paired client passkey fresh unlock off by default",
         },
         {
+          id: settingId("hub-owner-approval-answer-unlock"),
+          label: "Owner unlock for each approval answer",
+          scope: "host",
+          keywords:
+            "hub owner device unlock approval answer allow once deny session five minutes fresh unlock per answer off by default",
+        },
+        {
           id: settingId("hub-confirm-new-members"),
           label: "Confirm new members",
           scope: "host",

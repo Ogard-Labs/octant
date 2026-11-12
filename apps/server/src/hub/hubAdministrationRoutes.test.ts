@@ -45,6 +45,7 @@ async function setup(
     hub: host.hub,
     spoke: host.spoke,
     pairedMergeUnlock: host.pairedMergeUnlock,
+    ownerApprovalAnswerUnlock: host.ownerApprovalAnswerUnlock,
     failover: host.failover,
     wake: host.wake,
     spokeWake: host.spokeWake,
@@ -178,6 +179,35 @@ describe("hub administration over the loopback channel", () => {
     expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
       ["paired-merge-unlock-on", "local-window"],
       ["paired-merge-unlock-off", "local-window"],
+    ]);
+  });
+
+  it("lets a window ask for an owner unlock per approval answer, reports it in the status, and journals each change", async () => {
+    const { host, handle } = await setup();
+    const status = async () =>
+      (
+        await handle(
+          new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+            headers: {
+              "x-octant-desktop-secret": secret,
+              "x-octant-window-capability": capability,
+            },
+          }),
+        )
+      )?.json();
+
+    expect(await status()).toMatchObject({ ownerApprovalAnswerUnlock: false });
+    const on = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.ownerApprovalAnswerUnlock, { enabled: true }),
+    );
+    expect(await on?.json()).toEqual({ status: "changed", enabled: true });
+    expect(await status()).toMatchObject({ ownerApprovalAnswerUnlock: true });
+    await handle(post(HUB_ADMINISTRATION_ROUTES.ownerApprovalAnswerUnlock, { enabled: false }));
+
+    expect(host.ownerApprovalAnswerUnlock.required()).toBe(false);
+    expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
+      ["owner-approval-answer-unlock-on", "local-window"],
+      ["owner-approval-answer-unlock-off", "local-window"],
     ]);
   });
 
