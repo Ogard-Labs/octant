@@ -260,6 +260,15 @@ import { appToolHostLines } from "../providers/appToolHostLines";
 
 type Awaitable<T> = T | Promise<T>;
 
+/**
+ * How many threads the start-up look at unconfirmed steps reads remotes for
+ * at once. Each look is a `git ls-remote` or a GitHub read; a few together
+ * finish a host's handful quickly without a burst of them at launch.
+ */
+export const UNCONFIRMED_STEP_SETTLEMENT_CONCURRENCY = 3;
+/** How long one unconfirmed step's reads may take before it is left unconfirmed. */
+const UNCONFIRMED_STEP_TIMEOUT_MS = 20_000;
+
 interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
   /**
@@ -270,6 +279,8 @@ interface RuntimePersistence extends ReviewFindingPersistencePort {
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
   ) => ReadonlyArray<{ readonly work: CodeRuntimeWork }>;
+  /** The threads holding a push or pull request step whose outcome is unknown. */
+  readonly readCodeThreadsWithUnconfirmedRemoteSteps?: () => ReadonlyArray<CodeThreadId>;
   readonly journal: Journal;
   readonly readCodeCheckout: (
     checkoutId: CodeCheckoutIdentity["id"],
@@ -967,6 +978,19 @@ export interface CodeOperationRuntime {
    */
   settleCutOffTurns?(threadId: string): void;
   /**
+   * Looks once, as `scopeId`, at the remote of every thread holding a push or
+   * pull request step whose outcome a restart left unknown, and settles each
+   * step the remote proves either way. At most
+   * `UNCONFIRMED_STEP_SETTLEMENT_CONCURRENCY` threads are looked at together,
+   * and each step's reads stop after `stepTimeoutMs`; a step whose remote
+   * does not answer in time stays unconfirmed. Resolves when every thread was
+   * looked at or `signal` aborted; never rejects.
+   */
+  settleUnconfirmedSteps?(
+    scopeId: WindowId,
+    options: { readonly signal: AbortSignal; readonly stepTimeoutMs?: number },
+  ): Promise<void>;
+  /**
    * The thread as its running turn may use it: a turn keeps the posture it
    * started under, so a later wider grant does not reach its tool calls.
    */
@@ -1009,6 +1033,26 @@ export interface CodeOperationRuntime {
    * one reconcile, and one shutdown cover every shell the host started.
    */
   readonly terminals?: TerminalService;
+}
+
+/**
+ * Starts the host's look at unconfirmed steps and returns at once, so a slow
+ * or unreachable remote never holds start-up. `stop` ends the look and
+ * resolves once it has let go; the steps it had not settled stay unconfirmed.
+ */
+export function beginUnconfirmedStepSettlement(
+  runtime: Pick<CodeOperationRuntime, "settleUnconfirmedSteps"> | undefined,
+  scopeId: WindowId,
+): { readonly stop: () => Promise<void> } {
+  const look = new AbortController();
+  const settled =
+    runtime?.settleUnconfirmedSteps?.(scopeId, { signal: look.signal }) ?? Promise.resolve();
+  return {
+    stop: async () => {
+      look.abort();
+      await settled;
+    },
+  };
 }
 
 export function createCodeOperationRuntime(
@@ -1916,6 +1960,35 @@ export function createCodeOperationRuntime(
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     recordShieldReview: (input) => turns.recordShieldReview(input),
     settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
+    settleUnconfirmedSteps: async (
+      scopeId,
+      { signal, stepTimeoutMs = UNCONFIRMED_STEP_TIMEOUT_MS },
+    ) => {
+      let waiting: Array<CodeThreadId>;
+      try {
+        waiting = [...(options.persistence.readCodeThreadsWithUnconfirmedRemoteSteps?.() ?? [])];
+      } catch {
+        return;
+      }
+      const stepSignal = () => AbortSignal.any([signal, AbortSignal.timeout(stepTimeoutMs)]);
+      const lookInTurn = async () => {
+        for (
+          let next = waiting.shift();
+          next !== undefined && !signal.aborted;
+          next = waiting.shift()
+        ) {
+          try {
+            await service.settleUnconfirmedSteps(scopeId, next, stepSignal);
+          } catch {
+            // A look that failed leaves that thread's steps unconfirmed, as an
+            // unreachable remote does; the other threads are still looked at.
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: UNCONFIRMED_STEP_SETTLEMENT_CONCURRENCY }, lookInTurn),
+      );
+    },
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) =>
       startingTurns.has(threadId) || turns.holdsTurn(threadId) || fileReviewLeases.has(threadId),
