@@ -166,6 +166,7 @@ import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import { toolStepsActivity } from "../transcript/turnActivity";
+import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -421,8 +422,17 @@ function WorkTurnHeader(props: {
 function WorkToolGroup(props: {
   readonly turn: WorkTurnState;
   readonly canvasClient?: CanvasClient;
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
 }) {
   const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const toolCallRecords = useToolCallRecordsReader({
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    mode: "work",
+    threadId: String(props.turn.threadId),
+    turnId: String(props.turn.requestId),
+  });
   if (activity === undefined) return null;
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
@@ -435,6 +445,7 @@ function WorkToolGroup(props: {
       }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
+      {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
     />
   );
 }
@@ -2442,7 +2453,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                             events={workRetryEvents(retries, String(row.head.requestId))}
                           />
                           <WorkToolGroup
+                            serverUrl={props.serverUrl}
                             turn={row.head}
+                            windowCapability={props.windowCapability}
                             {...(props.canvasClient === undefined
                               ? {}
                               : { canvasClient: props.canvasClient })}
@@ -2483,7 +2496,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       events={workRetryEvents(retries, String(row.turn.requestId))}
                     />
                     <WorkToolGroup
+                      serverUrl={props.serverUrl}
                       turn={row.turn}
+                      windowCapability={props.windowCapability}
                       {...(props.canvasClient === undefined
                         ? {}
                         : { canvasClient: props.canvasClient })}

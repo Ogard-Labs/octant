@@ -4395,14 +4395,14 @@ transcript (see [DESIGN.md](../DESIGN.md) Transcript). Code replays them from
 its journaled `tool-activity` events. Chat and Work record exactly the same
 step per tool call and nothing more: the provider's tool call id, the tool
 name, a state (`started`, `running`, `completed`, `failed`), and an optional
-progress or result message of at most 2048 bytes, redacted before it is kept. A
-setting, on by default, also keeps each call's bounded input and output in
-purgeable storage (maintainer request, 2026-11-12). Not built yet: today no tool
-input and no tool output is captured, except the `published` page a call put
-outside this host (its `https` address and title, and the host's own snapshot
-of the file it sent; today only a Claude artifact), which Code's
+progress or result message of at most 2048 bytes, redacted before it is kept.
+The step carries no tool input and no tool output, except the `published` page
+a call put outside this host (its `https` address and title, and the host's
+own snapshot of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
-as a link card beside the drawn snapshot. A turn keeps at most 512 steps
+as a link card beside the drawn snapshot. A call's input and output are kept
+apart from the step, as [Tool-call records](#tool-call-records) describes. A
+turn keeps at most 512 steps
 by default, a number the person can change (maintainer request, 2026-11-12;
 not built yet: today a constant 64, kept until a step is journaled and
 streamed as a change, because each tool event now restates the whole list
@@ -4419,6 +4419,66 @@ removes them with it. Both fields are optional, so a turn saved before they exis
 still decodes, and the group draws nothing for a turn that called no tool. This
 changes rendering and recording only; Chat's and Work's authority, and Work's
 shell posture, are unchanged.
+
+### Tool-call records
+
+A host setting, on by default (Settings › Permissions › Tool-call records,
+`keepToolCallRecords`), keeps a bounded copy of what each Chat and Work tool
+call was given and what it returned, so a person can inspect afterwards what
+an agent ran and got back (maintainer request, 2026-11-12).
+
+- **Where.** A record is thread content in the host database's
+  `thread_tool_call_record_store`, never the journal: no event carries the
+  text, a rebuild does not touch it, and nothing is added to the journaled
+  step. Rationale: Chat journals a turn's whole step list on every tool event,
+  so text kept on the step would be written again by every later event. A
+  record is found by the mode, the thread, the turn (a Chat attempt id or a
+  Work turn's request id) and the tool call id the step already names, so the
+  journal holds no reference of its own.
+- **Bounds.** At most 16 KiB of input and 64 KiB of output a call, each cut at
+  a character boundary and marked `truncated` when the call's text was longer,
+  whether the store or the adapter cut it. A turn keeps records for no more
+  calls than it keeps steps. A thread's records hold at most 16 MiB together;
+  past that the thread's oldest records are dropped, so the newest calls stay
+  inspectable. The bounds are fixed: they size stored data.
+- **What is recorded.** A tool Octant runs for a turn (an app-managed tool
+  request: Octant's own tools on every provider, and every tool of an Octant
+  Harness turn) is recorded by the host from the request and the result it
+  answered with. A runtime's own tool is recorded from `tool-call-content`
+  runtime events, which carry a call's input or output and exist only for
+  this: Chat and Work hand them to the record, and Code, a helper agent's
+  session, and every other consumer drop them before anything could journal
+  them. Claude reports its own tools this way (a file edit or write keeps the
+  path alone, not what was written, and a tool disabled in Plan reports
+  nothing); Octant's own tools reach Claude as `mcp__octant__` calls and are
+  left to the host's record. Not built yet: Codex, ACP, OpenCode and Pi send
+  no `tool-call-content`, so their own tools keep no record.
+- **Secrets.** Runtime events pass the shared driver boundary's redaction and
+  the store redacts again before it writes, so a known key format or a value
+  the credential broker issued is kept only as the redaction mark. A call
+  whose input names a protected secret file (an absolute or home-rooted path
+  on the list in force) keeps its input and not its output, marked
+  `outputWithheld`: redaction recognises key shapes, not every credential a
+  file can hold. This changes what is recorded only; the secret guard refuses
+  or allows the call exactly as before.
+- **Data rights.** Deleting a Chat thread and purging any thread remove its
+  records, and a tool event that arrives during or after either keeps
+  nothing. Retention purges through the same thread purge. A thread export a
+  local window asks for, and so Export my data, carries them as
+  `evidence.toolCalls`, each with its turn. Leave no trace governs person
+  memory, which never reads these records; such a thread keeps its records
+  with its transcript until it is deleted or purged. A Chat branch or a Work
+  fork starts with no records of its source's calls. Turning the setting off
+  stops new records at once, a running turn's included, and leaves the ones
+  already kept.
+- **Reading.** The tool row opens to show the call's input and output, read
+  from the host when the row is opened (`POST /api/threads/tool-call-records`,
+  which checks the caller may read the thread). Only a local window may read
+  or export them: a paired device is refused and its export leaves them out,
+  because what a tool was given and returned is wider than the step a
+  transcript shows it. Not built yet: a call with no tool row (an Octant
+  Harness turn's calls, which announce no start) has its record kept and
+  exported but no row to open it from.
 
 ### Web search
 
