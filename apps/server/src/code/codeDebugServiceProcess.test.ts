@@ -1808,6 +1808,19 @@ describe("the agent's debug tool", () => {
     expect(narrowed.asked).toHaveLength(1);
   });
 
+  it("redacts a key held in a configuration's arguments from the listing", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration({ args: ["--key", "AKIAIOSFODNN7EXAMPLE"] });
+    expect(await test.approve(value)).toMatchObject({ status: "approved" });
+    const listed = await agentTools(test).call({ operation: "configurations" });
+    expect(listed.result).toMatchObject({ configurations: [{ name: "Run the fixture" }] });
+    const text = JSON.stringify(listed.result);
+    expect(text).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(text).toContain("--key");
+  });
+
   it("refuses input outside its closed operations before anything is read or asked", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

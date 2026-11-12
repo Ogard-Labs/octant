@@ -298,10 +298,13 @@ export function createCodeDebugAgentTools(
       const listed = await startable(current.executionPolicy);
       if (listed.status === "refused") return serviceRefusal(listed.reason);
       return {
-        result: {
+        // A person may have typed a key as an argument. The listing is the
+        // Project's own record, so it marks nothing, but it is redacted as
+        // every other result is.
+        result: redactHostSecretsInValue({
           configurations: listed.configurations.map(agentConfiguration),
           ...(listed.session === undefined ? {} : { session: { name: listed.session.name } }),
-        },
+        }),
         isError: false,
       };
     }

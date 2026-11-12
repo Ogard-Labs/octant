@@ -1601,7 +1601,8 @@ the addendum left a choice open.
 - **What it starts.** `configurations` lists what this turn may start, at
   most 32, each with its digest, name, program, arguments, folder, and the
   names (never the values) of its environment entries, and names the running
-  session. `start` takes one of those digests and optional breakpoints (at
+  session. The listing is redacted as tool output is, so a key typed as an
+  argument does not reach the provider. `start` takes one of those digests and optional breakpoints (at
   most 16 files of 64 lines). Below Full access the list holds only the
   configurations an approval covers as they stand; at Full access it also
   holds the readable proposals of the repository's launch file. A digest not
