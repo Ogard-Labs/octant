@@ -4,10 +4,7 @@ import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, relative } from "node:path";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type {
-  JsonSchemaType,
-  JsonSchemaValidator,
-} from "@modelcontextprotocol/sdk/validation";
+import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type {
