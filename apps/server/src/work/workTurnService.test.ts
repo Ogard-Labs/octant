@@ -54,6 +54,11 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { leadApprovalFor } from "../harness/leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
@@ -6212,6 +6217,7 @@ describe("continuing a Work turn a restart cut off", () => {
       modeEnabled: () => true,
       connection,
       liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      uncertainToolCall: () => undefined,
       releaseQueue,
       ...options.recovery,
     });
@@ -6252,6 +6258,75 @@ describe("continuing a Work turn a restart cut off", () => {
     expect(second.cutOff).toEqual([]);
     expect(second.recovery).toEqual({ continued: [], held: [] });
     expect(continuations(second.host)).toHaveLength(1);
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(ids.thread), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (cutOffTurnId: string) => uncertainToolCallHold(ledger.certainty(cutOffTurnId));
+  }
+
+  it("holds a cut-off turn whose tool call nobody saw finish and names the tool", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "shell");
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "uncertain-tool-call",
+          detail:
+            'Octant stopped while the tool "shell" was running, so it may or may not have taken effect. Check it, then continue.',
+        },
+      ],
+    });
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("continues a cut-off turn whose only unfinished tool call reads", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "grep");
+
+    const { host, recovery } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+    expect(continuations(host)).toHaveLength(1);
   });
 
   it("holds a cut-off turn while Continue after restart is off in Settings", async () => {

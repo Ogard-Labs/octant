@@ -86,6 +86,11 @@ import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
@@ -15604,6 +15609,7 @@ describe("continuing a Code turn a restart cut off", () => {
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
+      uncertainToolCall: () => undefined,
       attempts: createCodeRestartContinuationAttempts(host.connection),
       resumability: (current, continuation, cutOffOperationId) =>
         codeRestartResumability(
@@ -15799,6 +15805,88 @@ describe("continuing a Code turn a restart cut off", () => {
       });
       expect(last.connection.send).not.toHaveBeenCalled();
       expect(statuses(last.host).every(([, status]) => status !== "running")).toBe(true);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: operationId(990) as never },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(threadId), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (cutOffTurnId: string) => uncertainToolCallHold(ledger.certainty(cutOffTurnId));
+  }
+
+  it("holds a thread whose cut-off turn left a tool call nobody saw finish, and names the tool", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "edit"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [],
+        held: [
+          {
+            threadId: String(threadId),
+            reason: "uncertain-tool-call",
+            detail:
+              'Octant stopped while the tool "edit" was running, so it may or may not have taken effect. Check it, then continue.',
+          },
+        ],
+      });
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
+      // The person's own Resume is an ordinary turn and is admitted as before.
+      await expect(
+        next.host.runtime.execute(windowId, {
+          ...start(62),
+          prompt: continuationPrompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("continues a thread whose cut-off turn left only a reading tool call unfinished", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "read"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [{ mode: "code", threadId: String(threadId) }],
+        held: [],
+      });
     } finally {
       for (const host of hosts) host.close();
     }

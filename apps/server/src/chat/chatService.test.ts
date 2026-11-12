@@ -104,6 +104,7 @@ import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
+import { ToolEffectLedger, uncertainToolCallHold } from "../toolEffects/toolEffectLedger";
 import {
   readAgentRunResultEvidence,
   readAgentRunResultText,
@@ -12499,6 +12500,7 @@ describe("continuing a Chat answer a restart cut off", () => {
       enabled: () => true,
       connection: fixture.persistence.connection,
       liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      uncertainToolCall: () => undefined,
       releaseQueue,
       ...overrides,
     });
@@ -12543,6 +12545,7 @@ describe("continuing a Chat answer a restart cut off", () => {
       enabled: () => true,
       connection: fixture.persistence.connection,
       liftHarnessRecovery: async () => ({ kind: "none" }),
+      uncertainToolCall: () => undefined,
       releaseQueue: async () => {},
     });
     expect(fixture.service.read(thread.id).turns).toHaveLength(2);
@@ -12602,6 +12605,76 @@ describe("continuing a Chat answer a restart cut off", () => {
 
     expect(recovery.continued).toEqual([{ mode: "chat", threadId: String(thread.id) }]);
     expect(order).toEqual([`lift:${String(thread.id)}`, `release:${String(thread.id)}`]);
+  });
+
+  /** The turn's tool call record, and a call of the cut-off answer the host never saw finish. */
+  function toolCallCutOff(fixture: Fixture, thread: { readonly id: unknown }, toolName: string) {
+    const ledger = new ToolEffectLedger({
+      journal: fixture.persistence.journal,
+      uuid: () => crypto.randomUUID(),
+      actor: { kind: "system", actorId: ids.actor } as never,
+      clock: () => now,
+    });
+    const attemptId = String(fixture.service.read(thread.id as never).turns[0]?.attempts[0]?.id);
+    const tools = ledger.forTurn({ threadId: String(thread.id), turnId: attemptId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      // The host stops inside the call: it never returns.
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return {
+      uncertainToolCall: (turnId: string) => uncertainToolCallHold(ledger.certainty(turnId)),
+    };
+  }
+
+  it("holds a cut-off answer whose tool call nobody saw finish, names the tool, and still takes the person's own continue", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const record = toolCallCutOff(fixture, thread, "octant_canvas");
+
+    const { recovery, releaseQueue } = await restart(fixture, record);
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "chat",
+          threadId: String(thread.id),
+          reason: "uncertain-tool-call",
+          detail:
+            'Octant stopped while the tool "octant_canvas" was running, so it may or may not have taken effect. Check it, then continue.',
+        },
+      ],
+    });
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuationTurns(fixture)).toHaveLength(0);
+
+    // The hold only stops the host's own continuation; the person's is theirs.
+    const current = fixture.service.read(thread.id).thread;
+    await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: current.id,
+      expectedVersion: current.version,
+      prompt: RESTART_CONTINUATION_PROMPT,
+      submissionId: crypto.randomUUID() as never,
+    });
+    await until(
+      () => fixture.service.read(thread.id).turns[1]?.attempts[0]?.outcome === "completed",
+    );
+    expect(continuationTurns(fixture)).toHaveLength(1);
+  });
+
+  it("continues a cut-off answer whose only unfinished tool call reads", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const record = toolCallCutOff(fixture, thread, "web-search");
+
+    const { recovery } = await restart(fixture, record);
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "chat", threadId: String(thread.id) }],
+      held: [],
+    });
   });
 
   it("holds a cut-off answer whose harness session a blocker keeps in restart recovery", async () => {

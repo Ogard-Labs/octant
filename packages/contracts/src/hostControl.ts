@@ -209,7 +209,9 @@ export type HostMemoryStatus = typeof HostMemoryStatus.Type;
 /**
  * Why one start of the host held a thread a restart cut off instead of
  * continuing it. `uncertain-external-action` is a push or pull request step
- * whose outcome the host never learned; `crash-loop` is a thread whose own
+ * whose outcome the host never learned; `uncertain-tool-call` is a tool call
+ * of the cut-off turn that may change something and has no record of having
+ * finished, named in the detail by its tool; `crash-loop` is a thread whose own
  * automatic continuations were cut off by a restart twice; `quit` is a thread
  * whose turn ended because a person quit Octant, not because it crashed or
  * the system restarted.
@@ -218,6 +220,7 @@ export const HostRestartRecoveryHold = Schema.Literal(
   "turned-off",
   "opted-out",
   "uncertain-external-action",
+  "uncertain-tool-call",
   "quit",
   "crash-loop",
   "cannot-resume",
