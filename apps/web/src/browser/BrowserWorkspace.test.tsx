@@ -863,10 +863,26 @@ describe("BrowserWorkspace", () => {
         return browser;
       }
 
+      // The drawing bar appears after the capture is taken, read and decoded.
+      // On a slow runner that chain outlasted the one-second default and a
+      // different test of this group failed on each run. Stay under the
+      // package's 15 s test timeout.
+      const DRAWING_OPENS_WITHIN_MS = 8_000;
+
       async function openDrawing(browser: BrowserAutomationClient) {
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
-        return screen.findByRole("toolbar", { name: "Drawing tools" });
+        fireEvent.click(
+          await screen.findByRole(
+            "button",
+            { name: "Draw on page" },
+            { timeout: DRAWING_OPENS_WITHIN_MS },
+          ),
+        );
+        return screen.findByRole(
+          "toolbar",
+          { name: "Drawing tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
       }
 
       function drag(layer: Element, from: [number, number], to: [number, number]) {
