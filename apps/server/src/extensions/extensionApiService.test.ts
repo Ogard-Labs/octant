@@ -417,6 +417,14 @@ describe("extension inspection and lifecycle API service", () => {
     expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: false });
     await service.execute({ kind: "install-package", ...target, trust: true } as never);
     expect(install).toHaveBeenLastCalledWith(expect.anything(), { trust: true });
+    // Switching on at install is the driver flow, which trusts first.
+    const untrusted = await service.execute({
+      kind: "install-package",
+      ...target,
+      enable: true,
+    } as never);
+    expect(untrusted.kind).toBe("extension-command-failed");
+    expect(install).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed when lifecycle targets were not inspected or source resolution throws private details", async () => {

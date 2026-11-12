@@ -189,8 +189,18 @@ trust and enable: the person reads one review and confirms once, and the host
 then runs steps 1 to 4 in order, each journaled through the existing extension
 lifecycle, stopping at the first that refuses. Digest-bound trust and the
 driver's confinement are unchanged, and each step stays available on its own
-(maintainer request, 2026-11-12). Not built yet: today each step is its own
-action and none implies the next.
+(maintainer request, 2026-11-12). Built: the review of a package that holds a
+provider driver (publisher, source, signing key, digest, components) is the
+one confirmation, and **Install and trust** on it sends `install-package`
+with `trust` and `enable`. The host runs install, `set-source-trust`,
+`set-plugin-desired` and `set-component-desired` for the driver component
+through the same lifecycle methods the separate actions use, so each is
+journaled and refused exactly as it is alone. A refused step ends the flow
+with the earlier steps standing, and the result names the step (`stoppedAt`:
+`trust` or `enable`) so the window says what is and is not done. The host
+refuses `enable` for a package that holds no provider driver before it
+installs anything, and without `trust`; **Confirm install** remains step 2 on
+its own.
 
 1. **Inspect** a source with an expected digest (`inspect-package`). The review
    shows the package identity, digest, publisher and signature state, protocol

@@ -5622,7 +5622,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; one "Install and trust" flow covers inspect, install, trust and
   enable, with digest-bound trust and confinement unchanged (maintainer
-  request, 2026-11-12; not built yet: today these are separate steps); the catalog lists effective outside drivers in their own group from
+  request, 2026-11-12; built, with each step still available on its own); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
