@@ -9,6 +9,9 @@ import {
   buildRemoteHostObservation,
   canExecuteRemoteProductMutation,
   listRemoteShellSurfacesByAvailability,
+  readRemoteSessionStanding,
+  RESTRICTED_REMOTE_SESSION,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -47,9 +50,26 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     () => readContinuationLink(globalThis.location?.href ?? "")?.mode ?? "chat",
   );
   const connected = canExecuteRemoteProductMutation(state);
+  // What the host says this session is, asked again each time the session
+  // becomes ready. Until the host answers, and whenever it does not, the
+  // session is shown as restricted.
+  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
+  const ready = state.kind === "ready";
+  useEffect(() => {
+    if (!ready) return;
+    const connection = props.bridge.connection();
+    if (connection === undefined) return;
+    let current = true;
+    void readRemoteSessionStanding(connection).then((answer) => {
+      if (current) setStanding(answer);
+    });
+    return () => {
+      current = false;
+    };
+  }, [props.bridge, ready]);
   const localHostSurfaces = useMemo(
-    () => listRemoteShellSurfacesByAvailability("local-host-only"),
-    [],
+    () => listRemoteShellSurfacesByAvailability("local-host-only", standing),
+    [standing],
   );
 
   if (
@@ -144,7 +164,12 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           origin,
         }}
       >
-        <RemoteWorkspace clients={clients} connected={connected} mode={activeMode} />
+        <RemoteWorkspace
+          actsAsHostPerson={standing.actsAsHostPerson}
+          clients={clients}
+          connected={connected}
+          mode={activeMode}
+        />
       </ContinuityScreenContext.Provider>
 
       <RemoteDeviceSelfPanel
@@ -170,8 +195,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       >
         <h2 className="remote-shell__section-title">Local host only</h2>
         <p className="remote-shell__local-only">
-          These stay with the person at the host. A paired browser reads threads and sends turns; it
-          cannot bind folders, approve tool use, or manage credentials.
+          {standing.actsAsHostPerson
+            ? "Only a window on the host's own computer does these. You paired this browser yourself, so the host takes its other requests as it takes a window's."
+            : "These stay with the person at the host. A paired browser reads threads and sends turns; it cannot bind folders, approve tool use, or manage credentials."}
         </p>
         {localHostSurfaces.map((surface) => (
           <OctantCard

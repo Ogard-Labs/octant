@@ -16,6 +16,7 @@ import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { useChatController } from "../chat/useChatController";
 import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
 import { useCodeController } from "../code/useCodeController";
+import { RemoteAccessDefaults } from "./RemoteAccessDefaults";
 import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
 import { useProviderController } from "../providers/useProviderController";
 import { ShellState } from "../shell/ShellState";
@@ -40,6 +41,12 @@ export interface RemoteWorkspaceProps {
   readonly mode: OctantMode;
   /** False while the session is stale: reads stay visible, sends are refused. */
   readonly connected: boolean;
+  /**
+   * What the host said of this session. Set for a browser the host's own
+   * person paired, which is then offered what the host takes from it alone;
+   * absent, the session is shown as restricted.
+   */
+  readonly actsAsHostPerson?: boolean;
 }
 
 /**
@@ -161,6 +168,16 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
   return (
     <>
       {surface}
+      {props.actsAsHostPerson === true && props.mode !== "chat" ? (
+        <RemoteAccessDefaults
+          codeClient={props.clients.code}
+          connected={props.connected}
+          key={props.mode}
+          mode={props.mode}
+          projectClient={props.clients.project}
+          workThreadClient={props.clients.workThread}
+        />
+      ) : null}
       <OctantDialogPresence>
         {canvas === undefined ||
         canvas.client !== props.clients.canvas ||

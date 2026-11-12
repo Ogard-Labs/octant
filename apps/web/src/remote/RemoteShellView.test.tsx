@@ -370,8 +370,15 @@ function answerProduct(seen: ProductRequest[], withCanvas = false) {
   };
 }
 
-async function readyBridge(seen: ProductRequest[] = [], withCanvas = false) {
-  const server = createFakeRemoteServer({ handleProductRequest: answerProduct(seen, withCanvas) });
+async function readyBridge(
+  seen: ProductRequest[] = [],
+  withCanvas = false,
+  actsAsHostPerson?: boolean,
+) {
+  const server = createFakeRemoteServer({
+    handleProductRequest: answerProduct(seen, withCanvas),
+    ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
+  });
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -529,6 +536,44 @@ describe("RemoteShellView", () => {
     expect(screen.getByText("Provider credentials")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable remotely").length).toBeGreaterThanOrEqual(4);
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("offers a browser the host's own person paired the default modes, and marks local only what the host forwards to no device", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+    await waitFor(() => expect(within(localOnly).queryByText("Approvals")).toBeNull());
+    expect(within(localOnly).queryByText("Extensions")).toBeNull();
+    expect(within(localOnly).queryByText("Provider setup")).toBeNull();
+    expect(within(localOnly).getByText("Provider credentials")).toBeInTheDocument();
+    expect(within(localOnly).getByText("Remote listener")).toBeInTheDocument();
+    expect(within(localOnly).getByText("Host controls")).toBeInTheDocument();
+    expect(within(localOnly).queryByText(/cannot bind folders, approve tool use/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Code" }));
+    const defaults = await screen.findByRole("region", { name: "Default modes" });
+    expect(
+      await within(defaults).findByRole("combobox", { name: "Default mode for new threads" }),
+    ).toHaveTextContent("Plan");
+  });
+
+  it("offers a restricted session no default modes, whether its host says so or does not say", async () => {
+    const user = userEvent.setup();
+    for (const actsAsHostPerson of [false, undefined]) {
+      const { bridge } = await readyBridge([], false, actsAsHostPerson);
+      const { unmount } = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+      expect(within(localOnly).getByText("Approvals")).toBeInTheDocument();
+      expect(within(localOnly).getByText("Extensions")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Code" }));
+      await screen.findByRole("navigation", { name: "Code thread list" });
+      await screen.findByText(/No Code threads on this host yet/i);
+      expect(screen.queryByRole("region", { name: "Default modes" })).toBeNull();
+      unmount();
+    }
   });
 
   it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {
