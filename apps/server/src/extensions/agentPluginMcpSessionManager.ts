@@ -862,7 +862,14 @@ export class AgentPluginMcpSessionManager {
                           const key = `${target.extensionId}:${target.packageId}:${target.componentId}`;
                           if (this.#exclusiveHolders.has(key)) return undefined;
                           this.#exclusiveHolders.add(key);
-                          return () => void this.#exclusiveHolders.delete(key);
+                          // Effective once: a late second release (exit, then stop)
+                          // must not delete a later holder's entry.
+                          let released = false;
+                          return () => {
+                            if (released) return;
+                            released = true;
+                            this.#exclusiveHolders.delete(key);
+                          };
                         },
                       },
                     }
