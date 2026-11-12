@@ -410,6 +410,41 @@ broker APIs does not itself prove every tracked managed-tool process exited.
 This preserves the existing emergency termination path and its deadline;
 it does not add a process-exit guarantee for managed tools.
 
+The desktop waits up to 60 seconds for the host it spawned to open its store;
+a host that exits first ends the wait at once with its last error output. The
+host backs up and replays its journal before it listens, and on a loaded
+machine (load average above 60) a large journal outlasted the former 15
+seconds, so each launch stopped the host mid-start and showed a failure. A
+start-up that cannot proceed writes its reason to stderr and releases the
+launch (bounded by the quit stop bounds) before anything is shown. The failure
+is then shown in a small window of its own, never a native alert: it states
+that Octant could not start, the reason in a bounded scrolling block (the
+heading and the Quit button stay in view however long the reason is), and one
+Quit button. It names no log, because the reason is written only to stderr and
+a person who opened the app from the Dock cannot read that; the reason is
+selectable text in the window. The page is a static document loaded as a data URL into a sandboxed,
+context-isolated window with no preload and no script, so it needs no renderer
+or host, loads nothing from the network, and refuses every navigation but its
+Quit link. SIGTERM, SIGINT, a logout or shutdown request, the Quit menu item,
+the Quit button and closing the window all end the app once with the cleanup
+already run; a quit requested during the release ends the app without showing
+the window; a quit requested while the app is still becoming ready creates no
+window, and a quit while it is still loading removes it at once (a graceful close of a
+window whose renderer is still starting held the quit until the close-grace deadline
+in a packaged run) and is not reported as a failure to show. Every platform takes this one path. An alert with no parent window
+(`dialog.showErrorBox`, the synchronous message box, and the asynchronous
+message box without a window) runs a nested modal loop (`-[NSAlert runModal]`)
+on macOS, and a packaged launch was observed to stay in it for twenty seconds
+after a SIGTERM; other failures raised outside a live window, such as a failed
+host restart or a failed tray action, go to a sheet when the main window is
+visible and not minimised (Electron attaches an async sheet to any parent with
+no visibility check, so a hidden window would hold it back) and otherwise to a
+small notice window with a Close button that closes only itself; at most one
+notice window exists, and a newer notice replaces its text. Nightly's
+reconnect failure shows one failure window and stops a Dock click from starting
+another reconnect beside it. A box shown from a live window as the answer to a person's
+action keeps its parent window and is unchanged.
+
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a

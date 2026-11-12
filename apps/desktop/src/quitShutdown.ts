@@ -88,3 +88,63 @@ export function armQuitDeadline(options: {
   const timer = setTimeout(options.forceExit, options.boundMs ?? QUIT_DEADLINE_MS);
   return () => clearTimeout(timer);
 }
+
+/**
+ * Ends the app after a start-up that cannot proceed. The reason is logged and
+ * what the failed start still holds is released before the failure is shown.
+ * The failure is shown in a window, never an alert without a parent: on macOS
+ * that alert runs a nested modal loop, and a packaged launch sat in it with a
+ * SIGTERM waiting behind it for as long as the box stayed open. The window
+ * leaves the main loop running, so a quit from any source (signal, logout,
+ * menu, closing the window, the Quit button) reaches `quit` and ends the app
+ * once. A quit requested while the app is still releasing ends it without
+ * showing anything.
+ */
+export async function quitAfterStartupFailure(options: {
+  readonly message: string;
+  readonly log: (message: string) => void;
+  /**
+   * Puts the failure on screen and returns without waiting for a person.
+   * `quit` ends the app; `quitRequested` says whether one has been asked for,
+   * so a window is not created for an app that is already leaving.
+   */
+  readonly showFailure: (
+    message: string,
+    control: { readonly quit: () => void; readonly quitRequested: () => boolean },
+  ) => Promise<void>;
+  /** Releases what the failed start still holds; bounded and never rejects. */
+  readonly shutDown: () => Promise<unknown>;
+  /** Receives the call that ends the app on a quit requested from now on. */
+  readonly onQuitRequested: (quit: () => void) => void;
+  /** Arms the quit deadline once the app is committed to ending. */
+  readonly armDeadline: () => void;
+  readonly finish: () => void;
+}): Promise<void> {
+  options.log(`Octant could not start: ${options.message}`);
+  let released = false;
+  let quitRequested = false;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    options.armDeadline();
+    options.finish();
+  };
+  const quit = () => {
+    quitRequested = true;
+    if (released) end();
+  };
+  options.onQuitRequested(quit);
+  await options.shutDown();
+  released = true;
+  if (quitRequested) {
+    end();
+    return;
+  }
+  try {
+    await options.showFailure(options.message, { quit, quitRequested: () => quitRequested });
+  } catch {
+    options.log("Octant could not show why it did not start.");
+    end();
+  }
+}
