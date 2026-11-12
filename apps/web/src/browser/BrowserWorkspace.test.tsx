@@ -905,7 +905,9 @@ describe("BrowserWorkspace", () => {
         const layer = screen.getByRole("application", { name: "Page capture to draw on" });
         expect(layer).toBeVisible();
         // Drawing opens ready for keys, not with focus left on the page body.
-        expect(layer).toHaveFocus();
+        // Focus lands a frame after the layer mounts, so a slow runner read it
+        // before it arrived.
+        await waitFor(() => expect(layer).toHaveFocus());
         // The page's own click-through preview is not mounted while the picture is drawn on.
         expect(
           screen.queryByRole("article", { name: "Interactive headless Browser preview" }),
@@ -1029,7 +1031,7 @@ describe("BrowserWorkspace", () => {
           expect(screen.queryByText("Added to the message")).toBeNull();
           // The refusal is announced, and the keys still work: focus is back on the layer.
           expect(screen.getByRole("alert")).toHaveTextContent("The picture was not added");
-          expect(layer).toHaveFocus();
+          await waitFor(() => expect(layer).toHaveFocus());
           // It sits in the stage, so it does not move the still.
           expect(screen.getByRole("alert").closest(".browser-markup")).not.toBeNull();
           await waitFor(() =>
