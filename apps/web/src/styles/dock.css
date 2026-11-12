@@ -721,20 +721,20 @@
   border-radius: var(--oct-radius-md);
 }
 
-/* A dialog shares the layer menus, popovers and pickers float on (`z-50`),
-   so whichever opened last paints on top. At 51 the dialog outranked every
-   popup opened from inside it: in the narrow dock sheet the Canvas version
-   history and More menu opened behind the sheet, out of reach. */
+/* A dialog stands on the floating layer and every popup stands above it, so
+   a popup opened from inside a dialog is never behind it: in the narrow dock
+   sheet the Canvas version history and More menu once opened behind the sheet,
+   out of reach. A notice sits between the two. */
 .octant-dialog__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -775,14 +775,14 @@
    its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
 .octant-sheet__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;

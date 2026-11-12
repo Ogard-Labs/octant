@@ -60,7 +60,10 @@ export function ComboboxPositioner({
 }: ComponentProps<typeof ComboboxPrimitive.Positioner>) {
   return (
     <ComboboxPrimitive.Positioner
-      className={cn("z-50 w-[var(--anchor-width)] outline-none window-no-drag", className)}
+      className={cn(
+        "z-[var(--oct-z-popup)] w-[var(--anchor-width)] outline-none window-no-drag",
+        className,
+      )}
       data-slot="combobox-positioner"
       {...props}
     />

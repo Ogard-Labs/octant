@@ -314,8 +314,15 @@
   --oct-z-base: 1;
   --oct-z-sticky: 20;
   --oct-z-overlay: 40;
-  --oct-z-modal: 60;
-  --oct-z-toast: 80;
+  /* Dialogs and sheets stand on the floating layer, a notice above them so
+     that one raised while a dialog is open can still be read and dismissed,
+     and everything a person opens to aim at (menu, popover, select,
+     combobox, tooltip, hover card) above the notice, so a notice that lands
+     on it never takes its clicks. The shadcn recipes spell `--oct-z-popup`
+     as a class; the contract test keeps the order. */
+  --oct-z-floating: 50;
+  --oct-z-toast: 55;
+  --oct-z-popup: 60;
 
   /* Media queries cannot read custom properties, so the literals below
      are repeated by hand in @media rules. These exist so JS and future
@@ -2092,7 +2099,7 @@ input.switch:checked::after {
 }
 
 .octant-tooltip__positioner {
-  z-index: var(--oct-z-toast);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-tooltip {
@@ -2127,7 +2134,7 @@ input.switch:checked::after {
    at the tooltip's layer so a card opened from a menu-adjacent row is never
    buried under the dock. */
 .octant-preview-card__positioner {
-  z-index: var(--oct-z-toast);
+  z-index: var(--oct-z-popup);
 }
 
 .octant-preview-card {
@@ -2232,8 +2239,13 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   z-index: var(--oct-z-toast);
   width: min(380px, calc(100vw - 32px));
+  /* The stack is a column at the window's corner: only a notice takes a
+     press, so the gap between two and any margin around them stay the
+     window's. */
+  pointer-events: none;
 }
 .toast {
+  pointer-events: auto;
   display: flex;
   align-items: flex-start;
   gap: var(--oct-space-2);

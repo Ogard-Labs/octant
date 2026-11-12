@@ -1136,4 +1136,68 @@ describe("the public-block visual language", () => {
       );
     });
   });
+
+  describe("the layer a notice sits on", () => {
+    // A notice that said the app had stopped unexpectedly landed on an open
+    // menu in the right dock's header and took the clicks meant for its
+    // items. jsdom does not stack, so this pins the numbers that decide it;
+    // the order was measured in a browser with `elementFromPoint`.
+    const system = readFileSync(join(webRoot, "styles", "octant.css"), "utf8");
+    const dock = readFileSync(join(webRoot, "styles", "dock.css"), "utf8");
+    const base = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const layer = (name: string) =>
+      Number(new RegExp(`--oct-z-${name}:\\s*(\\d+);`).exec(system)?.[1]);
+    const ruleBody = (css: string, selector: string) =>
+      new RegExp(
+        `(?:^|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
+        "m",
+      ).exec(css)?.[1] ?? "";
+
+    it("stands a notice above dialogs and sheets and below everything a person aims at", () => {
+      // Under a dialog's backdrop a notice could be neither read nor dismissed;
+      // under a menu's items it took their clicks.
+      expect(layer("toast")).toBeGreaterThan(layer("overlay"));
+      expect(layer("floating")).toBeGreaterThan(layer("overlay"));
+      expect(layer("toast")).toBeGreaterThan(layer("floating"));
+      expect(layer("toast")).toBeLessThan(layer("popup"));
+    });
+
+    it("keeps every popup recipe on the popup layer and never on a number of its own", () => {
+      for (const recipe of ["dropdown-menu", "context-menu", "popover", "select", "combobox"]) {
+        const source = readFileSync(join(webRoot, "ui", "shadcn", `${recipe}.tsx`), "utf8");
+        expect(source).toContain('"z-[var(--oct-z-popup)] ');
+        expect(source).not.toMatch(/\bz-\d+\b/);
+      }
+      for (const file of ["OctantPopover.tsx", "OctantSelect.tsx"]) {
+        const source = readFileSync(join(webRoot, "ui", "base", file), "utf8");
+        expect(source).toContain("z-[var(--oct-z-popup)]");
+        expect(source).not.toMatch(/\bz-\d+\b/);
+      }
+      expect(ruleBody(base, ".octant-menu__positioner")).toContain("z-index: var(--oct-z-popup);");
+    });
+
+    it("draws dialogs and sheets on the floating layer", () => {
+      for (const part of [
+        ".octant-dialog__backdrop",
+        ".octant-dialog__viewport",
+        ".octant-sheet__backdrop",
+        ".octant-sheet__viewport",
+      ]) {
+        expect(ruleBody(dock, part)).toContain("z-index: var(--oct-z-floating);");
+      }
+    });
+
+    it("puts a tooltip and a hover card on the popup layer", () => {
+      for (const part of [".octant-tooltip__positioner", ".octant-preview-card__positioner"]) {
+        expect(ruleBody(system, part)).toContain("z-index: var(--oct-z-popup);");
+      }
+    });
+
+    it("stacks every notice on the toast layer and lets only a notice take a press", () => {
+      expect(ruleBody(system, ".toast-stack")).toContain("z-index: var(--oct-z-toast);");
+      expect(ruleBody(system, ".toast-stack")).toContain("pointer-events: none;");
+      expect(ruleBody(system, ".toast")).toContain("pointer-events: auto;");
+      expect(ruleBody(base, ".computer-use-activity")).toContain("z-index: var(--oct-z-toast);");
+    });
+  });
 });

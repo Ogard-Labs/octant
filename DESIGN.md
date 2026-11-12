@@ -2732,10 +2732,22 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden. Dialogs and floating popups share one
-  layer, so the one opened last paints on top: a menu or popover opened inside
-  a dialog or the narrow dock sheet appears above it, and Escape closes the
-  innermost surface first.
+  when the title is visually hidden. Dialogs and sheets share one layer and
+  popups stand above it: a menu or popover opened inside a dialog or the
+  narrow dock sheet appears above it, and Escape closes the innermost surface
+  first.
+- Layers are tokens: page chrome stays at or below `--oct-z-overlay` (40),
+  dialogs and sheets with their backdrops stand at `--oct-z-floating` (50), a
+  notice at `--oct-z-toast` (55), and everything a person opens to aim at
+  (menus, context menus, popovers, selects, comboboxes, tooltips, hover
+  cards) at `--oct-z-popup` (60). A notice sits above a dialog or sheet
+  because under its backdrop it could be neither read nor dismissed, and
+  under a popup because a notice that said the app had stopped unexpectedly
+  once covered an open menu in the right dock's header and took the clicks
+  meant for its items. A menu opened inside a dialog stays above the dialog.
+  The `.toast-stack` column takes no press outside its notices. A new surface
+  takes one of these tokens, never a number of its own, and nothing in the
+  workspace goes above z-index 7.
 - A list a person picks from draws one row. One line is 28px
   (`--oct-menu-row-h`), its words stand 8px in from the row's edge
   (`--oct-menu-row-inset`), and the rows stand 4px in from the popup's edge
