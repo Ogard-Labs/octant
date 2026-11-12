@@ -3,6 +3,7 @@ import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";
 import {
   OctantMenuGroup,
   OctantMenuGroupLabel,
@@ -140,6 +141,7 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
                       <OctantMenuRadioGroup onValueChange={setChosen} value={folder}>
                         {folderChoices.map((choice) => (
                           <OctantMenuRadioItem key={choice.value} value={choice.value}>
+                            {rest.length === 0 ? null : <OctantMenuIconSlot />}
                             {choice.label}
                           </OctantMenuRadioItem>
                         ))}
@@ -150,7 +152,10 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
                 {onSetup === undefined ? null : (
                   <>
                     <OctantMenuSeparator />
-                    <OctantMenuItem onClick={onSetup}>Worktrees…</OctantMenuItem>
+                    <OctantMenuItem onClick={onSetup}>
+                      {rest.length === 0 ? null : <OctantMenuIconSlot />}
+                      Worktrees…
+                    </OctantMenuItem>
                   </>
                 )}
               </OctantMenuPopup>

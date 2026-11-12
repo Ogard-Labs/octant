@@ -238,6 +238,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { readThreadIdModes } from "../persistence/threadIdentity";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -381,6 +382,14 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
  * deltas, never an fsynced one.
  */
 const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
+
+/**
+ * The most deltas one burst holds before it commits, whatever the window
+ * says. A provider streaming as fast as it can filled one 100 ms window with
+ * nearly 600 deltas, and the single commit that held them (the Stop's own
+ * attempt persist among them) took 1.4 s, so Stop waited that long to settle.
+ */
+const STREAMED_DELTA_BATCH_MAX_DELTAS = 64;
 
 /**
  * The thread as one route actually runs it.
@@ -6346,7 +6355,11 @@ export class ChatService {
         appendedBatchStartedAtMs = nowMs;
         return;
       }
-      if (nowMs - appendedBatchStartedAtMs < STREAMED_DELTA_BATCH_WINDOW_MS) return;
+      if (
+        nowMs - appendedBatchStartedAtMs < STREAMED_DELTA_BATCH_WINDOW_MS &&
+        appendedBatch.length < STREAMED_DELTA_BATCH_MAX_DELTAS
+      )
+        return;
       journalAppendedBatch();
     };
 
@@ -7282,7 +7295,7 @@ export class ChatService {
       return new ChatServiceError(
         decodeChatFailure({
           category: "unavailable",
-          message: "Chat persistence is temporarily unavailable.",
+          message: persistenceFailureMessage(error, "Chat persistence is temporarily unavailable."),
         }),
       );
     }

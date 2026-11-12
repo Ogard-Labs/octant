@@ -45,13 +45,7 @@ export async function admitNativeHarnessTool(
   } catch {
     return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
   }
-  const turnExecutionPolicy = options.resolveTurnExecutionPolicy?.();
-  const decision = options.authority.authorize({
-    threadId: options.threadId,
-    request,
-    arguments: args,
-    ...(turnExecutionPolicy === undefined ? {} : { turnExecutionPolicy }),
-  });
+  const decision = authorize(options, request, args);
   if (decision.kind === "deny") {
     return refused(
       decision.reason,
@@ -93,9 +87,41 @@ export async function admitNativeHarnessTool(
                 : `The turn was cancelled while waiting for approval of ${name}.`,
       );
     }
+    // An approval can wait minutes for a person while the thread is switched
+    // to Plan, narrowed from Full access, or loses its Project. The answer
+    // covers the action under the authority it was asked under, so the action
+    // runs only if the thread's authority now still allows it and asks no more
+    // than the person already answered.
+    if (options.resolveAuthority() === undefined) {
+      return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
+    }
+    const recheck = authorize(options, request, args);
+    if (
+      recheck.kind === "deny" ||
+      (recheck.kind === "prompt" &&
+        (recheck.policy.approvalClass !== decision.policy.approvalClass ||
+          (recheck.reason === "taint-requires-fresh-confirmation" &&
+            decision.reason !== "taint-requires-fresh-confirmation")))
+    ) {
+      return refused(
+        recheck.kind === "deny" ? recheck.reason : "approval-stale",
+        `The thread's access changed while ${name} waited for approval, and its access now no longer allows it. Do not retry; say what you would have done.`,
+      );
+    }
   }
   return { status: "admitted", request } as const;
 }
+
+function authorize(options: AdmissionOptions, request: ToolActionRequest, args: unknown) {
+  const turnExecutionPolicy = options.resolveTurnExecutionPolicy?.();
+  return options.authority.authorize({
+    threadId: options.threadId,
+    request,
+    arguments: args,
+    ...(turnExecutionPolicy === undefined ? {} : { turnExecutionPolicy }),
+  });
+}
+
 const encoder = new TextEncoder();
 
 /**

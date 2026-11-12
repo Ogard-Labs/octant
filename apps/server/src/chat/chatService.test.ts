@@ -4508,6 +4508,75 @@ describe("ChatService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
+    const runs = 10;
+    const latencies: number[] = [];
+    for (let run = 0; run < runs; run += 1) {
+      let streamed = 0;
+      let sessionId = "";
+      const driver = {
+        acquire: () =>
+          Effect.succeed({
+            // A provider streaming as fast as it can: every pull is answered at once.
+            subscribe: Effect.succeed(
+              Stream.repeatEffect(
+                Effect.sync(() => {
+                  streamed += 1;
+                  return { kind: "text-delta", sessionId, text: "x" } as never;
+                }),
+              ),
+            ),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.sync(() => {
+                sessionId = input.sessionId;
+                return { sessionId: input.sessionId };
+              }),
+            send: () => Effect.void,
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            // Owning its process keeps the attempt live until the runner settles it.
+            forceStop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          }),
+      } as unknown as ProviderDriver;
+      // A clock that moves, so streamed deltas are journaled in timed batches
+      // as they are on a real host rather than all at once when the turn ends.
+      const { service } = openFixture({ driver, clock: () => new Date().toISOString() });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Flooded turn",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      void service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Stream",
+      });
+      await until(() => streamed > 200, { intervalMs: 1 });
+      const running = service.read(created.thread.id);
+      const stopIssued = performance.now();
+      await service.execute({
+        kind: "interrupt-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: running.thread.version,
+        turnId: running.turns[0]!.id,
+        attemptId: running.turns[0]!.attempts[0]!.id,
+      });
+      await until(
+        () => service.read(created.thread.id).turns[0]!.attempts[0]!.outcome === "cancelled",
+        { intervalMs: 1 },
+      );
+      latencies.push(performance.now() - stopIssued);
+    }
+    latencies.sort((left, right) => left - right);
+    const p95 = latencies[Math.ceil(runs * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    expect(p95).toBeLessThan(1_000);
+  }, 30_000);
+
   it("refuses to force-stop a turn whose provider shares one process and still stops it at once", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
     let acquired = false;

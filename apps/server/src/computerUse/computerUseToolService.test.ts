@@ -17,6 +17,7 @@ import {
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
   readApprovalOutsideContent,
   readThreadExternalContentTaint,
@@ -79,6 +80,8 @@ function fixture(overrides?: {
     readonly ingested: () => boolean;
     readonly outsideContent: () => ReturnType<typeof readApprovalOutsideContent>;
   };
+  /** The authority clock owners and app grants expire on; wall time by default. */
+  readonly now?: () => number;
 }) {
   let current = true;
   let tainted = false;
@@ -127,6 +130,7 @@ function fixture(overrides?: {
       (() => (tainted && overrides?.namesSources !== false ? marking : undefined)),
     threadTitle: () => "Fixture task",
     record: async () => {},
+    now: overrides?.now ?? (() => Date.now()),
   });
   const tools = service.toolSet(overrides?.toolOwner ?? owner);
   return {
@@ -181,6 +185,58 @@ describe("Computer use through a provider tool", () => {
       });
       await first;
       vi.setSystemTime(approvedAt + 301_000);
+      const second = f.tools.execute(command);
+      try {
+        await vi.waitFor(() =>
+          expect(
+            f.service.runtime
+              .list(owner.windowId)
+              .some((session) => session.pendingApproval !== undefined),
+          ).toBe(true),
+        );
+        expect(f.execute).toHaveBeenCalledOnce();
+      } finally {
+        await f.tools.close?.();
+        await second;
+      }
+    } finally {
+      await f.service.close();
+      vi.useRealTimers();
+    }
+  });
+  it("asks again once an app grant's five minutes have elapsed, even when the wall clock is set back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const approvedAt = Date.UTC(2026, 10, 1);
+    vi.setSystemTime(approvedAt);
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => Date.now(),
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const f = fixture({ now: clock.now() });
+    const command = {
+      name: "octant_computer",
+      inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+    };
+    try {
+      const first = f.tools.execute(command);
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+      await first;
+      elapsedMs += 301_000;
+      vi.setSystemTime(approvedAt - 60 * 60 * 1_000);
       const second = f.tools.execute(command);
       try {
         await vi.waitFor(() =>
@@ -881,6 +937,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     const recorded: Array<ComputerUseEvidenceEvent> = [];
     const macExecute = vi.fn(async () => decodeComputerControlResult({ kind: "apps", apps: [] }));
     const service = createComputerUseToolService({
+      now: () => Date.now(),
       ...(options.withMac === true
         ? {
             desktop: {

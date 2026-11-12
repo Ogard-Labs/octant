@@ -114,6 +114,7 @@ export class ChatProjection implements Projection {
       DELETE FROM chat_citation_projection;
       DELETE FROM chat_attachment_projection;
       DELETE FROM chat_turn_route_projection;
+      DELETE FROM chat_streamed_response_projection;
       DELETE FROM chat_attempt_projection;
       DELETE FROM chat_turn_projection;
       DELETE FROM chat_thread_projection;
@@ -302,40 +303,82 @@ export class ChatProjection implements Projection {
       readIndexedAttemptContentIds(connection, String(attempt.id)),
       event,
     );
+    // Every whole attempt carries the references streamed before it, so the
+    // rows that held them until now are folded in.
+    connection
+      .prepare(
+        "DELETE FROM chat_streamed_response_projection WHERE attempt_id = ? AND last_sequence < ?",
+      )
+      .run(String(attempt.id), event.globalSequence);
   }
 
   /**
    * A streamed delta after the attempt turned `streaming`. The journal holds
    * only the reference the delta appended; the attempt row the first delta's
    * `attempt-updated` wrote supplies everything else.
+   *
+   * The reference goes into its own row rather than into the attempt row and
+   * turn JSON: rewriting both per delta made each delta cost as much as the
+   * reply so far, so 2,000 deltas took 21-30 s to project and a Stop's
+   * commit waited behind them. Reads fold the rows onto the attempt; the next
+   * whole attempt event carries the references and removes the rows.
    */
   #applyAttemptResponseAppended(connection: SqliteConnection, event: EventEnvelope): void {
     assertEnvelope(event.aggregateType === "chat-thread");
     const appended = decodeProjection(() => decodeChatAttemptResponseAppended(event.payload));
     assertEnvelope(String(appended.threadId) === String(event.aggregateId));
-    const attempt = readChatAttempt(connection, String(appended.attemptId));
+    const owner = connection
+      .prepare(`
+        SELECT attempt.turn_id, attempt.thread_id, attempt.last_sequence,
+               turn.sequence AS turn_sequence,
+               json_type(turn.turn_json, '$.rewound') IS NOT NULL AS rewound
+        FROM chat_attempt_projection AS attempt
+        INNER JOIN chat_turn_projection AS turn ON turn.turn_id = attempt.turn_id
+        WHERE attempt.attempt_id = ?
+      `)
+      .get(String(appended.attemptId)) as
+      | {
+          readonly turn_id: string;
+          readonly thread_id: string;
+          readonly last_sequence: number;
+          readonly turn_sequence: number;
+          readonly rewound: number;
+        }
+      | undefined;
     // Replay order guarantees the first delta's attempt-updated wrote this row.
-    assertEnvelope(attempt !== undefined);
+    assertEnvelope(owner !== undefined);
     assertEnvelope(
-      String(attempt.turnId) === String(appended.turnId) &&
-        String(attempt.threadId) === String(appended.threadId),
+      owner.turn_id === String(appended.turnId) && owner.thread_id === String(appended.threadId),
     );
-    // Replay delivers the same event again; appending its reference twice
-    // would duplicate the delta in the transcript.
-    const alreadyAppended =
-      String(attempt.responseRefs.at(-1)?.contentId) === String(appended.responseRef.contentId);
-    const next = alreadyAppended
-      ? { ...attempt, updatedAt: appended.updatedAt }
-      : {
-          ...attempt,
-          responseRefs: [...attempt.responseRefs, appended.responseRef],
-          updatedAt: appended.updatedAt,
-        };
-    // The attempt read above is the row as the projection last wrote it, so
-    // its references are exactly what the search index already holds; reading
-    // the row back again would parse and decode the same JSON once more for
-    // every streamed delta.
-    this.#projectAttempt(connection, next, indexedAttemptContentIds(attempt), event);
+    // A whole attempt journaled after this delta already carries its
+    // reference, so a replayed delta must not add it a second time.
+    if (owner.last_sequence >= event.globalSequence) return;
+    const inserted = connection
+      .prepare(`
+        INSERT OR IGNORE INTO chat_streamed_response_projection (
+          attempt_id, thread_id, content_id, response_ref_json, updated_at, last_sequence
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(appended.attemptId),
+        String(appended.threadId),
+        String(appended.responseRef.contentId),
+        JSON.stringify(appended.responseRef),
+        appended.updatedAt,
+        event.globalSequence,
+      );
+    if (inserted.changes === 0) return;
+    // A late delta for a turn an edit or rewind already replaced must not bring its text back.
+    const turnPosition = { threadId: appended.threadId, sequence: owner.turn_sequence };
+    if (owner.rewound === 0 && !isTurnReplacedByEdit(connection, turnPosition)) {
+      upsertTranscriptSearchContent(connection, {
+        contentId: String(appended.responseRef.contentId),
+        turnId: owner.turn_id,
+        threadId: owner.thread_id,
+        lastSequence: event.globalSequence,
+        updatedAt: appended.updatedAt,
+      });
+    }
   }
 
   #projectAttempt(
@@ -573,6 +616,9 @@ export function purgeThreadContent(connection: SqliteConnection, threadId: strin
   connection.prepare("DELETE FROM chat_search_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_work_item_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_follow_up_projection WHERE thread_id = ?").run(threadId);
+  connection
+    .prepare("DELETE FROM chat_streamed_response_projection WHERE thread_id = ?")
+    .run(threadId);
   connection.prepare("DELETE FROM chat_attempt_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_turn_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_turn_route_projection WHERE thread_id = ?").run(threadId);
@@ -645,6 +691,8 @@ export function readChatNavigation(
                  WHERE thread_id = thread.thread_id
                UNION ALL SELECT last_sequence FROM chat_attempt_projection
                  WHERE thread_id = thread.thread_id
+               UNION ALL SELECT last_sequence FROM chat_streamed_response_projection
+                 WHERE thread_id = thread.thread_id
                UNION ALL SELECT last_sequence FROM chat_attachment_projection
                  WHERE thread_id = thread.thread_id
                UNION ALL SELECT last_sequence FROM chat_citation_projection
@@ -714,7 +762,7 @@ export function readChatThreadView(
   }>;
   const turns = turnRows.map(({ schema_version, turn_json }) => {
     assertChatProjectionSchema(schema_version);
-    return decodeChatTurn(JSON.parse(turn_json));
+    return withStreamedResponses(connection, decodeChatTurn(JSON.parse(turn_json)));
   });
   const attachments = readChatAttachments(connection, threadId);
   const citations = readChatCitations(connection, threadId);
@@ -877,7 +925,7 @@ function readChatTurnWindowPiece(
     | undefined;
   if (row === undefined) throw new Error("Chat projection turn order is inconsistent");
   assertChatProjectionSchema(row.schema_version);
-  const turn = decodeChatTurn(JSON.parse(row.turn_json));
+  const turn = withStreamedResponses(connection, decodeChatTurn(JSON.parse(row.turn_json)));
   const attachments = readChatProjectionRows(
     connection,
     `SELECT schema_version, attachment_json AS json
@@ -957,6 +1005,8 @@ function readChatThreadViewHead(connection: SqliteConnection, thread: ChatThread
         UNION ALL
         SELECT last_sequence FROM chat_attempt_projection WHERE thread_id = ?
         UNION ALL
+        SELECT last_sequence FROM chat_streamed_response_projection WHERE thread_id = ?
+        UNION ALL
         SELECT last_sequence FROM chat_turn_route_projection WHERE thread_id = ?
         UNION ALL
         SELECT last_sequence FROM chat_attachment_projection WHERE thread_id = ?
@@ -971,6 +1021,7 @@ function readChatThreadViewHead(connection: SqliteConnection, thread: ChatThread
       )
     `)
     .get(
+      threadId,
       threadId,
       threadId,
       threadId,
@@ -1109,7 +1160,7 @@ export function readChatContent(
   };
 }
 
-/** The attempt row exactly as the projection last wrote it. */
+/** The attempt as the projection holds it, with every reference streamed so far. */
 export function readChatAttempt(
   connection: SqliteConnection,
   attemptId: string,
@@ -1118,7 +1169,49 @@ export function readChatAttempt(
     .prepare("SELECT attempt_json FROM chat_attempt_projection WHERE attempt_id = ?")
     .get(attemptId) as { readonly attempt_json: string } | undefined;
   if (row === undefined) return undefined;
-  return decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+  const attempt = decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+  return attemptWithStreamedResponses(connection, attempt);
+}
+
+/**
+ * The attempt with the references streamed since its last whole event, in
+ * the order they were journaled, and the time the latest one was streamed.
+ */
+function attemptWithStreamedResponses(
+  connection: SqliteConnection,
+  attempt: ChatAttempt,
+): ChatAttempt {
+  const rows = connection
+    .prepare(`
+      SELECT response_ref_json, updated_at
+      FROM chat_streamed_response_projection
+      WHERE attempt_id = ?
+      ORDER BY last_sequence ASC
+    `)
+    .all(String(attempt.id)) as ReadonlyArray<{
+    readonly response_ref_json: string;
+    readonly updated_at: string;
+  }>;
+  const last = rows.at(-1);
+  if (last === undefined) return attempt;
+  const held = new Set(attempt.responseRefs.map((reference) => String(reference.contentId)));
+  const streamed = rows
+    .map((row) => JSON.parse(row.response_ref_json) as { readonly contentId: string })
+    .filter((reference) => !held.has(reference.contentId));
+  return decodeProjection(() =>
+    decodeChatAttempt({
+      ...attempt,
+      responseRefs: [...attempt.responseRefs, ...streamed],
+      updatedAt: last.updated_at,
+    }),
+  );
+}
+
+function withStreamedResponses(connection: SqliteConnection, turn: ChatTurn): ChatTurn {
+  return {
+    ...turn,
+    attempts: turn.attempts.map((attempt) => attemptWithStreamedResponses(connection, attempt)),
+  };
 }
 
 export function searchChatThreads(
@@ -1448,11 +1541,13 @@ function readTurnIds(
 
 /**
  * Whether a later edit replaced this turn: it names a turn at or before this
- * one. Streaming persists an attempt update per delta, so this reads only the
- * turns after this one (none, for the turn being streamed) rather than folding
- * the whole thread.
+ * one. Streaming indexes each delta, so this reads only the turns after this
+ * one (none, for the turn being streamed) rather than folding the whole thread.
  */
-function isTurnReplacedByEdit(connection: SqliteConnection, turn: ChatTurn): boolean {
+function isTurnReplacedByEdit(
+  connection: SqliteConnection,
+  turn: Pick<ChatTurn, "threadId" | "sequence">,
+): boolean {
   return (
     connection
       .prepare(`
@@ -1539,13 +1634,11 @@ function readIndexedAttemptContentIds(
   };
   const ids = new Set((previous.responseRefs ?? []).map((reference) => reference.contentId));
   if (previous.researchRef !== undefined) ids.add(previous.researchRef.contentId);
-  return ids;
-}
-
-/** The same set, from an attempt the caller already read and decoded. */
-function indexedAttemptContentIds(attempt: ChatAttempt): ReadonlySet<string> {
-  const ids = new Set(attempt.responseRefs.map((reference) => String(reference.contentId)));
-  if (attempt.researchRef !== undefined) ids.add(String(attempt.researchRef.contentId));
+  // Each streamed delta indexed its own body when it applied.
+  const streamed = connection
+    .prepare("SELECT content_id FROM chat_streamed_response_projection WHERE attempt_id = ?")
+    .all(attemptId) as ReadonlyArray<{ readonly content_id: string }>;
+  for (const row of streamed) ids.add(row.content_id);
   return ids;
 }
 
