@@ -49,6 +49,12 @@ import { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
 import { registerCanvasExportFolderEvents } from "./canvas/canvasExportFolderEventStore";
 import { createCanvasExportFilePort } from "./canvas/canvasExportFilePort";
 import {
+  CanvasExportEventStore,
+  registerCanvasExportEvents,
+} from "./canvas/canvasExportEventStore";
+import { CanvasExportService } from "./canvas/canvasExportService";
+import { canvasExportTargetBindings } from "./canvas/canvasExportTargets";
+import {
   CANVAS_ACTION_RECEIPT_RECORDED,
   CANVAS_CREATED,
   CANVAS_REFRESH_RECEIPT_RECORDED,
@@ -110,6 +116,8 @@ function createRevisionRoute(
     readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
     readonly threadReadAuthority?: ThreadReadAuthority;
     readonly resolveDesignSystem?: CanvasRouteDependencies["resolveDesignSystem"];
+    /** Handed each page the link destination was asked to publish. */
+    readonly publishedPages?: string[];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -168,14 +176,16 @@ function createRevisionRoute(
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
   const registry = registerCanvasOutsideContentEvents(
-    registerCanvasExportFolderEvents(
-      registerCanvasCommentEvents(
-        registerCanvasShareEvents(
-          registerCanvasPublicShareEvents(new EventRegistry())
-            .register(CANVAS_CREATED, 1, CanvasCreated)
-            .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-            .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-            .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+    registerCanvasExportEvents(
+      registerCanvasExportFolderEvents(
+        registerCanvasCommentEvents(
+          registerCanvasShareEvents(
+            registerCanvasPublicShareEvents(new EventRegistry())
+              .register(CANVAS_CREATED, 1, CanvasCreated)
+              .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+              .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+              .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+          ),
         ),
       ),
     ),
@@ -255,11 +265,60 @@ function createRevisionRoute(
     home: tmpdir(),
     standingOutsideApproval: false,
   });
+  // The destinations as the host binds them: the folder (none chosen here) and
+  // a link destination that needs no account, with its upload recorded.
+  const publishedPages = options.publishedPages;
+  const canvasExportService = new CanvasExportService({
+    load: (id) => {
+      const version = projection.getById(id)?.currentVersion;
+      return version === undefined
+        ? undefined
+        : {
+            canvasId: version.canvasId,
+            versionId: version.versionId,
+            sequence: version.sequence,
+            title: version.definition.title,
+            blocks: version.definition.blocks,
+            definition: version.definition,
+          };
+    },
+    targets: (id) =>
+      canvasExportTargetBindings(
+        {
+          folderFor: () => undefined,
+          files: createCanvasExportFilePort(),
+          home: tmpdir(),
+          standingOutsideApproval: false,
+          newTempId: () => "temp",
+          sharehtml: {
+            pages: {
+              createPage: async (html) => {
+                publishedPages?.push(html);
+                return {
+                  kind: "created",
+                  id: "2b6f0c1e-7d2a-4d5a-9b1c-4f2e8a9d3c71",
+                  url: "https://k3x9q2a.sharehtml.org/",
+                  manageUrl: "https://sharehtml.org/m/manage-key",
+                };
+              },
+            },
+          },
+        },
+        id,
+      ),
+    eventStore: new CanvasExportEventStore({
+      journal,
+      uuid: () => `acacacac-acac-4cac-8cac-${(counter += 1).toString(16).padStart(12, "0")}`,
+    }),
+    uuid: () => `adadadad-adad-4dad-8dad-${(counter += 1).toString(16).padStart(12, "0")}`,
+    clock: () => later as never,
+  });
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability: windowCapability, now: 0 });
   const route = createCanvasRouteHandler({
     canvasProjection: projection,
     canvasService,
+    canvasExportService,
     designRunTickets: new CanvasDesignRunTickets(() => 1),
     ...(options.findPublishedSnapshot === undefined
       ? {}
@@ -1959,6 +2018,95 @@ describe("canvas routes", () => {
       }),
     );
     expect(JSON.parse(await refused!.text()).kind).toBe("unauthorized");
+  });
+
+  it("shares a Canvas owned by a Chat thread outside every Project through a link destination once the person approves, and refuses a window in another mode", async () => {
+    const publishedPages: string[] = [];
+    const route = createRevisionRoute(new CanvasProjection(), {
+      threadOwned: true,
+      publishedPages,
+    });
+    const headers = { "x-octant-window-capability": windowCapability };
+    const post = (handler: typeof route, path: string, body: unknown) =>
+      handler(
+        new Request(`http://127.0.0.1/api/canvas/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify(body),
+        }),
+      );
+    const prepareBody = {
+      schemaVersion: 1,
+      kind: "canvas-export-prepare",
+      canvasId,
+      versionId: "22222222-2222-4222-8222-222222222222",
+      expectedSequence: 1,
+      targetId: "sharehtml",
+      format: "html",
+    };
+
+    const offered = await route(
+      new Request(`http://127.0.0.1/api/canvas/export-targets?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers,
+      }),
+    );
+    expect(offered?.status).toBe(200);
+    const link = (
+      JSON.parse(await offered!.text()) as {
+        targets: ReadonlyArray<{ targetId: string; status: string }>;
+      }
+    ).targets.find((target) => target.targetId === "sharehtml");
+    expect(link?.status).toBe("ready");
+
+    const prepared = JSON.parse(await (await post(route, "export-prepare", prepareBody))!.text());
+    expect(prepared.kind).toBe("approval");
+    // Nothing leaves before the person answers the card.
+    expect(publishedPages).toHaveLength(0);
+
+    const decided = JSON.parse(
+      await (await post(route, "export-decide", {
+        schemaVersion: 1,
+        kind: "canvas-export-decision",
+        canvasId,
+        approvalId: prepared.card.approvalId,
+        decision: "approved",
+      }))!.text(),
+    );
+    expect(decided).toMatchObject({
+      kind: "exported",
+      record: {
+        outcome: {
+          kind: "receipt",
+          receipt: { kind: "link", href: "https://k3x9q2a.sharehtml.org/" },
+        },
+      },
+    });
+    expect(publishedPages).toHaveLength(1);
+    expect(publishedPages[0]).toContain("A bounded Canvas");
+    // The page that leaves names no thread, host, or Canvas.
+    expect(publishedPages[0]).not.toContain(threadId);
+    expect(publishedPages[0]).not.toContain(String(canvasId));
+
+    // The Canvas is the thread's: a Work window is offered nothing and can send nothing.
+    const workPages: string[] = [];
+    const workRoute = createRevisionRoute(new CanvasProjection(), {
+      threadOwned: true,
+      activeMode: "work",
+      publishedPages: workPages,
+    });
+    const refusedOffers = await workRoute(
+      new Request(`http://127.0.0.1/api/canvas/export-targets?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers,
+      }),
+    );
+    expect(refusedOffers?.status).toBe(403);
+    const refusedPrepare = JSON.parse(
+      await (await post(workRoute, "export-prepare", prepareBody))!.text(),
+    );
+    expect(refusedPrepare).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(workPages).toHaveLength(0);
   });
 
   it("lists the recipes a person may start a Canvas from, and only to an authenticated window", async () => {

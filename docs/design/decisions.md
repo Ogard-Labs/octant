@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 10        | 9       | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
+| [Canvas](#canvas)                                                                     | 11        | 8       | 3            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
+| **All areas**                                                                         | **247**   | **164** | **78**       | **5**               |
 
 ## Principles and hard lines
 
@@ -580,7 +580,7 @@ Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md
 
 A Canvas belongs to its thread's Project, or for a Chat thread in no Project to the thread alone. Finished work comes in three tiers (typed blocks, static frames, running frames), and each new block kind is gated by a schema version.
 
-- A thread-owned Canvas holds no file, shell, Git or network authority, takes images only from its own thread, and is never mirrored or published to a replica. A Chat Canvas outside a Project can be shared through the export destinations (maintainer request, 2026-11-12); not built yet: today it is never shared.
+- A thread-owned Canvas holds no file, shell, Git or network authority, takes images only from its own thread, and is never mirrored or published to a replica. A Chat Canvas outside a Project can be shared through the export destinations (maintainer request, 2026-11-12).
 - Plan keeps `create` and `revise`, because a Canvas changes only the thread's own document; the agent tool has no publish or share, and the mirror and replica sync write nothing for a Plan thread.
 - An older runtime refuses a document of a newer schema version rather than misreading it.
 - A person's change is journaled as a new head version with a host-stamped actor, and a renderer never authors as an agent.
@@ -2594,12 +2594,12 @@ Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choic
 
 ### Canvas shares and exports
 
-A share names its Project and is judged against it. A Canvas owned by a Chat thread outside every Project is shared only through the export destinations (maintainer request, 2026-11-12); not built yet: today it is not shared.
+A share names its Project and is judged against it. A Canvas owned by a Chat thread outside every Project is shared only through the export destinations (maintainer request, 2026-11-12): a window in Chat is offered the same destinations for it as for any Canvas, and a link destination publishes it once the person approves the card.
 
 - Share versions are independent of Canvas versions. A share that declares an older version but carries a newer block is refused.
 - Action blocks and source ids never leave. Exports carry no tags.
 
-Status: Partly built. Since: —. Detail: [Canvas: Shares](canvas.md#shares).
+Status: Built. Since: —. Detail: [Canvas: Shares](canvas.md#shares).
 
 ### Artifact library and tags
 

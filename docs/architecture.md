@@ -1080,8 +1080,7 @@ document as a future version. Frames follow the
   agent and by a window in Chat, follows its thread into a Chat Project
   without joining that Project's inventory or memory, is erased with the
   thread's purge, exports to the host folder, can be shared through the
-  export destinations (maintainer request, 2026-11-12; not built yet: today
-  it is never shared), and is never mirrored
+  export destinations (maintainer request, 2026-11-12), and is never mirrored
   or published to a replica. [Canvas](design/canvas.md#agent-tool-and-recipes)
   owns the rule. This has shipped.
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
