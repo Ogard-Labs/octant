@@ -190,11 +190,10 @@ describe("the public-block visual language", () => {
       expect(rule, selector).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
       expect(rule, selector).not.toMatch(/border-(right|bottom)/);
     }
-    // The line is the border, under Window glass the rim, and the strong
-    // border under increased contrast.
-    expect(inFrame(".shell.shell-frame")).toMatch(/--octant-pane-line:\s*var\(--octant-border\)/);
-    expect(inFrame(".shell--material-translucent.shell-frame")).toMatch(
-      /--octant-pane-line:\s*var\(--octant-rim\)/,
+    // The line is a share of the ink, so it shows on a near-black preset and
+    // on a glass tint alike, and the strong border under increased contrast.
+    expect(inFrame(".shell.shell-frame")).toMatch(
+      /--octant-pane-line:\s*color-mix\(in srgb, var\(--octant-text-primary\) \d+%, transparent\)/,
     );
     expect(inFrame('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,

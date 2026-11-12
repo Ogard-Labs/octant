@@ -388,9 +388,9 @@ sitting on it and no panel behind them. The thread stage, each tool tile in
 the dock, the bottom panel and the dock's overview are square panes (level 1)
 under the title band that touch each other and the window's right and bottom
 edges: no gap, no corner, no shadow. Between two neighbours there is one 1px
-line (`--octant-pane-line`: the border, the rim under Window glass, the strong
-border under increased contrast, and a system-colour border in forced
-colours), and one under the title band along the panes' top. Each pane draws
+line (`--octant-pane-line`: a tenth of the ink, so it shows on a near-black
+preset and on a glass tint as it does on the stock page; the strong border
+under increased contrast, and a system-colour border in forced colours), and one under the title band along the panes' top. Each pane draws
 only its own top and left edge, so a shared edge is never drawn twice. The
 divider's hit area is 8px wide and centred on that line, for the edge between
 the thread and the dock, between two tiles, and above the bottom panel; the

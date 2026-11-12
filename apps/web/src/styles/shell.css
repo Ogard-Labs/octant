@@ -2035,15 +2035,13 @@ html[data-octant-native-host="true"]
      over it; the shell has to hold that level itself; without a ground the
      piece otherwise dropped below the shell's own background and the stage
      showed the frame colour. The pane line is the one colour every divider
-     takes: under Window glass the border is lost on the tint, so the rim
-     shows instead. */
+     takes. It is a tenth of the ink, not the theme's border: on a near-black
+     preset the border is a shade off the page and the panes ran together
+     (#181c19 on #0a0e0c), and under Window glass it is lost on the tint. A
+     share of the ink shows on any fill, in dark, in light and on glass. */
   .shell.shell-frame {
-    --octant-pane-line: var(--octant-border);
+    --octant-pane-line: color-mix(in srgb, var(--octant-text-primary) 10%, transparent);
     isolation: isolate;
-  }
-
-  .shell--material-translucent.shell-frame {
-    --octant-pane-line: var(--octant-rim);
   }
 
   html[data-octant-increased-contrast="true"] .shell.shell-frame {
