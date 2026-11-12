@@ -41,6 +41,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".statuslist .dot",
   ".st",
   ".filetab .dirty",
+  '.dock-tool-buttons__button[data-dock-open="true"]::after',
   ".chart-dot",
   ".screen-live::before",
   ".pool li::before",
