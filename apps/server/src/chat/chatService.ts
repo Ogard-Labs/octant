@@ -272,6 +272,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -645,6 +646,8 @@ export interface ChatServiceOptions {
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /** Keeps each attempt's tool-call input and output in purgeable storage; absent keeps none. */
+  readonly toolCallRecorders?: ThreadToolCallRecorders;
   /**
    * Whether the agent's own harness approval is waiting on a person in this
    * thread. Its turn is parked then, not executing, so the navigation row says
@@ -1076,6 +1079,7 @@ export class ChatService {
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
   readonly #liveTurns?: LiveTurnRegistry;
+  readonly #toolCallRecorders?: ThreadToolCallRecorders;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
@@ -1140,6 +1144,9 @@ export class ChatService {
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
+    if (options.toolCallRecorders !== undefined) {
+      this.#toolCallRecorders = options.toolCallRecorders;
+    }
     if (options.awaitsHarnessApproval !== undefined) {
       this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     }
@@ -6402,6 +6409,15 @@ export class ChatService {
                 ? {}
                 : {
                     liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
+              ...(this.#toolCallRecorders === undefined
+                ? {}
+                : {
+                    toolCallRecords: this.#toolCallRecorders({
+                      mode: "chat",
+                      threadId: String(input.thread.id),
+                      turnId: String(input.attempt.id),
+                    }),
                   }),
               onHarnessRetry: (notice) => {
                 this.#nativeHarness?.noteRetry?.(harnessScope, notice);

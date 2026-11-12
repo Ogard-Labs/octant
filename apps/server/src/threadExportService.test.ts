@@ -112,6 +112,14 @@ function service(
       readonly list: (threadId: string) => ReadonlyArray<unknown>;
     };
     readonly code?: ThreadExportCodePort;
+    readonly toolCalls?: {
+      readonly list: (mode: "chat" | "work", threadId: string) => ReadonlyArray<unknown>;
+      readonly read?: (
+        mode: "chat" | "work",
+        threadId: string,
+        turnId: string,
+      ) => ReadonlyArray<unknown>;
+    };
   } = {},
 ) {
   return new ThreadExportService({
@@ -135,6 +143,7 @@ function service(
     ...(options.browserCaptures === undefined
       ? {}
       : { browserCaptures: options.browserCaptures as never }),
+    ...(options.toolCalls === undefined ? {} : { toolCalls: options.toolCalls as never }),
   });
 }
 
@@ -313,6 +322,164 @@ describe("ThreadExportService", () => {
     expect(outcome.bundle.evidence.attachments[0]?.displayName).toBe("brief.pdf");
     expect(outcome.bundle.omissions).toContainEqual({ kind: "attachment-bytes", count: 3 });
     expect(JSON.stringify(outcome.bundle)).not.toContain("data:image");
+  });
+
+  it("exports a Chat and a Work thread's kept tool-call records with the turn each belongs to", async () => {
+    const record = {
+      turnId: "b2000000-0000-4000-8000-000000000001",
+      toolCallId: "call-1",
+      toolName: "Bash",
+      input: { text: "ls -la", truncated: false },
+      output: { text: "README.md", truncated: true },
+      recordedAt: now,
+    };
+    const listed: Array<readonly [string, string]> = [];
+    const toolCalls = {
+      list: (mode: "chat" | "work", id: string) => {
+        listed.push([mode, id]);
+        return [record];
+      },
+    };
+    const chat = await service({ chat: chatView(), toolCalls }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "chat", threadId },
+    );
+    const work = await service({ work: workFixture(), toolCalls }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "work", threadId: workThreadId },
+    );
+    expect(listed).toEqual([
+      ["chat", threadId],
+      ["work", workThreadId],
+    ]);
+    for (const outcome of [chat, work]) {
+      expect(outcome.kind).toBe("exported");
+      if (outcome.kind !== "exported") return;
+      expect(outcome.bundle.evidence.toolCalls).toEqual([record]);
+    }
+  });
+
+  it("exports a key a tool call's record somehow held as the redaction mark", async () => {
+    const outcome = await service({
+      chat: chatView(),
+      toolCalls: {
+        list: () => [
+          {
+            turnId: "b2000000-0000-4000-8000-000000000001",
+            toolCallId: "call-1",
+            toolName: "Bash",
+            output: { text: `KEY=sk-ant-api03-${"a".repeat(80)}`, truncated: false },
+            recordedAt: now,
+          },
+        ],
+      },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    expect(JSON.stringify(outcome)).not.toContain("sk-ant-api03-");
+  });
+
+  it("leaves tool-call records out of an export a paired device asks for", async () => {
+    const outcome = await service({
+      chat: chatView(),
+      toolCalls: {
+        list: () => {
+          throw new Error("a paired device must not reach the tool-call records");
+        },
+      },
+    }).exportThread(windowId as never, "remote-device", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.evidence.toolCalls).toBeUndefined();
+  });
+
+  it("exports a thread that kept no tool-call record exactly as it would without the record store", async () => {
+    const withStore = await service({
+      chat: chatView(),
+      toolCalls: { list: () => [] },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    const without = await service({ chat: chatView() }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "chat", threadId },
+    );
+    expect(withStore).toEqual(without);
+  });
+
+  it("answers a local window with one turn's tool-call records for a thread it can read", async () => {
+    const turnId = "b2000000-0000-4000-8000-000000000001";
+    const record = {
+      toolCallId: "call-1",
+      toolName: "Bash",
+      input: { text: "ls -la", truncated: false },
+      output: { text: "README.md", truncated: false },
+      recordedAt: now,
+    };
+    const asked: Array<ReadonlyArray<string>> = [];
+    const toolCalls = {
+      list: () => [],
+      read: (mode: string, id: string, turn: string) => {
+        asked.push([mode, id, turn]);
+        return [record];
+      },
+    };
+    expect(
+      await service({ chat: chatView(), toolCalls }).readToolCallRecords(
+        windowId as never,
+        "local-window",
+        { mode: "chat", threadId, turnId },
+      ),
+    ).toEqual({ kind: "records", records: [record] });
+    expect(
+      await service({ work: workFixture(), toolCalls }).readToolCallRecords(
+        windowId as never,
+        "local-window",
+        { mode: "work", threadId: workThreadId, turnId },
+      ),
+    ).toEqual({ kind: "records", records: [record] });
+    expect(asked).toEqual([
+      ["chat", threadId, turnId],
+      ["work", workThreadId, turnId],
+    ]);
+  });
+
+  it("refuses a paired device, an unreadable thread, and a malformed request a turn's tool-call records", async () => {
+    const turnId = "b2000000-0000-4000-8000-000000000001";
+    const toolCalls = {
+      list: () => [],
+      read: () => {
+        throw new Error("a refused read must not reach the tool-call records");
+      },
+    };
+    expect(
+      await service({ chat: chatView(), toolCalls }).readToolCallRecords(
+        windowId as never,
+        "remote-device",
+        { mode: "chat", threadId, turnId },
+      ),
+    ).toEqual({ kind: "refused", reason: "unauthorized" });
+    expect(
+      await service({ toolCalls }).readToolCallRecords(windowId as never, "local-window", {
+        mode: "chat",
+        threadId,
+        turnId,
+      }),
+    ).toEqual({ kind: "refused", reason: "not-found" });
+    expect(
+      await service({ toolCalls }).readToolCallRecords(windowId as never, "local-window", {
+        mode: "work",
+        threadId: workThreadId,
+        turnId,
+      }),
+    ).toEqual({ kind: "refused", reason: "not-found" });
+    expect(
+      await service({ chat: chatView(), toolCalls }).readToolCallRecords(
+        windowId as never,
+        "local-window",
+        { mode: "code", threadId, turnId },
+      ),
+    ).toEqual({ kind: "refused", reason: "not-found" });
   });
 
   it("leaves Browser captures out of an export a paired device asks for", async () => {

@@ -67,6 +67,7 @@ import {
   type SideChatFileSource,
 } from "../chat/sideChatSourceTools";
 import { createThreadMentionRouteHandler } from "../threadMentionRoutes";
+import { threadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
@@ -391,6 +392,13 @@ export function wireChat(deps: ChatDependencies) {
     const chatService = new ChatService({
       conversationInputTransfer,
       liveTurns,
+      toolCallRecorders: threadToolCallRecorders({
+        connection: persistence.connection,
+        // The host setting, read at each write.
+        enabled: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
+        clock: () => new Date().toISOString(),
+      }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",

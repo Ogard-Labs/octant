@@ -19,6 +19,7 @@ import {
 } from "@octant/domain";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { ThreadToolCallRecorder } from "../threadToolCallRecorder";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
   MAX_WORK_TURN_RESPONSE_BYTES,
@@ -148,6 +149,8 @@ export interface WorkTurnRuntimePort {
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     /** The turn's tool calls, whole, whenever one starts, moves, or ends. */
     readonly onToolSteps?: (toolSteps: ThreadToolSteps) => void;
+    /** Keeps each call's input and output outside the journal; absent keeps none. */
+    readonly toolCallRecords?: ThreadToolCallRecorder;
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
@@ -513,6 +516,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   });
                 }
                 if (handledEvents > MAX_EVENTS) return;
+                input.toolCallRecords?.observe(event);
+                // Kept in the record above; never a step or a turn event.
+                if (event.kind === "tool-call-content") return;
                 if (event.kind === "usage") input.onUsage?.(event);
                 const sighting = compactions.observe(event);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
@@ -620,11 +626,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       input.onToolSteps?.(next);
                     }
                   }
+                  const resultJson = boundedToolResultJson(execution.result);
+                  input.toolCallRecords?.appTool({
+                    toolCallId: event.requestId,
+                    toolName: event.toolName,
+                    inputJson: event.inputJson,
+                    resultJson,
+                  });
                   yield* connection
                     .answerTool({
                       sessionId: input.providerSessionId,
                       requestId: event.requestId,
-                      resultJson: boundedToolResultJson(execution.result),
+                      resultJson,
                       ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     })

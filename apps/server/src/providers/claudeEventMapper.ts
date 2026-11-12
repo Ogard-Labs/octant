@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
@@ -225,6 +226,56 @@ function event(
   value: RuntimeEventWithoutEnvelope,
 ): ClaudeMappedMessage {
   return { kind: "event", event: mappedEvent(context, value) };
+}
+
+/** Octant's own tools reach Claude under this prefix; the host records those itself. */
+const OCTANT_TOOL_PREFIX = "mcp__octant__";
+
+/** A tool disabled in Plan ran nothing, so it has nothing to record. */
+function reportsToolCallContent(state: ClaudeToolState): boolean {
+  return (
+    state.emitsActivity && state.disabled !== true && !state.toolName.startsWith(OCTANT_TOOL_PREFIX)
+  );
+}
+
+/**
+ * The input a record keeps. A file edit or write keeps the path alone: what
+ * was written stays out of every event this adapter emits, as it does for the
+ * change's diff, and the file itself holds it.
+ */
+function recordedInput(
+  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
+): string {
+  if (content.toolName !== "Edit" && content.toolName !== "Write") {
+    return JSON.stringify(content.input);
+  }
+  const path = jsonString(content.input, "file_path");
+  return path === undefined ? "" : JSON.stringify({ file_path: path });
+}
+
+/**
+ * A tool call's input or result for a Chat or Work thread's record, cut to
+ * what one event carries. Never part of the tool's own events, which stay
+ * free of both.
+ */
+function toolCallContent(
+  context: ClaudeEventContext,
+  toolCallId: string,
+  part: "input" | "output",
+  text: string,
+  alreadyCut = false,
+): ReadonlyArray<ClaudeMappedMessage> {
+  if (text.length === 0) return [];
+  const cut = text.length > MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS;
+  return [
+    event(context, {
+      kind: "tool-call-content",
+      toolCallId,
+      part,
+      text: cut ? text.slice(0, MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS) : text,
+      ...(cut || alreadyCut ? { truncated: true } : {}),
+    }),
+  ];
 }
 
 function truncate(value: string, maximum: number): string {
@@ -493,10 +544,19 @@ function mapToolUse(
   ) {
     return checklistEvents(context, content.input);
   }
-  if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
-  // A shell command crosses only when it reaches a server, so the command
-  // can be journaled with its host as Octant Shield's record of it; any other
-  // command stays inside the runtime.
+  // A streamed call's start carried no input; its whole message does. Octant
+  // records a tool it runs itself from the request, so only the runtime's own
+  // tools are reported here.
+  // Made after the start below, so the events keep the order they are numbered in.
+  const inputContent = () =>
+    authoritativeInput && content.disabled !== true && reportsToolCallContent(resolved.state)
+      ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
+      : [];
+  if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
+  if (!resolved.created) return withoutIgnored(inputContent());
+  // A shell command rides on the tool's start only when it reaches a server,
+  // so the command can be journaled with its host as Octant Shield's record
+  // of it; the start of any other command names the tool and nothing more.
   const shellCommand =
     content.toolName === "Bash" ? jsonString(content.input, "command") : undefined;
   const remoteArgument =
@@ -515,6 +575,7 @@ function mapToolUse(
     const task = normalized(jsonString(content.input, "description") ?? "", SUMMARY_MAX_CHARACTERS);
     return [
       start,
+      ...inputContent(),
       event(context, {
         kind: "child-agent-activity",
         childAgentId: resolved.state.toolCallId,
@@ -525,12 +586,13 @@ function mapToolUse(
     ];
   }
   const outsideContent = OUTSIDE_CONTENT_TOOLS.get(content.toolName);
-  if (outsideContent === undefined) return [start];
+  if (outsideContent === undefined) return [start, ...inputContent()];
   // Offered only to a session the person let use Claude's own web tools.
   // Claude runs each of these itself and hands the model what came back.
   const target = outsideContentTarget(jsonString(content.input, outsideContent.targetKey));
   return [
     start,
+    ...inputContent(),
     event(context, {
       kind: "outside-content-read",
       toolCallId: resolved.state.toolCallId,
@@ -771,6 +833,17 @@ function mapToolResults(
     const state = pair.state!;
     state.lifecycle = "terminal";
     if (!state.emitsActivity) continue;
+    if (pair.result.text !== undefined && reportsToolCallContent(state)) {
+      results.push(
+        ...toolCallContent(
+          context,
+          state.toolCallId,
+          "output",
+          pair.result.text,
+          pair.result.textTruncated === true,
+        ),
+      );
+    }
     if (state.toolName === CLAUDE_SUBAGENT_TOOL) {
       results.push(
         event(context, {

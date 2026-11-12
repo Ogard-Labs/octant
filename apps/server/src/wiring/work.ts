@@ -71,6 +71,11 @@ import {
   createThreadHandOffRouteHandler,
 } from "../threadExportRoutes";
 import { ThreadExportService } from "../threadExportService";
+import { threadToolCallRecorders } from "../threadToolCallRecorder";
+import {
+  listThreadToolCallRecords,
+  readThreadToolCallRecords,
+} from "../persistence/threadToolCallRecordStore";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
 import { ThreadHandOffService, type ThreadHandOffProviderPort } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
@@ -421,6 +426,13 @@ export function wireWork(deps: WorkDependencies) {
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      toolCallRecorders: threadToolCallRecorders({
+        connection: persistence.connection,
+        // The host setting, read at each write.
+        enabled: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
+        clock: () => new Date().toISOString(),
+      }),
       carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
       confirmAgentMessagesDelivered: (messageIds) =>
         agentMessageService.confirmDelivered(messageIds),
@@ -927,6 +939,12 @@ export function wireWork(deps: WorkDependencies) {
     const threadExportService = new ThreadExportService({
       hostId: LOCAL_HOST_ID,
       clock: () => new Date().toISOString(),
+      toolCalls: {
+        list: (mode, threadId) =>
+          listThreadToolCallRecords(persistence.connection, { mode, threadId }),
+        read: (mode, threadId, turnId) =>
+          readThreadToolCallRecords(persistence.connection, { mode, threadId, turnId }),
+      },
       chat: {
         read: (threadId) => {
           try {

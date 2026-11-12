@@ -2,6 +2,7 @@ import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contr
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { ThreadToolCallRecorder } from "../threadToolCallRecorder";
 import {
   decodeChatAttemptQuestion,
   decodeChatFailure,
@@ -291,6 +292,8 @@ export interface ChatTurnRunnerInput {
   /** The endpoint is sending the request again. The same event the stats line counts. */
   readonly onHarnessRetry?: (notice: HarnessRetryNotice) => void;
   readonly onHarnessRetryCleared?: () => void;
+  /** Keeps each tool call's input and output outside the journal; absent keeps none. */
+  readonly toolCallRecords?: ThreadToolCallRecorder;
   /** Tells the navigation read what the running turn is doing, from its start to its end. */
   readonly liveTurn?: LiveTurnTracker;
   /**
@@ -1092,6 +1095,9 @@ export class ChatTurnRunner {
                     }),
                   );
                 }
+                input.toolCallRecords?.observe(event);
+                // Kept in the record above; never a step or part of the attempt.
+                if (event.kind === "tool-call-content") return;
                 if (event.kind === "text-delta") {
                   if (event.text.trim().length > 0) sawVisibleResponse = true;
                   if (responseText.length < 262_144) responseText += event.text;
@@ -1357,11 +1363,18 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
+                  const resultJson = boundedToolResultJson(execution.result);
+                  input.toolCallRecords?.appTool({
+                    toolCallId: event.requestId,
+                    toolName: event.toolName,
+                    inputJson: event.inputJson,
+                    resultJson,
+                  });
                   yield* callProvider(
                     connection.answerTool({
                       sessionId: input.attempt.providerSessionId,
                       requestId: event.requestId,
-                      resultJson: boundedToolResultJson(execution.result),
+                      resultJson,
                       ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     }),

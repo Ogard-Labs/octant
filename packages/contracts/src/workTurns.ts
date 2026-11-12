@@ -288,7 +288,8 @@ export const WorkTurnState = Schema.Struct({
   tasks: Schema.optional(ThreadTaskProgressList),
   /**
    * The tool calls this turn made, in arrival order: name, state, and a
-   * bounded progress or result message. No tool input or output is kept.
+   * bounded progress or result message. A call's input and output are kept
+   * apart from the turn, as its tool-call record.
    */
   toolSteps: Schema.optional(ThreadToolStepList),
   /** Whether the turn called more tools than `toolSteps` keeps. */

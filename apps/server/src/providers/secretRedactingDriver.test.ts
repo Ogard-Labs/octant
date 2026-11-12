@@ -57,6 +57,32 @@ async function collect(driver: ProviderDriver): Promise<ReadonlyArray<ProviderRu
 }
 
 describe("secret redaction at the driver boundary", () => {
+  it("redacts a tool call's input and output before any record can keep them", async () => {
+    noteIssuedSecret(fakeIssued);
+    const events = await collect(
+      redactProviderRuntimeSecrets(
+        fixture([
+          event({
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "input",
+            text: `curl -H "Authorization: Bearer ${fakeGithubToken}"`,
+          }),
+          event({
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "output",
+            text: `TOKEN=${fakeIssued}`,
+          }),
+        ]),
+      ),
+    );
+    const text = JSON.stringify(events);
+    expect(text).not.toContain(fakeGithubToken);
+    expect(text).not.toContain(fakeIssued);
+    expect(text).toContain(SECRET_REDACTION);
+  });
+
   it("redacts known key formats and broker-issued values from what a runtime said or printed", async () => {
     noteIssuedSecret(fakeIssued);
     const events = await collect(

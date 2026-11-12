@@ -61,6 +61,7 @@ import {
   type ProjectedChatContent,
 } from "./chatPersistenceSchema";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
+import { purgeThreadToolCallRecords } from "./threadToolCallRecordStore";
 import { purgeContextSubjectContent } from "./contextProjection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import { readUsageResumeState } from "./usageResumeProjection";
@@ -565,6 +566,8 @@ export function purgeThreadContent(connection: SqliteConnection, threadId: strin
   // So are the parent-thread selection a child was admitted with and the reply
   // it produced about this conversation.
   purgeAgentRunSubjectContent(connection, subject);
+  // And what the thread's tool calls were given and returned.
+  purgeThreadToolCallRecords(connection, "chat", threadId);
   connection.prepare("DELETE FROM chat_attachment_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_citation_projection WHERE thread_id = ?").run(threadId);
   connection

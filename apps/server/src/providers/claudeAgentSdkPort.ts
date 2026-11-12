@@ -311,6 +311,13 @@ export type ClaudeDecodedMessage =
         readonly toolUseId: string;
         readonly isError: boolean;
         /**
+         * The result's text as the model was handed it, cut to what one
+         * tool-call content event carries. Only a thread's tool-call record
+         * reads it.
+         */
+        readonly text?: string;
+        readonly textTruncated?: true;
+        /**
          * The claude.ai page the tool's structured result names, read only
          * from a message that settles one call. The mapper keeps it only for
          * an Artifact call.

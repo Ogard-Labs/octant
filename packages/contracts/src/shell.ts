@@ -887,6 +887,13 @@ export const ShellSettings = Schema.Struct({
     Schema.Int.pipe(Schema.between(1, MAX_BROWSER_CAPTURES_PER_THREAD)),
     { default: () => DEFAULT_BROWSER_CAPTURES_PER_THREAD },
   ),
+  /**
+   * Whether Chat and Work keep a bounded copy of each tool call's input and
+   * output in purgeable storage. A host setting. Turning it off stops new
+   * records and leaves the ones already kept, which go with their threads. A
+   * store persisted before this shipped decodes to on.
+   */
+  keepToolCallRecords: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);

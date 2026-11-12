@@ -405,10 +405,42 @@ describe("A published Claude artifact", () => {
         {
           toolUseId: "toolu-1",
           isError: false,
+          text: "ok",
           publishedPage: { url: "https://claude.ai/artifact/abc123", title: "Quarterly report" },
         },
       ],
     });
+  });
+
+  it("reads a tool result's text from a string or from its text blocks, cut to one event's bound", () => {
+    const result = (content: unknown) => {
+      const decoded = decodeMessage(
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "toolu-1", content }],
+          },
+          parent_tool_use_id: null,
+          session_id: "session-1",
+        },
+        openInput,
+        active,
+      );
+      return decoded.kind === "tool-results" ? decoded.results[0] : undefined;
+    };
+    expect(result("plain")).toEqual({ toolUseId: "toolu-1", isError: false, text: "plain" });
+    expect(
+      result([
+        { type: "text", text: "first" },
+        { type: "image", source: { type: "base64", data: "AAAA" } },
+        { type: "text", text: "second" },
+      ]),
+    ).toEqual({ toolUseId: "toolu-1", isError: false, text: "first\nsecond" });
+    expect(result(undefined)).toEqual({ toolUseId: "toolu-1", isError: false });
+    const long = result("x".repeat(70_000));
+    expect(long?.text).toHaveLength(65_536);
+    expect(long?.textTruncated).toBe(true);
   });
 
   it("names no page for another host, plain http, a failed call, or no address", () => {

@@ -24,8 +24,9 @@ export type ThreadToolStepState = typeof ThreadToolStepState.Type;
 /**
  * One tool call a Chat or Work turn made: its id, its name, how it stands, and
  * the provider's latest progress or result message. The same fields a Code
- * turn's tool step carries, and nothing more: no tool input and no tool output
- * is captured beyond a page the call published.
+ * turn's tool step carries, and nothing more: the step holds no tool input
+ * and no tool output beyond a page the call published. Those are kept apart
+ * from it, as the call's tool-call record.
  */
 export const ThreadToolStep = Schema.Struct({
   toolCallId: boundedNonEmptyText(255),

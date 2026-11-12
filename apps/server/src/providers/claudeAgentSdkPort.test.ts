@@ -1726,7 +1726,7 @@ describe("Claude Agent SDK port", () => {
     });
   });
 
-  test("does not emit replayed prompts or raw tool-result payloads", async () => {
+  test("does not emit replayed prompts, and carries of a tool result only its text for the thread's record", async () => {
     const messages = await collectMessages([
       safeRuntimeInitialization,
       {
@@ -1740,7 +1740,7 @@ describe("Claude Agent SDK port", () => {
         type: "user",
         session_id: "session-1",
         parent_tool_use_id: null,
-        tool_use_result: { commandOutput: "private command output" },
+        tool_use_result: { commandOutput: "private structured output" },
         message: {
           role: "user",
           content: [
@@ -1748,7 +1748,7 @@ describe("Claude Agent SDK port", () => {
               type: "tool_result",
               tool_use_id: "tool-1",
               is_error: false,
-              content: "private command output",
+              content: "command output",
             },
           ],
         },
@@ -1760,11 +1760,11 @@ describe("Claude Agent SDK port", () => {
       {
         kind: "tool-results",
         sessionId: "session-1",
-        results: [{ toolUseId: "tool-1", isError: false }],
+        results: [{ toolUseId: "tool-1", isError: false, text: "command output" }],
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain("private replayed prompt");
-    expect(JSON.stringify(messages)).not.toContain("private command output");
+    expect(JSON.stringify(messages)).not.toContain("private structured output");
   });
 
   test("protocol-fails unsupported assistant payload variants without reflecting payload content", async () => {
