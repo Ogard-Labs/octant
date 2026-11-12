@@ -1020,6 +1020,73 @@ describe("minimised dock tools", () => {
     holdsInvariants(back);
   });
 
+  it("restores into the other column when the last one is full, never over a shown tool", () => {
+    const third = 1 / 3;
+    const state: ThreadUtilityDockState = {
+      tabs: [
+        { id: "files", surface: "files" },
+        { id: "plan", surface: "plan" },
+        { id: "canvas", surface: "canvas" },
+        { id: "agents", surface: "agents" },
+        { id: "browser", surface: "browser" },
+      ],
+      active: "files",
+      layout: {
+        columns: [
+          { share: 0.5, tiles: [{ tabId: "files", share: 1 }] },
+          {
+            share: 0.5,
+            tiles: [
+              { tabId: "plan", share: third },
+              { tabId: "canvas", share: third },
+              { tabId: "agents", share: third },
+            ],
+          },
+        ],
+      },
+      minimised: ["browser"],
+    };
+    const back = restoreUtilityTool(state, "browser");
+    expect(columnsOf(back)).toEqual([
+      ["files", "browser"],
+      ["plan", "canvas", "agents"],
+    ]);
+    expect(back.active).toBe("browser");
+    expect(back.minimised).toBeUndefined();
+    holdsInvariants(back);
+  });
+
+  it("replaces the focused tile only when both columns are full", () => {
+    const tab = (id: "files" | "plan" | "canvas" | "agents" | "review" | "tests" | "browser") => ({
+      id,
+      surface: id,
+    });
+    const column = (
+      ...ids: ReadonlyArray<"files" | "plan" | "canvas" | "agents" | "review" | "tests">
+    ) => ({
+      share: 0.5,
+      tiles: ids.map((tabId) => ({ tabId, share: 1 / ids.length })),
+    });
+    const full: ThreadUtilityDockState = {
+      tabs: [
+        tab("files"),
+        tab("plan"),
+        tab("canvas"),
+        tab("agents"),
+        tab("review"),
+        tab("tests"),
+        tab("browser"),
+      ],
+      active: "files",
+      layout: { columns: [column("files", "plan", "canvas"), column("agents", "review", "tests")] },
+      minimised: ["browser"],
+    };
+    const back = restoreUtilityTool(full, "browser");
+    expect(shownUtilityTabIds(back)).toContain("browser");
+    expect(shownUtilityTabIds(back)).not.toContain("files");
+    expect(shownUtilityTabIds(back)).toHaveLength(6);
+  });
+
   it("restores a tool as a new column when the single tool shown leaves room beside it", () => {
     const state = showUtilityTabBeside(opened("browser", "files"), "browser");
     const parked = minimiseUtilityTool(state, "browser");

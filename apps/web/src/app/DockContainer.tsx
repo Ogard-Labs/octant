@@ -608,6 +608,11 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     [activeMode, agentBrowserLive, displayedDockState],
   );
 
+  /** The Browser context of the page a card stands for, when that page has one of its own. */
+  function contextOf(entry: DockShelfEntry): string | undefined {
+    return displayedDockState.tabs.find((tab) => tab.id === entry.tabId)?.browserContextId;
+  }
+
   function hideCard(entry: DockShelfEntry) {
     // The card goes and nothing else: the tool stays an open tab in the strip,
     // and no page or shell is closed or stopped. A card that showed because the
@@ -733,11 +738,13 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                 onShow: actions.restoreDockTool,
                 // Keyed by thread and checkout: a card belongs to one shell and
                 // never shows another thread's under its own name.
-                renderCard: (entry: DockShelfEntry, controls: DockCardControls) =>
-                  entry.surface === "browser" ? (
+                renderCard: (entry: DockShelfEntry, controls: DockCardControls) => {
+                  const contextId = contextOf(entry);
+                  return entry.surface === "browser" ? (
                     <DockBrowserCard
                       client={browserAutomationClient}
-                      key={`browser:${dockThread.threadId}`}
+                      {...(contextId === undefined ? {} : { contextId })}
+                      key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
                       onExpand={controls.onShow}
                       onHide={controls.onHide}
                       threadId={decodeBrowserThreadId(dockThread.threadId)}
@@ -751,7 +758,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       onHide={controls.onHide}
                       threadId={decodeCodeThreadId(dockThread.threadId)}
                     />
-                  ) : null,
+                  ) : null;
+                },
               },
             })}
         renderTab={(descriptor) => {

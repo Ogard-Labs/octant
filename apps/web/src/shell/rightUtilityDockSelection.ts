@@ -473,12 +473,12 @@ export function restoreUtilityTool(
     target = { column: remembered.column, row: remembered.row, alone: false };
   } else if (newColumnFits) {
     target = { column: columns.length, row: 0, alone: true };
-  } else if (roomIn(columns.length - 1)) {
-    target = {
-      column: columns.length - 1,
-      row: columns[columns.length - 1]?.tiles.length ?? 0,
-      alone: false,
-    };
+  } else {
+    // The end of the last column with room, the last column first.
+    const column = [...columns.keys()].reverse().find(roomIn);
+    if (column !== undefined) {
+      target = { column, row: columns[column]?.tiles.length ?? 0, alone: false };
+    }
   }
   if (target === undefined) return focusTab(base, tabId);
   return settle(base.tabs, insertTile(columns, tabId, target), tabId, carried(base));

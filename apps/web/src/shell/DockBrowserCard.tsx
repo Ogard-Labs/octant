@@ -1,7 +1,7 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
-import { useBrowserThreadSnapshot } from "../threadActivity/useBrowserThreadSnapshot";
+import { useBrowserThreadRead } from "../threadActivity/useBrowserThreadSnapshot";
 import { DockMiniCard } from "./DockShelf";
 
 /**
@@ -13,13 +13,19 @@ import { DockMiniCard } from "./DockShelf";
  */
 export function DockBrowserCard(props: {
   readonly client: BrowserAutomationClient | undefined;
+  /**
+   * The Browser context of the page the card stands for, when that page lives
+   * in one of its own; the thread's own page is read through the thread.
+   */
+  readonly contextId?: string;
   readonly onHide: () => void;
   readonly onExpand: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
 }) {
-  const snapshot = useBrowserThreadSnapshot({
+  const { snapshot, unavailable } = useBrowserThreadRead({
     client: props.client,
+    ...(props.contextId === undefined ? {} : { contextId: props.contextId }),
     enabled: props.client !== undefined,
     liveOnly: false,
     picture: true,
@@ -50,7 +56,9 @@ export function DockBrowserCard(props: {
       title={title}
       toolLabel="Browser"
     >
-      {picture === undefined ? (
+      {unavailable ? (
+        <p className="dock-mini-card__note">Page not available</p>
+      ) : picture === undefined ? (
         <span className="skeleton dock-mini-card__skeleton" />
       ) : (
         <img alt="" className="dock-mini-card__picture" draggable={false} src={picture} />

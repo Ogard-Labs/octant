@@ -45,13 +45,14 @@ function clientOf(read: () => BrowserAutomationSnapshot) {
 
 function renderCard(
   client: BrowserAutomationClient | undefined,
-  extra: { readonly pollIntervalMs?: number } = {},
+  extra: { readonly pollIntervalMs?: number; readonly contextId?: string } = {},
 ) {
   const onExpand = vi.fn();
   const onHide = vi.fn();
   const view = render(
     <DockBrowserCard
       client={client}
+      {...(extra.contextId === undefined ? {} : { contextId: extra.contextId })}
       onHide={onHide}
       onExpand={onExpand}
       pollIntervalMs={extra.pollIntervalMs ?? 60_000}
@@ -93,6 +94,62 @@ describe("DockBrowserCard", () => {
     const calls = vi.mocked(client.inspectThread).mock.calls.length;
     await new Promise((done) => setTimeout(done, 120));
     expect(vi.mocked(client.inspectThread).mock.calls.length).toBe(calls);
+  });
+
+  describe("a page that lives in a context of its own", () => {
+    const own = "30000000-0000-4000-8000-000000000002";
+    const both = (read: () => Promise<BrowserAutomationSnapshot>) =>
+      ({
+        inspect: vi.fn(read),
+        inspectThread: vi.fn(async () => snapshot()),
+      }) as unknown as BrowserAutomationClient;
+
+    it("reads that context and not the thread's current one", async () => {
+      const client = both(async () => snapshot());
+      const { container } = renderCard(client, { contextId: own });
+      await waitFor(() =>
+        expect(container.querySelector("img")).toHaveAttribute(
+          "src",
+          "data:image/jpeg;base64,AQID",
+        ),
+      );
+      expect(client.inspect).toHaveBeenCalledWith(
+        { contextId: own, threadId },
+        expect.any(AbortSignal),
+      );
+      expect(client.inspectThread).not.toHaveBeenCalled();
+    });
+
+    it("keeps reading the thread for the thread's own page", async () => {
+      const client = both(async () => snapshot());
+      renderCard(client);
+      await waitFor(() => expect(client.inspectThread).toHaveBeenCalled());
+      expect(client.inspect).not.toHaveBeenCalled();
+    });
+
+    it("says the page is not available, in words, when its context is gone", async () => {
+      const client = both(async () => {
+        throw new Error("Browser context is stale or unknown.");
+      });
+      const { container } = renderCard(client, { contextId: own });
+      expect(await screen.findByText("Page not available")).toBeVisible();
+      expect(container.querySelector(".skeleton")).toBeNull();
+    });
+
+    it("says the same when the context has stopped, and stops asking when the card goes", async () => {
+      const live = snapshot();
+      const client = both(async () => ({
+        ...live,
+        ...(live.context === undefined ? {} : { context: { ...live.context, state: "stopped" } }),
+      }));
+      const { unmount } = renderCard(client, { contextId: own, pollIntervalMs: 10 });
+      expect(await screen.findByText("Page not available")).toBeVisible();
+      unmount();
+      const calls = vi.mocked(client.inspect).mock.calls.length;
+      await new Promise((done) => setTimeout(done, 120));
+      expect(vi.mocked(client.inspect).mock.calls.length).toBe(calls);
+      expect(client.inspectThread).not.toHaveBeenCalled();
+    });
   });
 
   it("asks for nothing without a Browser client", async () => {

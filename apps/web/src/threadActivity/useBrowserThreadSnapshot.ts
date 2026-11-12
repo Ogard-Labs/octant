@@ -1,3 +1,4 @@
+import { decodeBrowserContextId } from "@octant/contracts";
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -19,6 +20,19 @@ export interface BrowserThreadSnapshotOptions {
   readonly liveOnly: boolean;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
+  /**
+   * A page that lives in a Browser context of its own (one opened for itself,
+   * not the thread's current context) is read by that context, as the Browser
+   * tool reads it. The thread's current-context read leaves such contexts out,
+   * so reading it for one would show another page or none.
+   */
+  readonly contextId?: string;
+}
+
+export interface BrowserThreadRead {
+  readonly snapshot: BrowserAutomationSnapshot | undefined;
+  /** A context read that found the context gone, refused, or stopped: say so, do not wait. */
+  readonly unavailable: boolean;
 }
 
 /**
@@ -31,8 +45,14 @@ export interface BrowserThreadSnapshotOptions {
 export function useBrowserThreadSnapshot(
   options: BrowserThreadSnapshotOptions,
 ): BrowserAutomationSnapshot | undefined {
-  const { client, enabled, liveOnly, picture, threadId } = options;
+  return useBrowserThreadRead(options).snapshot;
+}
+
+/** The same read, also saying when a page's own context cannot be read any more. */
+export function useBrowserThreadRead(options: BrowserThreadSnapshotOptions): BrowserThreadRead {
+  const { client, contextId, enabled, liveOnly, picture, threadId } = options;
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
+  const [unavailable, setUnavailable] = useState(false);
   const signature = useRef("");
   const polledActivity = picture && snapshot !== undefined && isBrowserActivity(snapshot);
   const pollIntervalMs = options.pollIntervalMs ?? (polledActivity ? 1_000 : 5_000);
@@ -41,6 +61,7 @@ export function useBrowserThreadSnapshot(
     if (!enabled || client === undefined) {
       signature.current = "";
       setSnapshot(undefined);
+      setUnavailable(false);
       return;
     }
     const controller = new AbortController();
@@ -50,11 +71,32 @@ export function useBrowserThreadSnapshot(
     /** Resolves to whether the read changed what the preview would show. */
     const load = async (): Promise<boolean> => {
       try {
-        const next = await client.inspectThread(
-          picture ? { threadId } : { threadId, freshPicture: false },
-          controller.signal,
-        );
+        const next =
+          contextId === undefined
+            ? await client.inspectThread(
+                picture ? { threadId } : { threadId, freshPicture: false },
+                controller.signal,
+              )
+            : await client.inspect(
+                { contextId: decodeBrowserContextId(contextId), threadId },
+                controller.signal,
+              );
         if (controller.signal.aborted) return true;
+        // A context that is no longer there, or no longer running, is read as
+        // gone: the preview says so instead of holding a picture of nothing.
+        if (
+          contextId !== undefined &&
+          (next.context === undefined ||
+            next.failure !== undefined ||
+            next.context.state === "stopped" ||
+            next.context.state === "expired")
+        ) {
+          signature.current = "gone";
+          setSnapshot(undefined);
+          setUnavailable(true);
+          return true;
+        }
+        setUnavailable(false);
         const kept =
           String(next.threadId) === String(threadId) && (!liveOnly || isBrowserActivity(next))
             ? next
@@ -68,6 +110,9 @@ export function useBrowserThreadSnapshot(
         if (controller.signal.aborted || isAbortError(error)) return true;
         signature.current = browserPictureSignature(undefined);
         setSnapshot(undefined);
+        // A page's own context that cannot be read is gone for the preview; the
+        // thread's current-context read has nothing to say here.
+        setUnavailable(contextId !== undefined);
         return true;
       }
     };
@@ -97,11 +142,15 @@ export function useBrowserThreadSnapshot(
       controller.abort();
       stop();
     };
-  }, [client, enabled, liveOnly, picture, pollIntervalMs, threadId]);
+  }, [client, contextId, enabled, liveOnly, picture, pollIntervalMs, threadId]);
 
-  return enabled && snapshot !== undefined && String(snapshot.threadId) === String(threadId)
-    ? snapshot
-    : undefined;
+  return {
+    snapshot:
+      enabled && snapshot !== undefined && String(snapshot.threadId) === String(threadId)
+        ? snapshot
+        : undefined,
+    unavailable: enabled && unavailable,
+  };
 }
 
 export function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {

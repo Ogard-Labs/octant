@@ -1141,7 +1141,8 @@ thread's open tools; the bottom panel never has one.
   was minimised from while that place still exists: the same row of a column it
   shared, or a column of its own again at the same position, when there is room
   under the caps. Otherwise it becomes the last tile: a new column while there is
-  room for one, else the end of the last column. With nothing shown it is the one
+  room for one, else the end of the last column that has room (the last column
+  first, then the other). With nothing shown it is the one
   tool shown. It never takes over a shown tool's tile, so no shown tool remounts;
   only when both columns are full does it take the focused tile's, as choosing
   its tab would. A tool that was the only one shown leaves no place. Hide card removes the card and
@@ -1157,7 +1158,10 @@ thread's open tools; the bottom panel never has one.
   name beside it where the page lives in one (a signed-in page acts as the
   person's account) and the page count past one, over a picture of the page
   cropped to the preview from its top left, never stretched. It reads the same host
-  snapshot the Browser pane reads, and asks for a fresh picture only while the
+  snapshot the Browser pane reads (a page that lives in a Browser context of its
+  own is read by that context, as the pane reads it, never through the thread's
+  current context, which leaves such pages out; a context that is gone or stopped
+  makes the preview say "Page not available" instead of holding a skeleton), and asks for a fresh picture only while the
   card is on screen: no card, no request for one. It polls every second while a
   session is live and every five otherwise, backs off while the page does not
   change, and pauses with the window. A stale or missing picture is a neutral
