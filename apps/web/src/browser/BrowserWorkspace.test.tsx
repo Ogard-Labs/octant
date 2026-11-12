@@ -864,20 +864,29 @@ describe("BrowserWorkspace", () => {
       }
 
       // The drawing bar appears after the capture is taken, read and decoded.
-      // On a slow runner that chain outlasted the one-second default and a
-      // different test of this group failed on each run. Stay under the
-      // package's 15 s test timeout.
+      // On a slow runner that chain outlasted the one-second default. Stay
+      // under the package's 15 s test timeout.
       const DRAWING_OPENS_WITHIN_MS = 8_000;
+
+      // Press Draw on page once the page it draws on has settled. The component
+      // retires any drawing request still on its way when that page first
+      // appears, in an effect that runs after the commit. A click that lands
+      // before that effect is retired with it and no drawing ever opens. A
+      // person cannot click that fast; the test can, and on a slow runner it
+      // did: the bar was then waited for until the timeout.
+      async function pressDrawOnPage() {
+        const draw = await screen.findByRole(
+          "button",
+          { name: "Draw on page" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        await act(async () => {});
+        fireEvent.click(draw);
+      }
 
       async function openDrawing(browser: BrowserAutomationClient) {
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(
-          await screen.findByRole(
-            "button",
-            { name: "Draw on page" },
-            { timeout: DRAWING_OPENS_WITHIN_MS },
-          ),
-        );
+        await pressDrawOnPage();
         return screen.findByRole(
           "toolbar",
           { name: "Drawing tools" },
@@ -943,7 +952,7 @@ describe("BrowserWorkspace", () => {
         );
         const browser = drawable(takeCapture);
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        await pressDrawOnPage();
         expect(
           await screen.findByText(
             "There is nothing to draw on: the Browser gave no picture of this page. A page with a sign-in field is never pictured.",
@@ -1073,7 +1082,7 @@ describe("BrowserWorkspace", () => {
           fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
           // The composer is still uploading; the person discards and draws again.
           fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
-          fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+          await pressDrawOnPage();
           await screen.findByRole("toolbar", { name: "Drawing tools" });
           const layer = screen.getByRole("application", { name: "Page capture to draw on" });
           drag(layer, [20, 20], [120, 60]);
@@ -1121,7 +1130,7 @@ describe("BrowserWorkspace", () => {
         );
         const browser = drawable(takeCapture);
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        await pressDrawOnPage();
         await waitFor(() => expect(takeCapture).toHaveBeenCalledOnce());
         fireEvent.click(screen.getByRole("button", { name: "Reload" }));
         await waitFor(() => expect(browser.act).toHaveBeenCalled());
