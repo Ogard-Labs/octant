@@ -866,10 +866,11 @@ Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
 three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
 1px gaps, lit in the same accent, whose last four columns thin out in steps (two
 thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
-Neither animates, so reduced motion needs no variant. The composer row keeps its
-controls: the access chip carries its shield icon beside the label, the model
-button names the model with a chosen effort in muted ink, the microphone sits
-just before send, and send is the round accent-filled button with an up arrow.
+Neither animates, so reduced motion needs no variant. The row under the box
+([The row under the box](#welcome-and-composer)) keeps its controls: the
+approval mode is its shield icon alone, the model button names the model with a
+chosen effort in muted ink and no chevron, the microphone sits just before send,
+and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
@@ -987,7 +988,7 @@ one line where the text fits, its tone tint, the callout's own hairline) so
 the box stays the one strong shape. With nothing of that pending, nothing
 stands above the box. The composer is the box and one quiet row under it. A
 standing fact about access is not a card: that a thread has read outside content
-is a chip in that row, directly after the access control, a globe and the words
+is a chip in that row, directly after the surface's own icons, a globe and the words
 "Outside content" in the warning ink with no fill or edge at rest, shown for as
 long as the fact applies. Pressing it opens a popover with the full sentence and
 the Review action; in a narrow row (under 560px) the chip keeps the globe and
@@ -1015,25 +1016,40 @@ box's corners (a rounded bar in a rounded box, with thin uneven gaps), made the
 box a tall lopsided shape, and read as part of the message being typed; with
 the cards above it, the empty box is 44px tall in every state, and the
 microphone's failure no longer has to be cut to fit beside it. The person's
-own attachments and the message queue are not notices and keep their place. How the
-thread runs is one quiet line under the box, with no fill or edge
-of its own, in reading order: a thread's own context (Project, branch,
-checkout), the surface's row (image and access leading; the model and then
-the context ring trailing), the plan meters, and the Thread info icon
-button. The context ring ends the row's run: it is the one figure there, and
-at the end it does not move when the model's name changes length. Icon
-controls in the line stay square tiles with the control corner, as the
-box's own controls are. The line is one row in a split pane as narrow as 520px: a Work
-Project made from a folder names that folder once, not as Project and folder
-both, and a context with nothing in it holds no place. At a phone's width the
-line is two rows, the context with Thread info at its trailing edge and the
-surface's row under them. A thread with no place to name is two rows there too: the
-surface's row on two lines, with Thread info at the end of the second. Only the
-surface's row gives its controls the row's one quiet treatment; the checkout's
-actions and the info panel's fields keep their own. With that row inside
-it the card was a third taller than its prompt and read as a form; an empty
-composer now stands 44px tall, where a reply box stood 114px before the prompt
-went to one line.
+own attachments and the message queue are not notices and keep their place. **The row under the box.** How the thread runs is one quiet row under the
+box, with no fill or edge of its own, 28px high and one spacing token (4px)
+below the box, so the space under a composer is the same on a thread, a start
+screen, a side chat and a split pane. It repeats the box's columns. Both sides
+have the box's own 8px inset. A leading cell as wide as attach (28px) holds the
+Project's icon, centred under attach, and the Project's name starts where the
+prompt's text does (44px in). The trailing cells are as wide as send (28px): the
+context ring is last, centred under send, and the approval control stands under
+the microphone where there is one. Measured in a render, the centres and the
+text edge agree within half a pixel. Left to right the row holds the Project
+control (its icon in the leading cell, then its name; in Code the checkout's
+branch, diff and pull-request icon follow it), the surface's own icons (Create
+image, Plan, Web research), then, right-aligned, the plan meters where there
+are any, the model's name in meta ink with no chevron, the approval mode as one
+icon-only button (Full access adds its words), and the context ring. The approval button's accessible name
+and tooltip state the mode ("Mode: Ask first"); each mode has its own icon, and
+Full access alone keeps its words beside it, in the warning ink (danger without
+the sandbox), so it cannot be read as asking first. Labels are the 12px meta step
+in the meta ink, icons are 16px, nothing is filled at rest, and the standard
+hover fill answers the pointer. A long Project name ends in an ellipsis and
+never pushes the right side under it. Where a Work thread names its Project,
+the name is the Thread info button: the panel opens above it from its leading
+edge, and "Review required" follows the name while a row waits. Chat and Code
+keep the small info icon after the Project (a Code checkout has actions of its
+own), in the leading cell where there is no Project. The overflow menu is gone:
+Mark done and the document-delivery choice are a group of the add menu. Reading
+order is visual order. A Work Project made from a folder names that folder once,
+not as Project and folder both. At a phone's width the row is two rows, the
+Project with Thread info beside it and the controls under them, still on the
+same columns, so the ring stays under send. Only the surface's row gives its
+controls the row's one quiet treatment; the checkout's actions and the info
+panel's fields keep their own. A card as tall as the box plus two rows under it
+read as four layers, and the row's old two lines of mixed icons and words read
+as loose text.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
@@ -1539,18 +1555,43 @@ become one and the row goes away, with the reader's row where it was; Jump to
 latest, or sending a message, returns to the newest messages at the end. A
 jump happens once: after its message has been shown, nothing jumps back to it.
 
-The Browser toolbar is two groups, navigation and the address first, then the
-page's status and the tools. They share one row from 1100px; below it the
-controls become one row and the address takes a row under it, so a page open
-never takes more than two rows. In a tile from 303px wide no control is clipped
-or overlaid and only the address ellipsizes. Words leave one control at a time as
-the width falls and come back in the reverse order as it grows: who may use the
-page (below 801px), the profile (below 640px), Reclaim locally (below 610px),
-Take over and Hand back (below 521px), then the holder (below 420px). Each
-keeps its name and tooltip as a bare glyph. With no page open the address takes
-its own row below 390px. The desktop app's Open in default browser button is
-counted in these widths, so below 303px, where the row no longer fits, the last
-button wraps to a third row.
+The Browser toolbar is one row under the tile bar and never wraps. It holds back,
+forward and reload as plain icon buttons (no capsule, no fill at rest, the
+standard hover fill and disabled look); then the address field, which takes the
+rest of the width; then icon-only buttons. The field is the system's text field:
+the control corner (`--oct-radius-sm`, never a pill), the field border, the hover
+edge and the keyboard-focus fill, at the 28px rail height. It holds at most one
+mark: the connection mark (lock or globe) of a loaded page. With no page it is
+empty but for its placeholder. After the field, in this order and each only when
+it applies: a **status** icon (who may use the page, who holds it, how long it
+idles, or that the agent cannot use it, as its name and tooltip; a spinner while
+the page loads or the agent drives it), **Take over** or **Hand back**, the
+extensions button (when an extension is on in the page's profile), and the
+**profile** icon, a menu button named for the page's profile that also signs out
+of a stored profile. The status icon is not drawn at rest; the availability
+sentence is then part of the profile icon's tooltip. The last button is **More
+Browser actions**, which holds Screenshot, Draw on page (only in a Work or Code
+thread's Browser), Open in default browser (desktop), Login permission, Hand
+back while a remote owner holds the page, the agent-availability recovery
+action, Dock in the focus zone and Stop this Browser session, each only when it
+applies; the menu is absent when it would be empty. While a remote owner holds
+the page, **Reclaim locally** replaces Take over and Hand back as the trailing
+button, because a hand back is refused until the page is reclaimed. The profile
+icon names a signed-in profile (Project, Personal or a named account) beside
+itself in the meta ink and extra-small size the dock's cards use, so a page that
+acts as the person's own account is named at rest as it is everywhere else; a
+Private page, which signs nothing in, stays an icon. The name shortens with an
+ellipsis before the address gives up width, and the icon and tooltip stay. No
+more than three icons trail the field besides More. When there would be more, or
+the address would otherwise be narrower than 120px, the left-most move into More
+(status as a non-interactive first line, then Take over, then the extensions),
+each counted at its own width (the extensions button grows a count while the
+agent drives). When only the profile is left and the floor still fails, the
+profile's choices and its sign-out move into More as well. Back, forward and
+reload always stay. The row's inset follows the tile bar: its first glyph
+stands on the bar's 12px lead inset and its last button ends 4px from the edge,
+with 4px between controls. With no page open the row is the history buttons, the
+empty field and the profile icon.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each
@@ -1565,8 +1606,8 @@ reads by shape and word, never by colour. It moves only once opened, where a
 ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
 its first frame.
 
-**Draw on page** is a ghost icon button (a 16px pen-line) beside Screenshot in
-the Browser toolbar, offered only in a Work or Code thread's Browser. While a
+**Draw on page** is an item (a 16px pen-line) beside Screenshot in the Browser
+toolbar's More menu, offered only in a Work or Code thread's Browser. While a
 picture is drawn on, its still fills the page area, fitted and centred on the
 canvas colour, and one floating bar sits at the bottom centre
 (`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
@@ -1969,12 +2010,12 @@ beside the Project. Access is
 a titled menu in the row under the prompt card, and carries the
 "Remember for this Project" switch.
 Every composer's row under the card is two groups with the row's free space
-between them, in one order on a new task and in the thread it becomes: what
-the person adds on the left (Create image in an open thread once an image
-profile is ready, access, a surface's own extras such as Web or Task actions),
-then how the turn runs on the right (the context meter, the model,
-dictation). Attach and send are in the card. A control never changes sides
-between the two composers.
+between them, in one order on a new task and in the thread it becomes: where the
+thread runs and a surface's own icons on the left (Create image in an open
+thread once an image profile is ready, Plan, Web), then how the turn runs on the
+right (the model, the approval control, the context ring). Attach, dictation and
+send are in the card, and the add menu holds the thread's own actions as a
+group (Mark done). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
@@ -2107,11 +2148,8 @@ their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page.
-The Browser's toolbar groups back, forward, and reload in one capsule with the control corner
-beside an address field with the same corner, followed by the driver indicator and a
-quiet ghost **Take over** button (secondary **Hand back** while the person has
-the page), both extra-small, which drop their words below 720px and keep their
-names. The right dock's tools are opened from a **tool row** at the right of the
+The Browser's toolbar is one row of plain icon buttons, the address field and
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right of the
 title band, before the bottom-panel and dock toggles: icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher
@@ -3900,7 +3938,7 @@ Chat has no bottom panel. With the dock closed, the conversation uses the availa
 workspace width. A Chat
 Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
 Code's quiet transcript edge: Browser is a dock tool and completion lives in the
-composer's compact Task actions menu, preserving its confirmation flow.
+add menu's Mark done, preserving its confirmation flow.
 
 ### Readability and scroll containment
 

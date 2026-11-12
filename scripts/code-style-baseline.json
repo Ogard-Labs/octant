@@ -80,7 +80,7 @@
     "apps/web/src/apple/AppleWorkbenchPane.tsx": 4,
     "apps/web/src/automation/automationCenterModel.ts": 3,
     "apps/web/src/automation/automationEditorCatalog.ts": 45,
-    "apps/web/src/browser/BrowserWorkspace.tsx": 10,
+    "apps/web/src/browser/BrowserWorkspace.tsx": 8,
     "apps/web/src/chat/ChatProjectOverview.tsx": 3,
     "apps/web/src/chat/ChatTranscript.tsx": 4,
     "apps/web/src/chat/ThreadWorkShelf.tsx": 2,

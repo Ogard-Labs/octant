@@ -225,7 +225,7 @@ describe("WorkThreadWorkspace", () => {
     const level = await screen.findByText("Ask first", { selector: ".guardrail-level__mode" });
     expect(level).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Thread info" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Thread info/ }));
 
     expect(screen.getByRole("region", { name: "Thread info" })).toContainElement(level);
     expect(level).toBeVisible();
@@ -264,13 +264,14 @@ describe("WorkThreadWorkspace", () => {
           title={thread.title}
         />,
       );
-      const strip = await screen.findByRole("group", { name: "Project and folder" });
+      const strip = await screen.findByRole("button", { name: /^Thread info/ });
       expect(within(strip).getByText("Research")).toBeVisible();
-      expect(within(strip).getByText("research/brief")).toHaveAttribute(
-        "title",
+      expect(within(strip).getByText("research/brief")).toBeVisible();
+      await userEvent.setup().hover(strip);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
         matching ? "/Users/example/Research/research/brief" : "research/brief",
       );
-      expect(strip.closest(".thread-composer__context")).not.toBeNull();
+      expect(strip.closest(".composer-under")).not.toBeNull();
     },
   );
 
@@ -303,9 +304,11 @@ describe("WorkThreadWorkspace", () => {
         title={thread.title}
       />,
     );
-    const strip = await screen.findByRole("group", { name: "Project and folder" });
+    const strip = await screen.findByRole("button", { name: /^Thread info/ });
     // One "Research", and hovering it still tells where the folder is.
-    expect(within(strip).getByText("Research")).toHaveAttribute("title", "/Users/example/Research");
+    expect(within(strip).getByText("Research")).toBeVisible();
+    await userEvent.setup().hover(strip);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("/Users/example/Research");
   });
 
   it("names the server and folder a thread on a server works in", async () => {
@@ -339,9 +342,10 @@ describe("WorkThreadWorkspace", () => {
         />
       </ServerCodeProjectsContext.Provider>,
     );
-    const strip = await screen.findByRole("group", { name: "Project and folder" });
+    const strip = await screen.findByRole("button", { name: /^Thread info/ });
     expect(within(strip).getByText("Notes")).toBeVisible();
-    expect(within(strip).getByText("notes")).toHaveAttribute("title", "devbox:/home/build/notes");
+    await userEvent.setup().hover(strip);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("devbox:/home/build/notes");
   });
 
   it("keeps a Browser approval visible and explains a failed decision", async () => {
@@ -757,8 +761,11 @@ describe("WorkThreadWorkspace", () => {
       screen.queryByRole("button", { name: "Mark this task complete" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Task actions" }).closest(".composer-row"),
+      screen
+        .getByRole("button", { name: "Add attachment or task action" })
+        .closest(".composer-field"),
     ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Task actions" })).not.toBeInTheDocument();
   });
 
   it("says what a provider switch handed to the turn that started a new session", async () => {
@@ -1028,8 +1035,8 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    const mode = await screen.findByRole("button", { name: "Mode" });
-    expect(mode).toHaveTextContent("Ask first");
+    const mode = await screen.findByRole("button", { name: /^Mode:/ });
+    expect(mode).toHaveAccessibleName("Mode: Ask first");
     await user.click(mode);
     expect(screen.queryByRole("menuitemradio", { name: /^Plan/ })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("menuitemradio", { name: /^Full access/ }));
@@ -1041,11 +1048,13 @@ describe("WorkThreadWorkspace", () => {
       access: "full-access",
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access"),
+      expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
+        "Mode: Full access",
+      ),
     );
   });
 
-  it("marks the task Done from Task actions with no confirmation, and Reopen undoes it in one click", async () => {
+  it("marks the task Done from the add menu with no confirmation, and Reopen undoes it in one click", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async (command: { readonly kind: string }) =>
       command.kind === "confirm-work-thread-completion"
@@ -1070,7 +1079,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
     await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1081,7 +1090,9 @@ describe("WorkThreadWorkspace", () => {
       deliveryTarget: "Draft brief",
     });
     expect(await screen.findByText("This task is marked Done.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Task actions" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add attachment or task action" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Reopen" }));
@@ -1094,7 +1105,9 @@ describe("WorkThreadWorkspace", () => {
     await waitFor(() =>
       expect(screen.queryByText("This task is marked Done.")).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Task actions" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add attachment or task action" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
   });
 
@@ -2881,7 +2894,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Add attachment or task action" })).toBeEnabled();
   });
 
   it("attaches a picture marked up in this thread's Browser, and refuses it on a model that cannot read images", async () => {
