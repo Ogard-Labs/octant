@@ -113,7 +113,7 @@ export function TurnHeader(props: TurnHeaderProps) {
           </span>
         )}
         {props.workedFor === undefined ? null : (
-          <span className="turn-header__worked-for">{props.workedFor}</span>
+          <span className="oct-activity-line turn-header__worked-for">{props.workedFor}</span>
         )}
         {props.at === undefined &&
         props.onFork === undefined &&
@@ -186,7 +186,11 @@ export function TurnTime(props: {
         </OctantIconButton>
       )}
       {label === undefined ? null : (
-        <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
+        <time
+          className="oct-activity-line turn-time"
+          dateTime={props.at}
+          title={turnTimeTitle(props.at)}
+        >
           {label}
         </time>
       )}

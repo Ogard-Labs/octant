@@ -8,7 +8,7 @@
  * it never shrinks under it.
  */
 export const menuRow =
-  "relative flex min-h-(--oct-menu-row-h) cursor-default items-center gap-2 rounded-md px-(--oct-menu-row-inset) py-1 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+  "relative flex min-h-(--oct-menu-row-h) cursor-default items-center gap-2 rounded-md px-(--oct-menu-row-inset) py-1 oct-menu-option outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground";
 
 /** A group's heading stands on the rows' inset, so its words line up with theirs. */
 export const menuGroupLabel =

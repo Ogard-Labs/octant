@@ -393,12 +393,17 @@
   font-size: var(--oct-transcript-font-size);
 }
 
+/* Running text in a reply takes a line more air than the interface's body. */
+.chat-rich-text :is(p, li, td, th) {
+  line-height: var(--oct-leading-reading);
+}
+
 /* Tailwind preflight strips list markers; restore them for message content. */
 .chat-rich-text ul,
 .chat-rich-text ol {
   display: grid;
   gap: 4px;
-  padding-left: 20px;
+  padding-left: 16px;
 }
 
 .chat-rich-text ul {
