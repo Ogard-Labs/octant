@@ -150,6 +150,7 @@ export const AGENT_ACCESS_EVENT_NAMES = {
   directKeyRotated: "agent-access.direct-key-rotated@1",
   grantRevoked: "agent-access.grant-revoked@1",
   threadStarted: "agent-access.thread-started@1",
+  turnSent: "agent-access.turn-sent@1",
 } as const;
 
 export const AgentGrantCreatedV1 = Schema.Struct({
@@ -212,6 +213,21 @@ export const AgentThreadStartedV1 = Schema.Struct({
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type AgentThreadStartedV1 = typeof AgentThreadStartedV1.Type;
+
+/**
+ * A prompt an outside agent sent a thread, keyed by the id its turn record
+ * keeps: a Code turn's operation id, a Chat turn's submission id, a Work
+ * turn's id. The id is chosen by the sender before the send, so the host can
+ * name the turn without waiting for it to exist.
+ */
+export const AgentTurnSentV1 = Schema.Struct({
+  grantId: AgentGrantId,
+  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  mode: AgentGrantMode,
+  turnKey: Schema.UUID,
+  sentAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentTurnSentV1 = typeof AgentTurnSentV1.Type;
 
 // ── Enrollment ───────────────────────────────────────────────────────────────
 
@@ -382,8 +398,23 @@ export const AgentThreadAttribution = Schema.Struct({
 }).annotations(strict);
 export type AgentThreadAttribution = typeof AgentThreadAttribution.Type;
 
+/** A turn an outside agent sent, by the id the thread's turn record keeps. */
+export const AgentTurnAttribution = Schema.Struct({
+  threadId: Schema.NonEmptyTrimmedString,
+  turnKey: Schema.UUID,
+  agentName: label,
+}).annotations(strict);
+export type AgentTurnAttribution = typeof AgentTurnAttribution.Type;
+
+/** The newest turns outside agents sent, at most this many in one read. */
+export const MAX_AGENT_TURN_ATTRIBUTIONS = 2_000;
+
 export const AgentThreadAttributions = Schema.Struct({
   threads: Schema.Array(AgentThreadAttribution),
+  /** Absent from a host that predates per-turn attribution. */
+  turns: Schema.optional(
+    Schema.Array(AgentTurnAttribution).pipe(Schema.maxItems(MAX_AGENT_TURN_ATTRIBUTIONS)),
+  ),
 }).annotations(strict);
 export type AgentThreadAttributions = typeof AgentThreadAttributions.Type;
 

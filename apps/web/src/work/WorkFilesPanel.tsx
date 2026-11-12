@@ -155,6 +155,21 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   );
   const rest = entries.filter((entry) => entry.kind !== "file" || entry.origin !== "authored");
 
+  // Refresh sits on the first group's heading row, so it is not a row of its own
+  // holding one control; with no group to join (loading, empty, failed) it keeps
+  // its own row.
+  const hasGroups = authored.length > 0 || rest.length > 0;
+  const refreshButton = (
+    <OctantIconButton
+      disabled={status === "loading"}
+      label="Refresh files"
+      onClick={refresh}
+      type="button"
+    >
+      <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+    </OctantIconButton>
+  );
+
   return (
     <div className="work-files-panel">
       {props.serverLocation === undefined ? null : (
@@ -163,16 +178,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
           Use Refresh to check for changes.
         </p>
       )}
-      <div className="work-files-panel__toolbar">
-        <OctantIconButton
-          disabled={status === "loading"}
-          label="Refresh files"
-          onClick={refresh}
-          type="button"
-        >
-          <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-        </OctantIconButton>
-      </div>
+      {hasGroups ? null : <div className="work-files-panel__toolbar">{refreshButton}</div>}
 
       {status === "loading" ? (
         <p className="work-files-panel__status" role="status">
@@ -201,7 +207,10 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
 
       {authored.length > 0 ? (
         <section aria-label="Made here" className="work-files-panel__group">
-          <h3 className="oct-section-label">Made here</h3>
+          <div className="work-files-panel__heading">
+            <h3 className="oct-section-label">Made here</h3>
+            {refreshButton}
+          </div>
           <ul className="work-files-panel__list">
             {authored.map((entry) => (
               <FileRow
@@ -221,7 +230,14 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
 
       {rest.length > 0 ? (
         <section aria-label="In this folder" className="work-files-panel__group">
-          <h3 className="oct-section-label">In this folder</h3>
+          {authored.length > 0 ? (
+            <h3 className="oct-section-label">In this folder</h3>
+          ) : (
+            <div className="work-files-panel__heading">
+              <h3 className="oct-section-label">In this folder</h3>
+              {refreshButton}
+            </div>
+          )}
           <ul className="work-files-panel__list">
             {rest.map((entry) =>
               entry.kind === "directory" ? (

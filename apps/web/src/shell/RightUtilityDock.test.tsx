@@ -159,4 +159,63 @@ describe("RightUtilityDock", () => {
     expect(screen.queryByText("Live Browser")).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
   });
+
+  it("announces the width it is drawn at and the ceiling for the columns shown", () => {
+    const innerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    const bounds = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 500, height: 800 }));
+    const client = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(() => 1180);
+    try {
+      const { unmount } = render(
+        <div>
+          <RightUtilityDock {...props({ width: 530 })} />
+        </div>,
+      );
+      let splitter = screen.getByRole("separator", { name: "Resize utility dock" });
+      expect(splitter).toHaveAttribute("aria-valuenow", "500");
+      expect(splitter).toHaveAttribute("aria-valuetext", "500 px");
+      expect(splitter).toHaveAttribute("aria-valuemax", "590");
+      unmount();
+
+      const layout = {
+        columns: [
+          { share: 0.5, tiles: [{ tabId: "browser", share: 1 }] },
+          { share: 0.5, tiles: [{ tabId: "terminal", share: 1 }] },
+        ],
+      };
+      render(
+        <div>
+          <RightUtilityDock
+            {...props({
+              tiles: {
+                layout,
+                narrow: false,
+                onHideTile: vi.fn(),
+                onMove: vi.fn(),
+                onOpenBeside: vi.fn(),
+                onResizeColumn: vi.fn(),
+                onResizeColumns: vi.fn(),
+                onShowAlone: vi.fn(),
+                onShowBelow: vi.fn(),
+                onShowBeside: vi.fn(),
+                resolveSurface: (id) => ({ kind: "surface", surface: dockSurface(id) }),
+              },
+              width: 530,
+            })}
+          />
+        </div>,
+      );
+      splitter = screen.getByRole("separator", { name: "Resize utility dock" });
+      // The thread keeps 440px beside two columns, so the handle may go further.
+      expect(splitter).toHaveAttribute("aria-valuemax", "740");
+    } finally {
+      client.mockRestore();
+      bounds.mockRestore();
+      if (innerWidth !== undefined) Object.defineProperty(window, "innerWidth", innerWidth);
+    }
+  });
 });

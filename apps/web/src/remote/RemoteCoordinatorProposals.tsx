@@ -48,7 +48,10 @@ export function RemoteCoordinatorProposals(props: {
       : [];
   if (proposals.length === 0) return null;
   return (
-    <section aria-label="Proposed workers" className="follow-up-cards thread-column">
+    <section
+      aria-label="Proposed workers"
+      className="follow-up-cards thread-column remote-workspace__proposals"
+    >
       {proposals.map((entry) => (
         <article
           aria-label={`Proposed worker: ${entry.proposal.title}`}

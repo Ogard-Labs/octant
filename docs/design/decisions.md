@@ -2045,7 +2045,7 @@ An agent on another machine on the person's own network starts and follows work 
 - A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
 - The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
-- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent.
+- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
 - Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 
@@ -2375,6 +2375,10 @@ Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-
 The dock is contextual: it follows the active pane's thread and Project, and never shows another pane's content.
 
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
+- The dock may show several open tools together as tiles, each live, beside a thread: at most two columns of three tiles, one Browser tile whose page is the chosen Browser tab, the focused tile's tab always selected, a tile that cannot be described for the active pane saying so in its tile, and the narrow modal drawing only the focused tile. A layout is window-local presentation, never reaches the bottom panel, and moves nothing about what an agent may do. Tile changes apply to the tools on screen, a column is never narrower than 280px while there is room, and two columns let the dock take what the thread's own minimum leaves. A tile clips its tool, and the Browser returns to the page last shown.
+- With two or more tiles each has one bar, the tool's own header (the Browser's bar is its row of pages), 32px high everywhere; the strip lists only the tools that are not shown, then Add tool and Show another tool. A tile's bar ends with an Arrange menu (Move left, Move right, Move up, Move down where the caps allow, Show alone, Hide from view) and Close, which closes the tool as its strip tab does. A move keeps every tool mounted. A divider is a hairline, in the quiet strong-divider role while hovered or held, with no accent line after a click. A page stacked four bars and named the tool three times.
+- A **Show another tool** control in the dock head, and each tab's menu, drag and Shift+F10, show a tool with the focused tile, so a tool in the strip's overflow can be tiled.
+- Opening a dock tool leaves the bottom panel open; a tool the panel already shows is the only one that leaves it. A tool is on screen in one region at a time.
 - A new Code task's pane starts with the dock closed until the person opens it there; that choice belongs to the draft and is never saved as the window's.
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
 - Git History stays read-only in every posture, Plan included. Browsing or refreshing it never fetches, checks out, stages, reverts or resets. _Here only._
@@ -2386,7 +2390,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 - Code Review turns a person-selected captured diff line into a local finding without execution approval, and selected findings into an editable unsent draft in the owning thread. Checkout/revision/side identity and outside-content references survive ordinary send and queue; missing provenance refuses, and only the person resolves a finding. Receipt links never infer a missing checkout or retarget after rebind. [Workspace](workspace.md) owns the detailed rule.
 - Running Code turns expose bounded versioned comparisons from their recorded starting tree after typed edit activity. Captured Review stays on an exact immutable version while newer/final captures are announced, preserves view preferences, and keeps original note anchors. Passive reads never capture; current authority, cancellation, unavailable source and final-capture failure remain explicit. [Workspace](workspace.md) owns the lifecycle and view-only whitespace rule.
 
-Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles).
+Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout).
 
 ### Canvas in the thread
 

@@ -418,6 +418,16 @@
   transition: transform var(--oct-motion-fast) ease;
 }
 
+/* With no state beside it, a long title wraps to a second line instead of
+   pushing the chevron out past the card's edge in a narrow dock tile. */
+.environment-group__title:has(+ .environment-group__chevron),
+.environment-row__title:has(+ .environment-row__trailing) {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The button recipe keeps a label on one line. */
+  white-space: normal;
+}
+
 /* With no state to show, the chevron still ends the row. */
 .environment-group__title + .environment-group__chevron {
   margin-inline-start: auto;

@@ -852,7 +852,29 @@ working tree. Stale selections require a new comparison; captured run and Git
 History views do not offer mutations. The authority, native preflight and writer
 rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
-Thread utilities live in the Right Utility Dock outside the split tree.
+Thread utilities live in the Right Utility Dock outside the split tree. The dock
+shows one open tool, or several together as tiles (at most two columns of three;
+[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the strip
+menu). One tool at a time meant choosing between a simulator and the page it
+was testing, so a thread keeps, beside its open tools and the selected one, which
+tools are shown. A shown tile is live and stays mounted while it is shown;
+a tool that is open but not shown is not mounted, as a hidden tab never was.
+Each tile resolves its own availability against the active pane, and the dock
+still never shows another pane's content. All Browser tabs are pages of one
+Browser tool and share one tile. The layout is window-local presentation in
+local storage: it grants nothing, starts nothing, and the bottom panel never
+has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
+with an Arrange menu (Move left, right, up and down where the caps allow, Show
+alone, Hide from view) and Close at its trailing edge; the strip lists only the
+tools that are not shown. Stacked, a page showed four bars and named the tool
+three times. A divider is a hairline that shows a quiet strong role while hovered
+or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
+otherwise stack. The thread keeps 440px beside two columns (560px beside one,
+from a 1100px window up), because at 560px two tools could never stand side by
+side in a 1440px window: with the sidebar open a second column widens the dock to
+about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
+that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
+already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
 `apps/web/src/dockModules` receive only declared inputs and contain render
 failures. Review owns local Working tree and Git History views. History reads
@@ -1074,9 +1096,9 @@ session is live and the thread's Browser is out of sight, a small live preview
 of its active page floats over the thread as a small preview (sized by `.browser-pip`), resting in one of
 the four corners of the thread frame (top right by default), draggable between
 them with an arrow-key twin, and remembered per client. Out of sight means no
-pane shows the thread's shared Browser and neither the dock nor the bottom panel
-has it as its active tool (a tab bound to one link or local server is a page of
-its own and does not count); the preview leaves as soon as the Browser appears and returns
+pane shows the thread's shared Browser and neither the dock (as a shown tile, or
+as its one tool) nor the bottom panel has it as its active tool (a tab bound to
+one link or local server is a page of its own and does not count); the preview leaves as soon as the Browser appears and returns
 when it closes. Clicking it shows the Browser (the dock when the thread is the
 dock's subject, else the pane), the close control hides it for that session, and
 the page's title or host shows only under the pointer or focus. A bottom corner

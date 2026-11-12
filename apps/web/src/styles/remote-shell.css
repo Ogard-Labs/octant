@@ -69,6 +69,20 @@
   overflow: hidden;
 }
 
+/* A coordinator's proposed workers sit above the thread in its frame. Left to
+   the frame, a short thread let the grid stretch their row and spread each
+   card's lines apart, the first card met the frame's top edge, and in dark a
+   card's surface and border matched the frame's and vanished. They take only
+   their own height, clear the edge, and sit on the thread's ground. */
+.remote-workspace__thread-view:has(> .remote-workspace__proposals) {
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--oct-bg);
+}
+
+.remote-workspace__proposals {
+  margin-top: var(--oct-space-3);
+}
+
 .remote-shell__header {
   display: grid;
   gap: var(--oct-space-3);
