@@ -1,33 +1,48 @@
 /*
- * The mark's notice sits at the top of the composer surface, beside the
- * follow-up offers, so it reads as part of what the person types next. The
- * recipe is the system's `.callout`; this only places it and fits it to the
- * composer's inset.
+ * The mark that a thread read outside content is a chip in the row under the
+ * pill, after the access control it is a fact about: a globe and the words in
+ * the warning ink, with no fill or edge at rest like the row's other chips. It
+ * is shown for as long as the fact applies; pressing it opens the full
+ * sentence and Review. In a narrow row it keeps the globe and drops the words
+ * (the name and the tooltip keep them).
  */
-.outside-content-notice {
-  margin: var(--oct-space-2) var(--oct-space-4) 0;
+.outside-content-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
-/* In the composer the notice is one quiet line, not a box: as a bordered card
-   it stood taller than the reply field under it and read as an error on every
-   thread that had opened a web page. Its sentence, mark, and Review still say
-   the same thing. It names the recipe too: the shared `.callout` rule loads
-   after this file in the packaged app and, at equal weight, kept its box. */
-.callout.outside-content-notice {
-  flex-wrap: nowrap;
-  align-items: center;
+.composer-row .outside-content-chip__trigger {
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-warn-fg);
+}
+
+.outside-content-chip__label {
+  white-space: nowrap;
+}
+
+@container composer-under (max-width: 560px) {
+  .outside-content-chip__label {
+    display: none;
+  }
+  .composer-row .outside-content-chip__trigger {
+    padding-inline: var(--oct-space-1);
+  }
+}
+
+.outside-content-popover {
+  display: grid;
+  max-width: 280px;
   gap: var(--oct-space-2);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-detail);
+  justify-items: start;
+  padding: var(--oct-space-3);
 }
 
-.callout.outside-content-notice > svg {
-  width: 14px;
-  height: 14px;
-  margin-top: 0;
+.outside-content-popover__text {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 
 /* The review dialog's message stays compact: its mark, sentence, and action

@@ -1,6 +1,7 @@
 import { SpeechClientFailure } from "@octant/client-runtime/speech-client";
 import { LoaderCircle, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useComposerNoticeSink } from "../composer/ComposerNotice";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useSpeechCapability } from "./SpeechCapabilityContext";
 import { formatRecordingDuration, MAX_VOICE_RECORDING_MS, useVoiceRecorder } from "./voiceRecorder";
@@ -85,6 +86,21 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
     }
   }, [ready]);
 
+  // Inside a thread composer the failure is said in its notice card, where it
+  // wraps; standing alone the control says it beside itself.
+  const failure =
+    phase.kind === "failed"
+      ? phase.message
+      : recorder.state.kind === "unavailable"
+        ? recorder.state.reason
+        : undefined;
+  const said = useComposerNoticeSink(
+    "dictation",
+    failure === undefined || !ready || !recorder.supported
+      ? undefined
+      : { key: "dictation", tone: "warning", role: "alert", text: failure },
+  );
+
   if (!ready || !recorder.supported) return null;
 
   const recording = recorder.state.kind === "recording";
@@ -96,12 +112,6 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
       : recorder.state.kind === "requesting"
         ? "Starting microphone…"
         : "Dictate message";
-  const failure =
-    phase.kind === "failed"
-      ? phase.message
-      : recorder.state.kind === "unavailable"
-        ? recorder.state.reason
-        : undefined;
 
   return (
     <span className="composer-voice">
@@ -142,7 +152,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
           {formatRecordingDuration(recorder.elapsedMs)}
         </span>
       ) : null}
-      {failure === undefined ? null : (
+      {failure === undefined || said ? null : (
         /* ui-boundary-exception: compact-status */
         <span className="composer-voice__error" role="alert">
           {failure}

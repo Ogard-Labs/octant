@@ -4,6 +4,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptWindow } from "./TranscriptWindow";
 
+// Indexing a 1,000-row history takes about 3 s on a loaded laptop and went past
+// 5 s on merge-queue runners, failing tests that only check Find completes.
+// Stay under the package's 15 s test timeout.
+const FIND_INDEXED_WITHIN_MS = 12_000;
+
 interface Row {
   readonly id: string;
   readonly label: string;
@@ -278,7 +283,9 @@ describe("TranscriptWindow", () => {
     expect(mountedCount()).toBeLessThan(80);
     fireEvent.change(input, { target: { value: "Row 500" } });
     expect(mountedCount()).toBeLessThan(80);
-    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     expect(mountedCount()).toBeLessThan(80);
     expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
   });
@@ -317,7 +324,9 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "Row 500" } });
-    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     expect(mountedCount()).toBeLessThan(80);
   });
 
@@ -326,7 +335,9 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "Row 500" } });
-    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "Row 600" } });
     expect(screen.queryByText("Searching…")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Row 600" })).toBeInTheDocument();
@@ -341,7 +352,9 @@ describe("TranscriptWindow", () => {
     fireEvent.change(input, { target: { value: "row 5" } });
 
     // Row 5, 50-59, 500-599.
-    expect(await screen.findByText("1 of 111", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 111", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("2 of 111")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
@@ -354,7 +367,9 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(window, { key: "f", metaKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "no such text" } });
-    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("No matches", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(mountedCount()).toBeLessThan(80);
     });
@@ -413,10 +428,14 @@ describe("TranscriptWindow", () => {
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
 
     fireEvent.change(input, { target: { value: "the plan is" } });
-    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "readysecond" } });
-    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("No matches", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
   });
 
   it("refreshes matches when a disclosure opens or closes", async () => {
@@ -436,7 +455,9 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "hidden phrase" } });
-    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("No matches", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     const disclosure = screen.getByText("Thinking").closest("details");
     if (disclosure === null) throw new Error("expected disclosure");
     disclosure.open = true;
@@ -510,7 +531,9 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "detail row-500." } });
-    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 of 1", {}, { timeout: FIND_INDEXED_WITHIN_MS }),
+    ).toBeInTheDocument();
     expect(mountedCount()).toBeLessThan(80);
   });
 

@@ -3,11 +3,11 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
-import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
+import { TOOL_CATALOG_CONTINUATION_COPY } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { ConversationInputs } from "../continuity/ConversationInputs";
-import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
+import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -2249,6 +2249,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     canvasesByRow: canvasPlacement.byRow,
   });
 
+  const sideChatNotice = sideChatDraftNotice({
+    count: composerDraft.sideChatReturns.length,
+    invalid: composerDraft.sideChatReturnsInvalid,
+    onClear: composerDraft.clear,
+  });
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
@@ -2757,7 +2763,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
-        {folderDrops.notice}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
@@ -2851,27 +2856,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 }
               />
               <TrackerReferenceComposerHints draft={prompt} />
-              <WorkImageAttachmentChips images={images} />
-              {turnActionMessage === undefined ? null : (
-                <p className="work-thread-workspace__hint" role="status">
-                  {turnActionMessage}
-                </p>
-              )}
-              <SideChatDraftNotice
-                count={composerDraft.sideChatReturns.length}
-                invalid={composerDraft.sideChatReturnsInvalid}
-                onClear={composerDraft.clear}
-              />
-              {composerDraft.stagedDropped === true ? (
-                <p className="work-thread-workspace__hint" role="status">
-                  {COMPOSER_STAGED_DROPPED_NOTE}
-                </p>
-              ) : null}
-              {composerDraft.persistError === undefined ? null : (
-                <p className="work-thread-workspace__hint" role="status">
-                  {composerDraft.persistError}
-                </p>
-              )}
+              <WorkImageAttachmentChips images={images} withMessage={false} />
             </>
           }
           input={
@@ -3133,36 +3118,88 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               },
             },
           }}
-          footer={
-            <div aria-live="polite" className="composer-status">
-              {errorMessage === undefined ? null : (
-                /* ui-boundary-exception: compact-status */
-                <span className="composer-status__notice" role="alert" title={errorMessage}>
-                  {errorMessage}
-                </span>
-              )}
-              {toolCatalogHandoffRequired ? (
-                <ToolCatalogContinuation
-                  disabled={!canSubmit || queueFollowUp || creating}
-                  onContinue={() => void sendWorkTurn(false, true)}
-                />
-              ) : null}
-              {handoffNotice === undefined || completionLocked || turnRunning ? null : (
-                <span className="composer-status__hint" role="status">
-                  {handoffNotice}
-                </span>
-              )}
-              {completionLocked || turnRunning || props.turnClient === undefined ? (
-                <span className="composer-status__hint" role="status">
-                  {completionLocked
-                    ? "Reactivate this task before creating another file or changing its provider."
-                    : turnRunning
-                      ? "Submit adds this message to the host queue"
-                      : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
-                </span>
-              ) : null}
-            </div>
+          progress={
+            // A keyboard hint, or what Submit does while a turn runs: said in
+            // the quiet line, never in a card.
+            completionLocked
+              ? undefined
+              : turnRunning
+                ? { text: "Submit adds this message to the host queue" }
+                : props.turnClient === undefined
+                  ? { text: "Enter saves a Markdown artifact · Shift+Enter for a new line" }
+                  : undefined
           }
+          notices={[
+            ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(images.message === undefined
+              ? []
+              : [{ key: "image", tone: "warning" as const, text: images.message }]),
+            ...(turnActionMessage === undefined
+              ? []
+              : [{ key: "turn-action", tone: "neutral" as const, text: turnActionMessage }]),
+            ...(sideChatNotice === undefined ? [] : [sideChatNotice]),
+            ...(composerDraft.stagedDropped === true
+              ? [
+                  {
+                    key: "staged-dropped",
+                    tone: "neutral" as const,
+                    text: COMPOSER_STAGED_DROPPED_NOTE,
+                  },
+                ]
+              : []),
+            ...(composerDraft.persistError === undefined
+              ? []
+              : [
+                  {
+                    key: "persist-error",
+                    tone: "warning" as const,
+                    text: composerDraft.persistError,
+                  },
+                ]),
+            ...(errorMessage === undefined
+              ? []
+              : [
+                  {
+                    key: "error",
+                    tone: "danger" as const,
+                    role: "alert" as const,
+                    text: errorMessage,
+                  },
+                ]),
+            ...(toolCatalogHandoffRequired
+              ? [
+                  {
+                    key: "tool-catalog",
+                    tone: "warning" as const,
+                    text: TOOL_CATALOG_CONTINUATION_COPY,
+                    action: (
+                      <OctantButton
+                        disabled={!canSubmit || queueFollowUp || creating}
+                        onClick={() => void sendWorkTurn(false, true)}
+                        size="sm"
+                        type="button"
+                      >
+                        Continue with updated tools
+                      </OctantButton>
+                    ),
+                  },
+                ]
+              : []),
+            ...(handoffNotice === undefined || completionLocked || turnRunning
+              ? []
+              : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
+            // A locked task is a fact the person acts on: it stays until
+            // they reactivate it.
+            ...(completionLocked
+              ? [
+                  {
+                    key: "locked",
+                    tone: "neutral" as const,
+                    text: "Reactivate this task before creating another file or changing its provider.",
+                  },
+                ]
+              : []),
+          ]}
         />
       </section>
     </ThreadReplyDetailScope>

@@ -184,9 +184,13 @@ describe("ChatComposer", () => {
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    // A refusal is an alert in a card above the pill, never a line inside it.
+    const refusal = await screen.findByRole("alert");
+    expect(refusal).toHaveTextContent(
       "Message could not be sent. Your draft is still here; try again.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
+    expect(document.querySelector(".thread-composer__surface")).not.toContainElement(refusal);
     expect(screen.getByLabelText("Message")).toHaveValue("Try this again");
   });
 
@@ -244,18 +248,32 @@ describe("ChatComposer", () => {
     expect(onForceStop).toHaveBeenCalledOnce();
   });
 
-  it("marks a running turn on the composer so the streaming state is visible", () => {
-    renderComposer({ isSending: true });
+  it("marks a running turn without drawing a card: the streaming state is the status region's, and Stop says it", () => {
+    renderComposer({ isSending: true, onStop: vi.fn() });
 
-    expect(screen.getByRole("status")).toHaveClass("chat-composer__status--live");
+    // Passing progress is never a card, so the transcript above does not move.
+    expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
+    // The Stop control already says a response runs, so no line is drawn,
+    // but the persistent polite region carries the words.
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
+    expect(document.querySelector(".composer-progress__line")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Response is streaming. Submit to add a message to the host queue.",
+    );
     expect(document.querySelector(".chat-composer--running")).not.toBeNull();
   });
 
-  it("keeps the composer quiet when no turn is running", () => {
+  it("says why Send is held in the prompt's description when no turn is running", () => {
     renderComposer({ isSending: false });
 
-    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--live");
+    expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
     expect(document.querySelector(".chat-composer--running")).toBeNull();
+    const prompt = screen.getByLabelText("Message");
+    expect(prompt).toHaveAccessibleDescription(
+      "Research uses SearXNG. Enter a message before sending.",
+    );
+    // The region the prompt names is the one polite status region.
+    expect(screen.getByRole("status")).toHaveTextContent("Enter a message before sending.");
   });
 
   it("keeps a newer draft editable beside the queue while the response runs", async () => {
@@ -291,10 +309,11 @@ describe("ChatComposer", () => {
 
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
-    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--quiet");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    // The refusal is an alert card above the pill.
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "The selected model cannot accept attachments.",
     );
+    expect(screen.getByRole("alert").closest(".composer-notices")).not.toBeNull();
 
     const file = new File(["image"], "diagram.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
@@ -307,9 +326,9 @@ describe("ChatComposer", () => {
       attachment: { kind: "unavailable", reason: "Attachments are unavailable." },
     });
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Attachments are unavailable.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Attachments are unavailable.");
     rerender(<ChatComposer {...props} attachment={{ kind: "supported" }} />);
-    expect(screen.getByRole("status")).not.toHaveTextContent("Attachments are unavailable.");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("forwards the selected File without reading or exposing a file path", async () => {
@@ -368,7 +387,7 @@ describe("ChatComposer", () => {
     expect(onModelChange).toHaveBeenCalledWith("model-b");
     expect(onResearchEnabledChange).toHaveBeenCalledWith(false);
     expect(onResearchRoutingChange).toHaveBeenCalledWith("provider-native");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "Research unavailable: SearXNG is not configured.",
     );
   });

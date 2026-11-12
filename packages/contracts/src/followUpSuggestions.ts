@@ -18,6 +18,7 @@ import {
   NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpId,
   NativeHarnessFollowUpSet,
+  NativeHarnessTurnId,
 } from "./nativeHarness";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
@@ -26,6 +27,19 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /** The fence language a reply's suggestions arrive in; a reply without it suggests nothing. */
 export const FOLLOW_UP_BLOCK_LANGUAGE = "octant-follow-ups";
+
+/** How long a reply's predicted next message may be: one line a person would type. */
+export const MAX_FOLLOW_UP_NEXT_MESSAGE_LENGTH = 280;
+
+/**
+ * The message the person is most likely to send next, in their own words, as
+ * the reply's model predicted it. The empty composer shows it and Tab takes
+ * it; it is never sent on the person's behalf and creates nothing.
+ */
+export const FollowUpNextMessage = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_FOLLOW_UP_NEXT_MESSAGE_LENGTH),
+);
+export type FollowUpNextMessage = typeof FollowUpNextMessage.Type;
 
 /** The model that suggested a set; a new thread from it starts on the same model. */
 export const FollowUpSuggestedBy = Schema.Struct({
@@ -37,7 +51,8 @@ export type FollowUpSuggestedBy = typeof FollowUpSuggestedBy.Type;
 /**
  * The latest reply's suggestions on one thread. A later reply without a block
  * replaces them with an empty set, so an old offer never outlives the turn
- * that made it.
+ * that made it. The predicted next message is spent as soon as the person
+ * sends anything, so it is absent while the next turn runs.
  */
 export const ThreadFollowUpSuggestions = Schema.Struct({
   threadId: Schema.UUID,
@@ -45,6 +60,7 @@ export const ThreadFollowUpSuggestions = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   suggestedBy: FollowUpSuggestedBy,
   followUps: NativeHarnessFollowUpSet,
+  nextMessage: Schema.optional(FollowUpNextMessage),
   activatedFollowUpIds: Schema.Array(NativeHarnessFollowUpId).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_FOLLOW_UPS),
   ),
@@ -57,8 +73,15 @@ export const ThreadFollowUpsSuggested = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   suggestedBy: FollowUpSuggestedBy,
   followUps: NativeHarnessFollowUpSet,
+  nextMessage: Schema.optional(FollowUpNextMessage),
 }).annotations(strict);
 export type ThreadFollowUpsSuggested = typeof ThreadFollowUpsSuggested.Type;
+
+/** The person sent a message after the reply, so its predicted next message is spent. */
+export const ThreadFollowUpNextMessageSpent = Schema.Struct({
+  turnId: NativeHarnessTurnId,
+}).annotations(strict);
+export type ThreadFollowUpNextMessageSpent = typeof ThreadFollowUpNextMessageSpent.Type;
 
 export const ThreadFollowUpActivated = Schema.Struct({
   suggestionId: NativeHarnessFollowUpId,
@@ -86,6 +109,7 @@ export const THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE = "thread-follow-up-sug
 export const THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES = {
   suggested: "thread-follow-ups-suggested@1",
   activated: "thread-follow-up-activated@1",
+  nextMessageSpent: "thread-follow-up-next-message-spent@1",
 } as const;
 
 export const decodeThreadFollowUpSuggestions = Schema.decodeUnknownSync(ThreadFollowUpSuggestions);

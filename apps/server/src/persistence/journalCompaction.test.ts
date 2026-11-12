@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readCodeCheckout, readCodeCheckoutAggregateVersion } from "./codeProjection";
 import { Journal } from "./journal";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
+import { recordJournalWatermark } from "./journalWatermark";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { rebuildAll, verifyDatabase } from "./recovery";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -274,6 +275,30 @@ describe("compactSupersededCheckoutObservations", () => {
         eventsRemoved: 0,
       });
       expect(journalRows(connection)).toEqual(before);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("clears the startup verification watermark when it rewrites rows", () => {
+    const { connection, journal } = openStore();
+    try {
+      for (const [index, minute] of [1, 2, 3].entries()) {
+        appendObserved(journal, {
+          checkoutId: ids.checkout,
+          expectedVersion: index,
+          availability: "available",
+          observedAt: `2026-08-20T09:0${minute}:00.000Z`,
+        });
+      }
+      recordJournalWatermark(connection, "fingerprint", 3, now);
+      const watermark = () =>
+        connection.prepare("SELECT verified_through FROM journal_verification_watermark").get();
+      expect(watermark()).toEqual({ verified_through: 3 });
+
+      expect(compactSupersededCheckoutObservations(connection).eventsRemoved).toBe(2);
+
+      expect(watermark()).toBeUndefined();
     } finally {
       connection.close();
     }
