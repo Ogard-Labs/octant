@@ -59,6 +59,7 @@ import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  makeEventLoopShare,
   makeIdleTimeout,
   makeTurnTextParagraphs,
   type IdleTimeout,
@@ -313,6 +314,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let reachedTerminalEvent = false;
+      const shareEventLoop = makeEventLoopShare();
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -455,6 +457,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
+            Stream.tap(() => shareEventLoop),
             Stream.tap(() => idle.touch),
             // Liveness only restarts the idle clock above; nothing else sees it.
             Stream.filter((event) => event.kind !== "liveness"),

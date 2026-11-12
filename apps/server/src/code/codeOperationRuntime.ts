@@ -307,6 +307,8 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  /** How long a Stop waits for the runtime to confirm it; defaults to {@link CODE_STOP_CONFIRMATION_MS}. */
+  readonly stopConfirmationMs?: number;
   /**
    * Whether a move holds the thread: frozen while it leaves this computer, or
    * arriving and not yet committed. A held thread starts no turn.
@@ -3986,6 +3988,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#persistNormalized(active, event);
       return;
     }
+    // A runtime that has not yet answered a Stop can keep working and ask for
+    // more. The person asked for the turn to end, so nothing new is put to
+    // them; the request is declined and the turn waits for the runtime.
+    if (active.abort.signal.aborted) {
+      await Effect.runPromise(
+        active.connection
+          .answerApproval({
+            sessionId: active.sessionId as never,
+            requestId,
+            approved: false,
+            scope: "once",
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+      return;
+    }
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
@@ -4788,12 +4806,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
+    const connection = active.connection;
+    if (connection !== undefined) {
+      const confirmed = await settlesWithin(
+        Effect.runPromise(
+          connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+        ),
+        this.#options.stopConfirmationMs ?? CODE_STOP_CONFIRMATION_MS,
       );
+      // A Stop is only a request, and the caller hears back within the bound.
+      // The turn stays live and holds the thread until the runtime itself
+      // reports how it ended: recording it interrupted here while a runtime
+      // that shares its process kept working let a late completion land on a
+      // turn that already read as ended, and freed the thread under work
+      // that was still running. A runtime that owns its process can also be
+      // ended by Force stop.
+      if (!confirmed) {
+        return {
+          ...turnState("interrupted", {
+            category: "failed",
+            message:
+              connection.forceStop === undefined
+                ? STOP_UNCONFIRMED_MESSAGE
+                : `${STOP_UNCONFIRMED_MESSAGE} Force stop can end it.`,
+          }),
+          stoppedOperationId: active.operationId,
+        };
+      }
     }
     return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
   }
@@ -6193,6 +6232,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         state,
       }),
     );
+  }
+}
+
+/**
+ * How long a Stop waits for the runtime to confirm the turn ended: the same
+ * grace Chat gives a shared-process runtime and the renderer waits before it
+ * offers Force stop. A runtime that never answers the interrupt otherwise
+ * left the person's Stop request waiting indefinitely; the turn itself stays
+ * open until the runtime reports how it ended.
+ */
+export const CODE_STOP_CONFIRMATION_MS = 10_000;
+
+const STOP_UNCONFIRMED_MESSAGE =
+  "Stop was not confirmed. The provider may still be running this turn.";
+
+/** Whether `work` settles, either way, before `ms` pass. */
+async function settlesWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([
+      work.then(
+        () => true,
+        () => true,
+      ),
+      expired,
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

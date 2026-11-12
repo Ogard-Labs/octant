@@ -1368,9 +1368,26 @@ that serves several threads from one process (Codex, OpenCode) reports
 `forceStop` unsupported: the command is refused, the UI never offers it, and
 Stop settles the attempt at once as before. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
-did not take stays visible. Work returns `stop-requested` while its exact
-request-owned supported runtime is still ending. Its force command requires the
-same request/thread/turn and an already-aborted owned controller. Code's force
+did not take stays visible. A Code Stop waits at most ten seconds
+(`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
+answers `interrupted` with "Stop was not confirmed. The provider may still be
+running this turn." The turn stays live and holds its thread until the
+runtime itself reports how it ended: its tool activity meanwhile is still
+journaled (streamed reply text after a Stop is not kept), an approval it asks for is declined rather than put to the person,
+host-run tools under the turn already see it cancelled, and its own completed,
+failed or interrupted event, or its late answer to the interrupt, is the turn's
+one terminal outcome. On a runtime with Force stop the answer adds that Force
+stop can end it. Rationale: recording a shared-process turn interrupted at the
+bound freed the thread under work that was still running, and a late
+completion then landed on a turn that already read as ended. A busy host cannot hold Stop back either: every Chat, Work and Code
+turn hands the event loop back (one `setImmediate`) after 10 ms of processing
+provider events (`PROVIDER_EVENT_SLICE_MS`). Rationale: a provider streaming
+deltas as fast as they could be pulled kept each turn's work on one unbroken
+chain of microtasks, so timers and incoming requests never ran until it
+paused; with the slice, a Stop issued into that flood settled the turn at p95
+22–23 ms (Code) and 54–179 ms (Chat) over three sets of 10 runs. Work
+returns `stop-requested` while its exact request-owned supported runtime is
+still ending. Its force command requires the same request/thread/turn and an already-aborted owned controller. Code's force
 command additionally names the original turn operation, rejects replacement
 operations and requires that Stop already reached that controller. Neither path
 accepts a PID or kills a shared runtime; the provider owns process verification.
@@ -4553,7 +4570,11 @@ flowchart LR
   per short burst (a Code burst also flushes before any other event of its turn
   and when the turn ends), so the authoritative journal fsyncs a bounded number
   of times per second instead of once per token, and a power loss loses at most
-  the burst that was still open — never a committed one.
+  the burst that was still open — never a committed one. A burst is also
+  bounded in size (256 Ki characters of Code text, merged into one event; 64
+  Chat deltas, each its own event), so no single commit, including the one
+  that settles a Stop, grows with how fast the provider streams: an unbounded Chat burst under a flood held nearly 600 deltas and
+  its commit kept Stop waiting 1.4 s.
   Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
@@ -5147,7 +5168,9 @@ or .zip>` write the same files, built by one host command
   event another names as its cause. The other self-applying
   exception files rather than erases: the completed-thread sweep archives a
   thread the person completed once the Settings window has passed, keeping
-  its transcript, checkout, and journal in place.
+  its transcript, checkout, and journal in place. A sweep pass looks at 50
+  threads at a time and yields to the event loop between batches, so a pass
+  over thousands of threads cannot hold up Stop or an approval answer.
   A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
