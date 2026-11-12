@@ -1,6 +1,7 @@
 import { DEFAULT_PRODUCT_SURFACE_SETTINGS } from "@octant/contracts/modes";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { IconDefaults } from "./ui/IconDefaults";
 import { App } from "./App";
 import { followInputModality } from "./lib/inputModality";
 import { getInjectedHostBridge } from "./shell/hostBridge";
@@ -18,9 +19,11 @@ followInputModality();
 
 createRoot(root).render(
   <StrictMode>
-    <App
-      settings={DEFAULT_PRODUCT_SURFACE_SETTINGS}
-      {...(hostBridge === undefined ? {} : { hostBridge })}
-    />
+    <IconDefaults>
+      <App
+        settings={DEFAULT_PRODUCT_SURFACE_SETTINGS}
+        {...(hostBridge === undefined ? {} : { hostBridge })}
+      />
+    </IconDefaults>
   </StrictMode>,
 );

@@ -111,9 +111,9 @@ export interface ThreadComposerRow {
    */
   readonly trailing?: ReactNode;
   /**
-   * The microphone, in the pill just before send: it writes into the prompt,
+   * The microphone, in the box just before send: it writes into the prompt,
    * so it stands with the two other controls that act on the message. In the
-   * row under the pill it read as a fact about the thread.
+   * row under the box it read as a fact about the thread.
    */
   readonly dictate?: ReactNode;
   readonly actions: ThreadComposerActions;
@@ -121,7 +121,7 @@ export interface ThreadComposerRow {
 
 /**
  * The one composer frame Chat, Work, and Code share. It owns the anatomy —
- * the `.composer` frame, and inside it the notice cards, the pill (chips, then
+ * the `.composer` frame, and inside it the notice cards, the box (chips, then
  * attach, the block message label and send/stop on one line) and the
  * `.composer-row` of the surface's controls on the page under it — while every
  * capability (chips, typeaheads, pickers, notices) is passed in by the surface
@@ -180,7 +180,7 @@ export interface ThreadComposerProps {
   /**
    * What the surface has to say about its thread or about sending: a refusal,
    * a failure, a status, a hint. They are drawn as cards directly above the
-   * pill, most severe first, never inside it.
+   * box, most severe first, never inside it.
    */
   readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   /**
@@ -191,7 +191,7 @@ export interface ThreadComposerProps {
   readonly progress?: ComposerProgress | undefined;
   /**
    * Text for the persistent status region that is the prompt's description
-   * (why Send is held). Visually hidden and never in the pill's height.
+   * (why Send is held). Visually hidden and never in the box's height.
    */
   readonly description?: ReactNode;
   /** The region's element id, when the surface's prompt already names it. */
@@ -226,7 +226,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
 
 function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }) {
   const notice = useComposerNotice();
-  // A control inside the pill (the microphone) says its failure in the card
+  // A control inside the box (the microphone) says its failure in the card
   // too, where it wraps, instead of beside itself where it was cut to fit.
   const [published, setPublished] = useState<ReadonlyMap<string, ComposerNoticeItem>>(new Map());
   const publish = useCallback((item: ComposerNoticeItem | undefined, key: string) => {
@@ -274,7 +274,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
       </div>
     );
-  // One group of cards directly above the pill, under the start row: what the
+  // One group of cards directly above the box, under the start row: what the
   // thread did or what sending refused, then the Project offer and the
   // outside-content mark.
   const all = [...(props.notices ?? []), ...published.values()];
@@ -324,11 +324,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {notice}
     </ComposerNoticeCard>
   );
-  // The pill holds what acts on the message being written and nothing else:
+  // The box holds what acts on the message being written and nothing else:
   // attach, the prompt, the microphone and send. With the model, the access
   // level and the context ring in a toolbar inside it, it was a third taller
   // than its prompt and read as a form; those describe the thread, so they
-  // stand on the page under the pill with the thread's other facts.
+  // stand on the page under the box with the thread's other facts.
   const message = (
     <>
       {props.queue}
@@ -366,7 +366,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One line under the pill, in reading order: where the thread runs, the
+  // One line under the box, in reading order: where the thread runs, the
   // surface's own row (what the thread may do leading, the model and then the
   // context ring trailing), the plan's windows, and the thread's info. The
   // ring ends the run: it is the one figure there, and at the end it does not
@@ -406,9 +406,9 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   // The stats line stands under the composer, where a person reads the last
   // turn's figures after sending.
   //
-  // The frame groups the start row, the pill and the line under it, and
-  // draws nothing: the pill is the one raised thing and the rows are quiet
-  // lines on the page. A held thread has no pill; the frame stays in the tree
+  // The frame groups the start row, the box and the line under it, and
+  // draws nothing: the box is the one raised thing and the rows are quiet
+  // lines on the page. A held thread has no box; the frame stays in the tree
   // so the info panel in the line is never remounted.
   const body = (
     <>
@@ -502,7 +502,7 @@ function sendVariant(refused: boolean): "secondary" | "default" {
 /**
  * A refused send keeps its quiet fill at full strength and dims only the
  * arrow: the blanket disabled opacity left the circle at 1.07:1 on the page,
- * so the pill no longer showed where send is.
+ * so the box no longer showed where send is.
  */
 const SEND_REFUSED_PAINT = "disabled:opacity-100 disabled:[&_svg]:opacity-50";
 
@@ -513,7 +513,7 @@ function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefi
 }
 
 /**
- * The pill's trailing edge: the microphone, then Send, and Stop while a
+ * The box's trailing edge: the microphone, then Send, and Stop while a
  * response streams.
  */
 function ComposerSendCell(props: {
@@ -538,7 +538,7 @@ function ComposerSendCell(props: {
           type={send.onSend === undefined ? "submit" : "button"}
           variant={sendVariant(refused)}
         >
-          <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+          <ArrowUp aria-hidden="true" size={16} />
         </OctantButton>
       </div>
     );
@@ -567,7 +567,7 @@ function ComposerSendCell(props: {
           type="button"
           variant="secondary"
         >
-          <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
+          <Square aria-hidden="true" fill="currentColor" size={12} />
         </OctantButton>
       ) : null}
       <OctantButton
@@ -580,7 +580,7 @@ function ComposerSendCell(props: {
         type="button"
         variant={sendVariant(refused)}
       >
-        <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+        <ArrowUp aria-hidden="true" size={16} />
       </OctantButton>
     </div>
   );

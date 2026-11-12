@@ -135,16 +135,11 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
         variant={recording ? "destructive" : "ghost"}
       >
         {busy ? (
-          <LoaderCircle
-            aria-hidden="true"
-            className="composer-voice__spin"
-            size={16}
-            strokeWidth={1.8}
-          />
+          <LoaderCircle aria-hidden="true" className="composer-voice__spin" size={16} />
         ) : recording ? (
-          <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
+          <Square aria-hidden="true" fill="currentColor" size={12} />
         ) : (
-          <Mic aria-hidden="true" size={16} strokeWidth={1.8} />
+          <Mic aria-hidden="true" size={16} />
         )}
       </OctantButton>
       {recording ? (

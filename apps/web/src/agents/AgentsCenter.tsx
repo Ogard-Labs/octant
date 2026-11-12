@@ -218,7 +218,7 @@ function AgentsCenterToolbar(props: {
     <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
       <label className="surface-toolbar__search agents-center__search">
         <span className="sr-only">Search agent runs</span>
-        <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Search aria-hidden="true" size={14} />
         <OctantInput
           onChange={(event) => controller.setSearch(event.target.value)}
           placeholder="Search tasks, roles, threads"
@@ -370,7 +370,7 @@ function AgentsCenterListBody(props: {
             ? "Clear or adjust the active filters to see other runs."
             : "Child agents appear here after a thread starts one."
         }
-        icon={<Bot size={20} strokeWidth={1.5} />}
+        icon={<Bot size={20} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
       />
     );

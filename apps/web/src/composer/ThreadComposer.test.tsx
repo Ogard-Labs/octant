@@ -126,7 +126,7 @@ describe("ThreadComposer", () => {
     expect(meters).toHaveTextContent("5h85%week43%");
   });
 
-  it("says a notice in a card above the pill and keeps the checkout context in the row under it", () => {
+  it("says a notice in a card above the box and keeps the checkout context in the row under it", () => {
     const row = {
       actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
     };
@@ -148,13 +148,13 @@ describe("ThreadComposer", () => {
     const cards = container.querySelector(".composer-notices");
     const under = container.querySelector(".composer-under");
     expect(surface).toContainElement(field);
-    // The pill holds the message and nothing said about it: the notice is a
-    // card of its own, directly above the pill.
+    // The box holds the message and nothing said about it: the notice is a
+    // card of its own, directly above the box.
     const card = within(cards as HTMLElement).getByText("Usage notice");
     expect(surface).not.toContainElement(card);
     expect(cards?.nextElementSibling).toBe(surface);
     expect(card.closest(".callout")).toHaveAttribute("data-tone", "warning");
-    // The line under the pill holds the checkout context.
+    // The line under the box holds the checkout context.
     expect(surface?.nextElementSibling).toBe(under);
     expect(under).toContainElement(container.querySelector(".thread-composer__context"));
     // The context is beside the surface's row, not in it: the row restyles
@@ -283,7 +283,7 @@ describe("ThreadComposer", () => {
     rerender(<ThreadComposer {...base} progress={{ text: "Sending message…" }} />);
     expect(container.querySelector(".composer-progress")).toBe(region);
     expect(region.querySelector(".composer-progress__line")).toHaveTextContent("Sending message…");
-    // Progress is never a card: the notice group stays empty and the pill is
+    // Progress is never a card: the notice group stays empty and the box is
     // the same element in the same place.
     expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
 
@@ -336,7 +336,7 @@ describe("ThreadComposer", () => {
     expect(prompt.getAttribute("aria-describedby")?.split(" ")).toEqual(["own", region.id]);
   });
 
-  it("draws a notice's action at the card's trailing edge, after its words, and keeps the pill clear", async () => {
+  it("draws a notice's action at the card's trailing edge, after its words, and keeps the box clear", async () => {
     const onUndo = vi.fn();
     const { container } = render(
       <ThreadComposer
@@ -361,7 +361,7 @@ describe("ThreadComposer", () => {
     );
   });
 
-  it("offers the outside-content review from a chip in the row under a marked thread's pill and holds the clear while the thread is busy", async () => {
+  it("offers the outside-content review from a chip in the row under a marked thread's box and holds the clear while the thread is busy", async () => {
     const threadId = "40000000-0000-4000-8000-000000000001";
     const marked = decodeThreadExternalContentState({
       threadId,
@@ -390,8 +390,8 @@ describe("ThreadComposer", () => {
     );
 
     const chip = await screen.findByRole("button", { name: "Outside content" });
-    // The chip stands in the row under the pill, right after the access
-    // control; no card stands above the pill and nothing of it is in the pill.
+    // The chip stands in the row under the box, right after the access
+    // control; no card stands above the box and nothing of it is in the box.
     const surface = container.querySelector(".thread-composer__surface");
     const row = container.querySelector(".composer-row");
     expect(surface).not.toContainElement(chip);
@@ -423,7 +423,7 @@ describe("ThreadComposer", () => {
     expect(container.querySelector("label")).toBeNull();
     expect(container.querySelector(".composer-field__attach")).toBeNull();
     // The composer is its frame alone, and the frame holds the notice cards
-    // (none here, so the group is empty and takes no room), the pill and the
+    // (none here, so the group is empty and takes no room), the box and the
     // line under it.
     expect(frame?.children).toHaveLength(1);
     const inner = frame?.children[0];

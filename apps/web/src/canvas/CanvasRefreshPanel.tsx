@@ -240,14 +240,9 @@ export function CanvasRefreshPanel(props: CanvasRefreshPanelProps) {
           }}
         >
           {running ? (
-            <LoaderCircle
-              aria-hidden="true"
-              className="canvas-refresh__spinner"
-              size={14}
-              strokeWidth={2}
-            />
+            <LoaderCircle aria-hidden="true" className="canvas-refresh__spinner" size={14} />
           ) : (
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+            <RefreshCw aria-hidden="true" size={14} />
           )}
           <span>Refresh canvas</span>
         </OctantButton>
@@ -293,11 +288,11 @@ function RefreshStatus(props: { readonly run: RefreshRun }) {
       aria-live="polite"
     >
       {run.kind === "refreshed" ? (
-        <Check aria-hidden="true" size={14} strokeWidth={2} />
+        <Check aria-hidden="true" size={14} />
       ) : isError ? (
-        <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Ban aria-hidden="true" size={14} />
       ) : run.kind === "partial" ? (
-        <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+        <TriangleAlert aria-hidden="true" size={14} />
       ) : null}
       <span>{text}</span>
     </p>

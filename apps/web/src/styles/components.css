@@ -41,7 +41,7 @@
   box-shadow: none;
 }
 
-/* Compact pill chip. */
+/* Compact chip. */
 .octant-chip {
   display: inline-flex;
   min-height: 26px;
@@ -51,7 +51,7 @@
   color: var(--oct-muted);
   background: transparent;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
@@ -229,7 +229,7 @@ html[data-octant-increased-contrast="true"]
   background: var(--octant-control);
 }
 
-/* A chip is a raised pill; the suggestion chip (a button variant) stays quiet
+/* A chip is a raised control; the suggestion chip (a button variant) stays quiet
    until it is pointed at. */
 .octant-chip {
   background: var(--octant-control);
@@ -768,7 +768,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   /* Fill, edge, and shadow are the shared dialog's. A strong border plus the
      overlay's ring gave search a 2px edge the command palette beside it does
      not have. */
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 .thread-search__field {
@@ -2030,7 +2030,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   max-width: 100%;
   padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-fill-4);
   color: var(--oct-fg);
 }
@@ -2072,7 +2072,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   max-width: 100%;
   padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-fill-4);
   color: var(--oct-fg);
   text-decoration: none;

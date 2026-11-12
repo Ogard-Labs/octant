@@ -97,7 +97,7 @@ describe("ComposerVoiceButton", () => {
     expect(await screen.findByText("Microphone access was not allowed.")).toBeVisible();
   });
 
-  it("says a failed dictation in the composer's notice card, in full, and not beside the microphone in the pill", async () => {
+  it("says a failed dictation in the composer's notice card, in full, and not beside the microphone in the box", async () => {
     const user = userEvent.setup();
     installFakeMicrophone();
     const failure =

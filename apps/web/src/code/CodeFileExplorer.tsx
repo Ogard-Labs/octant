@@ -197,7 +197,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
       <div className="code-file-explorer__head">
         <label className="code-file-explorer__search">
           <span className="sr-only">Filter files</span>
-          <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+          <Search aria-hidden="true" size={14} />
           <OctantInput
             aria-label="Filter files"
             onChange={(event) => setQuery(event.currentTarget.value)}
@@ -218,7 +218,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={14} strokeWidth={1.8} />
+              <X aria-hidden="true" size={14} />
             </OctantButton>
           )}
         </label>
@@ -230,7 +230,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
             onClick={props.onRefresh}
             type="button"
           >
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+            <RefreshCw aria-hidden="true" size={14} />
           </OctantIconButton>
         )}
       </div>
@@ -301,12 +301,11 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                     aria-hidden="true"
                     className="code-file-explorer__chevron"
                     size={16}
-                    strokeWidth={1.8}
                   />
                   {open ? (
-                    <FolderOpen aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <FolderOpen aria-hidden="true" size={14} />
                   ) : (
-                    <Folder aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <Folder aria-hidden="true" size={14} />
                   )}
                   <FileName name={pathBasename(entry.path)} />
                 </OctantButton>
@@ -341,7 +340,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                 type="button"
                 variant="bare"
               >
-                <File aria-hidden="true" size={14} strokeWidth={1.7} />
+                <File aria-hidden="true" size={14} />
                 <FileName name={name} />
                 {parentHint === undefined ? null : (
                   <span className="code-file-explorer__hint">{parentHint}</span>

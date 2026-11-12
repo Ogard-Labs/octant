@@ -23,7 +23,7 @@ describe("shared control paint ownership", () => {
       "/* The frame's direct labels are its message fields;",
     );
 
-    expect(controlRules).toMatch(/border-radius:\s*var\(--oct-radius-(?:sm|pill)\)/);
+    expect(controlRules).toMatch(/border-radius:\s*var\(--oct-radius-sm\)/);
     expect(controlRules).toMatch(/background:\s*transparent/);
     expect(controlRules).not.toMatch(/rgb\(/);
   });

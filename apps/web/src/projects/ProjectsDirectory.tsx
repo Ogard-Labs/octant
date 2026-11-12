@@ -46,7 +46,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
       <>
         {props.onAddProject === undefined ? null : (
           <OctantButton onClick={props.onAddProject} size="sm" type="button" variant="secondary">
-            <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
+            <Plus aria-hidden="true" size={12} />
             Add Project
           </OctantButton>
         )}
@@ -60,7 +60,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
             type="button"
             variant="ghost"
           >
-            <PanelLeftClose aria-hidden="true" size={16} strokeWidth={1.7} />
+            <PanelLeftClose aria-hidden="true" size={16} />
           </OctantButton>
         )}
       </>
@@ -77,7 +77,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
     : {
         title: "No Projects yet",
         detail: "Add a Project to see it here.",
-        icon: <FolderPlus size={20} strokeWidth={1.5} />,
+        icon: <FolderPlus size={20} />,
         ...(props.onAddProject === undefined
           ? {}
           : {
@@ -103,7 +103,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
       />
       <div className="surface-toolbar">
         <label className="surface-toolbar__search">
-          <Search aria-hidden="true" size={14} strokeWidth={1.6} />
+          <Search aria-hidden="true" size={14} />
           <span className="sr-only">Search Projects</span>
           <OctantInput
             aria-label="Search Projects"
@@ -146,7 +146,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
                   variant="ghost"
                 >
                   <ProjectIcon
-                    fallback={<Folder aria-hidden="true" size={16} strokeWidth={1.6} />}
+                    fallback={<Folder aria-hidden="true" size={16} />}
                     projectId={String(project.id)}
                     size={16}
                   />

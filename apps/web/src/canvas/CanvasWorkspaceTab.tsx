@@ -1094,7 +1094,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               {String(selectedVersionId) === tipVersionId ? null : (
                 <span className="canvas-workspace-tab__older">older</span>
               )}
-              <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+              <ChevronDown aria-hidden="true" size={12} />
             </>
           }
           triggerLabel={`Version history, v${String(expectedSequence)}`}
@@ -1151,7 +1151,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             type="button"
             variant={commentsOpen ? "secondary" : "ghost"}
           >
-            <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+            <MessageSquare aria-hidden="true" size={14} />
             Comments
             {openThreads.length === 0 ? null : (
               <span className="canvas-workspace-tab__count">{openThreads.length}</span>
@@ -1176,7 +1176,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               setDialog(chosen);
             }}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
             triggerClassName="canvas-workspace-tab__overflow"
             triggerLabel="More Canvas actions"
             value=""
@@ -1253,7 +1253,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                 type="button"
                 variant="ghost"
               >
-                <X aria-hidden="true" size={14} strokeWidth={1.8} />
+                <X aria-hidden="true" size={14} />
               </OctantButton>
             </div>
             <CanvasCommentsPanel

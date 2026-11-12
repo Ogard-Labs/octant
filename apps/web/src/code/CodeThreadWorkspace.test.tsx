@@ -1496,7 +1496,7 @@ describe("CodeThreadWorkspace", () => {
       ),
     );
     expect(screen.getByText("The restore was undone.")).toBeVisible();
-    // The message and its action are one card above the pill: the words, then
+    // The message and its action are one card above the box: the words, then
     // the button at the trailing edge.
     const card = screen.getByText("The restore was undone.").closest(".callout");
     expect(card?.closest(".composer-notices")).not.toBeNull();

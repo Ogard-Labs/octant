@@ -202,7 +202,7 @@ its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
 answers a plain 404 when there is none. The renderer draws it as an `<img>` at
-the row's own icon size (12, 14, 16, 20 or 24px) with a small radius; it never
+the row's own icon size (a step of the [icon scale](../../DESIGN.md#iconography-and-provider-marks)) with a small radius; it never
 inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
 while it loads, when the Project has none, and when the image fails. A Project's
@@ -561,17 +561,17 @@ when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), then a breadcrumb: the Project in meta text, a slash,
 and the title. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
-faster, with no fixed floor so a narrow pane keeps its status pill); without a
+faster, with no fixed floor so a narrow pane keeps its status chip); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" chip (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
-approval, or on a question the turn asked, is not running: the pill reads
+approval, or on a question the turn asked, is not running: the chip reads
 "Needs you", with no spinner, until someone decides or answers. A surface that is not a thread shows no environment mark.
 With content tabs open the bar holds the drag handle and the tabs alone: the
-Project and the Running or Needs you pill leave it. A Project name ahead of
+Project and the Running or Needs you chip leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
 · Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
@@ -873,7 +873,7 @@ with the stage: no gap and no corner, one 1px line between two panes
 under the title band along the top. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
 and the meta ink while grabbed, and keeps no accent line after a click. A window of 680px or less keeps
-rounded tiles with a gap between them. Columns stand side by side only when the tile area can give each 280px and
+its rounded tiles. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to

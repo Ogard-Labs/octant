@@ -32,7 +32,7 @@ export function TurnActionMenu(props: TurnActionMenuProps) {
         <OctantMenu
           items={props.actions}
           onValueChange={props.onAction}
-          trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
+          trigger={<Ellipsis aria-hidden="true" className="icon" size={16} />}
           selectionMode="action"
           triggerClassName="shell-icon-button"
           triggerLabel={props.label ?? "More actions"}

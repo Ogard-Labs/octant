@@ -37,7 +37,7 @@ describe("ZenBar", () => {
     expect(onHide).toHaveBeenCalledOnce();
   });
 
-  it("collapses to a pill that still exits Zen", () => {
+  it("collapses to a small bar that still exits Zen", () => {
     const onExit = vi.fn();
     const onExpand = vi.fn();
     render(<ZenBar collapsed onExit={onExit} onExpand={onExpand} />);

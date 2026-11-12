@@ -412,9 +412,9 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       title="Choose a repository"
       trigger={
         <>
-          <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+          <FolderGit2 aria-hidden="true" size={14} />
           <span className="github-issue-browser__repository-name">{repositoryLabel}</span>
-          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={14} />
         </>
       }
       triggerClassName="github-issue-browser__repository"
@@ -544,7 +544,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
             </OctantToggleGroup>
 
             <label className="surface-toolbar__search github-issue-browser__search">
-              <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+              <Search aria-hidden="true" size={14} />
               <span className="sr-only">Search GitHub issues</span>
               <OctantInput
                 aria-label="Search GitHub issues"
@@ -562,7 +562,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         // Nothing to list until a repository is chosen; the page says so in
         // one panel rather than opening on the whole catalogue.
         <div className="github-issue-browser__empty">
-          <FolderGit2 aria-hidden="true" size={20} strokeWidth={1.5} />
+          <FolderGit2 aria-hidden="true" size={20} />
           <p className="github-issue-browser__empty-title">Choose a repository</p>
           <p className="github-issue-browser__note">
             Issues are read from any repository this host can reach. Repositories a Code thread has
@@ -761,7 +761,7 @@ function IssueDetailPane(props: {
   if (detail.kind === "idle") {
     return (
       <div className="github-issue-browser__placeholder" role="status">
-        <CircleDot aria-hidden="true" size={20} strokeWidth={1.5} />
+        <CircleDot aria-hidden="true" size={20} />
         <p className="github-issue-browser__note">Select an issue to read it.</p>
       </div>
     );
@@ -847,7 +847,7 @@ function IssueDetailPane(props: {
               type="button"
               variant="secondary"
             >
-              <SquarePen aria-hidden="true" size={14} strokeWidth={1.8} />
+              <SquarePen aria-hidden="true" size={14} />
               Start a Code thread
             </OctantButton>
           </div>

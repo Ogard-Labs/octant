@@ -279,9 +279,9 @@ export function PathMentionTypeahead(props: {
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
                 {candidate.kind === "directory" ? (
-                  <Folder aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <Folder aria-hidden="true" size={12} />
                 ) : (
-                  <File aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <File aria-hidden="true" size={12} />
                 )}
                 <span>{candidate.path}</span>
                 <span className="thread-mention__meta">

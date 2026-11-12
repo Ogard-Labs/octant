@@ -51,7 +51,7 @@ function Buttons() {
               </OctantButton>
             ))}
             <OctantButton size="default" type="button" variant={variant}>
-              <Plus aria-hidden="true" data-icon="inline-start" size={16} strokeWidth={1.5} />
+              <Plus aria-hidden="true" data-icon="inline-start" size={16} />
               With icon
             </OctantButton>
           </div>
@@ -65,7 +65,7 @@ function Buttons() {
         <div className="gallery-row">
           {ICON_SIZES.map((size) => (
             <OctantButton aria-label={size} key={size} size={size} type="button" variant="outline">
-              <Bell aria-hidden="true" size={16} strokeWidth={1.5} />
+              <Bell aria-hidden="true" size={16} />
             </OctantButton>
           ))}
         </div>

@@ -53,7 +53,7 @@ export function PullRequestChip(props: PullRequestChipProps) {
       data-tone={props.state}
       title={`Pull request #${props.number} · ${label}`}
     >
-      <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#{props.number}
+      <GitPullRequest aria-hidden="true" size={12} />#{props.number}
       {props.showState === true ? ` ${label}` : null}
       {note === undefined ? null : <span className="pull-request-chip__checks">{note}</span>}
     </span>

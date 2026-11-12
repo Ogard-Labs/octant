@@ -1,7 +1,8 @@
 import type { CodePlannerView, CodeThread } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { requestedWorkerOptions } from "../code/plannerProposalReview";
+import { OctantButton } from "../ui/base/OctantButton";
 
 /**
  * A coordinator's pending proposed workers on a paired browser, read-only
@@ -62,7 +63,7 @@ export function RemoteCoordinatorProposals(props: {
             <span className="follow-up-card__kind">Worker · waiting for approval</span>
           </div>
           <p className="follow-up-card__title">{entry.proposal.title}</p>
-          <p className="follow-up-card__prompt">{entry.proposal.intent}</p>
+          <ProposalIntent intent={entry.proposal.intent} />
           {entry.proposal.workerOptions === undefined ? null : (
             <p className="oct-row-detail">{requestedWorkerOptions(entry.proposal.workerOptions)}</p>
           )}
@@ -70,5 +71,53 @@ export function RemoteCoordinatorProposals(props: {
         </article>
       ))}
     </section>
+  );
+}
+
+/**
+ * The proposal's request, two lines at first. The desktop card's Review opens
+ * the whole request; a paired browser has no review, so a cut-off request
+ * would otherwise be unreadable there. The toggle appears only when the two
+ * lines actually cut text off.
+ */
+function ProposalIntent(props: { readonly intent: string }) {
+  const prompt = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  useLayoutEffect(() => {
+    const node = prompt.current;
+    if (node === null || expanded) return;
+    const measure = () => setClamped(node.scrollHeight > node.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [expanded, props.intent]);
+  return (
+    <>
+      <p
+        className={
+          expanded
+            ? "follow-up-card__prompt remote-workspace__proposal-intent--expanded"
+            : "follow-up-card__prompt"
+        }
+        ref={prompt}
+      >
+        {props.intent}
+      </p>
+      {clamped || expanded ? (
+        <OctantButton
+          aria-expanded={expanded}
+          className="remote-workspace__proposal-toggle"
+          onClick={() => setExpanded((open) => !open)}
+          size="sm"
+          type="button"
+          variant="link"
+        >
+          {expanded ? "Show less" : "Show the full request"}
+        </OctantButton>
+      ) : null}
+    </>
   );
 }

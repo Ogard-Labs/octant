@@ -1017,7 +1017,7 @@ function ProviderRow(props: ProviderRowProps) {
               className="provider-settings__local-mark"
               title="Detected locally on this host"
             >
-              <CheckCircle2 aria-hidden="true" size={14} strokeWidth={2} />
+              <CheckCircle2 aria-hidden="true" size={14} />
             </span>
           ) : null}
         </span>

@@ -108,7 +108,7 @@ export function TurnHeader(props: TurnHeaderProps) {
               ? { "aria-live": "polite" as const, role: "status" }
               : {})}
           >
-            {Icon === undefined ? null : <Icon aria-hidden="true" size={12} strokeWidth={1.8} />}
+            {Icon === undefined ? null : <Icon aria-hidden="true" size={12} />}
             <span>{props.label ?? OUTCOME_LABELS[props.outcome]}</span>
           </span>
         )}

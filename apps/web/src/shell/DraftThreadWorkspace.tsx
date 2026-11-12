@@ -1591,7 +1591,7 @@ function CreateFromIssueControl(props: {
 function CoordinatorDraftHeading(props: { readonly onCancel: () => void }) {
   return (
     <>
-      <Network aria-hidden="true" className="welcome__mark" size={24} strokeWidth={1.6} />
+      <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
         Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
@@ -1633,19 +1633,19 @@ function DraftContextStrip(props: {
       />
       {props.mode !== "chat" && props.projectName !== undefined ? (
         <span className="draft-thread__context-item" title={props.projectRoot}>
-          <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+          <FolderOpen aria-hidden="true" size={12} />
           <span>{props.projectName}</span>
         </span>
       ) : null}
       {props.mode === "code" && props.branchName !== undefined ? (
         <span className="draft-thread__context-item">
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          <GitBranch aria-hidden="true" size={12} />
           <span>{props.branchName}</span>
         </span>
       ) : null}
       {props.approvalLabel !== undefined ? (
         <span className="draft-thread__context-item">
-          <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+          <ShieldCheck aria-hidden="true" size={12} />
           <span>{props.approvalLabel}</span>
         </span>
       ) : null}

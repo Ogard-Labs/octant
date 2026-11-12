@@ -2767,7 +2767,7 @@ a numbered slice. Built, with these narrower readings:
     to shut down, the handover (note, commit, push, notice, continued report,
     and Continue handover), and the screens: Environment's Computer card, the
     move and handover sheets, the frozen bar, the tombstone, the Arriving
-    pill, and This thread can't move.
+    chip, and This thread can't move.
     Acceptance: a move without an own fresh unlock, or to a member without
     Move in or with Owners unticked, is refused before any part is sent; at no
     point can both copies start a turn unless the person chose Take back here
@@ -2855,7 +2855,7 @@ a numbered slice. Built, with these narrower readings:
     destination unreachable, a busy or delegated thread) journals its
     reason the same way. The desktop forwards each as a hub administration
     operation. Environment's Computer card lists the computers with their
-    pills, picks the one fitting Project, opens the move sheet (what moves,
+    chips, picks the one fitting Project, opens the move sheet (what moves,
     what stays, the erase sentence, Move with Touch ID, or Move after this
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another

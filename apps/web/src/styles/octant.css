@@ -179,18 +179,18 @@
   --oct-section-y-desktop: 80px;
   --oct-section-y-tablet: 48px;
   --oct-section-y-phone: 32px;
-  /* A tighter scale than the first desktop one (10/16/20), which read as
-     soft and toy-like next to the dense text it framed. */
-  --oct-radius-sm: 8px;
+  /* Two numbers and the round exception. A control's outline (a button, a
+     field, a tab, a menu row, a chip, a track that groups controls) is the
+     small token; a container (a card, a menu, a dialog, the composer) is the
+     medium one. Any two neighbours therefore agree. A part inside a control
+     takes the small radius less the padding between them, never below 2px. */
+  --oct-radius-sm: 4px;
   --oct-radius-md: 12px;
   /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
-  --oct-radius-lg: 14px;
-  /* The composer's pill: half the height of its one-line prompt, so the
-     empty composer has half-circle ends and a longer message keeps the same
-     corner. */
-  --oct-radius-composer: 22px;
+  /* Only what is inherently round: a switch, an avatar, a dot, a count, a
+     meter, a slider thumb. A control never takes it. */
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
@@ -239,6 +239,7 @@
   --oct-menu-inset: var(--oct-space-1);
   --oct-disabled-opacity: 0.75;
 
+  --oct-icon-xs: 12px;
   --oct-icon-sm: 14px;
   --oct-icon-md: 16px;
   --oct-icon-lg: 20px;
@@ -879,7 +880,7 @@ h4 {
   margin-bottom: -28px;
 }
 
-/* ─── pill / tag / badge ────────────────────────────────────────────── */
+/* ─── chip / tag / badge ────────────────────────────────────────────── */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -887,7 +888,7 @@ h4 {
   padding: 4px var(--oct-space-3);
   background: var(--oct-accent-soft);
   color: var(--oct-accent-fg);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   letter-spacing: 0;
@@ -1478,7 +1479,7 @@ input.switch:checked::after {
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -1628,7 +1629,9 @@ input.switch:checked::after {
   min-height: 26px;
   padding-inline: var(--oct-space-3);
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  /* A segment sits inside the track's 5px of padding and border, so it takes
+     the control corner less that gap, never below 2px. */
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
@@ -1663,7 +1666,7 @@ input.switch:checked::after {
 .runpanel {
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   overflow: hidden;
 }
 .runpanel-bar {
@@ -1801,7 +1804,7 @@ input.switch:checked::after {
 .ph-img {
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   aspect-ratio: 16 / 10;
   display: grid;
   place-items: center;
@@ -1989,7 +1992,7 @@ input.switch:checked::after {
 }
 .skeleton-block {
   height: 96px;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 @keyframes oct-sheen {
   to {
@@ -2004,7 +2007,7 @@ input.switch:checked::after {
   gap: var(--oct-space-3);
   padding: var(--oct-space-12) var(--oct-space-6);
   border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   text-align: center;
 }
 .empty h3 {
@@ -2123,7 +2126,7 @@ input.switch:checked::after {
   background: var(--oct-fg);
   color: var(--oct-surface);
   /* No inset bevel: the raised elevation's white top line drew on the dark
-     pill in light. */
+     tooltip in light. */
   box-shadow:
     0 1px 2px color-mix(in srgb, var(--octant-scrim) 20%, transparent),
     0 8px 20px -10px color-mix(in srgb, var(--octant-scrim) 40%, transparent);
@@ -2171,7 +2174,7 @@ input.switch:checked::after {
   width: min(520px, calc(100vw - 2 * var(--oct-space-6)));
   padding: 0;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   color: var(--oct-fg);
   box-shadow: var(--oct-elev-raised);
@@ -2202,7 +2205,7 @@ input.switch:checked::after {
   padding: var(--oct-space-4) var(--oct-space-6);
   border-top: 1px solid var(--oct-border);
   background: var(--oct-surface-warm);
-  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
+  border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
 }
 /* a scrim for anything that is not a <dialog> */
 .overlay {
@@ -2455,7 +2458,7 @@ input.switch:checked::after {
 .palette {
   width: min(560px, calc(100vw - 2 * var(--oct-space-6)));
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
   overflow: hidden;
@@ -3316,7 +3319,7 @@ input.switch:checked::after {
    The same facts, one row per thread, for scanning rather than triaging. */
 .issuelist {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -3427,7 +3430,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   min-height: 24px;
   padding-inline: var(--oct-space-3);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   text-transform: none;
@@ -3836,7 +3839,7 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: var(--oct-split, minmax(0, 1fr)) 1px minmax(0, 1.6fr);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -4207,6 +4210,12 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
+/* A button in the tray sits 2px inside it: the control corner less the gap,
+   never below 2px, so the tray's outline is the control's and the button is
+   concentric with it. */
+.modeswitch .modeswitch__tray > .mode {
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
+}
 /* The selection role is the tray's own tint, so the chosen segment drew as
    the tray (1.01:1 in light). A 12% tint of the ink reads one step stronger
    than the tray, in either mode, and stays translucent under Glass. */
@@ -4498,11 +4507,11 @@ input.switch:checked::after {
    so the ring never joins layout or escapes the rounded corners. */
 .composer {
   border: 0;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   /* The card role is white on the light well and the floating step in
      dark, so the composer is the one raised object in both modes. */
   background: var(--octant-card);
-  /* The pill's own rim is part of the shadow token, so a second ring here
+  /* The box's own rim is part of the shadow token, so a second ring here
      would draw two lines on one edge. */
   box-shadow: var(--octant-shadow-md);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
@@ -4523,8 +4532,8 @@ input.switch:checked::after {
   color: var(--octant-text-primary);
   background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-card));
   border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
-  /* The pill's corner less the cue's 8px inset. */
-  border-radius: var(--oct-radius-lg);
+  /* The composer's corner less the cue's 8px inset. */
+  border-radius: calc(var(--oct-radius-md) - 8px);
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -4550,7 +4559,7 @@ input.switch:checked::after {
    Code, has this one prompt: the same insets and the transcript's own type,
    so a message reads the same in the box as in the bubble it becomes. The
    empty prompt is one line everywhere and grows as the person types: one line
-   and 12px above and under it is the 44px pill. At two lines a start screen's
+   and 12px above and under it is the 44px box. At two lines a start screen's
    box was a card with a field's worth of empty room, and under a thread the
    50px box held 6px more above the words than under them. */
 .composer-input {
@@ -4582,7 +4591,7 @@ input.switch:checked::after {
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
-/* The pill's one line: attach, the prompt, the microphone, send. The
+/* The box's one line: attach, the prompt, the microphone, send. The
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */
 .composer-field {
@@ -4612,7 +4621,7 @@ input.switch:checked::after {
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
   margin-bottom: calc((1lh - 4px) / 2);
 }
-/* The microphone's failure is said in the notice card above the pill, where it
+/* The microphone's failure is said in the notice card above the box, where it
    wraps; beside the control it was cut to fit, and a cut failure is not read.
    The buttons keep their size and the cell gives way before the prompt does. */
 .composer-field__actions {
@@ -4635,20 +4644,14 @@ input.switch:checked::after {
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
 }
-/* The pill's controls are round: its ends are half circles, and a 28px
-   circle 8px in from one is concentric with it. A square tile in a round end
-   left a wedge of the pill between the tile's corner and the curve. */
+/* The composer's attach and send are controls like any other: a 28px tile
+   with the control corner, 8px in from the 12px corner of the box. */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
   min-height: 28px;
   height: 28px;
   border-color: transparent;
-  border-radius: var(--oct-radius-pill);
-}
-/* Attach, send, and stop are raised round controls on the pill, with the
-   control recipe's own rim and drop. The microphone stays quiet until it is
-   pointed at, like the other quiet controls. */
-.composer-field__actions .composer-voice :is(button, [role="button"]) {
+  border-radius: var(--oct-radius-sm);
   box-shadow: none;
 }
 .composer-field__attach button[data-size="icon"],
@@ -4657,7 +4660,7 @@ input.switch:checked::after {
   min-width: 28px;
   padding: 0;
 }
-/* The thread's facts stand under the pill, as one quiet line with no fill or
+/* The thread's facts stand under the box, as one quiet line with no fill or
    edge of its own: where the thread runs, the surface's row of controls, the
    plan's windows, and the thread's info. */
 .composer-under {
@@ -4767,7 +4770,7 @@ input.switch:checked::after {
   box-shadow: none;
 }
 /* An icon control in the row is a square tile with the control corner, as
-   controls on the page are. Only the pill's own controls are round. */
+   controls on the page are. */
 .composer-row button[data-size="icon"],
 .thread-info > button[data-size="icon"] {
   width: 28px;
@@ -4803,7 +4806,7 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
 }
 /* A bordered box inside the composer's own box read as a form field nested in
-   a form field. The trigger is a quiet pill that only gains a ground when
+   a form field. The trigger is a quiet chip that only gains a ground when
    pointed at, so the typed message stays the loudest thing in the frame. */
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
@@ -4896,44 +4899,46 @@ input.switch:checked::after {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
-  border-radius: var(--oct-radius-composer);
+  border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
-/* The frame groups the start row, the pill and the line under it, and
-   draws nothing: the pill is the one raised thing, and the rows are quiet
+/* The frame groups the start row, the box and the line under it, and
+   draws nothing: the box is the one raised thing, and the rows are quiet
    lines beside it, as the figures of the last turn are. Drawn as a tray
-   around all three, the composer was a block three rows tall with the pill a
+   around all three, the composer was a block three rows tall with the box a
    box inside a box. */
 .composer-frame {
   display: grid;
   gap: var(--oct-space-1);
   min-width: 0;
 }
-/* A held thread has no pill to frame; its line stands where it stood. */
+/* A held thread has no box to frame; its line stands where it stood. */
 .composer-frame--held {
   display: contents;
 }
-/* A row starts where the pill's first control does. */
+/* A row starts where the box's first control does. */
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-space-2);
 }
-/* The pill: the composer's one raised surface. Its corner is half its
-   one-line height, so the empty composer has half-circle ends. */
+/* The composer's one raised surface: a container, so its corner is the
+   container token at one line and at four. */
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
   border: 0;
-  border-radius: var(--oct-radius-composer);
-  box-shadow: var(--octant-shadow-md);
+  border-radius: var(--oct-radius-md);
+  box-shadow:
+    var(--octant-shadow-md),
+    inset 0 0 0 1px var(--oct-border);
 }
 /* The notice card: what the composer has to say about its thread or about
-   sending, as the system's callout directly above the pill, in the pill's
-   width. A tinted bar inside the pill fought its corner (a rounded bar in a
-   rounded pill, with thin uneven gaps), made the pill a tall lopsided shape and
+   sending, as the system's callout directly above the box, in the box's
+   width. A tinted bar inside the box fought its corner (a rounded bar in a
+   rounded box, with thin uneven gaps), made the box a tall lopsided shape and
    read as part of what was being typed. The card has the callout's own corner,
-   a step down from the pill's, and each notice is a card of its own, most
+   a step down from the box's, and each notice is a card of its own, most
    severe first, so three notices stay three short rows. The frame's gap and
-   this margin make the 8px between the last card and the pill. */
+   this margin make the 8px between the last card and the box. */
 /* Passing progress (sending, a response streaming, a provider check) is one
    quiet line of meta ink, never a card. It is placed in the transcript's
    bottom padding directly above the notice group and takes no layout room, so
@@ -5022,10 +5027,10 @@ input.switch:checked::after {
 .thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
   position: absolute;
   top: 12px;
-  /* Clear of send at the pill's trailing edge. */
+  /* Clear of send at the box's trailing edge. */
   right: calc(var(--oct-space-2) * 2 + 28px);
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   box-shadow: inset 0 0 0 1px var(--oct-border);
   color: var(--oct-meta);
   content: "Tab";
@@ -5265,7 +5270,7 @@ input.switch:checked::after {
   min-height: 24px;
   padding-inline: var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface-warm);
   color: var(--oct-fg-2);
   font-family: var(--oct-font-mono);
@@ -5280,7 +5285,7 @@ input.switch:checked::after {
   width: 14px;
   height: 14px;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: none;
   color: var(--oct-meta);
   padding: 0;
@@ -5397,7 +5402,7 @@ input.switch:checked::after {
   place-items: center;
   gap: var(--oct-space-2);
   border: 1px dashed var(--oct-accent-fg);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: color-mix(in oklab, var(--oct-bg) 82%, transparent);
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
@@ -5531,7 +5536,7 @@ input.switch:checked::after {
 
 .chart {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
 }
@@ -5870,8 +5875,8 @@ input.switch:checked::after {
   color: var(--oct-meta);
 }
 .canvas-prov .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .canvas-body {
   display: flex;
@@ -6034,8 +6039,8 @@ input.switch:checked::after {
   color: var(--oct-meta);
 }
 .cmetric-delta .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 /* key-value — a fact table, aligned on the colon */
@@ -6265,7 +6270,7 @@ input.switch:checked::after {
    here and the whole panel sits at meta weight. */
 .provenance {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
 }
@@ -6279,8 +6284,8 @@ input.switch:checked::after {
   color: var(--oct-fg);
 }
 .provenance-title .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--oct-accent-fg);
 }
 .provenance .kv dd {
@@ -6325,7 +6330,7 @@ input.switch:checked::after {
   position: relative;
   min-height: 420px;
   overflow: hidden;
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
 }
 /* the ground. Faint enough to read as texture rather than as a grid the
@@ -6402,8 +6407,8 @@ input.switch:checked::after {
   white-space: nowrap;
 }
 .zen-el-head .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .zen-el-head .zen-el-gap {
   flex: 1;
@@ -6545,7 +6550,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-2);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
 }
@@ -6555,7 +6560,7 @@ input.switch:checked::after {
   margin-inline: var(--oct-space-1);
   background: var(--oct-glass-stroke-strong);
 }
-/* collapsed to a pill — the bar's own minimised state */
+/* collapsed to a small bar — the bar's own minimised state */
 .zen-pill {
   position: absolute;
   left: 50%;
@@ -6567,7 +6572,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   padding: var(--oct-space-1);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
 }
@@ -6724,9 +6729,9 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       .composer:not(.composer--carded) {
       box-shadow: var(--octant-shadow-md);
     }
-    /* Over a ground or under Glass the pill is the glass surface: floor,
+    /* Over a ground or under Glass the box is the glass surface: floor,
        thick tint, blur, and the glass stroke as its ring. The opaque border
-       is near black there and drew a dark outline around the pill. */
+       is near black there and drew a dark outline around the box. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
       .thread-composer__surface {
@@ -6736,8 +6741,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       box-shadow: var(--octant-shadow-md);
     }
-    /* The notice card above the pill is the same glass: an opaque callout
-       ground beside a translucent pill read as a block. A tone is its tint
+    /* The notice card above the box is the same glass: an opaque callout
+       ground beside a translucent box read as a block. A tone is its tint
        laid over the thick glass, so the card keeps the callout's colours. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
@@ -6762,10 +6767,10 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
         linear-gradient(var(--oct-danger-soft), var(--oct-danger-soft)),
         linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
     }
-    /* Under Window glass the pill takes the control tint in place of the
+    /* Under Window glass the box takes the control tint in place of the
        floor, and keeps the blur and the stroke. The floor is the page colour
        at part strength, there to hold text over a picture in an opaque
-       window; on a see-through window it made the pill darker than the glass
+       window; on a see-through window it made the box darker than the glass
        around it, a well where a raised surface should be. */
     html:not([data-octant-reduced-transparency="true"])
       .shell--material-translucent
@@ -6791,7 +6796,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 .runtree {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -6904,7 +6909,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   align-items: center;
   gap: var(--oct-space-1);
   padding: 2px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-warn-soft);
   color: var(--oct-warn-fg);
   font-family: var(--oct-font-mono);
@@ -6951,8 +6956,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   color: var(--oct-fg);
 }
 .receipt-head .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: var(--oct-success-fg);
 }
 .receipt-list {
@@ -6979,7 +6984,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    are indented under it, so the fan-out is visible as a shape. */
 .linkmap {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7066,7 +7071,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   margin-inline: auto;
   padding: var(--oct-space-6);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   text-align: center;
 }
@@ -7117,7 +7122,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    session connects and the real dimensions arrive. */
 .screen {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7225,7 +7230,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 .envpanel {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7300,8 +7305,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   gap: var(--oct-space-1);
 }
 .gitgroup .gitgroup-item .icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .gitgroup .is-dirty {
   color: var(--oct-warn-fg);
@@ -7447,7 +7452,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    since "allow" alone does not say for how long. */
 .approval {
   border: 1px solid var(--oct-warn-fg);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   overflow: hidden;
 }
@@ -7771,8 +7776,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 }
 .subagent > .icon {
   grid-row: span 2;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   margin-top: 1px;
   color: var(--oct-accent-fg);
 }
@@ -8230,8 +8235,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 
 /* Same state language as the Code home rows and sidebar threads: a small dot
    carries the tone, the word stays readable for anyone who cannot read the
-   colour. Ready gets a filled pill; the quieter states keep the dot only so a
-   wall of amber pills does not shout over the list. */
+   colour. Ready gets a filled chip; the quieter states keep the dot only so a
+   wall of amber chips does not shout over the list. */
 .prov-state {
   display: inline-flex;
   align-items: center;
@@ -8405,7 +8410,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 /* full weight, not meta: this is the fact the row is about */
 .mem-scope {
   padding: 1px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg-soft);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -8907,7 +8912,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    conflating them is what broke this: as `.phone .glass` the rule carried two
    classes and quietly outranked every one-class component that also wears
    the material, so .bsheet lost its position, its top-only corners and its
-   open bottom edge, and .tabbar lost its pill. The sheet still looked right
+   open bottom edge, and .tabbar lost its chip. The sheet still looked right
    in the styleguide purely because the markup happened to nest it in a flex
    column — which is exactly the kind of accident that survives review.
    At zero specificity the material sets the defaults and any component
@@ -8968,7 +8973,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   flex: 0 0 auto;
   margin: 0 var(--oct-space-3) var(--oct-space-3);
   padding: var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-md);
 }
 .tabitem {
   display: flex;
@@ -8979,7 +8984,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   min-height: var(--oct-touch-min);
   padding: 4px;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
@@ -9027,8 +9032,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   color: inherit;
 }
 .statuscard > .icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: var(--oct-fg);
 }
 .statuscard-label {
@@ -9260,7 +9265,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   align-items: center;
   gap: var(--oct-space-1);
   padding: var(--oct-space-1) var(--oct-space-3);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-fg);
@@ -9324,7 +9329,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   min-height: 32px;
   padding: 0 var(--oct-space-3);
   border: 1px solid var(--oct-glass-stroke);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-glass-thin);
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
@@ -9338,7 +9343,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   height: var(--oct-touch-min);
   flex: 0 0 auto;
   border: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-accent);
   color: var(--oct-accent-on);
 }
@@ -9569,7 +9574,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   width: 100%;
   min-height: var(--oct-touch-min);
   border: 1px solid var(--oct-glass-stroke-strong);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-display);
