@@ -2,6 +2,7 @@ import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/th
 import { useCallback, useRef, useState } from "react";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
+import { IconDefaults } from "../ui/IconDefaults";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -82,64 +83,66 @@ export function Gallery() {
   }, []);
   return (
     <ThemeSettingsProvider rememberMode={false} settings={settings}>
-      <ThemeTypographyProvider typography={settings.typography}>
-        <div className={glass ? "gallery shell--material-translucent" : "gallery"}>
-          <header className="gallery-bar">
-            <h1 className="oct-page-title">Component gallery</h1>
-            <div className="gallery-bar__controls">
-              <OctantToggleGroup<string>
-                aria-label="Mode"
-                onValueChange={(value) => {
-                  const next = value[0];
-                  if (next === "dark" || next === "light") setMode(next);
-                }}
-                value={[mode]}
-              >
-                <OctantToggleGroupItem value="dark">Dark</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="light">Light</OctantToggleGroupItem>
-              </OctantToggleGroup>
-              <label className="gallery-bar__field oct-row-detail">
-                Glass
-                <OctantSwitch checked={glass} label="Glass material" onCheckedChange={setGlass} />
-              </label>
-              <OctantToggleGroup<string>
-                aria-label="Interface size"
-                onValueChange={(value) => {
-                  const next = SIZES.find((candidate) => String(candidate) === value[0]);
-                  if (next !== undefined) setSize(next);
-                }}
-                value={[String(size)]}
-              >
-                {SIZES.map((candidate) => (
-                  <OctantToggleGroupItem key={candidate} value={String(candidate)}>
-                    {candidate}
-                  </OctantToggleGroupItem>
+      <IconDefaults>
+        <ThemeTypographyProvider typography={settings.typography}>
+          <div className={glass ? "gallery shell--material-translucent" : "gallery"}>
+            <header className="gallery-bar">
+              <h1 className="oct-page-title">Component gallery</h1>
+              <div className="gallery-bar__controls">
+                <OctantToggleGroup<string>
+                  aria-label="Mode"
+                  onValueChange={(value) => {
+                    const next = value[0];
+                    if (next === "dark" || next === "light") setMode(next);
+                  }}
+                  value={[mode]}
+                >
+                  <OctantToggleGroupItem value="dark">Dark</OctantToggleGroupItem>
+                  <OctantToggleGroupItem value="light">Light</OctantToggleGroupItem>
+                </OctantToggleGroup>
+                <label className="gallery-bar__field oct-row-detail">
+                  Glass
+                  <OctantSwitch checked={glass} label="Glass material" onCheckedChange={setGlass} />
+                </label>
+                <OctantToggleGroup<string>
+                  aria-label="Interface size"
+                  onValueChange={(value) => {
+                    const next = SIZES.find((candidate) => String(candidate) === value[0]);
+                    if (next !== undefined) setSize(next);
+                  }}
+                  value={[String(size)]}
+                >
+                  {SIZES.map((candidate) => (
+                    <OctantToggleGroupItem key={candidate} value={String(candidate)}>
+                      {candidate}
+                    </OctantToggleGroupItem>
+                  ))}
+                </OctantToggleGroup>
+                <OctantButton onClick={onStepFocus} size="sm" type="button" variant="outline">
+                  Step keyboard focus
+                </OctantButton>
+              </div>
+              <nav aria-label="Sections" className="gallery-bar__contents">
+                {CONTENTS.map(([id, label]) => (
+                  <a href={`#${id}`} key={id}>
+                    {label}
+                  </a>
                 ))}
-              </OctantToggleGroup>
-              <OctantButton onClick={onStepFocus} size="sm" type="button" variant="outline">
-                Step keyboard focus
-              </OctantButton>
-            </div>
-            <nav aria-label="Sections" className="gallery-bar__contents">
-              {CONTENTS.map(([id, label]) => (
-                <a href={`#${id}`} key={id}>
-                  {label}
-                </a>
-              ))}
-            </nav>
-          </header>
-          <main className="gallery-main">
-            <TypeRoles sizeKey={measureKey} />
-            <ColourRoles themeKey={measureKey} />
-            <SpacingScale sizeKey={measureKey} />
-            <Radii sizeKey={measureKey} />
-            <IconScale sizeKey={measureKey} />
-            <ControlSections />
-            <OverlaySections />
-            <PatternSections />
-          </main>
-        </div>
-      </ThemeTypographyProvider>
+              </nav>
+            </header>
+            <main className="gallery-main">
+              <TypeRoles sizeKey={measureKey} />
+              <ColourRoles themeKey={measureKey} />
+              <SpacingScale sizeKey={measureKey} />
+              <Radii sizeKey={measureKey} />
+              <IconScale sizeKey={measureKey} />
+              <ControlSections />
+              <OverlaySections />
+              <PatternSections />
+            </main>
+          </div>
+        </ThemeTypographyProvider>
+      </IconDefaults>
     </ThemeSettingsProvider>
   );
 }

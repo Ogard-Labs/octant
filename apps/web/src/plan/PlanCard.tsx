@@ -162,15 +162,14 @@ function StepActions(props: {
 
 function StepIcon(props: { readonly status: ThreadPlanStepStatus }) {
   const size = 14;
-  const strokeWidth = 1.8;
   switch (props.status) {
     case "done":
-      return <CheckCircle2 aria-hidden="true" size={size} strokeWidth={strokeWidth} />;
+      return <CheckCircle2 aria-hidden="true" size={size} />;
     case "in-progress":
-      return <CircleDot aria-hidden="true" size={size} strokeWidth={strokeWidth} />;
+      return <CircleDot aria-hidden="true" size={size} />;
     case "dropped":
-      return <CircleSlash aria-hidden="true" size={size} strokeWidth={strokeWidth} />;
+      return <CircleSlash aria-hidden="true" size={size} />;
     case "pending":
-      return <Circle aria-hidden="true" size={size} strokeWidth={strokeWidth} />;
+      return <Circle aria-hidden="true" size={size} />;
   }
 }

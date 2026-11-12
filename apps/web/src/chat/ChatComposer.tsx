@@ -522,7 +522,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   type="button"
                   variant="bare"
                 >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={12} />
                 </OctantButton>
               )}
             </li>
@@ -545,7 +545,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   type="button"
                   variant="bare"
                 >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={12} />
                 </OctantButton>
               )}
             </li>
@@ -568,7 +568,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   type="button"
                   variant="bare"
                 >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={12} />
                 </OctantButton>
               )}
             </li>
@@ -590,7 +590,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     type="button"
                     variant="bare"
                   >
-                    <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <X aria-hidden="true" size={12} />
                   </OctantButton>
                 )}
               </li>
@@ -616,7 +616,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   type="button"
                   variant="bare"
                 >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={12} />
                 </OctantButton>
               )}
             </li>
@@ -710,7 +710,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     type="button"
                     variant={index === activeCommandIndex ? "secondary" : "ghost"}
                   >
-                    <Slash aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <Slash aria-hidden="true" size={12} />
                     <span>{command.title}</span>
                     <span className="chat-composer__command-meta">
                       {command.detail === undefined
@@ -774,7 +774,7 @@ export function ChatComposer(props: ChatComposerProps) {
           type="button"
           variant={props.research.enabled ? "secondary" : "ghost"}
         >
-          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+          <Globe2 aria-hidden="true" size={14} />
           <span>Web</span>
         </OctantButton>
         {props.research.enabled ? (
@@ -861,7 +861,7 @@ export function ChatComposer(props: ChatComposerProps) {
               title="Model options"
               trigger={
                 <>
-                  <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />
+                  <SlidersHorizontal aria-hidden="true" size={16} />
                   {anyModelOptionSet ? (
                     <span aria-hidden="true" className="chat-composer__model-options-dot" />
                   ) : null}

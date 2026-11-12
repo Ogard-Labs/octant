@@ -206,7 +206,7 @@ export function FolderPicker(props: FolderPickerProps) {
         {hint}
       </p>
       <div className="folder-picker__search">
-        <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Search aria-hidden="true" size={14} />
         <OctantInput
           aria-label="Search folders"
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -224,13 +224,13 @@ export function FolderPicker(props: FolderPickerProps) {
                 className="folder-picker__breadcrumb-wrap"
                 key={`${candidateId ?? "current"}-${crumb.label}-${i}`}
               >
-                {i > 0 ? <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                {i > 0 ? <ChevronRight aria-hidden="true" size={12} /> : null}
                 {candidateId === undefined ? (
                   <span
                     aria-current="page"
                     className="folder-picker__breadcrumb folder-picker__breadcrumb--current"
                   >
-                    {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                    {i === 0 ? <Home aria-hidden="true" size={12} /> : null}
                     <span>{crumb.label}</span>
                   </span>
                 ) : (
@@ -240,7 +240,7 @@ export function FolderPicker(props: FolderPickerProps) {
                     type="button"
                     variant="bare"
                   >
-                    {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                    {i === 0 ? <Home aria-hidden="true" size={12} /> : null}
                     <span>{crumb.label}</span>
                   </OctantButton>
                 )}
@@ -287,9 +287,9 @@ export function FolderPicker(props: FolderPickerProps) {
                 variant="bare"
               >
                 {candidate.isGitRepository ? (
-                  <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <GitBranch aria-hidden="true" size={14} />
                 ) : (
-                  <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <FolderOpen aria-hidden="true" size={14} />
                 )}
                 <span className="folder-picker__item-name">{candidate.displayName}</span>
                 {props.mode === "code" && !candidate.isGitRepository ? (

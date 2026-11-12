@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
+import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 import { Section, Specimen } from "./Specimen";
 
 /**
@@ -191,22 +192,20 @@ export function Radii(props: { readonly sizeKey: unknown }) {
 }
 
 /** The steps `iconScaleContract.test.ts` allows an interface icon to be drawn at. */
-const ICON_SIZES = [12, 14, 16, 20, 24] as const;
-const STROKES = [1.5, 1.8] as const;
+const ICON_SIZES = [12, 14, 16, 20] as const;
 
-/** One row of icons; the size and stroke printed under it are read from the first drawn svg. */
-function IconCell(props: {
-  readonly size: number;
-  readonly stroke: number;
-  readonly sizeKey: unknown;
-}) {
-  const [ref, measured] = useComputed((_style, element) => {
-    const svg = element.querySelector("svg");
-    if (svg === null) return "no icon drawn";
-    const box = svg.getBoundingClientRect();
-    return `${String(box.width)}x${String(box.height)}, stroke ${getComputedStyle(svg).strokeWidth}`;
-  }, props.sizeKey);
-  const p = { size: props.size, strokeWidth: props.stroke };
+/** What an icon cell prints under its drawing, read from the first drawn svg. */
+function measureIcon(_style: CSSStyleDeclaration, element: Element): string {
+  const svg = element.querySelector("svg");
+  if (svg === null) return "no icon drawn";
+  const box = svg.getBoundingClientRect();
+  return `${String(box.width)}x${String(box.height)}, stroke ${getComputedStyle(svg).strokeWidth}`;
+}
+
+/** One row of icons at the app's one stroke: the call site names a size and no stroke. */
+function IconCell(props: { readonly size: number; readonly sizeKey: unknown }) {
+  const [ref, measured] = useComputed(measureIcon, props.sizeKey);
+  const p = { size: props.size };
   return (
     <span className="gallery-icons__cell" ref={ref}>
       <Folder aria-hidden="true" {...p} />
@@ -219,22 +218,47 @@ function IconCell(props: {
   );
 }
 
+/** A tick inside a small filled mark: the one place the stroke is not the default. */
+function TickCell(props: { readonly sizeKey: unknown }) {
+  const [ref, measured] = useComputed(measureIcon, props.sizeKey);
+  const mark: CSSProperties = {
+    display: "inline-grid",
+    placeItems: "center",
+    width: 16,
+    height: 16,
+    borderRadius: "var(--oct-radius-sm)",
+    background: "var(--oct-fg)",
+    color: "var(--oct-bg)",
+  };
+  return (
+    <span className="gallery-icons__cell" ref={ref}>
+      <span aria-hidden="true" style={mark}>
+        <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
+      </span>
+      <span className="oct-meta">{measured}</span>
+    </span>
+  );
+}
+
 export function IconScale(props: { readonly sizeKey: unknown }) {
   return (
     <Section
-      caption="The five sizes the icon-scale contract allows, at the 1.5 stroke the shell buttons use and the 1.8 stroke most call sites still ask for; the size and stroke printed are measured from the drawn svg."
+      caption="The four sizes the icon-scale contract allows, at the one 1.5 stroke the app sets for every icon, and the heavier tick stroke for a tick inside a small filled mark; the size and stroke printed are measured from the drawn svg."
       id="icons"
       title="Icon sizes and stroke"
     >
       {ICON_SIZES.map((size) => (
-        <Specimen key={size} props={`size={${String(size)}} strokeWidth={1.5 | 1.8}`}>
+        <Specimen key={size} props={`size={${String(size)}}`}>
           <span className="gallery-icons">
-            {STROKES.map((stroke) => (
-              <IconCell key={stroke} size={size} sizeKey={props.sizeKey} stroke={stroke} />
-            ))}
+            <IconCell size={size} sizeKey={props.sizeKey} />
           </span>
         </Specimen>
       ))}
+      <Specimen props="size={12} strokeWidth={MARK_TICK_STROKE_WIDTH}">
+        <span className="gallery-icons">
+          <TickCell sizeKey={props.sizeKey} />
+        </span>
+      </Specimen>
     </Section>
   );
 }

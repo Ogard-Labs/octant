@@ -97,7 +97,6 @@ export function ProviderUsageHistoryChart(props: {
                   )
                   .join(" ")}
                 fill="none"
-                strokeWidth={2}
               />
               {row.points.map((point) => (
                 <circle key={point.day} cx={x(point.day)} cy={y(point.value)} r={2.5} />

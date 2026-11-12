@@ -158,7 +158,7 @@ export function PatternSections() {
         <OctantEmpty
           action={<OctantButton type="button">Start a thread</OctantButton>}
           eyebrow="Nothing yet"
-          icon={<Inbox aria-hidden="true" size={20} strokeWidth={1.5} />}
+          icon={<Inbox aria-hidden="true" size={20} />}
           message="Threads that need you appear here."
           title="The inbox is empty"
         />
@@ -170,7 +170,7 @@ export function PatternSections() {
       >
         <div className="surface-empty">
           <span className="surface-empty__icon">
-            <SquareTerminal aria-hidden="true" size={20} strokeWidth={1.5} />
+            <SquareTerminal aria-hidden="true" size={20} />
           </span>
           <p className="oct-row-label">No terminals open</p>
           <p className="oct-row-detail">Open one from the dock.</p>

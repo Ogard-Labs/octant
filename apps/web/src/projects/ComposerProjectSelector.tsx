@@ -271,7 +271,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         type="button"
         variant="ghost"
       >
-        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+        <FolderOpen aria-hidden="true" size={12} />
         <span className="composer-folder-selector__label">{selectionLabel}</span>
       </OctantButton>
       {open ? (
@@ -291,7 +291,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                   type="button"
                   variant="ghost"
                 >
-                  <ArrowLeft aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <ArrowLeft aria-hidden="true" size={14} />
                 </OctantButton>
                 <span className="composer-folder-selector__head-title">
                   New Project from GitHub repository
@@ -364,7 +364,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                         variant="ghost"
                       >
                         <ProjectIcon
-                          fallback={<FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />}
+                          fallback={<FolderOpen aria-hidden="true" size={14} />}
                           projectId={String(entry.projectId)}
                           size={14}
                         />
@@ -383,7 +383,6 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                             aria-hidden="true"
                             className="octant-popover-option__check"
                             size={14}
-                            strokeWidth={2}
                           />
                         ) : null}
                       </OctantButton>
@@ -411,7 +410,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                           type="button"
                           variant="ghost"
                         >
-                          <Network aria-hidden="true" size={14} strokeWidth={1.8} />
+                          <Network aria-hidden="true" size={14} />
                           <span className="composer-folder-selector__option-copy">
                             <span className="composer-folder-selector__option-name">
                               {entry.displayName}
@@ -425,7 +424,6 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                               aria-hidden="true"
                               className="octant-popover-option__check"
                               size={14}
-                              strokeWidth={2}
                             />
                           ) : null}
                         </OctantButton>
@@ -463,11 +461,11 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                           variant="ghost"
                         >
                           {entry.kind === "add-github" ? (
-                            <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                            <FolderGit2 aria-hidden="true" size={14} />
                           ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
-                            <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+                            <FolderOpen aria-hidden="true" size={14} />
                           ) : (
-                            <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
+                            <FolderPlus aria-hidden="true" size={14} />
                           )}
                           <span className="composer-folder-selector__option-copy">
                             <span className="composer-folder-selector__option-name">{label}</span>

@@ -537,7 +537,7 @@ function ComposerSendCell(props: {
           type={send.onSend === undefined ? "submit" : "button"}
           variant={sendVariant(refused)}
         >
-          <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+          <ArrowUp aria-hidden="true" size={16} />
         </OctantButton>
       </div>
     );
@@ -566,7 +566,7 @@ function ComposerSendCell(props: {
           type="button"
           variant="secondary"
         >
-          <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
+          <Square aria-hidden="true" fill="currentColor" size={12} />
         </OctantButton>
       ) : null}
       <OctantButton
@@ -579,7 +579,7 @@ function ComposerSendCell(props: {
         type="button"
         variant={sendVariant(refused)}
       >
-        <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+        <ArrowUp aria-hidden="true" size={16} />
       </OctantButton>
     </div>
   );

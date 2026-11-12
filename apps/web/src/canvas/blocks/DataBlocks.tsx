@@ -127,7 +127,7 @@ function MetricDelta({
   const Icon = delta > 0 ? ArrowUpRight : delta < 0 ? ArrowDownRight : Minus;
   return (
     <span className={`cmetric-delta ${deltaTone(delta, direction)}`}>
-      <Icon aria-hidden="true" size={12} strokeWidth={2} />
+      <Icon aria-hidden="true" size={12} />
       {formatDelta(delta, format)}
     </span>
   );

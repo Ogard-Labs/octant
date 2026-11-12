@@ -44,12 +44,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
         className="validation-pane validation-pane--loading"
       >
         <header className="validation-pane__header">
-          <Loader
-            aria-hidden="true"
-            size={14}
-            strokeWidth={2}
-            className="validation-pane__spinner"
-          />
+          <Loader aria-hidden="true" size={14} className="validation-pane__spinner" />
           <span>Loading validation evidence…</span>
         </header>
       </section>
@@ -63,7 +58,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
         className="validation-pane validation-pane--waiting"
       >
         <header className="validation-pane__header">
-          <Clock aria-hidden="true" size={14} strokeWidth={2} />
+          <Clock aria-hidden="true" size={14} />
           <span>Waiting for validation evidence…</span>
         </header>
       </section>
@@ -77,7 +72,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
         className="validation-pane validation-pane--unavailable"
       >
         <header className="validation-pane__header">
-          <MinusCircle aria-hidden="true" size={14} strokeWidth={2} />
+          <MinusCircle aria-hidden="true" size={14} />
           <span>Validation evidence unavailable</span>
         </header>
         {props.errorMessage !== undefined ? (
@@ -104,7 +99,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
         className="validation-pane validation-pane--interrupted"
       >
         <header className="validation-pane__header">
-          <AlertTriangle aria-hidden="true" size={14} strokeWidth={2} />
+          <AlertTriangle aria-hidden="true" size={14} />
           <span>Validation evidence interrupted</span>
         </header>
         {props.onRetry !== undefined ? (
@@ -134,7 +129,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
         className={`validation-pane validation-pane--${props.status}`}
       >
         <header className="validation-pane__header">
-          <AlertTriangle aria-hidden="true" size={14} strokeWidth={2} />
+          <AlertTriangle aria-hidden="true" size={14} />
           <span>{label}</span>
         </header>
         {props.errorMessage === undefined ? null : (
@@ -164,7 +159,7 @@ export function ValidationEvidencePane(props: ValidationEvidencePaneProps) {
     return (
       <section aria-label="Validation evidence" className="validation-pane validation-pane--failed">
         <header className="validation-pane__header">
-          <XCircle aria-hidden="true" size={14} strokeWidth={2} />
+          <XCircle aria-hidden="true" size={14} />
           <span>Validation evidence failed</span>
         </header>
         {props.errorMessage !== undefined ? (
@@ -271,7 +266,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Passed"
           className="validation-pane__icon validation-pane__icon--passed"
           size={14}
-          strokeWidth={2}
         />
       );
     case "failed":
@@ -280,7 +274,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Failed"
           className="validation-pane__icon validation-pane__icon--failed"
           size={14}
-          strokeWidth={2}
         />
       );
     case "inconclusive":
@@ -289,7 +282,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Inconclusive"
           className="validation-pane__icon validation-pane__icon--inconclusive"
           size={14}
-          strokeWidth={2}
         />
       );
     case "unavailable":
@@ -298,7 +290,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Unavailable"
           className="validation-pane__icon validation-pane__icon--unavailable"
           size={14}
-          strokeWidth={2}
         />
       );
     case "interrupted":
@@ -307,7 +298,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Interrupted"
           className="validation-pane__icon validation-pane__icon--interrupted"
           size={14}
-          strokeWidth={2}
         />
       );
     case "skipped":
@@ -316,7 +306,6 @@ function OutcomeIcon(props: { readonly outcome: ValidationOutcome }) {
           aria-label="Skipped"
           className="validation-pane__icon validation-pane__icon--skipped"
           size={14}
-          strokeWidth={2}
         />
       );
   }

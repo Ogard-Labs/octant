@@ -46,7 +46,7 @@ export function CodeWorkspaceSelector(props: CodeWorkspaceSelectorProps) {
     <OctantMenu
       items={CODE_WORKSPACE_OPTIONS.map((option) => ({
         description: option.detail,
-        icon: <option.icon aria-hidden="true" size={14} strokeWidth={1.7} />,
+        icon: <option.icon aria-hidden="true" size={14} />,
         label: option.label,
         value: option.id,
       }))}
@@ -56,7 +56,7 @@ export function CodeWorkspaceSelector(props: CodeWorkspaceSelectorProps) {
       }}
       trigger={
         <>
-          <TriggerIcon aria-hidden="true" size={12} strokeWidth={1.8} />
+          <TriggerIcon aria-hidden="true" size={12} />
           <span>{selected?.label}</span>
           <ChevronDown aria-hidden="true" size={12} />
         </>

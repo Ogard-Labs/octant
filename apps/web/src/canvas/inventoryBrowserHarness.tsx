@@ -8,6 +8,7 @@ import type { CanvasInventoryEntry } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { StrictMode, useCallback, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { IconDefaults } from "../ui/IconDefaults";
 import { CanvasWorkspaceTab } from "./CanvasWorkspaceTab";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import {
@@ -262,10 +263,12 @@ if (!root) throw new Error("Canvas inventory browser evidence root is missing");
 
 createRoot(root).render(
   <StrictMode>
-    {new URL(location.href).searchParams.has("public-links") ? (
-      <PairedCanvasHarness />
-    ) : (
-      <CanvasInventoryHarness />
-    )}
+    <IconDefaults>
+      {new URL(location.href).searchParams.has("public-links") ? (
+        <PairedCanvasHarness />
+      ) : (
+        <CanvasInventoryHarness />
+      )}
+    </IconDefaults>
   </StrictMode>,
 );

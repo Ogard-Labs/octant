@@ -547,12 +547,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           type="button"
           variant="bare"
         >
-          <Star
-            aria-hidden="true"
-            fill={favorited ? "currentColor" : "none"}
-            size={14}
-            strokeWidth={1.75}
-          />
+          <Star aria-hidden="true" fill={favorited ? "currentColor" : "none"} size={14} />
         </OctantButton>
       </div>
     );
@@ -705,7 +700,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               type="button"
               variant="bare"
             >
-              <Star aria-hidden="true" fill="currentColor" size={20} strokeWidth={1.75} />
+              <Star aria-hidden="true" fill="currentColor" size={20} />
               <span className="composer-model-picker__rail-label">Favorites</span>
             </OctantButton>
           </OctantTooltip>

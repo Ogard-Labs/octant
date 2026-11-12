@@ -161,7 +161,7 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               type="button"
               variant="ghost"
             >
-              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+              <RefreshCw aria-hidden="true" size={14} />
             </OctantButton>
           ) : null}
           {props.onOpenAll === undefined ? null : (
@@ -173,7 +173,7 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               variant="ghost"
             >
               <span>All pull requests</span>
-              <ArrowUpRight aria-hidden="true" size={14} strokeWidth={1.8} />
+              <ArrowUpRight aria-hidden="true" size={14} />
             </OctantButton>
           )}
         </>
@@ -249,7 +249,7 @@ function EnvironmentPullRequestRow(props: {
   const body = (
     <>
       <span className="environment-pull-requests__title">
-        <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
+        <GitPullRequest aria-hidden="true" size={14} />
         <span>{`#${row.number} ${row.title}`}</span>
       </span>
       <span className="environment-pull-requests__branches">

@@ -849,9 +849,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     type="button"
                   >
                     {element.minimized ? (
-                      <Maximize2 aria-hidden="true" size={12} strokeWidth={1.75} />
+                      <Maximize2 aria-hidden="true" size={12} />
                     ) : (
-                      <Minus aria-hidden="true" size={14} strokeWidth={1.75} />
+                      <Minus aria-hidden="true" size={14} />
                     )}
                   </OctantIconButton>
                   <OctantIconButton
@@ -863,7 +863,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     }}
                     type="button"
                   >
-                    <X aria-hidden="true" size={14} strokeWidth={1.75} />
+                    <X aria-hidden="true" size={14} />
                   </OctantIconButton>
                 </span>
               </header>
@@ -968,7 +968,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
             type="button"
             variant="ghost"
           >
-            <LayoutGrid aria-hidden="true" size={14} strokeWidth={1.75} />
+            <LayoutGrid aria-hidden="true" size={14} />
             Tidy
           </OctantButton>
         </div>
@@ -1527,5 +1527,5 @@ function ZenElementIcon(props: { readonly kind: ZenElementPayload["kind"] }) {
                 : props.kind === "canvas"
                   ? FileText
                   : Sparkles;
-  return <Icon aria-hidden="true" className="zen-el-icon" size={14} strokeWidth={1.75} />;
+  return <Icon aria-hidden="true" className="zen-el-icon" size={14} />;
 }

@@ -49,7 +49,7 @@ export function CodeTurnChangedFilesCard(props: {
             const slash = file.path.lastIndexOf("/");
             return (
               <li className="code-turn-files__row" key={file.path} title={file.path}>
-                <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                <FileText aria-hidden="true" size={14} />
                 {props.onReviewFile === undefined ? (
                   <span className="code-turn-files__path">
                     {slash === -1 ? null : (

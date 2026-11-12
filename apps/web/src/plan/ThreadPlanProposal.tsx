@@ -33,7 +33,7 @@ export function ThreadPlanProposal() {
       >
         {/* Named in words: as a bare tick-list beside other bare glyphs in the
             composer's toolbar, nobody could tell what it offered. */}
-        <ListChecks aria-hidden="true" size={14} strokeWidth={1.7} />
+        <ListChecks aria-hidden="true" size={14} />
         <span>Plan</span>
       </OctantButton>
       <OctantDialog

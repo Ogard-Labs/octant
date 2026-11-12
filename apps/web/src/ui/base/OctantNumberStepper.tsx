@@ -36,7 +36,7 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
         type="button"
         variant="ghost"
       >
-        <Minus aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Minus aria-hidden="true" size={14} />
       </OctantButton>
       <OctantInput
         aria-label={props.label}
@@ -72,7 +72,7 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
         type="button"
         variant="ghost"
       >
-        <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+        <Plus aria-hidden="true" size={14} />
       </OctantButton>
     </span>
   );

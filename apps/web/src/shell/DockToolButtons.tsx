@@ -272,7 +272,7 @@ function MoreTools(props: {
                       key={reference.id}
                       onClick={reference.onOpen}
                     >
-                      <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <GitPullRequest aria-hidden="true" size={14} />
                       <span className="dock-utility-launcher__reference">
                         <span>{reference.label}</span>
                         {reference.detail === undefined ? null : (
