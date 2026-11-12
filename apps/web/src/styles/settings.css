@@ -185,7 +185,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   width: 100%;
   margin: 0;
   padding-inline: 8px;
-  font-size: var(--octant-ui-font-size);
 }
 
 .settings-view__workspace {
@@ -547,11 +546,17 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item,
 .settings-view__back {
   min-height: 28px;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
   justify-content: flex-start;
+}
+
+/* A page's name is a navigation name (`oct-nav-name`) in the muted ink until
+   it is hovered, focused or open. */
+:is(.settings-navigation .setnav-item, .settings-view__back):not(
+  :hover,
+  :focus-visible,
+  [aria-current="page"]
+) {
+  color: var(--oct-muted);
 }
 
 .settings-navigation .setnav-item > .icon,

@@ -134,6 +134,8 @@
   --oct-fs-h2: clamp(30px, 3.6vw, 44px);
 
   --oct-leading-body: 1.5;
+  /* Running text in a reply: a line more air than the interface's body. */
+  --oct-leading-reading: 1.6;
   --oct-leading-tight: 1.1;
   --oct-leading-heading: 1.14;
   --oct-leading-snug: 1.3;
@@ -2660,14 +2662,11 @@ input.switch:checked::after {
   overflow: hidden;
 }
 /* When a turn changed, at the right edge: under a person's bubble and at the
-   end of the turn header, in the meta size and the interface face. */
+   end of the turn header, as a thread activity line in the interface face. */
 .turn-time {
   margin: 0;
-  color: var(--oct-meta);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
-  line-height: var(--oct-leading-meta);
   text-align: end;
 }
 
@@ -4950,7 +4949,7 @@ input.switch:checked::after {
   padding-bottom: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
+  line-height: var(--oct-leading-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -7972,12 +7971,6 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 .setnav-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-snug);
-  color: var(--oct-muted);
   white-space: nowrap;
 }
 .setnav-section:first-child {

@@ -34,6 +34,10 @@ describe("surface language", () => {
       ".oct-title--hero {",
       ".oct-page-title {",
       ".oct-section-label {",
+      ".oct-nav-name {",
+      ".oct-nav-group {",
+      ".oct-activity-line {",
+      ".oct-menu-option {",
       ".oct-row-label {",
       ".oct-row-detail {",
       ".oct-meta {",
@@ -80,18 +84,62 @@ describe("surface language", () => {
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
 
-  it("sets the title band's facts, a turn's time and a sidebar group heading as their roles", () => {
+  it("sets the title band's facts as Meta, and names, group labels, activity lines and menu options as their own roles", () => {
     const app = read("styles.css");
     for (const selector of [".workspace-pane__context", ".workspace-pane__crumb"]) {
       const rule = app.match(new RegExp(`${selector.replace(".", "\\.")} \\{[^}]*\\}`))?.[0] ?? "";
       expect(rule).toContain("font-size: var(--oct-text-xs);");
       expect(rule).toContain("font-weight: var(--oct-weight-regular);");
     }
+    const surface = read("styles/surface.css");
+    const role = (name: string) => surface.match(new RegExp(`\\.${name} \\{[^}]*\\}`))?.[0] ?? "";
+    // A name in navigation: the interface size, regular weight, no tracking.
+    const name = role("oct-nav-name");
+    expect(name).toContain("font-size: var(--oct-text-detail);");
+    expect(name).toContain("font-weight: var(--oct-weight-regular);");
+    expect(name).toContain("letter-spacing: 0;");
+    // A group label: a quiet 12px caption, not a Section label.
+    const group = role("oct-nav-group");
+    expect(group).toContain("font-size: var(--oct-text-xs);");
+    expect(group).toContain("font-weight: var(--oct-weight-regular);");
+    expect(group).toContain("color: var(--oct-muted);");
+    // A thread's activity line is the text's size, told apart by ink.
+    const activity = role("oct-activity-line");
+    expect(activity).toContain("font-size: var(--oct-text-detail);");
+    expect(activity).toContain("color: var(--oct-meta);");
+    // A menu option: 13px at medium weight.
+    const option = role("oct-menu-option");
+    expect(option).toContain("font-size: var(--oct-text-detail);");
+    expect(option).toContain("font-weight: var(--oct-weight-medium);");
+    // The surfaces that play a role carry its class and set no type of their own.
+    expect(read("projects/SidebarThreadRowContent.tsx")).toContain(
+      "oct-nav-name sidebar-navigation__thread-title",
+    );
+    expect(read("shell/SidebarProfile.tsx")).toContain("oct-nav-name sidebar-label");
+    expect(read("shell/SplitWorkspace.tsx")).toContain("oct-nav-name workspace-pane__title");
+    expect(read("shell/SettingsNavigation.tsx")).toContain("oct-nav-group setnav-section");
+    expect(read("projects/ProjectSidebarSection.tsx")).toContain("oct-nav-group sidebar-section");
+    expect(read("transcript/TurnHeader.tsx")).toContain(
+      "oct-activity-line turn-header__worked-for",
+    );
+    expect(read("transcript/TurnHeader.tsx")).toContain("oct-activity-line turn-time");
+    expect(read("ui/shadcn/menu-row.ts")).toContain("oct-menu-option");
     const heading = app.match(/\.activity-nav__group > h2 \{[^}]*\}/)?.[0] ?? "";
-    expect(heading).toContain("font-size: var(--oct-text-sm);");
-    expect(heading).toContain("font-weight: var(--oct-weight-strong);");
-    const turnTime = read("styles/octant.css").match(/\.turn-time \{[^}]*\}/)?.[0] ?? "";
-    expect(turnTime).toContain("font-size: var(--oct-text-xs);");
+    expect(heading).not.toMatch(/font-|letter-spacing|line-height/);
+    expect(read("styles/octant.css").match(/\.turn-time \{[^}]*\}/)?.[0] ?? "").not.toMatch(
+      /font-size|line-height|color/,
+    );
+  });
+
+  it("gives a reply's running text a 1.6 leading and a 16px list indent without touching its size", () => {
+    const chat = read("styles/chat.css");
+    const text = chat.match(/\.chat-rich-text :is\(p, li, td, th\) \{[^}]*\}/)?.[0] ?? "";
+    expect(text).toContain("line-height: var(--oct-leading-reading);");
+    expect(text).not.toContain("font-size");
+    expect(read("styles/octant.css")).toMatch(/--oct-leading-reading:\s*1\.6;/);
+    const lists =
+      chat.match(/\.chat-rich-text ul,\n\.chat-rich-text ol \{[^}]*padding-left[^}]*\}/)?.[0] ?? "";
+    expect(lists).toContain("padding-left: 16px;");
   });
 
   it("keeps sidebar and menu labels in sentence case", () => {

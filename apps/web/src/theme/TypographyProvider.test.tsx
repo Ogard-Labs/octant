@@ -12,6 +12,7 @@ const typographyBridge = readFileSync(
 );
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
+const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 const appStyles = [
   readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"),
@@ -83,10 +84,14 @@ describe("ThemeTypographyProvider", () => {
     expect(systemStyles).toMatch(
       /\.setnav-item\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
-    // The rail's rows are Row labels: the role's size token scales with the
-    // interface size through `--oct-text-step`.
-    expect(settingsStyles).toMatch(
-      /\.settings-navigation \.setnav-item,[\s\S]*font-size:\s*var\(--oct-text-sm\);/s,
+    // The rail's rows are navigation names: the role's size token scales with
+    // the interface size through `--oct-text-step`, and the rail sets no size
+    // of its own.
+    expect(surfaceStyles).toMatch(
+      /\.oct-nav-name\s*\{[^}]*font-size:\s*var\(--oct-text-detail\);/s,
+    );
+    expect(settingsStyles).not.toMatch(
+      /\.settings-navigation \.setnav-item,[^{]*\{[^}]*font-size/s,
     );
     expect(shellStyles).toMatch(
       /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,

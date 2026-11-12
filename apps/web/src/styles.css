@@ -1108,15 +1108,9 @@ h6 {
   display: grid;
   gap: 8px;
 }
-/* A group heading is a section label: the recipe's size, weight and leading
-   in the secondary ink. */
+/* A group heading is a navigation group label (`oct-nav-group`). */
 .activity-nav__group > h2 {
   margin-bottom: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-snug);
 }
 
 .activity-nav__group > .sidebar-section {
@@ -1198,13 +1192,6 @@ h6 {
   min-height: var(--oct-nav-head-h);
   padding-inline: 10px;
   gap: 6px;
-}
-
-/* The account's name is a row label: primary ink, the role's size and leading. */
-.sidebar-profile .sidebar-label {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-label);
 }
 
 .sidebar-profile__chevron {
@@ -1674,11 +1661,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 4px;
 }
 
-/* Also carries `oct-page-title`, which owns the size, weight, leading and
-   truncation; this rule only gives it its share of the row. */
+/* Also carries `oct-nav-name`, which owns the size, weight and leading; this
+   rule gives it its share of the row and truncates it. */
 .workspace-pane__title {
   flex: 0 8 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The breadcrumb's first step: the Project the pane runs in, as plain meta
@@ -5533,11 +5523,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .composer-model-picker__model-name {
   overflow: hidden;
-  font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-label);
 }
 
 .composer-model-picker__model-detail {
