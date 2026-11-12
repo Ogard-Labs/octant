@@ -80,7 +80,7 @@ function BoundReview(props: DockReviewToolProps) {
           <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
         </OctantToggleGroup>
       </div>
-      <div className="git-history__list" hidden={view !== "changes"}>
+      <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
         <Suspense fallback={<ShellState state="loading" title="Loading changes" />}>
           <WorkingTree {...props} />
         </Suspense>

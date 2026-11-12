@@ -60,6 +60,21 @@ describe("WorkFilesPanel", () => {
     expect(onOpenFile).not.toHaveBeenCalled();
     expect(list).toHaveBeenCalledTimes(2);
   });
+  it("puts Refresh on the first heading's row instead of a row of its own", async () => {
+    render(
+      <WorkFilesPanel
+        client={client(
+          listing([{ kind: "file", path: "notes.txt", byteLength: 12, origin: "untouched" }]),
+        )}
+        projectId={projectId}
+        threadId={threadId}
+      />,
+    );
+
+    const heading = await screen.findByRole("heading", { name: "In this folder" });
+    const refresh = screen.getByRole("button", { name: "Refresh files" });
+    expect(refresh.parentElement).toContainElement(heading);
+  });
   it("names what the work produced above the rest of the folder", async () => {
     render(
       <WorkFilesPanel

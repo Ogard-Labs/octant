@@ -68,9 +68,12 @@ export function ThreadMoveComputerCard(props: ThreadMoveComputerCardProps) {
         <div className="environment-move__row environment-move__row--static">
           <EnvironmentTile icon={Laptop} />
           <span className="environment-move__name">{props.hostName}</span>
-          <OctantBadge variant="secondary">
-            {props.isThisComputer ? "This computer" : props.hostName}
-          </OctantBadge>
+          {/* This computer's own name is "This computer": the badge would say it twice. */}
+          {!props.isThisComputer || props.hostName !== "This computer" ? (
+            <OctantBadge variant="secondary">
+              {props.isThisComputer ? "This computer" : props.hostName}
+            </OctantBadge>
+          ) : null}
         </div>
       </EnvironmentCard>
     );
@@ -129,7 +132,9 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
           >
             <EnvironmentTile icon={Laptop} />
             <span className="environment-move__name">{props.hostName}</span>
-            <OctantBadge variant={pill.tone}>{pill.label}</OctantBadge>
+            {pill.label === props.hostName ? null : (
+              <OctantBadge variant={pill.tone}>{pill.label}</OctantBadge>
+            )}
             <ChevronRight
               aria-hidden="true"
               className="environment-group__chevron"

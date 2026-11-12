@@ -1265,6 +1265,21 @@ h6 {
   grid-row: 1 / -1;
 }
 
+/* Two columns of tools drop the half-of-the-workspace term and ask the thread
+   for less than one column does (--octant-tiled-primary-min, set on the shell
+   beside --octant-wide-primary-min), as dockWidthCeiling does for the handle. */
+.workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
+  grid-template-columns:
+    minmax(var(--octant-tiled-primary-min, var(--octant-wide-primary-min)), 1fr)
+    minmax(
+      var(--octant-context-sidebar-min),
+      min(
+        var(--octant-context-sidebar-width, 360px),
+        calc(100% - var(--octant-tiled-primary-min, var(--octant-wide-primary-min)))
+      )
+    );
+}
+
 .workspace-layer > .bottom-utility-panel {
   grid-column: 1;
   grid-row: 2;
@@ -5842,7 +5857,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .browser-workspace--feedback > .browser-workspace__chrome {
-  flex: 0 0 var(--oct-title-rail-h, 40px);
+  flex: 0 0 auto;
+  min-height: var(--oct-title-rail-h, 40px);
 }
 
 .browser-workspace--feedback > .browser-workspace__message {

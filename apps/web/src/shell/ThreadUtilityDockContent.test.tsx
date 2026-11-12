@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { configure, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeCodeProjectPullRequestView } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
@@ -6,6 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ThreadUtilityDockContent } from "./ThreadUtilityDockContent";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { decodeBindingRevisionId } from "@octant/contracts/projects";
+
+// Each dock tool is a lazy module: the first test to need one pays its import,
+// about 750ms for Files on its own, which left the default 1s wait no margin.
+configure({ asyncUtilTimeout: 5000 });
 
 vi.mock("../code/CodeWorkspaceTab", () => ({
   default: (props: { readonly tab: { readonly kind: string; readonly projectPath?: string } }) => (
