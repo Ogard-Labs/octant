@@ -447,6 +447,52 @@ describe("ExtensionsSettingsView", () => {
     expect(c.calls).toContainEqual({ kind: "reconcile-skills" });
   });
 
+  it("says when the Project's copy of a skill is in use and names the one turned off for it", async () => {
+    const projectSkillId =
+      "agents-skills-directory:project-skill:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as never;
+    const globalSkillId =
+      "agents-skills-directory:global-skill:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as never;
+    const skill = (qualifiedId: string, displayName: string, sourceRef: string, on: boolean) => ({
+      skill: {
+        qualifiedId,
+        name: "review",
+        sourceKind: "agents-skills-directory",
+        digest: qualifiedId.slice(qualifiedId.indexOf("sha256:")),
+        available: true,
+      },
+      source: { kind: "agents-skills-directory", sourceRef },
+      displayName,
+      provenance: { reviewed: true },
+      contentBytes: 128,
+      reviewed: true,
+      desiredEnabled: on,
+      effectiveState: on ? { kind: "effective" } : { kind: "blocked", reason: "superseded" },
+    });
+    const snapshot = {
+      ...installedSnapshot({ activation: baseActivation({ installed: false }) }),
+      skills: [
+        skill(projectSkillId, "Project review", "project:project-123:root", true),
+        skill(globalSkillId, "Global review", "user-global", false),
+      ],
+      collisions: [],
+      projectSkillsInUse: [{ name: "review", used: projectSkillId, gaveWay: globalSkillId }],
+    } as unknown as ExtensionSnapshot;
+
+    render(
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={client({ snapshot })}
+        scope={scope}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("status", { name: "Project skill in use: review" }),
+    ).toHaveTextContent(
+      "Two skills named review were on. The Project's copy, Project review, is used, and Global review was turned off. Turn Global review on to use it instead.",
+    );
+  });
+
   it("shows the .claude/skills source on the row and in expanded details alongside .agents/skills", async () => {
     const agentsRootId =
       "agents-skills-directory:project:project-123:root:review:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as never;

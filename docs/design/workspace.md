@@ -1542,8 +1542,10 @@ task's Task actions menu, with no confirmation, and the card moves to Done and
 stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
-(maintainer request, 2026-11-12). Not built yet: today Mark done asks for a
-confirmation and a person cannot mark a Code thread Done
+(maintainer request, 2026-11-12). While a Work task is marked, its composer
+says so and carries the Reopen button. A Code thread is marked with **Mark
+done** in its row's menus in the sidebar, where **Reopen** takes its place
+once it is marked
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and

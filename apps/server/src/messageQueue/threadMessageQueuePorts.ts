@@ -191,7 +191,7 @@ export function createThreadMessageQueuePort(
         (facts.thread.projectId !== undefined && project?.lifecycle !== "active") ||
         ("checkoutAvailable" in facts && !facts.checkoutAvailable) ||
         // A Work thread a person marked Done takes no new message: the queue
-        // keeps what it holds, shown as held, until the thread is reactivated.
+        // keeps what it holds, shown as held, until the thread is reopened.
         ("markedDone" in facts && facts.markedDone))
     )
       return { status: "held", reason: "thread-unavailable" };

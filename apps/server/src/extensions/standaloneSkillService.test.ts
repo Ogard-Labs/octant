@@ -286,6 +286,9 @@ describe("standalone skill marketplace service", () => {
   });
 });
 
+/** When the fixture host says a person turned a skill on. */
+const chosenAt = "2026-11-12T09:00:00.000Z";
+
 function discoveredSkill(
   name = "test-skill",
   content = "# Test skill instructions",
@@ -385,6 +388,7 @@ describe("standalone skill activation", () => {
       reviewed: true,
       trusted: true,
       desiredEnabled: true,
+      chosenAt: expect.any(String),
     });
   });
 
@@ -446,6 +450,7 @@ describe("standalone skill activation", () => {
       reviewed: true,
       trusted: true,
       desiredEnabled: true,
+      chosenAt: expect.any(String),
     });
   });
 
@@ -728,7 +733,7 @@ describe("standalone skill activation", () => {
     expect(current()[bundledId]).toEqual({ reviewed: true, trusted: true, desiredEnabled: false });
   });
 
-  it("reads an activation file that left two same-named skills on as neither on until one is chosen", async () => {
+  it("uses the Project's copy when a Project skill and a shared skill of the same name are both on, and says so", async () => {
     const userSkill = discoveredSkill("deploy", "# user deploy");
     const projectSkill = scopedSkill("deploy", "5", "project:project-a:root", {
       projectScope: { mode: "code", projectId: "project-a" as never },
@@ -743,6 +748,74 @@ describe("standalone skill activation", () => {
     await service.reconcile();
 
     const snapshot = service.snapshot(baseSnapshot);
+    const skill = byId(snapshot);
+    expect(skill(projectSkill)?.effectiveState).toEqual({ kind: "effective" });
+    expect(skill(userSkill)?.desiredEnabled).toBe(false);
+    expect(skill(userSkill)?.effectiveState).toEqual({ kind: "blocked", reason: "superseded" });
+    expect(snapshot.collisions).toEqual([]);
+    expect(snapshot.projectSkillsInUse).toEqual([
+      {
+        name: "deploy",
+        used: projectSkill.skill.qualifiedId,
+        gaveWay: userSkill.skill.qualifiedId,
+      },
+    ]);
+    expect(current()[String(projectSkill.skill.qualifiedId)]?.desiredEnabled).toBe(true);
+    expect(current()[String(userSkill.skill.qualifiedId)]?.desiredEnabled).toBe(false);
+
+    // The person may still pick the other one, and the notice goes with it.
+    await service.execute({
+      kind: "select-skill-collision",
+      name: "deploy",
+      qualifiedId: String(userSkill.skill.qualifiedId),
+    });
+    await service.reconcile();
+    const chosen = service.snapshot(baseSnapshot);
+    expect(byId(chosen)(userSkill)?.effectiveState).toEqual({ kind: "effective" });
+    expect(byId(chosen)(projectSkill)?.desiredEnabled).toBe(false);
+    expect(chosen.projectSkillsInUse ?? []).toEqual([]);
+  });
+
+  it("keeps the shared skill a person turned on after the Project's copy went missing, when that copy comes back", async () => {
+    const userSkill = discoveredSkill("deploy", "# user deploy");
+    const projectSkill = scopedSkill("deploy", "5", "project:project-a:root", {
+      projectScope: { mode: "code", projectId: "project-a" as never },
+    });
+    const { store, current } = memoryActivationStore({
+      [String(projectSkill.skill.qualifiedId)]: {
+        reviewed: true,
+        trusted: true,
+        desiredEnabled: true,
+      },
+    });
+    const discovered = [userSkill];
+    const service = activationService(discovered, store);
+    await service.reconcile();
+    await enable(service, userSkill);
+
+    discovered.push(projectSkill);
+    await service.reconcile();
+
+    const snapshot = service.snapshot(baseSnapshot);
+    expect(byId(snapshot)(userSkill)?.effectiveState).toEqual({ kind: "effective" });
+    expect(byId(snapshot)(projectSkill)?.desiredEnabled).toBe(false);
+    expect(snapshot.projectSkillsInUse ?? []).toEqual([]);
+    expect(current()[String(projectSkill.skill.qualifiedId)]?.desiredEnabled).toBe(false);
+  });
+
+  it("reads an activation file that left two same-named shared skills on as neither on until one is chosen", async () => {
+    const userSkill = discoveredSkill("deploy", "# user deploy");
+    const addedSkill = scopedSkill("deploy", "5", "added:tools", {});
+    const on = { reviewed: true, trusted: true, desiredEnabled: true } as const;
+    const { store, current } = memoryActivationStore({
+      [String(userSkill.skill.qualifiedId)]: on,
+      [String(addedSkill.skill.qualifiedId)]: on,
+    });
+    const service = activationService([userSkill, addedSkill], store);
+
+    await service.reconcile();
+
+    const snapshot = service.snapshot(baseSnapshot);
     const deploys = (snapshot.skills ?? []).filter(
       (candidate) => candidate.skill.name === "deploy",
     );
@@ -752,8 +825,9 @@ describe("standalone skill activation", () => {
     ]);
     expect(deploys.map((candidate) => candidate.desiredEnabled)).toEqual([false, false]);
     expect(snapshot.collisions.map((collision) => collision.name)).toEqual(["deploy"]);
+    expect(snapshot.projectSkillsInUse ?? []).toEqual([]);
     expect(current()[String(userSkill.skill.qualifiedId)]?.desiredEnabled).toBe(false);
-    expect(current()[String(projectSkill.skill.qualifiedId)]?.desiredEnabled).toBe(false);
+    expect(current()[String(addedSkill.skill.qualifiedId)]?.desiredEnabled).toBe(false);
   });
 
   it("keeps each Project's same-named skill to itself while a shared one gives way to both", async () => {
@@ -880,6 +954,7 @@ function activationService(
       uninstall: async () => baseSnapshot,
     },
     activationStore: store,
+    clock: () => chosenAt,
   });
 }
 

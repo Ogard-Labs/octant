@@ -1509,6 +1509,32 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </SettingsSection>
 
+          {(snapshot.projectSkillsInUse ?? []).length > 0 ? (
+            <ul
+              aria-label="Project skills in use"
+              className="extensions-settings__diagnostics settings-collection-scroll"
+              tabIndex={0}
+            >
+              {(snapshot.projectSkillsInUse ?? []).map((notice) => {
+                const named = (qualifiedId: string) =>
+                  snapshot.skills?.find(
+                    (skill) => String(skill.skill.qualifiedId) === String(qualifiedId),
+                  )?.displayName ?? notice.name;
+                return (
+                  <li
+                    aria-label={`Project skill in use: ${notice.name}`}
+                    key={`${String(notice.used)}:${String(notice.gaveWay)}`}
+                    role="status"
+                  >
+                    Two skills named <strong>{notice.name}</strong> were on. The Project's copy,{" "}
+                    {named(notice.used)}, is used, and {named(notice.gaveWay)} was turned off. Turn{" "}
+                    {named(notice.gaveWay)} on to use it instead.
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
           {snapshot.collisions.length > 0 ? (
             <SettingsDisclosure
               title="Name collisions"

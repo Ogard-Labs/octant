@@ -38,6 +38,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
 import {
@@ -5477,6 +5478,63 @@ describe("completing and snoozing a Code thread", () => {
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("lets a person mark a thread Done whatever its delivery target says, journals the mark as their override, and clears it on Reopen", async () => {
+    const fixture = serviceFixture();
+
+    const marked = await fixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(marked).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, version: 2 },
+    });
+    const markAppend = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(markAppend.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(markAppend.events[0]?.payload.thread.markedDoneAt).toBe(now);
+    // The delivery target is left exactly as the person confirmed it: the
+    // override never rewrites what the thread was asked to deliver.
+    expect(markAppend.events[0]?.payload.thread.deliveryTarget).toEqual(thread().deliveryTarget);
+
+    const alreadyMarked = serviceFixture({ threads: [thread({ markedDoneAt: nowAt })] });
+    await expect(
+      alreadyMarked.service.execute(ids.window, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: "This thread is already marked Done." },
+    });
+
+    const reopened = await alreadyMarked.service.execute(ids.window, {
+      kind: "reopen-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    if (!("thread" in reopened)) throw new Error("expected the reopened thread");
+    expect(reopened.thread).not.toHaveProperty("markedDoneAt");
+  });
+
+  it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: "Only a person can mark a Code thread Done." },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("reopens a completed thread and wakes a snoozed one back into play", async () => {

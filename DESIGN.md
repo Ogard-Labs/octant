@@ -1099,7 +1099,11 @@ the reason; the pick becomes the default for every new Work and Code thread
 until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Setup also asks once whether
 Octant may check for updates, and does not ask again whatever the answer
-(maintainer request, 2026-11-12; not built yet: today first run does not ask). Every step is optional from
+(maintainer request, 2026-11-12). The question is an Updates card on the
+readiness view with one switch, Check for updates automatically, off until the
+person turns it on; it is shown only in the desktop app, which is the only
+window that updates anything, and the answer is the Automatic update checks
+setting. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
 step's controls. Skipping preserves settled answers, waits for pending writes,
@@ -3693,8 +3697,9 @@ request from the person.
   managed server) if shutdown has not finished.
 - The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
   the setting "Press ⌘Q twice to quit" is on, which is its default; with it
-  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
-  not built yet: today the double press cannot be turned off). The
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12).
+  The switch is in Settings › General under Quitting, shown only in the Mac
+  app; the app starts guarded and learns the choice when settings load. The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first

@@ -170,6 +170,7 @@ export function defaultShellSettings(): ShellSettings {
     firstRunOnboarding: "pending",
     // Off by default: an unrecorded preference decodes to no update traffic.
     automaticUpdateChecks: false,
+    quitShortcutNeedsSecondPress: true,
     computerUse: { enabled: true, automaticUpdates: false },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,

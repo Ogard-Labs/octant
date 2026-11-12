@@ -27,6 +27,7 @@ import {
   ExtensionProvenance,
   ExtensionPublisherKeyFingerprint,
   SourceQualifiedSkill,
+  SourceQualifiedSkillId,
   StandaloneSkillRecord,
 } from "./extensions";
 import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
@@ -645,6 +646,17 @@ export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath 
 );
 export type SkillFolderSelection = typeof SkillFolderSelection.Type;
 
+/**
+ * Two same-named skills were both on where one thread would see both, and the
+ * host kept the Project's copy and turned the other off.
+ */
+export const ProjectSkillInUse = Schema.Struct({
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  used: SourceQualifiedSkillId,
+  gaveWay: SourceQualifiedSkillId,
+}).annotations(strict);
+export type ProjectSkillInUse = typeof ProjectSkillInUse.Type;
+
 export const ExtensionSnapshot = Schema.Struct({
   sequence: GlobalSequence,
   snapshotAt: UtcTimestamp,
@@ -652,6 +664,8 @@ export const ExtensionSnapshot = Schema.Struct({
   skills: Schema.optional(Schema.Array(StandaloneSkillRecord).pipe(Schema.maxItems(4096))),
   skillRoots: Schema.optional(Schema.Array(SkillRootStatus).pipe(Schema.maxItems(34))),
   collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
+  /** Absent when the host chose no Project copy over another skill. */
+  projectSkillsInUse: Schema.optional(Schema.Array(ProjectSkillInUse).pipe(Schema.maxItems(4096))),
 }).annotations(strict);
 export type ExtensionSnapshot = typeof ExtensionSnapshot.Type;
 

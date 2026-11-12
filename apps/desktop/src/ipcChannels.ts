@@ -74,6 +74,7 @@ export const DESKTOP_IPC_CHANNELS = {
   openInNewWindow: "octant:window:open-project",
   openSettings: "octant:menu:open-settings",
   quitShortcutHint: "octant:menu:quit-shortcut-hint",
+  quitShortcutSecondPress: "octant:menu:quit-shortcut-second-press",
   prepareToShutDown: "octant:menu:prepare-to-shut-down",
   shutdownMovesOffered: "octant:shutdown:moves-offered",
   shutdownProgress: "octant:shutdown:progress",

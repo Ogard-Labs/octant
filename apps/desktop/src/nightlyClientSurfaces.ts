@@ -122,8 +122,15 @@ export function installNightlyClientSurfaces(options: {
     return client;
   };
 
+  // The renderer reports the person's setting once settings load; until
+  // then, and for anything but an explicit false, the guard stays on.
+  let quitNeedsSecondPress = true;
+  register(DESKTOP_IPC_CHANNELS.quitShortcutSecondPress, (_event, value) => {
+    quitNeedsSecondPress = value !== false;
+  });
   const quitShortcut = createQuitShortcutGuard({
     now: () => performance.now(),
+    needsSecondPress: () => quitNeedsSecondPress,
     showNotice: () => {
       const window = frontWindow();
       if (window === undefined) return false;

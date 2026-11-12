@@ -360,6 +360,13 @@ export const CodeThread = Schema.Struct({
   coordinatorWakeOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
+  /**
+   * The person's override: when a person marked this thread Done whatever its
+   * delivery target says. It never touches `deliveryTarget`, so a thread whose
+   * target was objectively satisfied and one a person closed stay apart in
+   * the journal. Absent on every thread nobody marked.
+   */
+  markedDoneAt: Schema.optional(UtcTimestamp),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -822,8 +829,18 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("complete-code-thread"),
     ...CodeThreadCommandFields,
   }).annotations(strict),
+  /** Brings a put-away thread back, and clears a person's Done mark. */
   Schema.Struct({
     kind: Schema.Literal("reopen-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * A person marks the Code thread Done whatever its delivery target says.
+   * Only a person may send it: the host refuses it from a routine or anything
+   * else acting as the host, and no provider tool can send it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("mark-code-thread-done"),
     ...CodeThreadCommandFields,
   }).annotations(strict),
   /**

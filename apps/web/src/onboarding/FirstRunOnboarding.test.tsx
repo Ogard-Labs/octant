@@ -216,6 +216,34 @@ describe("FirstRunOnboarding", () => {
     expect(memory.change).not.toHaveBeenCalled();
   });
 
+  it("asks whether Octant may check for updates, off until answered, and waits for the answer before recording the outcome", async () => {
+    const user = userEvent.setup();
+    const write = Promise.withResolvers<boolean>();
+    const onSetUpdateChecks = vi.fn(() => write.promise);
+    const view = mount({ ...readyHandoff(), onSetUpdateChecks });
+    await openHandoff(user);
+
+    const answer = screen.getByRole("switch", { name: "Check for updates automatically" });
+    expect(answer).not.toBeChecked();
+    expect(onSetUpdateChecks).not.toHaveBeenCalled();
+    await user.click(answer);
+    expect(onSetUpdateChecks).toHaveBeenCalledExactlyOnceWith(true);
+    expect(answer).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    expect(view.controller.complete).not.toHaveBeenCalled();
+    await act(async () => write.resolve(true));
+    await waitFor(() => expect(view.controller.complete).toHaveBeenCalledOnce());
+  });
+
+  it("does not ask about update checks in a window that updates nothing", async () => {
+    const user = userEvent.setup();
+    mount(readyHandoff());
+    await openHandoff(user);
+
+    expect(screen.queryByRole("switch", { name: "Check for updates automatically" })).toBeNull();
+  });
+
   it("waits for a Computer use setup choice before recording the onboarding outcome", async () => {
     const write = Promise.withResolvers<boolean>();
     const view = mount({

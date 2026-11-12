@@ -32,28 +32,28 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 1            | 1                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
-| [Release scope](#release-scope)                                                       | 7         | 1       | 5            | 1                   |
+| [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 12      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
-| [Extensions](#extensions)                                                             | 8         | 5       | 3            | 0                   |
+| [Extensions](#extensions)                                                             | 8         | 6       | 2            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 8       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 5       | 4            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 4       | 1            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
+| [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **248**   | **164** | **79**       | **5**               |
+| **All areas**                                                                         | **248**   | **168** | **75**       | **5**               |
 
 ## Principles and hard lines
 
@@ -412,9 +412,9 @@ An update installs only after its feed signature and artifact hash verify, and o
 - The release must be strictly newer and name this app (Octant or Octant Nightly), platform, architecture and ring; a release for the other app is refused as the wrong app.
 - Anything unverifiable is refused, never downgraded; macOS adds the platform code-signature check, and a Linux AppImage replaces only the image it was launched from.
 - Rings are stable, preview and candidate. Octant follows stable or, by the person's in-app choice, candidate (shown as Preview or, with the Nightly install row, Nightly); the Octant Nightly app follows preview.
-- Install waits while agents are active; automatic checks default to off until the person opts in, including stores that never recorded a choice. First run asks once whether to check for updates (maintainer request, 2026-11-12); not built yet: today no first-run question is asked. A check carries only version, platform and architecture.
+- Install waits while agents are active; automatic checks default to off until the person opts in, including stores that never recorded a choice. First run asks once whether to check for updates (maintainer request, 2026-11-12). A check carries only version, platform and architecture.
 
-Status: Partly built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
+Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ### Scope hold until the Full access rule is built
 
@@ -931,11 +931,11 @@ Status: Partly built. Since: 2026-11-10. Detail: [Coordinator threads](coordinat
 Threads form one real hierarchy, and Work and Code have server-derived boards; Chat has none. An agent can never mark any thread Done.
 
 - The boards are the bundled Board plugin. Switching it off hides the Work and Code board views and every way to open them in the renderer; the host-owned status policy and the server board projections and routes stay, because thread rows, the dock overview, the planner board read, sibling-thread tools and side tasks read them. Nothing is deleted. Owner: [Workspace](workspace.md#boards-and-integrations).
-- A Code thread is Done when its user-confirmed delivery target is objectively satisfied, or when a person marks it Done whatever its delivery target says, recorded as the person's override (maintainer request, 2026-11-12). Not built yet: today no person's mark overrides ambiguous state.
-- A Work thread is Done when a person marks it; the mark needs no confirmation and no evidence text, and Reopen undoes it in one click (maintainer request, 2026-11-12). Not built yet: today the mark is final.
-- The Work mark locks the thread on the host until it is reopened (today, until it is archived and reactivated): queued messages hold, child results wait, and a due resume ends as invalidated.
+- A Code thread is Done when its user-confirmed delivery target is objectively satisfied, or when a person marks it Done whatever its delivery target says, recorded as the person's override (maintainer request, 2026-11-12). The override is journaled on the thread apart from its delivery target, and Reopen clears it.
+- A Work thread is Done when a person marks it; the mark needs no confirmation and no evidence text, and Reopen undoes it in one click (maintainer request, 2026-11-12).
+- The Work mark locks the thread on the host until it is reopened: queued messages hold, child results wait, and a due resume ends as invalidated.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Pull requests from a Code thread
 
@@ -1524,13 +1524,13 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 
 Octant discovers skills only from the closed Project allow-list, the user-global folder, and the provider and added folders a person turns on, never from the home folder's own tool-configuration folder on its own. A runtime that loads Project code by itself is switched off or denied.
 
-- A discovered skill is never trusted or active because of where it was found. When two skills share a name the Project's copy is used, with a notice (maintainer request, 2026-11-12); not built yet: today same-named skills that share a thread are both turned off until the person chooses.
+- A discovered skill is never trusted or active because of where it was found. When two skills that are both on share a name and a thread, the Project's copy is used over a skill every thread shares, with a notice, unless the person turned the shared one on later by hand (maintainer request, 2026-11-12). Any other same-named pair is turned off until the person chooses.
 - A runtime that loads Project skills, MCP servers, hooks or plugins by itself runs with a proven switch or is denied the file in the OS profile. Instruction files stay readable.
 - Two runtimes are refused at start in a Project holding their settings entries, because their loaders fail on a denied file.
 - Skills from Claude Code's and Codex's own folders, turned on one by one, and folders a person adds in Settings are discoverable roots under the same ladder; Octant adds none on its own.
 - Desktop offers a window-owned purpose receipt folder picker alongside manual paths; it records only the existing skill-folder setting and grants no trust or enablement. Chosen-root diagnostics explain zero discovery. Bounded selected-root/package watching covers later creation and package changes; committed-setting reconciliation works without a mounted Settings view, and host teardown prevents late watcher restart.
 
-Status: Partly built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
+Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
 
 ### MCP tool approvals
 
@@ -2288,10 +2288,10 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](..
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting (maintainer request, 2026-11-12), not built yet: today it is always on. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
 
 ### Window defaults, ground and drafts
 
@@ -2475,10 +2475,10 @@ Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) 
 
 Work and Code have server-authoritative boards. Chat has none, and an agent cannot mark any thread Done.
 
-- Cards cannot be dragged between columns. A person marks a Work thread Done with no confirmation, and Reopen undoes it in one click; a Code thread reaches Done when its delivery target is satisfied or a person marks it Done as their own override (maintainer request, 2026-11-12). Not built yet: today marking Work Done asks for a confirmation, and a Code thread reaches Done only when its delivery target is satisfied.
+- Cards cannot be dragged between columns. A person marks a Work thread Done with no confirmation, and Reopen undoes it in one click; a Code thread reaches Done when its delivery target is satisfied or a person marks it Done as their own override (maintainer request, 2026-11-12).
 - A Code card may show one plan-progress count computed at read time. It is absent with no live plan and never shown on Work cards. _Here only._
 - The pull request list is a cached host-local snapshot, and board queries never call the forge. A card's summary says fresh, stale or unavailable. The forge is reached only by explicit refresh or a per-Project opt-in cadence (off by default, floored at 30 seconds).
-- The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. The list offers Newest, Oldest and a "mine" filter (maintainer request, 2026-11-12); not built yet: today they are not offered, because the snapshot has no creation time and no signed-in login. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.
+- The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. The list offers Newest, Oldest and a "mine" filter (maintainer request, 2026-11-12); not built yet: today they are not offered, because the snapshot has no creation time and no signed-in login. Creation time is one more field on the existing list read; the signed-in login needs a forge read of its own. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.
 
 Status: Partly built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 
