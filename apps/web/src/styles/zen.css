@@ -279,7 +279,7 @@
 
 /* ─── floating chrome anchors ──────────────────────────────────────────
    Zen's chrome is anchored by the surface itself (window-drag regions,
-   mobile repositioning), so the system bar/pill's self-anchoring is
+   mobile repositioning), so the system bar's self-anchoring is
    overridden inside an anchor: position only, never restyle. */
 .zen-surface__bar-anchor .zen-bar,
 .zen-surface__bar-anchor .zen-pill,
@@ -292,7 +292,7 @@
 
 /* The zoom controls are the same floating chrome as the orbit bar, placed
    at the surface's top right instead of bottom centre. */
-/* On the same row as the spaces pill, not below it: a wall reserves one band
+/* On the same row as the spaces bar, not below it: a wall reserves one band
    at the top for the surface's floating chrome, and a cluster sitting under
    that band lands on the first row of cards. */
 .zen-bar.zen-surface__controls {
@@ -514,7 +514,7 @@
 
 /* ─── spaces ───────────────────────────────────────────────────────────
    The switcher rides above the panning surface: it is how you leave a
-   space. It wears the system pill chrome and only scrolls sideways when
+   space. It wears the system bar chrome and only scrolls sideways when
    the window cannot hold every space. */
 .zen-surface__spaces-anchor {
   position: absolute;
@@ -1235,7 +1235,7 @@ html[data-octant-increased-contrast="true"]
   -webkit-backdrop-filter: none;
 }
 
-/* The dock, the collapsed pill, the spaces pill, and every sheet are the
+/* The dock, the collapsed bar, the spaces bar, and every sheet are the
    same glass as the windows, one step lighter: they carry a few words, not
    a transcript. Rounder than a window and lifted by the same long shadow, so
    the floating chrome reads as objects on the picture rather than as strips

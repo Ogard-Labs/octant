@@ -119,7 +119,7 @@
   line-height: var(--oct-leading-snug);
 }
 
-/* .badge paints the pill; it only needs its slot in the card grid. */
+/* .badge paints the chip; it only needs its slot in the card grid. */
 .remote-shell__surface-badge {
   justify-self: start;
 }

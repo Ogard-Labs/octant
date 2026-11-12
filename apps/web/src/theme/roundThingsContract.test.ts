@@ -134,6 +134,9 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
 ];
 
 // The stylesheet blocks whose declaration reaches for a circle or the pill.
+// It reads the shorthand (with a `/` second radius), the physical corner
+// longhands (`border-top-left-radius`) and the logical ones
+// (`border-start-start-radius`).
 const roundDeclaration =
   /border(?:-[a-z]+-[a-z]+)?-radius:\s*[^;]*(?:--oct-radius-pill|\b9999?9px\b|\b50%|\b100%)/;
 
@@ -185,15 +188,31 @@ describe("what is allowed to be round", () => {
     expect(octant.match(/\b9999?9px\b/g)).toHaveLength(1);
   });
 
-  it("gives a recipe the full round class only for a switch, a slider, and a colour swatch", () => {
-    const offenders = sourceFiles(webRoot, ".tsx")
-      .filter((path) => /\brounded-full\b/.test(readFileSync(path, "utf8")))
-      .map((path) => relative(webRoot, path))
-      .sort();
-    expect(offenders).toEqual([
-      "profile/ProfileEditor.tsx",
-      "ui/shadcn/slider.tsx",
-      "ui/shadcn/switch.tsx",
-    ]);
+  it("sees every spelling of a round corner", () => {
+    for (const declaration of [
+      "border-radius: var(--oct-radius-pill)",
+      "border-radius: 4px / 50%",
+      "border-radius: 9999px 0 0 9999px",
+      "border-top-left-radius: 50%",
+      "border-start-start-radius: var(--oct-radius-pill)",
+      "border-end-end-radius: 9999px",
+    ]) {
+      expect(roundBlocks(`.x { ${declaration}; }`), declaration).toEqual([".x"]);
+    }
+    expect(roundBlocks(".x { border-radius: var(--oct-radius-sm); }")).toEqual([]);
+  });
+
+  it("gives a recipe the full round class only for a switch (2), a slider (1), and a colour swatch (1), counted per file", () => {
+    const full = /\brounded(?:-[a-z]+)?-full\b|\brounded(?:-[a-z]+)?-\[(?:9999?9px|50%|100%)\]/g;
+    const counts: Record<string, number> = {};
+    for (const path of [...sourceFiles(webRoot, ".tsx"), ...sourceFiles(webRoot, ".ts")]) {
+      const found = readFileSync(path, "utf8").match(full);
+      if (found) counts[relative(webRoot, path)] = found.length;
+    }
+    expect(counts).toEqual({
+      "profile/ProfileEditor.tsx": 1,
+      "ui/shadcn/slider.tsx": 1,
+      "ui/shadcn/switch.tsx": 2,
+    });
   });
 });

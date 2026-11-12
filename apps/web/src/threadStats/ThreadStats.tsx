@@ -14,7 +14,7 @@ import "./threadStats.css";
  * panel. They read the host's recorded turns, so every provider and mode shows
  * the same figures worded by one shared module. They are not drawn under the
  * composer: with the row of controls and a card, that made four layers under
- * a pill. It shows nothing when there is nothing honest to say (a provider
+ * a chip. It shows nothing when there is nothing honest to say (a provider
  * that reported neither usage nor timing), and the per-turn detail opens from
  * the block's own link and from the context meter. Active pane only: the
  * figures come from one shell-wide scope, so an inactive split pane would

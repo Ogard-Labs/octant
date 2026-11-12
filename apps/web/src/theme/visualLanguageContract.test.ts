@@ -188,7 +188,7 @@ describe("the public-block visual language", () => {
   it("gives title-band controls one shape and no accent on a pressed divider", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
-    // A label, a pill with a chevron, and a square icon sat in the band as
+    // A label, a chip with a chevron, and a square icon sat in the band as
     // three shapes at 24px and 28px: they are the 28px rail button's shape.
     expect(shell).toMatch(
       /\.project-action-buttons \[data-slot="button"\] \{\s*height: var\(--oct-rail-button-h\);\s*border-radius: var\(--oct-radius-sm\);/,
@@ -352,7 +352,7 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it("draws a composer's notices as callout cards above the pill, with the callout's corner, not inside it", () => {
+  it("draws a composer's notices as callout cards above the box, with the callout's corner, not inside it", () => {
     const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     const card = /\.callout\.composer-notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
@@ -360,7 +360,7 @@ describe("the public-block visual language", () => {
     const actions =
       /\.callout\.composer-notice > \.callout__actions\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
 
-    // One group of cards, with a gap from the pill on the spacing scale and no
+    // One group of cards, with a gap from the box on the spacing scale and no
     // room when there is nothing to say.
     expect(group).toMatch(/display:\s*grid/);
     expect(group).toMatch(/margin-bottom:\s*var\(--oct-space-1\)/);
@@ -368,7 +368,7 @@ describe("the public-block visual language", () => {
     // The words wrap, and the action wraps under them in a narrow composer.
     expect(card).toMatch(/flex-wrap:\s*wrap/);
     // The compact form: the 12px meta step and tight padding, so the card is
-    // visibly lighter than the pill.
+    // visibly lighter than the box.
     expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(body).toMatch(/flex:\s*1 1 200px/);
@@ -380,11 +380,11 @@ describe("the public-block visual language", () => {
     expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
       /border-radius:\s*var\(--oct-radius-md\)/,
     );
-    // Over a ground or under Window glass the card is the glass the pill is.
+    // Over a ground or under Window glass the card is the glass the box is.
     expect(css).toMatch(
       /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
     );
-    // Nothing the pill held for a notice survives: no feedback strip in it.
+    // Nothing the box held for a notice survives: no feedback strip in it.
     expect(css).not.toMatch(/\.thread-composer__feedback/);
     expect(css).not.toMatch(/\.composer-status\b/);
   });
@@ -564,7 +564,7 @@ describe("the public-block visual language", () => {
     for (const source of composers) {
       expect(source).toContain("thread-composer");
       // What the surface says about its thread or about sending goes to the
-      // composer's notice cards, never into a strip inside the pill.
+      // composer's notice cards, never into a strip inside the box.
       expect(source).toMatch(/\bnotices=\{/);
       expect(source).not.toMatch(/\bfooter=\{/);
     }
@@ -617,7 +617,7 @@ describe("the public-block visual language", () => {
     expect(readFileSync(join(webRoot, "ui/shadcn/checkbox.tsx"), "utf8")).toContain(
       "border-(--octant-divider-strong)",
     );
-    // The inverse tooltip takes no inset bevel: its white line drew on the dark pill.
+    // The inverse tooltip takes no inset bevel: its white line drew on the dark tooltip.
     expect(rule(system, "\\.octant-tooltip").match(/box-shadow:[^;]+;/)?.[0]).not.toContain(
       "inset",
     );

@@ -28,7 +28,7 @@ export const OutsideContentContext = createContext<OutsideContentThread | undefi
 
 /**
  * The chip for the thread around this composer, if it has read outside
- * content, in the row under the pill. A paired device is refused the read, so
+ * content, in the row under the box. A paired device is refused the read, so
  * it never draws one.
  */
 export function ComposerOutsideContentChip(props: {

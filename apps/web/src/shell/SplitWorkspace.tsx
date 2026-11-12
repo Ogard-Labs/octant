@@ -656,7 +656,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 )}
                 {showTabs ? null : running ? (
                   // The host reports that a turn is executing, not when it
-                  // began, so the pill names the state and no elapsed time.
+                  // began, so the chip names the state and no elapsed time.
                   // With tabs open, each tab carries its own thread's state.
                   <span className="workspace-pane__status">
                     <span aria-hidden="true" className="spinner spinner-sm" />

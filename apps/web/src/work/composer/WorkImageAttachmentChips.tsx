@@ -11,7 +11,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 export function WorkImageAttachmentChips(props: {
   readonly images: WorkComposerImages;
   /**
-   * A thread composer says the refusal in its notice card above the pill and
+   * A thread composer says the refusal in its notice card above the box and
    * passes false; the overview's quick start has no card and keeps it here.
    */
   readonly withMessage?: boolean;

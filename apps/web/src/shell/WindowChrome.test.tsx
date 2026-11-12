@@ -388,7 +388,7 @@ describe("WindowChrome", () => {
     expect(activeMode).toContain("box-shadow: var(--octant-shadow-selected);");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
-    // carried by ink alone rather than a filled pill.
+    // carried by ink alone rather than a filled chip.
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
@@ -847,7 +847,7 @@ describe("WindowChrome", () => {
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's pill is the glass surface, with the glass stroke as its
+    // The composer's box is the glass surface, with the glass stroke as its
     // ring; the frame around it and its rows draws nothing.
     const surface =
       systemStyles.match(
@@ -857,7 +857,7 @@ describe("WindowChrome", () => {
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
     expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
-    // Under Window glass the pill is a step lighter than the glass around
+    // Under Window glass the box is a step lighter than the glass around
     // it: the floor made it the darker of the two.
     expect(systemStyles).toMatch(
       /\.shell--material-translucent \.thread-composer__surface \{ background: var\(--octant-control\); \}/,

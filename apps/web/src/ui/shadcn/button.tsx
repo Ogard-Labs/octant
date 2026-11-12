@@ -14,7 +14,7 @@ import { cn } from "./utils";
  *
  * An outline button rests on the page colour, unless the shell names another
  * rest fill: under Glass the page colour is opaque while the page around the
- * button is not, and every outline button drew a black pill on the grey
+ * button is not, and every outline button drew a black chip on the grey
  * glass of an OLED preset.
  */
 const buttonVariants = cva(

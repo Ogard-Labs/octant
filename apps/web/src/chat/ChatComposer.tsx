@@ -194,7 +194,7 @@ export interface ChatComposerProps {
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
-  /** More for the notice card above the pill: the draft's own provenance. */
+  /** More for the notice card above the box: the draft's own provenance. */
   readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   readonly stopDisabledReason?: string;
   /** The Create image action. Absent when the host serves no image generation. */
@@ -328,7 +328,7 @@ export function ChatComposer(props: ChatComposerProps) {
   });
   // The full status text stays the prompt's description for assistive
   // technology and is never drawn; only actionable state (errors, streaming)
-  // is a card above the pill, and announces itself there.
+  // is a card above the box, and announces itself there.
 
   // `.composer-input` sizes itself through `field-sizing: content` with the
   // system's 60–240px bounds; an inline height would override the stylesheet
@@ -799,8 +799,8 @@ export function ChatComposer(props: ChatComposerProps) {
     </>
   );
 
-  // The trailing run under the pill reads context ring, then model, the same
-  // on every surface. The microphone is in the pill, beside send.
+  // The trailing run under the box reads context ring, then model, the same
+  // on every surface. The microphone is in the box, beside send.
   const rowTrailing = (
     <>
       <div className="chat-composer__selectors">
@@ -982,7 +982,7 @@ function composeStatus(input: {
 } {
   // Quiet messages are the prompt's description for assistive technology and
   // are never drawn. A refusal, a failure or a fact that stays until it is
-  // resolved is a card above the pill. What comes and goes by itself (sending,
+  // resolved is a card above the box. What comes and goes by itself (sending,
   // a response streaming) is progress: one quiet line, never a card.
   const quiet: string[] = [];
   const notices: ComposerNoticeItem[] = [];

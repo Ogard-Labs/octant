@@ -190,7 +190,7 @@
 
 /* A skill's state is a word in secondary text, coloured only through the
    status colours: "Available" and "Needs review" read at one size with no
-   pill around either. */
+   chip around either. */
 .extensions-settings__state-label,
 .extensions-settings .extcard-right > .badge {
   min-height: auto;

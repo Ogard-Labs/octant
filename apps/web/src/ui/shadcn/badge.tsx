@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * A filled pill on the type ramp. The previous outline-only label was
+ * A filled chip on the type ramp. The previous outline-only label was
  * drawn at 10px, a size the type hierarchy does not have, and read as a second
  * kind of border next to the hairlines that already separate rows.
  *

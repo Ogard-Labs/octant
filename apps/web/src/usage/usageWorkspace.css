@@ -211,7 +211,7 @@
   text-transform: none;
 }
 
-/* Four sources are wider than a phone: the group wraps inside its own pill. */
+/* Four sources are wider than a phone: the group wraps inside its own track. */
 .usage-source {
   flex-wrap: wrap;
   max-width: 100%;

@@ -255,9 +255,17 @@ one statement; elsewhere this document names the token, not the number.
 | Token                | Value  | Role                                                                                                                                                                                                                                                                                         |
 | -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--oct-radius-sm`    | 4px    | A control: every button of every size and variant, field, tab and segmented item, menu and option row, filled list or navigation row, chip and tag, and a capsule or track that only groups controls (the Browser's history capsule, a toggle group). The composer's attach and send buttons |
-| `--oct-radius-md`    | 12px   | A container: a card, panel, or well; a menu, popover, tooltip, and toast; a dialog and the Settings sheet; the composer; a bubble; a Settings section card; the window-frame cards                                                                                                           |
+| `--oct-radius-md`    | 12px   | A container: a card, panel, or well; a menu, popover, tooltip card, and toast; a dialog and the Settings sheet; the composer; a bubble; a Settings section card; the window-frame cards                                                                                                      |
 | `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                             |
 | `--oct-radius-pill`  | 9999px | Only what is inherently round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round colour swatch, a meter or progress bar, a slider's thumb. Never a control                                                                                     |
+
+A tooltip is the one overlay that stays on the control token when it is a control's
+height: a one-line tooltip (`.octant-tooltip`, `.tooltip > .tip`) and a drag
+preview (`.workspace-drag-preview`) are about 24px tall, so 12px on them would
+draw a pill. They take the control radius because they are a control's height. A
+tooltip card (`.octant-tooltip--card`, `.octant-preview-card`) holds content and
+is a container. A menu, popover, disclosure and filter menu are containers at
+12px, with their rows at the control radius, inset from the popup's corner.
 
 A part inside a control takes the control radius less the padding between them,
 never below 2px, so the outline of every control is 4px and the inner part is
@@ -313,7 +321,7 @@ never told from the page by an outline alone.
   surface crosses something lighter; in light the surfaces are already the
   lightest thing on the page and the shadow carries it.
 - **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
-  the raised elevation's white top line drew as a light seam on the dark pill
+  the raised elevation's white top line drew as a light seam on the dark tooltip
   in light, so it takes the two shadows alone in both modes.
 - **What sits on a floating surface is based on that surface.** Its control
   fills, its pointed-at row and its hairlines step up from `--octant-float`
@@ -1903,7 +1911,7 @@ read through:
   ground reads evenly behind every surface on the screen (with the plain card
   fill its characters ran through the cards at full strength while the
   composer beside them was frosted);
-- Zen's windows, dock, pills, and sheets (glass cards);
+- Zen's windows, dock, bars, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
   control, never the page;
@@ -2009,7 +2017,7 @@ Zen is a desk. Every card is a window: its title bar moves it, every edge and
 corner resizes it, the arrow keys nudge it and Alt with the arrows resizes it,
 and it stays exactly where it was left. There is no pan or zoom; everything is
 on the one screen. **Tidy**, top right, re-tiles every window in reading order
-into the room the surface has, leaving the spaces pill and the Navigator bar
+into the room the surface has, leaving the spaces bar and the Navigator bar
 their own edges; the column count follows the window count and drops when the
 area is too narrow for a readable measure. A space that has never been arranged
 is tiled once when it opens and that tiling is written down as each window's
@@ -2045,7 +2053,7 @@ something on the desk is one destination, not two: the Add sheet shows each
 kind of window as a tile (Thread, Terminal, Browser, Notes, Checklist) and the
 two that take a value, a timer's minutes and a link, as one line each. A panel
 is a page in a sheet, so its title is the page title and its close is an icon,
-and it stops above the dock. The dock, the pills, the sheets, and the empty
+and it stops above the dock. The dock, the bars, the sheets, and the empty
 space's guidance wear the windows' glass one step lighter and with a larger
 radius, the same step for every floating object. The Appearance sheet reads
 Look (one Dim dial that darkens every ground, window opacity, picture fit),

@@ -2928,7 +2928,7 @@ describe("WorkThreadWorkspace", () => {
       status: "refused",
       reason: "Choose an image-capable model to attach images.",
     });
-    // The refusal is a card above the pill, not a line among the chips.
+    // The refusal is a card above the box, not a line among the chips.
     const refusal = await screen.findByText("Choose an image-capable model to attach images.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByLabelText("Attached images")).toBeNull();
@@ -2972,7 +2972,7 @@ describe("WorkThreadWorkspace", () => {
     fireEvent.paste(screen.getByLabelText("Work prompt"), {
       clipboardData: { files: [file], items: [] },
     });
-    // The refusal is a card above the pill, not a line among the chips.
+    // The refusal is a card above the box, not a line among the chips.
     const refusal = await screen.findByText(
       "The selected model does not accept images. Choose an image-capable model.",
     );

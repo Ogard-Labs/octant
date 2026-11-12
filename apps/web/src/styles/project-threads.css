@@ -344,7 +344,7 @@
   background: var(--oct-fg-soft);
 }
 
-/* The active Project is marked by its label's ink alone: a filled pill would
+/* The active Project is marked by its label's ink alone: a filled chip would
    turn the header back into the row the reader keeps mistaking for one. */
 .project-row[data-active="true"] {
   color: var(--oct-fg);
