@@ -122,6 +122,8 @@ export class AgentAccessService {
   readonly #randomBytes: (size: number) => Uint8Array;
   /** Turn starts admitted but not yet started, per grant. */
   readonly #turnStarts = new Map<string, number>();
+  /** Threads each grant's agent ran turns on, for its running-turn limit. */
+  readonly #turnThreads = new Map<string, Map<string, AgentGrantMode>>();
   readonly #tickets = new Map<string, Ticket>();
   readonly #pending = new Map<string, Map<string, PendingKey>>();
   readonly #nonces = new Map<string, Map<string, number>>();
@@ -354,6 +356,31 @@ export class AgentAccessService {
         else this.#turnStarts.set(grantId, left);
       },
     };
+  }
+
+  /**
+   * Notes a thread the agent ran a turn on, so the running-turn limit reads it
+   * even when the agent did not start the thread (a Project thread the person
+   * made). Kept in memory, newest last, at most twenty per grant.
+   */
+  noteTurnThread(grantId: string, threadId: string, mode: AgentGrantMode): void {
+    const threads = this.#turnThreads.get(grantId) ?? new Map<string, AgentGrantMode>();
+    threads.delete(threadId);
+    threads.set(threadId, mode);
+    while (threads.size > 20) {
+      const oldest = threads.keys().next().value;
+      if (oldest === undefined) break;
+      threads.delete(oldest);
+    }
+    this.#turnThreads.set(grantId, threads);
+  }
+
+  turnThreadsOf(
+    grantId: string,
+  ): ReadonlyArray<{ readonly threadId: string; readonly mode: AgentGrantMode }> {
+    return [...(this.#turnThreads.get(grantId) ?? new Map<string, AgentGrantMode>())].map(
+      ([threadId, mode]) => ({ threadId, mode }),
+    );
   }
 
   threadOwner(threadId: string): AgentThreadRecord | undefined {

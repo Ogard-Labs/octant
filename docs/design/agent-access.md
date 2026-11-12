@@ -236,15 +236,17 @@ are cancelled through the remote request registry, as device revocation does.
 Turns already running keep running, since they are the person's threads; the
 revoke dialog offers **Also stop its running turns**.
 
-A grant that narrows narrows the agent's existing threads too. A thread the
-agent started stays in scope only while its mode and Project are still in the
-grant, and the agent may start a turn or send an answer only on a thread whose
-current access is within the grant's highest level (never the Full access
-sandbox); otherwise the turn is refused, and the person can lower the thread's
-access. Every prompt and answer an agent sends marks its thread as outside
-content before it is sent, and nothing is sent when the mark cannot be
+A grant that narrows narrows the agent's existing threads too. Every thread in
+reach, whether the agent started it or the person did in a granted Project, is
+in scope only while its mode and Project are in the grant. The agent may start
+a turn or send an answer only on a thread whose current access is within the
+grant's highest level (never the Full access sandbox) and whose current model
+is one the grant includes; otherwise the turn is refused, and the person can
+change the thread. Every prompt and answer an agent sends marks its thread as
+outside content before it is sent, and nothing is sent when the mark cannot be
 recorded. The running-turn limit counts turns still starting, so turns started
-at the same moment cannot pass it together.
+at the same moment cannot pass it together, and counts turns on every thread
+the agent ran one on, not only the threads it started.
 
 ### Journal
 

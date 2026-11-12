@@ -32,7 +32,13 @@ export const AGENT_ACCESS_ORIGIN = "octant-agent-access";
 export interface AgentSessionDependencies {
   readonly service: Pick<
     AgentAccessService,
-    "threadOwner" | "recordThreadStarted" | "threadsOf" | "takeTurn" | "holdTurnStart"
+    | "threadOwner"
+    | "recordThreadStarted"
+    | "threadsOf"
+    | "takeTurn"
+    | "holdTurnStart"
+    | "noteTurnThread"
+    | "turnThreadsOf"
   >;
   readonly dispatch: (
     handoff: AuthenticatedProductDispatchHandoff,
@@ -55,15 +61,22 @@ export interface AgentSessionDependencies {
   readonly markOutsideContent: (threadId: string, grant: AgentGrant) => void;
 }
 
+/** What a thread is and runs on now: its mode (`kind`), model, and access. */
 export type AgentThreadAccess =
   | {
       readonly kind: "code";
+      readonly modelId: string;
       readonly executionPolicy: string;
       readonly autoApprove: boolean;
       readonly fullAccessSandbox: boolean;
     }
-  | { readonly kind: "work"; readonly access: string; readonly fullAccessSandbox: boolean }
-  | { readonly kind: "chat" };
+  | {
+      readonly kind: "work";
+      readonly modelId: string;
+      readonly access: string;
+      readonly fullAccessSandbox: boolean;
+    }
+  | { readonly kind: "chat"; readonly modelId: string };
 
 /**
  * The in-process session an outside agent's tool calls run in. Every request
@@ -137,6 +150,9 @@ export function createAgentSession(input: {
       if (response === undefined) return refusal(404, "Octant does not offer that here.");
       const text = await response.text().catch(() => "");
       const parsed = parseJson(text);
+      if (response.ok && checked.marksThread !== undefined && checked.turnMode !== undefined) {
+        deps.service.noteTurnThread(String(grant.grantId), checked.marksThread, checked.turnMode);
+      }
       if (response.ok && checked.recordsThread !== undefined) {
         const threadId = checked.recordsThread.threadId ?? createdThreadId(parsed);
         if (threadId !== undefined) {
@@ -160,7 +176,7 @@ export function createAgentSession(input: {
 /** The tool policy that matches the guard, so refusals come before any request. */
 export function agentToolPolicy(
   grant: AgentGrant,
-  deps: Pick<AgentSessionDependencies, "service" | "threadProject">,
+  deps: Pick<AgentSessionDependencies, "service" | "threadProject" | "threadAccess">,
 ): AgentToolPolicy {
   return {
     tools: new Set(grant.scope.tools),
@@ -178,9 +194,18 @@ export function agentToolPolicy(
         return { kind: "refused" as const, message };
       };
       let running = hold.startingAlready;
+      // Threads it started and threads it sent turns to (a Project thread the
+      // person made counts as soon as the agent runs a turn there).
+      const threads = new Map<string, AgentGrantMode>();
       for (const thread of deps.service.threadsOf(String(grant.grantId)).slice(0, 20)) {
+        threads.set(thread.threadId, thread.mode);
+      }
+      for (const thread of deps.service.turnThreadsOf(String(grant.grantId))) {
+        threads.set(thread.threadId, thread.mode);
+      }
+      for (const [threadId, mode] of threads) {
         if (running >= grant.scope.limits.runningTurns) break;
-        const snapshot = await agentThreadPort(session, thread.mode, thread.threadId)
+        const snapshot = await agentThreadPort(session, mode, threadId)
           .read()
           .catch(() => undefined);
         if (isAgentSnapshotRunning(snapshot)) running += 1;
@@ -208,6 +233,8 @@ type GuardResult =
       };
       /** A prompt or answer for an existing thread: mark it before sending. */
       readonly marksThread?: string;
+      /** The marked thread's mode, so a turn the agent starts there counts toward its limit. */
+      readonly turnMode?: AgentGrantMode;
     }
   | { readonly kind: "refused"; readonly message: string };
 
@@ -253,12 +280,16 @@ export function guardAgentRequest(input: {
     if (typeof threadId !== "string" || !inScope(threadId)) {
       return refused("That thread is not in this agent's grant.");
     }
-    if (!withinCeiling(grant, deps.threadAccess(threadId))) {
+    const access = deps.threadAccess(threadId);
+    if (!withinCeiling(grant, access)) {
       return refused(
         `That thread runs above this agent's grant, which now allows at most ${grant.scope.highestLevel}; the person can lower the thread's access in Octant.`,
       );
     }
-    return { kind: "allowed", marksThread: threadId };
+    if (access === undefined || !modelAllowed(grant, access.modelId)) {
+      return refused("That thread runs on a model this agent's grant does not include.");
+    }
+    return { kind: "allowed", marksThread: threadId, turnMode: access.kind };
   };
   const body = (request.body ?? {}) as Readonly<Record<string, unknown>>;
 
@@ -427,18 +458,20 @@ function guardStopRequest(input: {
 function threadInScope(
   grant: AgentGrant,
   threadId: string,
-  deps: Pick<AgentSessionDependencies, "service" | "threadProject">,
+  deps: Pick<AgentSessionDependencies, "service" | "threadProject" | "threadAccess">,
 ): boolean {
   const owner = deps.service.threadOwner(threadId);
   if (owner !== undefined && owner.grantId !== String(grant.grantId)) return false;
   if (owner === undefined && grant.scope.threads !== "project") return false;
-  // A thread the agent started stays inside the grant as it reads now: taking
-  // a Project or a mode out of the grant takes that thread out too.
-  if (owner !== undefined && !grant.scope.modes.includes(owner.mode)) return false;
+  // Every thread is held to the grant as it reads now, the agent's own
+  // included: its mode must be one the grant names, and taking a Project or a
+  // mode out of the grant takes those threads out too.
+  const mode = deps.threadAccess(threadId)?.kind ?? owner?.mode;
+  if (mode === undefined || !grant.scope.modes.includes(mode)) return false;
   const project = deps.threadProject(threadId);
   if (project === undefined) return false;
   return project.projectId === undefined
-    ? owner?.mode === "chat"
+    ? owner !== undefined && mode === "chat"
     : projectAllowed(grant, project.projectId);
 }
 

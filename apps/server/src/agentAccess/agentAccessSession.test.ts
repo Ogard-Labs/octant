@@ -46,9 +46,12 @@ function grant(overrides: Partial<AgentGrantScope> = {}): AgentGrant {
 }
 
 const autoThread = "30000000-0000-4000-8000-000000000004";
+const chatThread = "30000000-0000-4000-8000-000000000005";
+const otherModelThread = "30000000-0000-4000-8000-000000000006";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
+  const turned: Array<{ threadId: string; mode: string }> = [];
   let starting = 0;
   const service: AgentSessionDependencies["service"] = {
     threadOwner: (threadId: string) =>
@@ -60,6 +63,10 @@ function deps() {
     },
     threadsOf: () => [],
     takeTurn: () => true,
+    noteTurnThread: (_grantId, threadId, mode) => {
+      turned.push({ threadId, mode });
+    },
+    turnThreadsOf: () => [],
     holdTurnStart: () => {
       const startingAlready = starting;
       starting += 1;
@@ -67,29 +74,35 @@ function deps() {
     },
   };
   const threadProject = (threadId: string) =>
-    threadId === projectThread || threadId === ownThread || threadId === autoThread
+    threadId === projectThread ||
+    threadId === ownThread ||
+    threadId === autoThread ||
+    threadId === chatThread ||
+    threadId === otherModelThread
       ? { projectId: granted }
       : threadId === strangerThread
         ? { projectId: other }
         : undefined;
-  // The agent's own thread at Ask first, another it made at Auto.
+  // The agent's own thread at Ask first, another it made at Auto, the
+  // person's Chat thread in the granted Project, and a thread on another model.
+  const askFirst = {
+    kind: "code" as const,
+    modelId: "fake-model",
+    executionPolicy: "approval-gated",
+    autoApprove: false,
+    fullAccessSandbox: false,
+  };
   const threadAccess = (threadId: string): AgentThreadAccess | undefined =>
     threadId === strangerThread || threadId === projectThread || threadId === ownThread
-      ? {
-          kind: "code",
-          executionPolicy: "approval-gated",
-          autoApprove: false,
-          fullAccessSandbox: false,
-        }
+      ? askFirst
       : threadId === autoThread
-        ? {
-            kind: "code",
-            executionPolicy: "approval-gated",
-            autoApprove: true,
-            fullAccessSandbox: false,
-          }
-        : undefined;
-  return { service, threadProject, threadAccess, recorded };
+        ? { ...askFirst, autoApprove: true }
+        : threadId === chatThread
+          ? { kind: "chat", modelId: "fake-model" }
+          : threadId === otherModelThread
+            ? { ...askFirst, modelId: "other-model" }
+            : undefined;
+  return { service, threadProject, threadAccess, recorded, turned };
 }
 
 const guard = (
@@ -345,10 +358,10 @@ describe("prompts an outside agent sends", () => {
 
 describe("the running-turn limit", () => {
   it("counts a turn that is still starting, so two started at once cannot both pass a limit of one", async () => {
-    const { service, threadProject } = deps();
+    const { service, threadProject, threadAccess } = deps();
     const policy = agentToolPolicy(
       grant({ limits: { ...DEFAULT_AGENT_GRANT_LIMITS, runningTurns: 1 } }),
-      { service, threadProject },
+      { service, threadProject, threadAccess },
     );
     const session = {} as Parameters<typeof policy.beforeTurn>[0];
     const [first, second] = await Promise.all([
@@ -359,5 +372,49 @@ describe("the running-turn limit", () => {
     if (first.kind === "admitted") first.release();
     if (second.kind === "admitted") second.release();
     expect((await policy.beforeTurn(session)).kind).toBe("admitted");
+  });
+});
+
+describe("threads the person made in a granted Project", () => {
+  it("are out of reach in a mode the grant does not name", () => {
+    const read = { path: `/api/chat/threads/${chatThread}`, method: "GET" as const };
+    expect(guard(read, { threads: "project" })).toBe("refused");
+    expect(guard(read, { threads: "project", modes: ["code", "work", "chat"] })).toBe("allowed");
+  });
+
+  it("take no prompt on a model the grant does not include", () => {
+    const send = (threadId: string) =>
+      guard(
+        {
+          path: "/api/code/commands",
+          method: "POST",
+          body: { kind: "start-provider-turn", threadId },
+        },
+        { threads: "project", models: ["fake-model"] },
+      );
+    expect(send(projectThread)).toBe("allowed");
+    expect(send(otherModelThread)).toBe("refused");
+  });
+
+  it("count toward the running-turn limit once the agent runs a turn there", async () => {
+    const { service, threadProject, threadAccess, turned } = deps();
+    const session = createAgentSession({
+      grant: grant({ threads: "project" }),
+      signal: new AbortController().signal,
+      deps: {
+        service,
+        threadProject,
+        threadAccess,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent: () => undefined,
+        dispatch: async () => Response.json({}),
+      },
+    });
+    await session.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", threadId: projectThread },
+    });
+    expect(turned).toEqual([{ threadId: projectThread, mode: "code" }]);
   });
 });

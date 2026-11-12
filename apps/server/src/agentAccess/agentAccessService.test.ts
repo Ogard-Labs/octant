@@ -235,6 +235,16 @@ describe("agent grants", () => {
     expect(service.holdTurnStart("g").startingAlready).toBe(0);
   });
 
+  it("remembers the newest threads an agent ran turns on, at most twenty", () => {
+    const { service } = harness();
+    for (let index = 0; index < 22; index += 1) service.noteTurnThread("g", `t-${index}`, "code");
+    service.noteTurnThread("g", "t-5", "work");
+    const threads = service.turnThreadsOf("g");
+    expect(threads).toHaveLength(20);
+    expect(threads.at(-1)).toEqual({ threadId: "t-5", mode: "work" });
+    expect(threads.some((thread) => thread.threadId === "t-0")).toBe(false);
+  });
+
   it("refuses a grant for a Project that is not there, and one without the Project's mode", () => {
     const { service } = harness();
     const unknown = service.execute(

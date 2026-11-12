@@ -2027,9 +2027,8 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     threadAccess: (threadId) => {
       try {
-        if (persistence.readChatThread(decodeChatThreadId(threadId)) !== undefined) {
-          return { kind: "chat" };
-        }
+        const chat = persistence.readChatThread(decodeChatThreadId(threadId));
+        if (chat !== undefined) return { kind: "chat", modelId: String(chat.modelId) };
       } catch {
         // Not a Chat thread id; try the other modes.
       }
@@ -2038,6 +2037,7 @@ export function wireRemote(deps: RemoteDependencies) {
         if (code !== undefined) {
           return {
             kind: "code",
+            modelId: String(code.modelId),
             executionPolicy: code.executionPolicy,
             autoApprove: code.autoApprove === true,
             fullAccessSandbox: code.fullAccessSandbox === true,
@@ -2049,7 +2049,12 @@ export function wireRemote(deps: RemoteDependencies) {
       const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
       return work === undefined
         ? undefined
-        : { kind: "work", access: work.access, fullAccessSandbox: work.fullAccessSandbox === true };
+        : {
+            kind: "work",
+            modelId: String(work.modelId),
+            access: work.access,
+            fullAccessSandbox: work.fullAccessSandbox === true,
+          };
     },
     markOutsideContent: (threadId, grant) => {
       externalContentIngestionStore.record({
