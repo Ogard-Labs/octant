@@ -284,6 +284,8 @@ export const CANVAS_CHOICE_SCHEMA_VERSION = 27;
 // Version 28 adds a document's design system: the tokens its typed blocks
 // (charts, tables, metrics, diagrams) draw their colours from.
 export const CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION = 28;
+// A decision form: sections on a choice block and a per-question `allowNote`.
+export const CANVAS_DECISION_FORM_SCHEMA_VERSION = 29;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -2680,12 +2682,78 @@ export type CanvasDeckBlock = typeof CanvasDeckBlock.Type;
 
 export const CANVAS_MAX_CHOICE_PROMPT_LENGTH = 1_024;
 
+export const CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH = 256;
+export const CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH = 1_024;
+
+/** A titled group of a decision form's questions, in the order the form draws them. */
+export const CanvasChoiceSection = Schema.Struct({
+  id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  title: boundedNonEmptyText(CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH),
+  intro: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH)),
+  questionIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))).pipe(
+    Schema.minItems(1),
+  ),
+}).annotations(strict);
+export type CanvasChoiceSection = typeof CanvasChoiceSection.Type;
+
+/**
+ * Whether sections name every question exactly once and repeat no id. A form
+ * with sections is fully grouped: a question outside every section would have
+ * no place to draw, and one in two would draw twice.
+ */
+export function canvasChoiceSectionsPlaceEveryQuestion(
+  questions: ReadonlyArray<{ readonly id: string }>,
+  sections:
+    | ReadonlyArray<{ readonly id: string; readonly questionIds: ReadonlyArray<string> }>
+    | undefined,
+): boolean {
+  if (sections === undefined) return true;
+  const sectionIds = sections.map((section) => section.id);
+  if (new Set(sectionIds).size !== sectionIds.length) return false;
+  const placed = sections.flatMap((section) => section.questionIds);
+  const known = new Set(questions.map((question) => question.id));
+  return (
+    new Set(placed).size === placed.length &&
+    placed.length === known.size &&
+    placed.every((id) => known.has(id))
+  );
+}
+
+/** Whether a choice block carries a field only a decision form (schema version 29) has. */
+export function canvasChoiceUsesDecisionForm(block: {
+  readonly kind?: unknown;
+  readonly questions?: unknown;
+  readonly sections?: unknown;
+}): boolean {
+  return (
+    block.kind === "choice" &&
+    (block.sections !== undefined ||
+      (Array.isArray(block.questions) &&
+        block.questions.some(
+          (question: unknown) =>
+            typeof question === "object" &&
+            question !== null &&
+            Reflect.get(question, "allowNote") !== undefined,
+        )))
+  );
+}
+
 export const CanvasChoiceBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("choice"),
   prompt: boundedNonEmptyText(CANVAS_MAX_CHOICE_PROMPT_LENGTH),
   questions: CanvasChoiceQuestions,
-}).annotations(strict);
+  sections: Schema.optional(Schema.Array(CanvasChoiceSection).pipe(Schema.minItems(1))),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (block) => canvasChoiceSectionsPlaceEveryQuestion(block.questions, block.sections),
+      {
+        message: () => "A choice block's sections must place every question exactly once.",
+      },
+    ),
+  );
 export type CanvasChoiceBlock = typeof CanvasChoiceBlock.Type;
 
 /**
@@ -3178,6 +3246,11 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
     since: CANVAS_CHOICE_SCHEMA_VERSION,
     carries: ofKind("choice"),
     requirement: `A choice block requires Canvas schema version ${String(CANVAS_CHOICE_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DECISION_FORM_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasChoiceUsesDecisionForm),
+    requirement: `A choice block's sections and per-question notes require Canvas schema version ${String(CANVAS_DECISION_FORM_SCHEMA_VERSION)}.`,
   },
   {
     since: CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,

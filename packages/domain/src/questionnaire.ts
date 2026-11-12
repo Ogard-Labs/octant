@@ -62,21 +62,36 @@ function validateAnswer(
     return invalid;
   for (const question of questionnaire.questions) {
     const answer = response.answers.find((entry) => entry.questionId === question.id);
-    if (answer === undefined) return invalid;
-    const selected = answer.selectedOptionIds;
-    if (
-      new Set(selected).size !== selected.length ||
-      selected.some((id) => !question.options.some((option) => option.id === id))
-    )
-      return invalid;
-    if (answer.customAnswer !== undefined) {
-      if (question.allowCustom === false || selected.length !== 0) return invalid;
-    } else if (
-      selected.length < (question.minSelections ?? 1) ||
-      selected.length >
-        (question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length))
-    )
-      return invalid;
+    if (answer === undefined || !questionAnswerIsAllowed(question, answer)) return invalid;
   }
   return { status: "valid", response };
+}
+
+/**
+ * Whether one answer obeys its question's own rule: only offered options, each
+ * once, at least `minSelections` (default one) and at most `maxSelections`, and
+ * a written answer only where the question allows one, standing in for every
+ * selection. The inline questionnaire and a Canvas decision form share it.
+ */
+export function questionAnswerIsAllowed(
+  question: Questionnaire["questions"][number],
+  answer: {
+    readonly selectedOptionIds: ReadonlyArray<string>;
+    readonly customAnswer?: string | undefined;
+  },
+): boolean {
+  const selected = answer.selectedOptionIds;
+  if (
+    new Set(selected).size !== selected.length ||
+    selected.some((id) => !question.options.some((option) => option.id === id))
+  )
+    return false;
+  if (answer.customAnswer !== undefined) {
+    return question.allowCustom !== false && selected.length === 0;
+  }
+  return (
+    selected.length >= (question.minSelections ?? 1) &&
+    selected.length <=
+      (question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length))
+  );
 }

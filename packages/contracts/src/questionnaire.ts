@@ -14,8 +14,7 @@ const Option = Schema.Struct({
   description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   recommended: Schema.optional(Schema.Boolean),
 }).annotations(strict);
-/** One question, shared by the `ask-user` questionnaire and a Canvas choice block. */
-export const QuestionnaireQuestion = Schema.Struct({
+const questionFields = {
   id: Id,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
   selection: Schema.Literal("single", "multiple"),
@@ -23,21 +22,45 @@ export const QuestionnaireQuestion = Schema.Struct({
   minSelections: Schema.optional(ChoiceCount),
   maxSelections: Schema.optional(ChoiceCount),
   allowCustom: Schema.optional(Schema.Boolean),
+};
+
+/** The selection limits and distinct options every question keeps, inline or on a Canvas. */
+const questionHoldsItsLimits = (question: {
+  readonly selection: "single" | "multiple";
+  readonly options: ReadonlyArray<{ readonly id: string }>;
+  readonly minSelections?: number | undefined;
+  readonly maxSelections?: number | undefined;
+}): boolean => {
+  const min = question.minSelections ?? 1;
+  const max =
+    question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length);
+  return (
+    new Set(question.options.map((option) => option.id)).size === question.options.length &&
+    min <= max &&
+    max <= question.options.length &&
+    (question.selection !== "single" || max === 1)
+  );
+};
+
+/** One question of the inline `ask-user` questionnaire. */
+export const QuestionnaireQuestion = Schema.Struct(questionFields)
+  .annotations(strict)
+  .pipe(Schema.filter(questionHoldsItsLimits));
+
+/** At most this long a note may be, on a Canvas question that takes one. */
+export const MAX_CANVAS_CHOICE_NOTE_LENGTH = 2_000;
+
+/**
+ * One question of a Canvas choice block: the inline question plus `allowNote`,
+ * which a Canvas form offers and an inline card does not.
+ */
+export const CanvasChoiceQuestion = Schema.Struct({
+  ...questionFields,
+  allowNote: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
-  .pipe(
-    Schema.filter((question) => {
-      const min = question.minSelections ?? 1;
-      const max =
-        question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length);
-      return (
-        new Set(question.options.map((option) => option.id)).size === question.options.length &&
-        min <= max &&
-        max <= question.options.length &&
-        (question.selection !== "single" || max === 1)
-      );
-    }),
-  );
+  .pipe(Schema.filter(questionHoldsItsLimits));
+export type CanvasChoiceQuestion = typeof CanvasChoiceQuestion.Type;
 
 export type QuestionnaireQuestion = typeof QuestionnaireQuestion.Type;
 export const MAX_QUESTIONNAIRE_QUESTIONS = 4;
@@ -48,7 +71,7 @@ export const MAX_QUESTIONNAIRE_QUESTIONS = 4;
  * Only the inline questionnaire, which interrupts a conversation, stays at
  * {@link MAX_QUESTIONNAIRE_QUESTIONS}.
  */
-export const CanvasChoiceQuestions = Schema.Array(QuestionnaireQuestion).pipe(
+export const CanvasChoiceQuestions = Schema.Array(CanvasChoiceQuestion).pipe(
   Schema.minItems(1),
   Schema.filter(
     (questions) => new Set(questions.map((question) => question.id)).size === questions.length,
