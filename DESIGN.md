@@ -1971,9 +1971,10 @@ rule:
   24px (`--oct-tray-segment-h`) inside 2px of padding, so every tray is 28px:
   the mode switch in the sidebar's header, the thread-list switch under it and
   the composer's Work and Code switch alike. A tray's inner corner stays the
-  tray's corner less its padding, never under 2px. The icon rail's button is its
-  32px face, with no border and no negative margin to give one back, and the
-  account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
+  tray's corner less its padding, never under 2px. The icon rail's button takes
+  its face's 32px in the column (its transparent 1px border is given back with
+  a 1px margin: switching the border off is a repaint of the shared button that
+  the UI check refuses), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
 - _The account row's avatar and the Projects toolbar's folder sit on the icon
   column._ The 20px avatar is centred on the centre line of the 16px navigation
   icons (the 12px inset plus half an icon), not left-aligned with them, and the

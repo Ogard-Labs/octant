@@ -66,15 +66,11 @@ describe("the shell's edges and gaps", () => {
   });
 
   it("makes each rail button its 32px face, and centres the first face on the title rail", () => {
-    // The recipe's 1px border is switched off instead of given back with a
-    // negative margin, so the button, its face and the column all measure 32px.
-    for (const body of [
-      rule(shell, ".sidebar-rail__button"),
-      rule(usage, ".rail-usage__ring"),
-    ]) {
-      expect(body).toMatch(/border-width:\s*0;/);
-      expect(body).not.toMatch(/margin:\s*-/);
-    }
+    // The recipe's 1px border is given back with the margin: switching it off
+    // (border-width: 0) is a repaint of the shared button that the UI check
+    // refuses, so the 34px box takes 32px in the column.
+    expect(rule(shell, ".sidebar-rail__button")).toMatch(/margin:\s*-1px;/);
+    expect(rule(usage, ".rail-usage__ring")).toMatch(/margin:\s*-1px;/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(
       /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 32px\) \/ 2\)/,
@@ -142,7 +138,9 @@ describe("the shell's edges and gaps", () => {
     // so its centre is the same 20px in from the row's start.
     expect(octant).toMatch(/--oct-nav-inset:\s*12px;/);
     expect(octant).toMatch(/--oct-icon-md:\s*16px;/);
-    expect(rule(root, ".sidebar-profile .sidebar-item")).toMatch(/\(20px - var\(--oct-icon-md\)\) \/ 2/);
+    expect(rule(root, ".sidebar-profile .sidebar-item")).toMatch(
+      /\(20px - var\(--oct-icon-md\)\) \/ 2/,
+    );
   });
 
   it("makes every control height one of 24, 28, 32 and 44: tray segments, the rail's faces and the account row", () => {
@@ -162,7 +160,9 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".modeswitch .modeswitch__tray > .mode")).toMatch(
       /border-radius:\s*max\(2px, calc\(var\(--oct-radius-sm\) - 2px\)\)/,
     );
-    expect(rule(octant, ".segment")).toMatch(/border-radius:\s*max\(2px, calc\(var\(--oct-radius-sm\) - 2px\)\)/);
+    expect(rule(octant, ".segment")).toMatch(
+      /border-radius:\s*max\(2px, calc\(var\(--oct-radius-sm\) - 2px\)\)/,
+    );
   });
 
   it("centres the Project views' first button on the icon column, so its folder shares the rows' centre line", () => {
@@ -188,7 +188,9 @@ describe("the shell's edges and gaps", () => {
       /@media \(max-width: 680px\) \{\s*:root \{\s*--oct-thread-gutter:\s*0px;/,
     );
     // The panel the column sits in is padded 20px at that width already.
-    expect(root).toMatch(/@media \(max-width: 680px\)[\s\S]*?\.workspace-pane__panel \{\s*padding:\s*24px var\(--oct-space-5\);/);
+    expect(root).toMatch(
+      /@media \(max-width: 680px\)[\s\S]*?\.workspace-pane__panel \{\s*padding:\s*24px var\(--oct-space-5\);/,
+    );
     for (const sheet of everyStylesheet) {
       expect(sheet).not.toMatch(/min\(100% - 40px, var\(--oct-(thread-measure|composer-width)\)\)/);
     }
@@ -227,7 +229,9 @@ describe("the shell's edges and gaps", () => {
     expect(settings).toMatch(
       /\.settings-view__workspace-titlebar \{[^}]*padding:\s*0 var\(--oct-settings-gutter\);/,
     );
-    expect(settings).not.toMatch(/settings-view--sheet \.settings-view__workspace-titlebar \{\s*padding-inline-end/);
+    expect(settings).not.toMatch(
+      /settings-view--sheet \.settings-view__workspace-titlebar \{\s*padding-inline-end/,
+    );
   });
 
   it("leaves 12px under a Settings label and 12px under its note, in whole pixels", () => {
@@ -246,10 +250,12 @@ describe("the shell's edges and gaps", () => {
     expect(rule(components, ".turn-activity__disclosure + .turn-activity__disclosure")).toContain(
       "1px solid var(--oct-hairline)",
     );
-    expect(rule(components, ".turn-activity__toolchain > .turn-activity__disclosure:first-child")).toContain(
-      "1px solid var(--oct-hairline)",
+    expect(
+      rule(components, ".turn-activity__toolchain > .turn-activity__disclosure:first-child"),
+    ).toContain("1px solid var(--oct-hairline)");
+    expect(rule(shell, ".sidebar-rail__badge")).toMatch(
+      /border:\s*1px solid var\(--oct-hairline\)/,
     );
-    expect(rule(shell, ".sidebar-rail__badge")).toMatch(/border:\s*1px solid var\(--oct-hairline\)/);
     expect(rule(shell, ".sidebar-rail__divider")).toMatch(/background:\s*var\(--oct-hairline\)/);
     // A reasoning rule is a hairline, not a 2px quote bar.
     expect(rule(octant, ".thinking")).toMatch(/border-left:\s*1px solid var\(--oct-hairline\)/);

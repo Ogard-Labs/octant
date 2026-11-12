@@ -627,7 +627,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     : "Drag to move or split"
                 }
               >
-                {showTabs ? <>{gripMark}{pullRequestChip}</> : null}
+                {showTabs ? (
+                  <>
+                    {gripMark}
+                    {pullRequestChip}
+                  </>
+                ) : null}
                 {/* A breadcrumb: the Project the pane runs in, then what it
                     shows. With tabs open the bar is tabs alone: a Project name
                     ahead of them read as a tab of its own, so it moves to the

@@ -62,7 +62,9 @@ describe("the composer's columns", () => {
     // at 390, 430 and 680 as on the start screen, not 40.
     expect(rule(".composer.thread-composer")).toContain("min(100% - var(--oct-thread-gutter)");
     expect(rule(".thread-column")).toContain("min(100% - var(--oct-thread-gutter)");
-    expect(styles).toMatch(/@media \(max-width: 680px\) \{\s*:root \{\s*--oct-thread-gutter:\s*0px;/);
+    expect(styles).toMatch(
+      /@media \(max-width: 680px\) \{\s*:root \{\s*--oct-thread-gutter:\s*0px;/,
+    );
     // Wider layouts keep the 20px each side the column always had.
     expect(styles).toMatch(/--oct-thread-gutter:\s*40px;/);
   });
