@@ -13,6 +13,13 @@
 // behind a loopback connection, and the secret binds the caller to the host's
 // OS user.
 //
+// A device the host's own person paired is that person (maintainer decision,
+// 2026-11-12), so it reaches the status, set, remove and key-pool routes under
+// `/api/providers/credentials/`, over its authenticated session, and the
+// journal names the device. Those paths answer nobody else: a hub-introduced
+// device, an unproved pairing, a local window and the bridge secret are all
+// refused there. Removing a provider together with its key stays secret-only.
+//
 // A native Octant Nightly main reaches the status, set, remove and key-pool
 // routes with its own window's capability and main-only token instead of the
 // secret (see desktopBrokerAdmission). Removing a provider stays secret-only.
@@ -24,7 +31,7 @@
 // its next start (see providerKeyJournal).
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
+import type { EventActor, ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
 import {
   addApiKey,
   ApiKeyPoolError,
@@ -37,7 +44,10 @@ import {
   setActiveApiKey,
   type CredentialStoreFailureCause,
 } from "@octant/host-runtime";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { readPrincipalRouteContext } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderCredentialStore, ProviderKeyReference } from "./credentialBrokerClient";
@@ -69,6 +79,27 @@ export const PROVIDER_API_KEY_ROUTES: ReadonlyArray<string> = [
 ];
 
 type Route = (typeof ROUTES)[keyof typeof ROUTES];
+
+const DESKTOP_ROUTE_PREFIX = "/api/desktop/provider-credentials/";
+const PAIRED_DEVICE_ROUTE_PREFIX = "/api/providers/credentials/";
+
+/**
+ * The routes a device the host's own person paired reaches, each under
+ * `/api/providers/credentials/` in place of the desktop bridge's prefix. The
+ * private listener forwards exactly these paths.
+ */
+export const PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS: ReadonlyArray<string> = [
+  ROUTES.status,
+  ROUTES.set,
+  ROUTES.remove,
+  ...PROVIDER_API_KEY_ROUTES,
+].map((route) => `${PAIRED_DEVICE_ROUTE_PREFIX}${route.slice(DESKTOP_ROUTE_PREFIX.length)}`);
+
+function pairedDeviceRoute(pathname: string): Route | undefined {
+  if (!PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS.includes(pathname)) return undefined;
+  const route = `${DESKTOP_ROUTE_PREFIX}${pathname.slice(PAIRED_DEVICE_ROUTE_PREFIX.length)}`;
+  return Object.values(ROUTES).find((candidate) => candidate === route);
+}
 
 /** The broker's own bound; a larger value is refused before it is sent. */
 export const MAX_PROVIDER_KEY_BYTES = 12 * 1_024;
@@ -167,33 +198,53 @@ export function createProviderCredentialRouteHandler(
 
   return async (request) => {
     const url = new URL(request.url);
-    if (!Object.values(ROUTES).includes(url.pathname as Route)) return undefined;
-    const route = url.pathname as Route;
+    const deviceRoute = pairedDeviceRoute(url.pathname);
+    if (deviceRoute === undefined && !Object.values(ROUTES).includes(url.pathname as Route)) {
+      return undefined;
+    }
+    const route = deviceRoute ?? (url.pathname as Route);
 
-    const admission = admitDesktopBroker({
-      request,
-      desktopBridgeSecret: options.desktopBridgeSecret,
-      windowAuthorityStore: options.windowAuthorityStore,
-      now: now(),
-    });
-    if (
-      options.desktopBridgeSecret === undefined ||
-      !isLoopbackHostname(url.hostname) ||
-      admission.status !== "admitted"
-    ) {
-      return refuse("unauthorized");
-    }
     let windowId: WindowId;
-    try {
-      windowId = options.windowAuthorityStore.authenticate(
-        request.headers.get("x-octant-window-capability") ?? "",
-        now(),
-      );
-    } catch (error) {
-      if (error instanceof WindowAuthorityError) return refuse("unauthorized");
-      throw error;
+    let actor: EventActor | undefined;
+    if (deviceRoute !== undefined) {
+      // The bound principal is the whole authority here: the product dispatch
+      // set it from the device's verified session, and no header or body field
+      // of the request can stand in for it.
+      const context = readPrincipalRouteContext(request);
+      if (
+        context === undefined ||
+        context.principal.kind !== "remote-device" ||
+        !principalActsAsHostPerson(context.principal)
+      ) {
+        return refuse("unauthorized");
+      }
+      windowId = context.scopeId;
+      actor = eventActorForPrincipal(context.principal);
+    } else {
+      const admission = admitDesktopBroker({
+        request,
+        desktopBridgeSecret: options.desktopBridgeSecret,
+        windowAuthorityStore: options.windowAuthorityStore,
+        now: now(),
+      });
+      if (
+        options.desktopBridgeSecret === undefined ||
+        !isLoopbackHostname(url.hostname) ||
+        admission.status !== "admitted"
+      ) {
+        return refuse("unauthorized");
+      }
+      try {
+        windowId = options.windowAuthorityStore.authenticate(
+          request.headers.get("x-octant-window-capability") ?? "",
+          now(),
+        );
+      } catch (error) {
+        if (error instanceof WindowAuthorityError) return refuse("unauthorized");
+        throw error;
+      }
+      if (!admitsWindow(admission, windowId)) return refuse("unauthorized");
     }
-    if (!admitsWindow(admission, windowId)) return refuse("unauthorized");
     if (request.method !== "POST" || url.search !== "") return refuse("invalid");
     if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
       return refuse("invalid");
@@ -206,7 +257,9 @@ export function createProviderCredentialRouteHandler(
       if (keyRequest === undefined) return refuse("invalid");
       if (keyRequest === "too-large") return refuse("too-large");
       if (credentialsForPool === undefined) return refuse("credential-store-unavailable");
-      return serialized(() => changeApiKeys(keyRequest, windowId, credentialsForPool, options));
+      return serialized(() =>
+        changeApiKeys(keyRequest, windowId, actor, credentialsForPool, options),
+      );
     }
     const decoded = decodeRequest(route, body.value);
     if (decoded === undefined) return refuse("invalid");
@@ -248,6 +301,7 @@ export function createProviderCredentialRouteHandler(
             action,
             instanceVersion: target.kind === "existing" ? target.instance.version : 0,
             windowId,
+            ...(actor === undefined ? {} : { actor }),
           });
         } catch {
           return undefined;
@@ -446,7 +500,8 @@ function answer(
 }
 
 const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
-  unauthorized: "Provider keys can be changed only by the host-local octant command.",
+  unauthorized:
+    "Provider keys can be changed only at this computer or from a device its person paired.",
   invalid: "The provider key request is invalid.",
   "too-large": "The key is larger than the credential store accepts.",
   "not-found": "No provider has that id or name.",
@@ -601,6 +656,7 @@ function decodeKeyRequest(route: Route, value: unknown): KeyRequest | "too-large
 async function changeApiKeys(
   request: KeyRequest,
   windowId: WindowId,
+  actor: EventActor | undefined,
   credentials: NonNullable<ProviderCredentialRouteOptions["credentials"]>,
   options: ProviderCredentialRouteOptions,
 ): Promise<Response> {
@@ -647,6 +703,7 @@ async function changeApiKeys(
         action: next === undefined ? "remove" : "set",
         instanceVersion: target.instance.version,
         windowId,
+        ...(actor === undefined ? {} : { actor }),
       });
     } catch {
       return refuse("journal-unavailable");

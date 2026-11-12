@@ -33,6 +33,8 @@ export type RoutesDependencies = {
   /** Agent grant reads and revoke; answers nothing until the remote wiring binds it. */
   readonly agentGrantRoutes: (request: Request) => Promise<Response | undefined>;
   readonly conversationInputRoutes: (request: Request) => Promise<Response | undefined>;
+  /** The remote wiring's routes a paired device reaches; answers nothing until that wiring binds them. */
+  readonly pairedDeviceRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
   readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
@@ -159,6 +161,7 @@ export type RoutesDependencies = {
 export function wireRoutes(deps: RoutesDependencies) {
   const {
     agentGrantRoutes,
+    pairedDeviceRoutes,
     conversationInputRoutes,
     credentialRequestRoutes,
     providerCloudSessionRoutes,
@@ -278,6 +281,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   // gives this chain a loopback-shaped internal request; individual handlers
   // resolve the bound context through principalRouteContext before effects.
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
+    (await pairedDeviceRoutes(request)) ??
     (await nativeBrowserPresentationRoutes(request)) ??
     (await hostResourceRoutes(request)) ??
     (await conversationInputRoutes(request)) ??

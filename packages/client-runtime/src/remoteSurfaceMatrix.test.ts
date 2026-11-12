@@ -119,6 +119,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "approvals",
       "extension-install",
       "provider-setup",
+      "provider-credentials",
     ]);
   });
 
@@ -127,7 +128,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       listRemoteShellSurfacesByAvailability("local-host-only", hostPerson).map(
         (surface) => surface.id,
       ),
-    ).toEqual(["provider-credentials", "listener-controls", "host-controls"]);
+    ).toEqual(["listener-controls", "host-controls"]);
   });
 
   it("holds a restricted session to the catalogue, as a session that says nothing is held", () => {

@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
+import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -102,11 +103,12 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/extensions/sign-in",
   "/api/extensions/connections",
   "/api/extensions/discovered",
-  // Provider administration and sign-in start. A key itself still reaches the
-  // credential broker only through the desktop bridge.
+  // Provider administration and sign-in start, and a provider key on its way
+  // to the credential broker: stored, replaced or cleared, never read back.
   "/api/providers/commands",
   "/api/providers/thread-native-setup",
   "/api/providers/oauth",
+  ...PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS,
   // Reviewing what a thread read and clearing its outside-content mark.
   "/api/thread-external-content",
   "/api/terminal-sessions/list",

@@ -14611,6 +14611,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
     routes. Key-pool routes under `keys/` (list, add, rename, replace,
     remove, set active, move) serve Octant Nightly's Settings the same way
     and answer only labels; the command line does not use them yet.
+  - **A paired device.** A device the host's own person paired is that
+    person (maintainer decision, 2026-11-12), so it reaches the same status,
+    set, remove and key-pool routes under `/api/providers/credentials/`,
+    over its authenticated session and nothing else: the routes take the
+    device from the session the listener verified, never from a header or the
+    body, and refuse a hub-introduced device, an unproved pairing, an agent
+    grant, a local window and the bridge secret alike. The same rules hold:
+    the key goes to the broker and nowhere else, the answers are the same
+    words and labels, the host keeps no copy of the request body, and the
+    journaled request and outcome name the device. Removing a provider
+    together with its key is not offered on these routes.
   - **Not the browser.** The loopback browser client cannot save a key, even
     on the host itself. The host cannot tell who is behind a loopback
     connection: the local session (`/api/shell/local-session`) is granted to

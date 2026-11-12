@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
+import { classifyProductAction } from "./authenticatedProductRoutes";
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
@@ -852,6 +853,45 @@ describe("remote route policy", () => {
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    for (const path of ["set", "status", "remove", "keys/list", "keys/add", "keys/replace"]) {
+      expect(inspect(`/api/providers/credentials/${path}`, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(`/api/providers/credentials/${path}`, "GET")).toMatchObject({
+        kind: "reject",
+      });
+      // No catalogued action, so the product dispatch refuses every session
+      // but a device the host's own person paired.
+      expect(
+        classifyProductAction(
+          new Request(`${origin}/api/providers/credentials/${path}`, { method: "POST" }),
+        ),
+      ).toBeUndefined();
+    }
+    expect(inspect("/api/providers/credentials/remove-provider", "POST")).toMatchObject({
+      kind: "reject",
+    });
+    expect(inspect("/api/desktop/provider-credentials/set", "POST")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
   });
 
   it("admits a paired device's reply detail read and nothing that could change it", () => {
