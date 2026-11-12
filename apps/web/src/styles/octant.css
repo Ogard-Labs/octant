@@ -457,12 +457,6 @@ button {
 p {
   text-wrap: pretty;
 }
-h1,
-h2,
-h3,
-h4 {
-  text-wrap: balance;
-}
 /* Keyboard focus draws one neutral edge, declared here and nowhere else. A
    focus fill alone was the hover fill, so a keyboard user could not tell the
    control they were on from the one under the pointer (WCAG 2.4.7). The edge
@@ -658,8 +652,7 @@ html {
 }
 
 /* ─── type ──────────────────────────────────────────────────────────── */
-.h1,
-h1 {
+.h1 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-fs-h1);
   line-height: var(--oct-leading-tight);
@@ -667,8 +660,7 @@ h1 {
   margin: 0;
   font-weight: var(--oct-weight-display);
 }
-.h2,
-h2 {
+.h2 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-fs-h2);
   line-height: var(--oct-leading-heading);
@@ -676,8 +668,7 @@ h2 {
   margin: 0;
   font-weight: var(--oct-weight-display);
 }
-.h3,
-h3 {
+.h3 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
@@ -685,14 +676,58 @@ h3 {
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
 }
-.h4,
-h4 {
+.h4 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
   font-weight: var(--oct-weight-display);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
+}
+/* The page's own heading look is a base default for reading content, so it
+   lives in the base layer: an unlayered bare-element rule beats every Tailwind
+   utility, which drew a card's title (text-base) at the h2 size, 44px, and a
+   popover's title the same. A heading a recipe sizes takes the recipe's size;
+   a bare heading with no class of its own still takes these. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  h1 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-fs-h1);
+    line-height: var(--oct-leading-tight);
+    letter-spacing: var(--oct-tracking-tight);
+    margin: 0;
+    font-weight: var(--oct-weight-display);
+  }
+  h2 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-fs-h2);
+    line-height: var(--oct-leading-heading);
+    letter-spacing: var(--oct-tracking-tight);
+    margin: 0;
+    font-weight: var(--oct-weight-display);
+  }
+  h3 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-text-xl);
+    font-weight: var(--oct-weight-display);
+    line-height: var(--oct-leading-snug);
+    letter-spacing: var(--oct-tracking-snug);
+    margin: 0;
+  }
+  h4 {
+    font-family: var(--oct-font-display);
+    font-size: var(--oct-text-lg);
+    font-weight: var(--oct-weight-display);
+    line-height: var(--oct-leading-snug);
+    letter-spacing: var(--oct-tracking-snug);
+    margin: 0;
+  }
 }
 .lead {
   font-size: var(--oct-text-lg);

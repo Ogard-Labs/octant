@@ -1626,3 +1626,39 @@ describe("the public-block visual language", () => {
     });
   });
 });
+
+describe("shared recipes against the global stylesheets", () => {
+  /** Drops every `@layer` block, so what is left is the unlayered cascade. */
+  function withoutLayers(css: string): string {
+    let rest = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (;;) {
+      const start = rest.search(/@layer\s+[\w-]+\s*\{/);
+      if (start < 0) return rest;
+      let depth = 0;
+      let end = rest.indexOf("{", start);
+      for (; end < rest.length; end += 1) {
+        if (rest[end] === "{") depth += 1;
+        if (rest[end] === "}") depth -= 1;
+        if (depth === 0) break;
+      }
+      rest = rest.slice(0, start) + rest.slice(end + 1);
+    }
+  }
+
+  it("lets a recipe's own type role size its heading, because no bare heading rule is unlayered", () => {
+    // An unlayered `h2 { font-size }` beats every Tailwind utility, so a card's
+    // title (text-base) was drawn at 44px. Bare heading defaults live in the base layer.
+    const strays: string[] = [];
+    for (const path of cssFiles(webRoot)) {
+      const css = withoutLayers(readFileSync(path, "utf8"));
+      for (const match of css.matchAll(/([^{}@]+)\{[^{}]*\}/g)) {
+        const selectors = (match[1] ?? "").split(/,(?![^(]*\))/).map((part) => part.trim());
+        if (selectors.some((part) => /^h[1-6]$/.test(part)))
+          strays.push(`${relative(webRoot, path)}: ${selectors.join(", ")}`);
+      }
+    }
+    expect(strays).toEqual([]);
+    const card = readFileSync(join(webRoot, "ui/shadcn/card.tsx"), "utf8");
+    expect(card).toMatch(/<h2[^>]*className=\{cn\("m-0 text-base /);
+  });
+});

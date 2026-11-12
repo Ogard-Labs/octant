@@ -1314,7 +1314,10 @@ Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
 and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
 denser controls, except that recipes paint no focus ring (the global
 `:focus-visible` rule is the only keyboard focus treatment) and the badge and
-the card keep the shape and elevation set in this document. This
+the card keep the shape and elevation set in this document. A recipe's heading
+(a card's or popover's title) takes the recipe's own type role: the page's bare
+`h1` to `h4` defaults sit in the base layer, below every utility, so they size
+reading content and never a component. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
