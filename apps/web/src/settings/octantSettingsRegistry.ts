@@ -1190,6 +1190,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser captures screenshots recordings kept per thread limit retention storage",
         },
         {
+          id: settingId("tool-call-records"),
+          label: "Keep tool inputs and outputs",
+          scope: "host",
+          keywords:
+            "tool calls records inputs outputs keep store inspect what an agent ran returned chat work purge privacy switch",
+        },
+        {
           id: settingId("tool-approvals"),
           label: "Remembered tool approvals",
           scope: "host",

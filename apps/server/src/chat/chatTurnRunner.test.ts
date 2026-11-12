@@ -3606,6 +3606,123 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.toolStepsTruncated).toBeUndefined();
   });
 
+  it("hands a tool call's input and output to the attempt's record and journals neither on its tool steps", async () => {
+    const updates: Array<ChatAttempt> = [];
+    const observed: Array<{ readonly kind: string }> = [];
+    const appTool = vi.fn();
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Queue.offerAll(queue, [
+          { kind: "tool-start", sessionId, toolCallId: "call-1", toolName: "Bash" },
+          {
+            kind: "tool-call-content",
+            sessionId,
+            toolCallId: "call-1",
+            part: "input",
+            text: "ls -la",
+          },
+          {
+            kind: "tool-call-content",
+            sessionId,
+            toolCallId: "call-1",
+            part: "output",
+            text: "README.md",
+          },
+          { kind: "tool-success", sessionId, toolCallId: "call-1", summary: "Tool completed." },
+          {
+            kind: "tool-request",
+            sessionId,
+            requestId: "tool-1",
+            toolName: "octant_lookup",
+            inputJson: '{"query":"a"}',
+          },
+          { kind: "text-delta", sessionId, text: "Done" },
+          { kind: "completed", sessionId },
+        ] as never),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          appManagedTools: {
+            definitions: [{ name: "octant_lookup" } as never],
+            execute: async () => ({ result: { status: "ok" } }),
+            close: async () => undefined,
+          },
+          toolCallRecords: { observe: (event) => observed.push(event), appTool },
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000060"),
+              digest: "a".repeat(64),
+              byteLength: 4,
+            }),
+        }),
+      ),
+    );
+
+    expect(observed.filter((event) => event.kind === "tool-call-content")).toEqual([
+      expect.objectContaining({ toolCallId: "call-1", part: "input", text: "ls -la" }),
+      expect.objectContaining({ toolCallId: "call-1", part: "output", text: "README.md" }),
+    ]);
+    expect(observed.some((event) => event.kind === "tool-start")).toBe(true);
+    expect(appTool).toHaveBeenCalledExactlyOnceWith({
+      toolCallId: "tool-1",
+      toolName: "octant_lookup",
+      inputJson: '{"query":"a"}',
+      resultJson: '{"status":"ok"}',
+    });
+    // The journaled attempt keeps the constant-size step and nothing of the call's content.
+    expect(updates.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Bash", state: "completed", summary: "Tool completed." },
+    ]);
+    expect(JSON.stringify(updates)).not.toContain("README.md");
+    expect(JSON.stringify(updates)).not.toContain("ls -la");
+  });
+
   it("passes finalized attachment bytes to send", async () => {
     const sent: Array<{ readonly attachments: ReadonlyArray<{ readonly bytes: Uint8Array }> }> = [];
     const bytes = new TextEncoder().encode("attachment-bytes");

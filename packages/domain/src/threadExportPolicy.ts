@@ -18,6 +18,7 @@ import {
   type ThreadExportBundle,
   type ThreadExportCitation,
   type ThreadExportCompletion,
+  type ThreadExportEvidence,
   type ThreadExportId,
   type ThreadExportOmission,
   type ThreadExportOmissionKind,
@@ -130,6 +131,8 @@ export interface ThreadExportSource {
   readonly attachments: ReadonlyArray<ThreadExportAttachment>;
   readonly citations: ReadonlyArray<ThreadExportCitation>;
   readonly completion?: ThreadExportCompletion;
+  /** The thread's kept tool-call records; absent when it kept none or the reader may not have them. */
+  readonly toolCalls?: NonNullable<ThreadExportEvidence["toolCalls"]>;
   readonly omissions: ReadonlyArray<ThreadExportOmission>;
 }
 
@@ -152,6 +155,7 @@ export function buildThreadExportBundle(source: ThreadExportSource): ThreadExpor
   const provenanceProject = source.projectId === undefined ? {} : { projectId: source.projectId };
   const branched = source.branchedFrom === undefined ? {} : { branchedFrom: source.branchedFrom };
   const completion = source.completion === undefined ? {} : { completion: source.completion };
+  const toolCalls = source.toolCalls === undefined ? {} : { toolCalls: source.toolCalls };
   return {
     octant: {
       format: THREAD_EXPORT_FORMAT,
@@ -170,6 +174,7 @@ export function buildThreadExportBundle(source: ThreadExportSource): ThreadExpor
       attachments: source.attachments,
       citations: source.citations,
       ...completion,
+      ...toolCalls,
     },
     provenance: {
       mode: source.mode,

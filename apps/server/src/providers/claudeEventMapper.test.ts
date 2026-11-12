@@ -634,6 +634,109 @@ describe("mapClaudeMessage", () => {
     );
   });
 
+  it("reports a tool call's input and result for the thread's record, apart from its tool events", () => {
+    const ctx = context();
+    const started = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [
+          { kind: "tool-use", toolUseId: "sdk-tool-1", toolName: "Bash", input: { command: "ls" } },
+        ],
+        usage,
+      }),
+    );
+    const settled = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [
+          { toolUseId: "sdk-tool-1", isError: false, text: "README.md", textTruncated: true },
+        ],
+      }),
+    );
+
+    expect(started).toMatchObject([
+      { kind: "tool-start", toolCallId: "tool-1", toolName: "Bash" },
+      { kind: "tool-call-content", toolCallId: "tool-1", part: "input", text: '{"command":"ls"}' },
+      { kind: "usage" },
+    ]);
+    // The start itself still carries nothing of the command.
+    expect(JSON.stringify(started[0])).not.toContain("ls");
+    expect(settled).toMatchObject([
+      {
+        kind: "tool-call-content",
+        toolCallId: "tool-1",
+        part: "output",
+        text: "README.md",
+        truncated: true,
+      },
+      { kind: "tool-success", toolCallId: "tool-1", summary: "Tool completed." },
+    ]);
+  });
+
+  it("reports a streamed tool call's input once its whole message arrives", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: { kind: "tool-use", toolUseId: "sdk-tool-1", toolName: "Read", input: {} },
+      },
+    });
+    const whole = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-tool-1",
+            toolName: "Read",
+            input: { file_path: "/repo/README.md" },
+          },
+        ],
+        usage,
+      }),
+    );
+    expect(whole.filter((next) => next.kind === "tool-call-content")).toMatchObject([
+      { toolCallId: "tool-1", part: "input", text: '{"file_path":"/repo/README.md"}' },
+    ]);
+    expect(whole.some((next) => next.kind === "tool-start")).toBe(false);
+  });
+
+  it("leaves a tool Octant runs itself to the host's own record", () => {
+    const ctx = context();
+    const started = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-tool-1",
+            toolName: "mcp__octant__web-search",
+            input: { query: "octant" },
+          },
+        ],
+        usage,
+      }),
+    );
+    const settled = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-tool-1", isError: false, text: "results" }],
+      }),
+    );
+    expect([...started, ...settled].some((next) => next.kind === "tool-call-content")).toBe(false);
+  });
+
   it("marks the thread when Claude runs its own web fetch or search, and for no other tool", () => {
     const ctx = context();
     const start = (
@@ -852,6 +955,7 @@ describe("mapClaudeMessage", () => {
     expect(Array.from(label.toolName)).toHaveLength(256);
     expect(label.toolName.endsWith("…")).toBe(true);
     expect(authoritative).toMatchObject([
+      { kind: "event", event: { kind: "tool-call-content", part: "input", text: "{}" } },
       { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(JSON.stringify([started, authoritative])).not.toContain("private-suffix");
@@ -1192,7 +1296,25 @@ describe("mapClaudeMessage", () => {
 
     expect(started).toMatchObject([
       { kind: "event", event: { kind: "tool-start", toolCallId: "tool-1", toolName: "Edit" } },
+      {
+        kind: "event",
+        event: {
+          kind: "tool-call-content",
+          toolCallId: "tool-1",
+          part: "input",
+          text: '{"file_path":"/repo/src/app.ts"}',
+        },
+      },
       { kind: "event", event: { kind: "tool-start", toolCallId: "tool-2", toolName: "Write" } },
+      {
+        kind: "event",
+        event: {
+          kind: "tool-call-content",
+          toolCallId: "tool-2",
+          part: "input",
+          text: '{"file_path":"src/new.ts"}',
+        },
+      },
       { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(events).toMatchObject([

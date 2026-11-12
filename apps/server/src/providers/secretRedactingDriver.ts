@@ -26,6 +26,7 @@ const REDACTED_KINDS: ReadonlySet<ProviderRuntimeEvent["kind"]> = new Set([
   "text-delta",
   "reasoning-delta",
   "tool-start",
+  "tool-call-content",
   "tool-progress",
   "tool-success",
   "tool-failure",

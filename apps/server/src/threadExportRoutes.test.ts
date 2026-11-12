@@ -48,6 +48,44 @@ function makeRequest(
   });
 }
 
+describe("tool-call record route", () => {
+  const body = { mode: "work", threadId, turnId: "00000000-0000-4000-8000-000000000a01" };
+  const record = {
+    toolCallId: "call-1",
+    toolName: "Bash",
+    input: { text: "ls", truncated: false },
+    recordedAt: "2026-08-19T12:00:00.000Z",
+  };
+  function recordSetup() {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+    const readToolCallRecords = vi.fn(async () => ({ kind: "records", records: [record] }));
+    const handler = createThreadExportRouteHandler({
+      service: { readToolCallRecords } as unknown as ThreadExportService,
+      windowAuthorityStore,
+      now: () => nowMs,
+    });
+    return { handler, readToolCallRecords };
+  }
+
+  it("answers an authenticated local window with a turn's tool-call records", async () => {
+    const { handler, readToolCallRecords } = recordSetup();
+    const response = await handler(
+      makeRequest("/api/threads/tool-call-records", { capability, body }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ kind: "records", records: [record] });
+    expect(readToolCallRecords).toHaveBeenCalledExactlyOnceWith(windowId, "local-window", body);
+  });
+
+  it("refuses a caller without a window capability before reading any record", async () => {
+    const { handler, readToolCallRecords } = recordSetup();
+    const response = await handler(makeRequest("/api/threads/tool-call-records", { body }));
+    expect(response?.status).toBe(401);
+    expect(readToolCallRecords).not.toHaveBeenCalled();
+  });
+});
+
 describe("thread export routes", () => {
   it("returns undefined for other paths", async () => {
     const { handler } = setup({ kind: "refused", reason: "not-found" });

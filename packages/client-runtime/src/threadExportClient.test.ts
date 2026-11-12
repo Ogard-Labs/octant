@@ -41,6 +41,49 @@ function fetchReturning(status: number, body: unknown) {
   );
 }
 
+describe("a turn's tool-call records", () => {
+  const request = {
+    mode: "work" as const,
+    threadId,
+    turnId: "00000000-0000-4000-8000-000000000a01",
+  };
+  const client = (fetchImpl: typeof globalThis.fetch) =>
+    createThreadExportClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchImpl,
+      windowCapability: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0",
+    });
+
+  it("posts the turn with the window capability and decodes its records", async () => {
+    const record = {
+      toolCallId: "call-1",
+      toolName: "Bash",
+      input: { text: "ls", truncated: false },
+      recordedAt: "2026-08-19T12:00:00.000Z",
+    };
+    const fetchImpl = fetchReturning(200, { kind: "records", records: [record] });
+    expect(await client(fetchImpl).readToolCallRecords(request)).toEqual({
+      kind: "records",
+      records: [record],
+    });
+    const call = fetchImpl.mock.calls[0] as unknown as [string, RequestInit] | undefined;
+    if (call === undefined) throw new Error("expected a tool-call records request");
+    expect(call[0]).toContain("/api/threads/tool-call-records");
+    expect(JSON.parse(String(call[1].body))).toEqual(request);
+  });
+
+  it("answers a refusal as a value and throws on a response it cannot read", async () => {
+    expect(
+      await client(
+        fetchReturning(401, { kind: "refused", reason: "unauthorized" }),
+      ).readToolCallRecords(request),
+    ).toEqual({ kind: "refused", reason: "unauthorized" });
+    await expect(
+      client(fetchReturning(200, { kind: "records" })).readToolCallRecords(request),
+    ).rejects.toBeInstanceOf(ThreadExportClientError);
+  });
+});
+
 describe("createThreadExportClient", () => {
   it("posts the request with the window capability and decodes the cut", async () => {
     const fetchImpl = fetchReturning(200, exportedBody);

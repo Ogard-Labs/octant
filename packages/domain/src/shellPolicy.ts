@@ -201,6 +201,7 @@ export function defaultShellSettings(): ShellSettings {
     rememberedBrowserProfileSites: [],
     agentBrowserDownloads: false,
     browserCapturesPerThread: DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+    keepToolCallRecords: true,
     persistentBrowserOwner: false,
   };
 }

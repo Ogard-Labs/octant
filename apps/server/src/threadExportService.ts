@@ -20,7 +20,18 @@ import {
   type ThreadExportTranscriptEntry,
   type ThreadExportTranscriptStatus,
 } from "@octant/contracts/thread-export";
-import type { WindowId, WorkThread, WorkTurnState } from "@octant/contracts";
+import {
+  decodeThreadToolCallRecordsRequest,
+  decodeThreadToolCallRecordsResult,
+  type ThreadExportToolCall,
+  type ThreadToolCallRecord,
+  type ThreadToolCallRecordMode,
+  type ThreadToolCallRecordsRequest,
+  type ThreadToolCallRecordsResult,
+  type WindowId,
+  type WorkThread,
+  type WorkTurnState,
+} from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import {
   authorizeThreadExportActor,
@@ -110,6 +121,19 @@ export interface ThreadExportServiceOptions {
   readonly browserCaptures?: {
     readonly list: (threadId: BrowserThreadId) => ReadonlyArray<BrowserCapture>;
   };
+  /** A Chat or Work thread's kept tool-call records, oldest first. */
+  readonly toolCalls?: {
+    readonly list: (
+      mode: ThreadToolCallRecordMode,
+      threadId: string,
+    ) => ReadonlyArray<ThreadExportToolCall>;
+    /** One turn's records, in the order its calls were first recorded. */
+    readonly read?: (
+      mode: ThreadToolCallRecordMode,
+      threadId: string,
+      turnId: string,
+    ) => ReadonlyArray<ThreadToolCallRecord>;
+  };
 }
 
 /**
@@ -128,6 +152,7 @@ export class ThreadExportService {
   readonly #canvases: Pick<CanvasProjection, "byThread">;
   readonly #generatedImages: ThreadExportServiceOptions["generatedImages"];
   readonly #browserCaptures: ThreadExportServiceOptions["browserCaptures"];
+  readonly #toolCalls: ThreadExportServiceOptions["toolCalls"];
 
   constructor(options: ThreadExportServiceOptions) {
     this.#hostId = options.hostId;
@@ -138,6 +163,7 @@ export class ThreadExportService {
     this.#canvases = options.canvases;
     this.#generatedImages = options.generatedImages;
     this.#browserCaptures = options.browserCaptures;
+    this.#toolCalls = options.toolCalls;
   }
 
   async exportThread(
@@ -155,8 +181,9 @@ export class ThreadExportService {
     } catch {
       return decodeThreadExportOutcome({ kind: "refused", reason: "not-found" });
     }
-    // A paired device never reads a thread's Browser captures, so an export it
-    // asks for must not carry their page addresses and titles either.
+    // A paired device never reads a thread's Browser captures or its
+    // tool-call records, so an export it asks for must not carry their page
+    // addresses and titles, or what a tool was given and returned, either.
     const withCaptures = actorKind === "local-window";
     const source = await this.#assemble(windowId, request, withCaptures);
     if (source === undefined) {
@@ -169,6 +196,39 @@ export class ThreadExportService {
       return decodeThreadExportOutcome({ kind: "refused", reason: "unauthorized" });
     }
     return decodeThreadExportOutcome({ kind: "exported", bundle });
+  }
+
+  /**
+   * One turn's tool-call records, for a local window that can read the
+   * thread. A paired device is refused: what a tool was given and returned is
+   * wider than the step a transcript shows it, and nothing sends it off the
+   * host.
+   */
+  async readToolCallRecords(
+    windowId: WindowId,
+    actorKind: ThreadExportActorKind,
+    input: unknown,
+  ): Promise<ThreadToolCallRecordsResult> {
+    if (actorKind !== "local-window") {
+      return decodeThreadToolCallRecordsResult({ kind: "refused", reason: "unauthorized" });
+    }
+    const notFound = () =>
+      decodeThreadToolCallRecordsResult({ kind: "refused", reason: "not-found" });
+    let request: ThreadToolCallRecordsRequest;
+    try {
+      request = decodeThreadToolCallRecordsRequest(input);
+    } catch {
+      return notFound();
+    }
+    const readable =
+      request.mode === "chat"
+        ? this.#assembleChat(request.threadId as ThreadExportId, false) !== undefined
+        : (await this.#work.read(windowId, request.threadId)) !== undefined;
+    if (!readable) return notFound();
+    return decodeThreadToolCallRecordsResult({
+      kind: "records",
+      records: this.#toolCalls?.read?.(request.mode, request.threadId, request.turnId) ?? [],
+    });
   }
 
   async #assemble(
@@ -281,6 +341,7 @@ export class ThreadExportService {
       artifacts: this.#artifacts("chat", projectId, threadId),
       attachments,
       citations,
+      ...this.#toolCallRecords("chat", threadId, withCaptures),
       omissions: collectOmissions({
         "attachment-bytes": attachments.length,
         "superseded-turns": view.turns.length - active.length,
@@ -354,6 +415,7 @@ export class ThreadExportService {
       attachments,
       citations: [],
       ...completion,
+      ...this.#toolCallRecords("work", threadId, withCaptures),
       omissions: collectOmissions({
         "in-progress": inProgress,
         "attachment-bytes": attachments.length,
@@ -527,6 +589,24 @@ export class ThreadExportService {
       );
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * The thread's records for a local window, absent when it kept none. A
+   * store that cannot be read leaves them out; the export still succeeds.
+   */
+  #toolCallRecords(
+    mode: ThreadToolCallRecordMode,
+    threadId: string,
+    localWindow: boolean,
+  ): { readonly toolCalls?: ReadonlyArray<ThreadExportToolCall> } {
+    if (!localWindow || this.#toolCalls === undefined) return {};
+    try {
+      const toolCalls = this.#toolCalls.list(mode, threadId);
+      return toolCalls.length === 0 ? {} : { toolCalls };
+    } catch {
+      return {};
     }
   }
 

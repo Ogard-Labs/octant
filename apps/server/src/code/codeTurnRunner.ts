@@ -464,6 +464,10 @@ export class CodeTurnRunner {
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                // A tool call's content is for a Chat or Work thread's record.
+                // Code keeps none, so it is dropped before it can be counted,
+                // sanitized, or journaled.
+                if (event.kind === "tool-call-content") return;
                 input.observeRemoteCommand?.(event);
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
@@ -537,7 +541,8 @@ export class CodeTurnRunner {
                 // Marked above; never a turn event.
                 if (
                   sanitizedEvent.kind === "outside-content-read" ||
-                  sanitizedEvent.kind === "outside-content-result"
+                  sanitizedEvent.kind === "outside-content-result" ||
+                  sanitizedEvent.kind === "tool-call-content"
                 ) {
                   return;
                 }
@@ -845,7 +850,8 @@ function normalizeProviderEvent(
         | "context-compacted"
         | "liveness"
         | "outside-content-read"
-        | "outside-content-result";
+        | "outside-content-result"
+        | "tool-call-content";
     }
   >,
   /** Whether the runtime compacted the session earlier in this turn. */

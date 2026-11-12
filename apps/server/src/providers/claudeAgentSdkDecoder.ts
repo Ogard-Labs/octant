@@ -5,6 +5,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderFailure,
 } from "@octant/contracts";
+import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
 
 import type {
   ClaudeAccountState,
@@ -404,7 +405,11 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
-    return { toolUseId: block.tool_use_id, isError: block.is_error === true };
+    return {
+      toolUseId: block.tool_use_id,
+      isError: block.is_error === true,
+      ...toolResultText(block.content),
+    };
   });
   if (results.length === 0) throw protocol("Claude returned an unsupported runtime message.");
   // `tool_use_result` is the structured output of the one call a message
@@ -418,6 +423,31 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
     results:
       only === undefined || publishedPage === undefined ? results : [{ ...only, publishedPage }],
   };
+}
+
+/**
+ * The text of a tool result: a string, or the text blocks of a content list
+ * joined by newlines. Images and other blocks carry no text and are left out.
+ */
+function toolResultText(content: unknown): {
+  readonly text?: string;
+  readonly textTruncated?: true;
+} {
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .flatMap((value) => {
+              const part = object(value);
+              return part?.type === "text" && typeof part.text === "string" ? [part.text] : [];
+            })
+            .join("\n")
+        : "";
+  if (text.length === 0) return {};
+  return text.length <= MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS
+    ? { text }
+    : { text: text.slice(0, MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS), textTruncated: true };
 }
 
 const MAX_PUBLISHED_URL_CHARACTERS = 2_048;

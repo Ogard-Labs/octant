@@ -2019,6 +2019,8 @@ function collectSessionEvents(
         ),
         Stream.runForEach((event) =>
           Effect.gen(function* () {
+            // For a Chat or Work thread's tool-call record; a helper keeps none.
+            if (event.kind === "tool-call-content") return;
             state.handledEvents += 1;
             // Marked before the budget is looked at: what the runtime read
             // reached its model either way.

@@ -43,6 +43,7 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { toolStepsActivity } from "../transcript/turnActivity";
+import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -869,6 +870,13 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       ? undefined
       : responseContents.map((content) => content!.body).join("");
   const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
+  const toolCallRecords = useToolCallRecordsReader({
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    mode: "chat",
+    threadId: String(props.attempt.threadId),
+    turnId: String(props.attempt.id),
+  });
   const usageLimit = props.attempt.usageLimit;
   // A limited attempt parks as waiting with the provider's fact beside it;
   // retry is the manual recovery path the notice offers.
@@ -966,6 +974,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
               props.attempt.outcome === "interrupted" ||
               props.attempt.outcome === "cancelled"
             }
+            {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
           />
         )}
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (

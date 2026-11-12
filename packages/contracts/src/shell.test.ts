@@ -109,6 +109,7 @@ const settings = {
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
   browserCapturesPerThread: 200,
+  keepToolCallRecords: true,
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
@@ -203,6 +204,14 @@ describe("shell bootstrap contracts", () => {
     for (const value of [0, 501, 1.5]) {
       expect(() => decodeShellSettings({ ...settings, browserCapturesPerThread: value })).toThrow();
     }
+  });
+
+  it("keeps tool-call records for a store saved before the setting, until a person turns them off", () => {
+    const { keepToolCallRecords: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).keepToolCallRecords).toBe(true);
+    expect(
+      decodeShellSettings({ ...settings, keepToolCallRecords: false }).keepToolCallRecords,
+    ).toBe(false);
   });
 
   it("defaults transcript text to the compact reading size", () => {

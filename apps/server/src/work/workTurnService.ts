@@ -100,6 +100,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   accumulateTurnUsage,
   decideConversationSession,
@@ -523,6 +524,8 @@ export interface WorkTurnServiceDependencies {
   readonly usageStore?: WorkTurnUsageStore;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /** Keeps each turn's tool-call input and output in purgeable storage; absent keeps none. */
+  readonly toolCallRecorders?: ThreadToolCallRecorders;
   /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
@@ -610,6 +613,7 @@ export class WorkTurnService {
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
+  readonly #toolCallRecorders: ThreadToolCallRecorders | undefined;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -674,6 +678,7 @@ export class WorkTurnService {
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
     this.#liveTurns = dependencies.liveTurns;
+    this.#toolCallRecorders = dependencies.toolCallRecorders;
     this.#agentRuns = dependencies.agentRuns;
   }
 
@@ -2488,6 +2493,15 @@ export class WorkTurnService {
           this.#liveTasks.set(String(input.command.requestId), tasks);
           this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
         },
+        ...(this.#toolCallRecorders === undefined
+          ? {}
+          : {
+              toolCallRecords: this.#toolCallRecorders({
+                mode: "work",
+                threadId: String(input.command.threadId),
+                turnId: String(input.command.requestId),
+              }),
+            }),
         onToolSteps: (toolSteps) => {
           if (input.signal.aborted) return;
           this.#liveToolSteps.set(String(input.command.requestId), toolSteps);

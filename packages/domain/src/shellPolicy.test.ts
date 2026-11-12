@@ -232,6 +232,7 @@ describe("shell settings policy", () => {
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
       browserCapturesPerThread: 200,
+      keepToolCallRecords: true,
       persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
@@ -245,6 +246,7 @@ describe("shell settings policy", () => {
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
       browserCapturesPerThread: 200,
+      keepToolCallRecords: true,
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);

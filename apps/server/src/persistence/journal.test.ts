@@ -242,6 +242,7 @@ describe("Journal", () => {
         sidebarCollapsedPresentation: "rail",
         agentBrowserDownloads: false,
         browserCapturesPerThread: 200,
+        keepToolCallRecords: true,
         persistentBrowserOwner: false,
       },
     } as const;

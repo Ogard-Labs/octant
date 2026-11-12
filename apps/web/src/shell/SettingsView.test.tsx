@@ -1939,6 +1939,18 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
   });
 
+  it("keeps tool-call records until the person turns the switch off", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool-call records" })).toBeInTheDocument();
+    const control = screen.getByRole("switch", { name: "Keep tool inputs and outputs" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/removed when its thread is purged/)).toBeVisible();
+    await userEvent.setup().click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
+  });
+
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {
