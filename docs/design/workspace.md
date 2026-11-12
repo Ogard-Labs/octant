@@ -1149,7 +1149,7 @@ thread's open tools; the bottom panel never has one.
   not shown, and no page or shell is closed or stopped (closing a tab with its
   own browser context ends that context, which a card that only previews must
   never do; the floating preview it replaces only hid itself). The keyboard goes
-  to the strip, the selected tab, else Add tool. Closing the tool stays the strip
+  to the strip, the selected tab, the strip's overflow count, else Add tool (or Show another tool where Add tool is absent), looked for again as the strip measures its room so focus never falls to the page. Closing the tool stays the strip
   tab's own close. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
@@ -1173,7 +1173,11 @@ thread's open tools; the bottom panel never has one.
   does not stop a new session opening the Browser tool once, except that a
   session announced while the person has the Browser minimised leaves it
   minimised, its card or the dock toggle's dot being the sign (the sign-in
-  hand-over, which the person has to act on, still restores it). Hiding the card,
+  hand-over, which the person has to act on, still restores it). That holds only
+  where the shelf is drawn: the narrow window's modal dock has neither card nor
+  dot, so there a new session opens the Browser like any other tab, which clears
+  the minimised flag (a window that grows again shows the Browser as a tool, not
+  as a card). Hiding the card,
   or closing the Browser's tab, dismisses it for that session, kept for the life of the page
   because the dock remounts; a later session shows it again. A Browser whose
   session is not live is a card only if the person minimised it. The thread pane
@@ -1184,7 +1188,7 @@ thread's open tools; the bottom panel never has one.
   accent ring, and the modal dock, which draws no shelf, shows none.
 - **The Terminal card** shows the shell's current tail, live, in a read-only
   instance of the terminal engine at the smallest type the terminal settings
-  allow, filling the preview (the shell's last lines, about seven rows), with no input, no focus and no resize sent to the shell.
+  allow, filling the preview (the shell's last lines, as many as the 104px preview holds), with no input, no focus and no resize sent to the shell.
   It reads the shell's state and follows the host's live stream, whose first
   frame is the tail, and stops it when the card goes away; it keeps only a few
   KiB of tail, drawn at most once an animation frame and appended to the terminal
@@ -1200,7 +1204,12 @@ thread's open tools; the bottom panel never has one.
   journaled operation and a card that did so on a timer once wrote thousands of
   entries for one thread; it never starts a shell. A thread with no shell running
   says "No terminal running", and expanding opens the tool, where the person may
-  start one. An exited or interrupted shell says so in the card's head. Output
+  start one. A card that never had a shell to show keeps that plain note when its
+  retries run out; only a tail that was followed can say "Preview ended". A card
+  that is not following a shell looks once more when it is seen again (the window
+  becoming visible, the pointer or the keyboard arriving, or Show), never more than
+  once every five seconds and never on a timer: one fresh read, which follows a
+  shell that started in the meantime and otherwise changes nothing. An exited or interrupted shell says so in the card's head. Output
   that arrives while the pointer and keyboard are off the card shows a small quiet
   dot named "New output", which goes when the pointer enters, the card takes
   focus, or the tool is restored.

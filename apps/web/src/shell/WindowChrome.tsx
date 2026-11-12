@@ -137,7 +137,6 @@ export function WindowChrome(props: WindowChromeProps) {
         {props.isNarrow ? (
           <NarrowOverflow
             dockAvailable={props.dockAvailable}
-            dockBrowserActive={props.dockBrowserActive === true}
             dockExpanded={props.dockExpanded}
             dockLabel={props.dockLabel}
             bottomPanelAvailable={props.bottomPanelAvailable === true}
@@ -194,7 +193,6 @@ function NarrowOverflow(props: {
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelExpanded: boolean;
   readonly dockAvailable: boolean;
-  readonly dockBrowserActive: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
   readonly onRecoverZen?: () => void;
@@ -228,7 +226,6 @@ function NarrowOverflow(props: {
       <IconButton
         aria-controls={disclosureId}
         aria-expanded={open}
-        {...dockActivityAttributes(props.dockAvailable && props.dockBrowserActive)}
         className="window-chrome__button"
         data-dock-opener={props.dockAvailable ? "true" : undefined}
         icon={MoreHorizontal}

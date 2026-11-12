@@ -178,14 +178,11 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("marks the overflow button that holds the dock toggle in the narrow window", () => {
+  it("never marks the narrow window's overflow button: the modal dock draws no card for the dot to promise", () => {
     const { rerender, props } = renderChrome({ dockAvailable: true, isNarrow: true });
+    rerender(<WindowChrome {...props} dockBrowserActive />);
     expect(screen.getByRole("button", { name: "More window actions" })).not.toHaveAttribute(
       "data-activity",
-    );
-    rerender(<WindowChrome {...props} dockBrowserActive />);
-    expect(screen.getByRole("button", { name: "More window actions" })).toHaveAccessibleDescription(
-      "Browser is active",
     );
   });
 

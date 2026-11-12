@@ -9,6 +9,7 @@ import {
   hideUtilityTile,
   isUtilityToolMinimised,
   minimiseUtilityTool,
+  offeredBrowserStaysMinimised,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
   moveUtilityTile,
@@ -1073,6 +1074,21 @@ describe("minimised dock tools", () => {
     expect(read(place(0, 1.5)).minimisedPlaces).toBeUndefined();
     expect(read(place(0, 0, "files")).minimisedPlaces).toBeUndefined();
     expect(read({ ...stored, minimised: undefined }).minimisedPlaces).toBeUndefined();
+  });
+
+  it("leaves a minimised Browser minimised for an agent's session only where the shelf is drawn", () => {
+    const parked = minimiseUtilityTool(opened("files", "browser"), "browser");
+    expect(offeredBrowserStaysMinimised(parked, { offered: true, shelfDrawn: true })).toBe(true);
+    // The narrow window's modal dock has no shelf and no dot: the session opens the Browser.
+    expect(offeredBrowserStaysMinimised(parked, { offered: true, shelfDrawn: false })).toBe(false);
+    // What the person asked for restores it anywhere.
+    expect(offeredBrowserStaysMinimised(parked, { offered: false, shelfDrawn: true })).toBe(false);
+    expect(
+      offeredBrowserStaysMinimised(opened("files", "browser"), { offered: true, shelfDrawn: true }),
+    ).toBe(false);
+    const opening = openUtilityTabState(parked, "browser");
+    expect(opening.active).toBe("browser");
+    expect(opening.minimised).toBeUndefined();
   });
 
   it("restores every page of a minimised Browser when any of its tabs is selected or opened", () => {

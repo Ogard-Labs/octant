@@ -235,39 +235,44 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         for (const timer of cardTimers) clearTimeout(timer);
       };
     }
-    const tabs = [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])];
-    // The tool's own tab, else the selected one, else the overflow count:
-    // a tab in the overflow list is not rendered, and the active tab never is.
-    const target =
-      (refocus.tab === undefined
-        ? undefined
-        : tabs.find((tab) => tab.dataset.dockTab === refocus.tab)) ??
-      tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ??
-      root.current?.querySelector<HTMLElement>(".dock-tool-strip__more") ??
-      toolPanel.current;
-    target?.focus();
-    // The tool's own tab can appear a beat late (the strip measures its room
-    // after tabs change), and a closing menu returns focus to its trigger,
-    // which may be the tile that just went. Focus is taken again only from the
-    // page body, from the stand-in just focused, or from a popup that is
-    // closing; anywhere else it is where the person put it and stays.
+    // The tool's own tab, else the selected one, else the overflow count (a tab
+    // in the overflow list is not rendered, and the active tab never is), else
+    // the tool panel, else the control that adds a tool. Resolved afresh each
+    // time: the strip measures its room after tabs change, so an element
+    // chosen a moment ago (the overflow count) may have gone by the next look.
     const wanted = refocus.tab;
+    const resolve = (): HTMLElement | null | undefined => {
+      const tabs = [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])];
+      return (
+        (wanted === undefined ? undefined : tabs.find((tab) => tab.dataset.dockTab === wanted)) ??
+        tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ??
+        root.current?.querySelector<HTMLElement>(".dock-tool-strip__more") ??
+        toolPanel.current ??
+        root.current?.querySelector<HTMLElement>('[aria-label="Add tool"]') ??
+        root.current?.querySelector<HTMLElement>('[aria-label="Show another tool"]')
+      );
+    };
+    const first = resolve();
+    first?.focus();
+    // A closing menu returns focus to its trigger, which may be the tile that
+    // just went. Focus is taken again only from the page body, from the
+    // stand-in just focused (which may itself have gone by now), or from a
+    // popup that is closing; anywhere else it is where the person put it and
+    // stays.
+    let stand = first;
     const timers = [0, 60, 250].map((delay) =>
       setTimeout(() => {
-        const preferred =
-          wanted === undefined
-            ? undefined
-            : [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])].find(
-                (tab) => tab.dataset.dockTab === wanted,
-              );
+        const next = resolve();
         const current = document.activeElement;
         const free =
           current === null ||
           current === document.body ||
-          current === target ||
+          current === stand ||
           current.closest('[role="menu"]') !== null;
-        const next = preferred ?? target;
-        if (next?.isConnected === true && free && current !== next) next.focus();
+        if (next?.isConnected === true && free && current !== next) {
+          next.focus();
+          stand = next;
+        }
       }, delay),
     );
     return () => {

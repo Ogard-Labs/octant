@@ -15,7 +15,7 @@ import { DockMiniCard } from "./DockShelf";
 /** The smallest size Settings allows for terminal text, so a card holds as many columns as it can. */
 const MINI_TERMINAL_FONT_SIZE = 8;
 /**
- * A card shows about six rows, so it keeps a few KiB of output. When the tail
+ * A card shows the last few lines, so it keeps a few KiB of output. When the tail
  * outgrows the limit it is cut back to the keep size at a line start, so it
  * never begins inside an escape sequence; the terminal is rewritten then, and
  * only then, which a chatty shell reaches rarely rather than on every frame.
@@ -26,6 +26,8 @@ const TAIL_KEEP_CHARACTERS = 4 * 1024;
 const RETRY_FIRST_MS = 5_000;
 const RETRY_LAST_MS = 60_000;
 const MAX_RETRIES = 6;
+/** A card with nothing to follow looks again when seen, but not more often than this. */
+const MIN_LOOK_INTERVAL_MS = 5_000;
 
 type ShellState = "running" | "exited" | "interrupted";
 
@@ -69,11 +71,42 @@ export function DockTerminalCard(props: {
   const engaged = useRef(false);
   const typography = useTypographyProjection("terminal");
   const { checkoutId, client, threadId } = props;
+  // A card with no shell to follow looks once more when it is seen again: the
+  // window becoming visible, the pointer or the keyboard arriving, or Show. The
+  // count asks for one fresh read, never a timer; a card that is following a
+  // shell never restarts, and looks are at least MIN_LOOK_INTERVAL_MS apart.
+  const [looks, setLooks] = useState(0);
+  const reading = useRef(false);
+  const lastLook = useRef(0);
+  const requestLook = useCallback(() => {
+    // While the card is reading or following, or waiting out its own retries,
+    // it already looks; only a card that has stopped asks again.
+    if (reading.current) return;
+    const now = Date.now();
+    if (now - lastLook.current < MIN_LOOK_INTERVAL_MS) return;
+    lastLook.current = now;
+    setLooks((count) => count + 1);
+  }, []);
+  const shell = `${String(threadId)}:${String(checkoutId)}`;
+  const shownShell = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    // Another thread's shell is never shown under this one's name.
-    setTail({ kind: "loading" });
-    setUnseen(false);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") requestLook();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [requestLook]);
+
+  useEffect(() => {
+    // Another thread's shell is never shown under this one's name; a look at
+    // the same shell keeps what the card says until it knows better.
+    if (shownShell.current !== shell) {
+      shownShell.current = shell;
+      setTail({ kind: "loading" });
+      setUnseen(false);
+    }
+    const once = looks > 0;
     if (checkoutId === undefined) {
       setTail({ kind: "none" });
       return;
@@ -153,33 +186,55 @@ export function DockTerminalCard(props: {
       }
     };
 
+    reading.current = true;
     void (async () => {
       let tries = 0;
-      while (!signal.aborted) {
-        const result = await readOnce();
-        if (signal.aborted || result.settled) return;
-        // Frames flowing again is a shell worth following: start the count over.
-        if (result.frames > 1) tries = 0;
-        if (tries >= MAX_RETRIES) {
-          publish({ kind: "ended", output });
-          return;
+      try {
+        while (!signal.aborted) {
+          const result = await readOnce();
+          if (signal.aborted || result.settled) return;
+          // Frames flowing again is a shell worth following: start the count over.
+          if (result.frames > 1) tries = 0;
+          // A look from a seen card that finds nothing is one read, not a new
+          // series of retries; one that finds a shell follows it as usual.
+          if (once && result.frames === 0) return;
+          if (tries >= MAX_RETRIES) {
+            // Nothing was ever shown: the plain note stands, not a preview that
+            // ended. Only a tail that was followed can have ended.
+            if (output !== "") publish({ kind: "ended", output });
+            return;
+          }
+          await waitForReconnect(signal, Math.min(RETRY_FIRST_MS * 2 ** tries, RETRY_LAST_MS));
+          tries += 1;
+          // Nothing is asked of the host while the window is hidden.
+          await waitUntilDocumentVisible(signal);
         }
-        await waitForReconnect(signal, Math.min(RETRY_FIRST_MS * 2 ** tries, RETRY_LAST_MS));
-        tries += 1;
-        // Nothing is asked of the host while the window is hidden.
-        await waitUntilDocumentVisible(signal);
+      } finally {
+        // An abort means a newer read owns the flag.
+        if (!signal.aborted) reading.current = false;
       }
     })();
     return () => {
       controller.abort();
       if (scheduled !== undefined) cancelFrame(scheduled);
     };
-  }, [checkoutId, client, threadId]);
+  }, [checkoutId, client, threadId, looks, shell]);
 
-  const onEngagementChange = useCallback((now: boolean) => {
-    engaged.current = now;
-    if (now) setUnseen(false);
-  }, []);
+  const onEngagementChange = useCallback(
+    (now: boolean) => {
+      engaged.current = now;
+      if (now) {
+        setUnseen(false);
+        requestLook();
+      }
+    },
+    [requestLook],
+  );
+  const onExpand = props.onExpand;
+  const expand = useCallback(() => {
+    requestLook();
+    onExpand();
+  }, [onExpand, requestLook]);
 
   return (
     <DockMiniCard
@@ -187,7 +242,7 @@ export function DockTerminalCard(props: {
       newOutput={unseen}
       onHide={props.onHide}
       onEngagementChange={onEngagementChange}
-      onExpand={props.onExpand}
+      onExpand={expand}
       previewLabel="Show Terminal, live preview"
       surface="terminal"
       title="Terminal"

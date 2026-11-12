@@ -371,7 +371,7 @@ describe("DockTerminalCard asking again", () => {
     expect(screen.queryByText("No terminal running")).not.toBeInTheDocument();
   });
 
-  it("gives up after six tries with 5 s doubling to 60 s, and says the preview ended", async () => {
+  it("gives up after six tries with 5 s doubling to 60 s, and keeps saying no terminal is running when it never had one", async () => {
     vi.useFakeTimers();
     const { client } = retrying(none);
     await advance(0);
@@ -387,9 +387,73 @@ describe("DockTerminalCard asking again", () => {
     }
     expect(waited).toBe(195_000);
     await advance(0);
-    expect(screen.getByText("Preview ended")).toBeVisible();
+    expect(screen.getByText("No terminal running")).toBeVisible();
+    expect(screen.queryByText("Preview ended")).not.toBeInTheDocument();
     await advance(600_000);
     expect(client.inspectTerminal).toHaveBeenCalledTimes(7);
+  });
+
+  /** A card that gave up on a thread with no shell, ready to be looked at again. */
+  async function gaveUp() {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    let started = false;
+    const stream = streamOf();
+    const view = retrying(
+      async () => (started ? { terminalId: threadId, state: "running" as const } : none()),
+      (signal) => stream.watch(undefined, signal),
+    );
+    await advance(0);
+    await advance(200_000);
+    expect(view.client.inspectTerminal).toHaveBeenCalledTimes(7);
+    return {
+      ...view,
+      stream,
+      start: () => {
+        started = true;
+      },
+    };
+  }
+
+  it("follows a shell that started after the card gave up when the window is visible again, with one fresh read", async () => {
+    const { client, runtime, stream, start } = await gaveUp();
+    start();
+    stream.push({ text: "$ late\r\n", replace: true });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await advance(100);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
+    expect(runtime.mounted[0]?.outputs.at(-1)).toBe("$ late\r\n");
+    await advance(600_000);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
+  });
+
+  it("looks once more when the pointer or the keyboard arrives, and not again within five seconds", async () => {
+    const { client } = await gaveUp();
+    const card = screen.getByRole("region", { name: "Minimised Terminal" });
+    fireEvent.pointerEnter(card);
+    await advance(0);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
+    fireEvent.pointerLeave(card);
+    fireEvent.pointerEnter(card);
+    await advance(1_000);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
+    // A look that finds nothing is one read, never a new series of retries.
+    await advance(600_000);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
+    fireEvent.pointerLeave(card);
+    fireEvent.pointerEnter(card);
+    await advance(0);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(9);
+  });
+
+  it("looks again when Show is pressed", async () => {
+    const { client } = await gaveUp();
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(7);
+    fireEvent.click(screen.getByRole("button", { name: "Show Terminal" }));
+    await advance(0);
+    expect(client.inspectTerminal).toHaveBeenCalledTimes(8);
   });
 
   it("never loops tightly when the host keeps ending the stream", async () => {

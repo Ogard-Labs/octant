@@ -397,6 +397,20 @@ export function minimiseUtilityTool(
   });
 }
 
+/**
+ * Whether an agent's new Browser session leaves a minimised Browser as it is:
+ * only where the shelf is drawn, since its card or the dock toggle's dot is the
+ * sign that the session is live. The modal dock draws neither, so there the
+ * session opens the Browser like any other tab (which also clears the
+ * minimised flag, as choosing any tab of a minimised tool does).
+ */
+export function offeredBrowserStaysMinimised(
+  state: ThreadUtilityDockState,
+  options: { readonly offered: boolean; readonly shelfDrawn: boolean },
+): boolean {
+  return options.offered && options.shelfDrawn && isUtilityToolMinimised(state, "browser");
+}
+
 /** Whether the person has this tool minimised. */
 export function isUtilityToolMinimised(
   state: ThreadUtilityDockState,

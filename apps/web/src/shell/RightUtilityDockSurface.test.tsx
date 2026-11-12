@@ -1306,29 +1306,34 @@ describe("tool tiles in the right sidebar", () => {
       );
     });
 
-    it("hands the keyboard to the strip when a card is hidden and no tab is selected", () => {
-      const focused: Array<string | null> = [];
-      const focus = vi
-        .spyOn(HTMLElement.prototype, "focus")
-        .mockImplementation(function (this: HTMLElement) {
-          focused.push(this.getAttribute("aria-label"));
-        });
-      try {
-        render(
-          <TiledDock
-            initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")}
-            launchable={[surface("plan")]}
-          />,
-        );
-        fireEvent.click(screen.getByRole("button", { name: "Hide Terminal card" }));
-        // The overview is showing, so no tab is selected: the strip's overflow
-        // count (here the hidden tool does not fit), else the Add tool control.
-        expect(focused).toHaveLength(1);
-        expect(["1 more open tab", "Add tool"]).toContain(focused[0]);
-      } finally {
-        focus.mockRestore();
-      }
-    });
+    it.each([
+      ["a strip that cannot be measured", 0],
+      ["a strip with room, which shows the hidden tool and no overflow count", 1000],
+    ])(
+      "hands the keyboard to Add tool when a card is hidden and no tab is selected: %s",
+      async (_, width) => {
+        const room = vi
+          .spyOn(HTMLElement.prototype, "clientWidth", "get")
+          .mockImplementation(() => width);
+        try {
+          render(
+            <TiledDock
+              initial={minimiseUtilityTool(opened("files", "terminal"), "terminal")}
+              launchable={[surface("plan")]}
+            />,
+          );
+          fireEvent.click(screen.getByRole("button", { name: "Hide Terminal card" }));
+          // The overview is showing, so no tab is selected and the strip has no
+          // overflow count to settle on: focus must not fall to the page body.
+          await waitFor(() =>
+            expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add tool" })),
+          );
+          expect(document.querySelector(".dock-tool-strip__more")).toBeNull();
+        } finally {
+          room.mockRestore();
+        }
+      },
+    );
 
     it("moves the keyboard to the selected tab when a card is hidden beside a shown tool", async () => {
       const user = userEvent.setup();

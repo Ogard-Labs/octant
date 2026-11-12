@@ -397,7 +397,7 @@ import {
   closeUtilityTabState,
   hideUtilityCard,
   hideUtilityTile,
-  isUtilityToolMinimised,
+  offeredBrowserStaysMinimised,
   restoreUtilityTool,
   minimiseUtilityTool,
   moveUtilityTile,
@@ -834,7 +834,10 @@ function LaunchedShell(
       // A session announced while the person has the Browser minimised leaves
       // it minimised: its card, or the dock toggle's dot, is the sign. What the
       // person asked for, such as the page handed over to sign in, restores it.
-      if (offered && isUtilityToolMinimised(displayedDockState, "browser")) return true;
+      // The narrow window's modal dock draws neither, so there it just opens.
+      if (offeredBrowserStaysMinimised(displayedDockState, { offered, shelfDrawn: !isNarrow })) {
+        return true;
+      }
       openDockTab("browser");
       return true;
     },
