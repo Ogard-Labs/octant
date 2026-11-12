@@ -546,11 +546,15 @@ export const ExtensionCommand = Schema.Union(
   /**
    * `trust` installs and trusts in one confirmed step, journaled as both.
    * Enabling stays its own switch. Left out, the package installs untrusted.
+   * `enable`, with `trust`, is the one flow that admits an outside provider
+   * driver: it also switches on the plugin and its driver component, each
+   * journaled as its own step. The host refuses it for any other package.
    */
   Schema.Struct({
     kind: Schema.Literal("install-package"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
+    enable: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("rollback-package"), ...versionedTarget }).annotations(
@@ -850,6 +854,11 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
+    /**
+     * Set only when the one install-trust-enable flow stopped early: the step
+     * the host refused. The steps before it stand, as the snapshot shows.
+     */
+    stoppedAt: Schema.optional(Schema.Literal("trust", "enable")),
     /** Set only when the update was a user-added server: the package that add created. */
     addedPackage: Schema.optional(
       Schema.Struct({

@@ -2241,6 +2241,169 @@ describe("local Agent Plugin import", () => {
     expect(screen.getByText(/bundled skill instructions/i)).toBeVisible();
   });
 
+  async function reviewOutsideDriver(stoppedAt?: "trust" | "enable") {
+    const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    const c = client({ snapshot });
+    c.importLocalPluginReceipt = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: {
+        entry: {
+          extensionId: extensionId as never,
+          packageId: packageId as never,
+          slug: "loopback-chat" as never,
+          displayName: "Loopback chat",
+          version: "0.1.0" as never,
+          digest: digest as never,
+          source: {
+            kind: "local-folder",
+            sourceRef: "local-dddddddddddddddddddddddddddddddd" as never,
+          },
+        },
+        review: previewReview({
+          declaredCapabilities: [],
+          components: [
+            {
+              id: "driver",
+              kind: "provider-driver",
+              displayName: "Loopback chat",
+              declaredCapabilities: [],
+            },
+          ],
+        } as never),
+        diagnostics: [],
+      },
+    })) as never;
+    const execute = c.execute;
+    c.execute = vi.fn(async (command: ExtensionCommand) => {
+      const result = await execute(command);
+      return command.kind === "install-package" &&
+        stoppedAt !== undefined &&
+        result.kind === "extension-state-updated"
+        ? { ...result, stoppedAt }
+        : result;
+    });
+    render(
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={c}
+        pickLocalPluginFolder={vi.fn(async () => ({
+          receiptId: "R".repeat(43),
+          displayName: "loopback-chat",
+        }))}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await findViewButton(/marketplace/i));
+    fireEvent.click(await screen.findByRole("button", { name: /import local agent plugin/i }));
+    await screen.findByRole("button", { name: "Install and trust" });
+    return c;
+  }
+
+  it("installs, trusts and switches on an outside driver from one review that shows its digest", async () => {
+    const c = await reviewOutsideDriver();
+    const review = screen.getByLabelText("Package inspection preview");
+    // The one confirmation shows what is trusted: publisher, digest, and the driver.
+    expect(review).toHaveTextContent(digest);
+    expect(review).toHaveTextContent("Example Publisher");
+    expect(review).toHaveTextContent("provider-driver");
+    expect(review).toHaveTextContent(
+      /installs this driver, trusts it at this digest and switches it on/i,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Install and trust" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "install-package" &&
+            command.trust === true &&
+            command.enable === true &&
+            command.digest === digest,
+        ),
+      ).toBe(true),
+    );
+    // The host runs the steps; the window sends no separate trust or enable.
+    expect(
+      c.calls.filter(
+        (command) =>
+          command.kind === "set-source-trust" ||
+          command.kind === "set-plugin-desired" ||
+          command.kind === "set-component-desired",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("keeps Confirm install as its own step for an outside driver", async () => {
+    const c = await reviewOutsideDriver();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm install" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "install-package" &&
+            command.trust === undefined &&
+            command.enable === undefined,
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("says which step stopped the outside driver flow and what still stands", async () => {
+    await reviewOutsideDriver("trust");
+    fireEvent.click(screen.getByRole("button", { name: "Install and trust" }));
+    expect(
+      await screen.findByText(/installed, but Octant refused to trust its source/i),
+    ).toBeVisible();
+  });
+
+  it("does not switch on an ordinary plugin from Install and trust", async () => {
+    const c = client({
+      snapshot: installedSnapshot({ activation: baseActivation({ installed: false }) }),
+    });
+    c.importLocalPluginReceipt = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: {
+        entry: {
+          extensionId: extensionId as never,
+          packageId: packageId as never,
+          slug: "hello-plugin" as never,
+          displayName: "hello-plugin",
+          version: "1.0.0" as never,
+          digest: digest as never,
+          source: {
+            kind: "local-folder",
+            sourceRef: "local-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" as never,
+          },
+        },
+        review: previewReview(),
+        diagnostics: [],
+      },
+    })) as never;
+    render(
+      <ExtensionsSettingsView
+        initialView="installed"
+        client={c}
+        pickLocalPluginFolder={vi.fn(async () => ({
+          receiptId: "R".repeat(43),
+          displayName: "hello-plugin",
+        }))}
+        scope={scope}
+      />,
+    );
+    fireEvent.click(await findViewButton(/marketplace/i));
+    fireEvent.click(await screen.findByRole("button", { name: /import local agent plugin/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install and trust" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "install-package" &&
+            command.trust === true &&
+            command.enable === undefined,
+        ),
+      ).toBe(true),
+    );
+  });
+
   async function reviewLanguageServer(launchClass: "static" | "repo-tooling") {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });

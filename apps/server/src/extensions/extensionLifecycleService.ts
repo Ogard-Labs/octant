@@ -135,6 +135,82 @@ export class ExtensionLifecycleService {
     }
   }
 
+  /**
+   * The one flow that admits an outside provider driver: install, trust the
+   * source, then switch on the plugin and its driver component, on the
+   * person's one confirmation of the review. Each step is the separate
+   * action's own method, so it journals and refuses exactly as that action
+   * does. A refused step stops the flow and the steps before it stand;
+   * `stoppedAt` names it. Any other package is refused before it is
+   * installed, because enabling a plugin stays its own switch.
+   */
+  async admitOutsideDriver(inspection: InspectedExtensionPackage): Promise<{
+    readonly snapshot: ExtensionSnapshot;
+    readonly stoppedAt?: "trust" | "enable";
+  }> {
+    if (!holdsProviderDriver(inspection.manifest)) {
+      throw new ExtensionLifecycleServiceError(
+        "invalid",
+        "Only an outside provider driver installs, trusts and switches on in one step.",
+      );
+    }
+    const { extensionId } = inspection.manifest;
+    await this.install(inspection);
+    // Read before each step: every step advances the version the next expects.
+    const expectedStateVersion = () => {
+      const state = this.snapshot().packages.find(
+        (candidate) => String(candidate.extensionId) === String(extensionId),
+      );
+      if (state === undefined) {
+        throw new ExtensionLifecycleServiceError("invalid", "Extension package is not installed.");
+      }
+      return state.stateVersion;
+    };
+    const steps = [
+      {
+        step: "trust" as const,
+        run: () =>
+          this.setSourceTrust({
+            extensionId,
+            expectedStateVersion: expectedStateVersion(),
+            trusted: true,
+          }),
+      },
+      {
+        step: "enable" as const,
+        run: () =>
+          this.setPluginDesired({
+            extensionId,
+            expectedStateVersion: expectedStateVersion(),
+            desired: true,
+          }),
+      },
+      ...inspection.manifest.components
+        .filter((component) => component.kind === "provider-driver")
+        .map((component) => ({
+          step: "enable" as const,
+          run: () =>
+            this.setComponentDesired({
+              extensionId,
+              expectedStateVersion: expectedStateVersion(),
+              componentId: component.id,
+              desired: true,
+            }),
+        })),
+    ];
+    for (const { step, run } of steps) {
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof ExtensionLifecycleServiceError) {
+          return { snapshot: this.snapshot(), stoppedAt: step };
+        }
+        throw error;
+      }
+    }
+    return { snapshot: this.snapshot() };
+  }
+
   async update(inspection: InspectedExtensionPackage): Promise<ExtensionSnapshot> {
     const existing = this.#installedRecord(inspection.manifest.extensionId);
     if (existing.packageId !== inspection.manifest.packageId) {

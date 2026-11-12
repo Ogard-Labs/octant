@@ -355,8 +355,19 @@ the CLI. The hub depends on that:
     Work-turn and Code-command/operation entry points refuse Windows before
     launch or journal mutation, including background routine calls and Full
     access, and provider process preparation refuses Windows before
-    its unconfined Full-access branch. Native experiments do not admit foreground
-    or desktop startup.
+    its unconfined Full-access branch. Lifting those gates for Full access is
+    not enough to run a turn, so they stay as they are until the launches
+    behind them have Windows forms: at every level the host's Git reads and
+    mutations, thread terminals, language servers, debug adapters, and
+    provider version and readiness probes launch through the shared
+    confinement port, which supports macOS and Linux only and has no
+    unconfined fallback; the harness's command port, Full access included,
+    and every provider process need an owned process group and a
+    process-identity receipt, which the server has for macOS and Linux only;
+    and the provider driver factory admits Ollama alone. The host's own file
+    tools' path checks, which keep them out of the private profile at every
+    level, have not been exercised under Windows path rules either. Native
+    experiments do not admit foreground or desktop startup.
     The Windows foreground entry resolves the fixed native artifacts from the
     actual portable resources layout, claims the selected native profile before
     server/persistence imports, and composes its journal, usage cache, private

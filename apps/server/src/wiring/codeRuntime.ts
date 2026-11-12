@@ -1,7 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -754,6 +754,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
             ask,
+            appToolThreadLevel(thread),
           ),
         spendCeiling,
         terminalProcessPort,
@@ -962,7 +963,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
-          return browserToolTransport(observed, String(thread.modelId)) === true;
+          return (
+            browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
+            true
+          );
         },
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities

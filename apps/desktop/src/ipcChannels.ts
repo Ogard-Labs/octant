@@ -123,6 +123,7 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteDeviceReconcileExpired: "octant:remote-device:reconcile-expired",
   hubAdministrationRequest: "octant:hub-administration:request",
   agentAccessRequest: "octant:agent-access:request",
+  providerDeviceSignIn: "octant:provider-device-sign-in:request",
   threadMoveOpenThere: "octant:thread-move:open-there",
   ownerUnlockMake: "octant:owner-unlock:make",
   ownerUnlockSign: "octant:owner-unlock:sign",

@@ -2889,7 +2889,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: ACP agents](provider-runt
 
 A local-server provider adapter gives each acquired connection its own process and one live session. Below Full access, app tools reach it only when a process receipt proves outside tool sources cannot enter.
 
-- Ordinary inherited configuration gives no such proof, so below Full access the adapter reports app tools unsupported. At Full access a runtime whose inherited configuration cannot prove tool exclusivity is still offered Octant's tools, labelled as mixed (maintainer request, 2026-11-12). Not built yet: today the adapter reports app tools unsupported at every level.
+- Ordinary inherited configuration gives no such proof, so below Full access the adapter reports app tools unsupported. At Full access a runtime whose inherited configuration cannot prove tool exclusivity is still offered Octant's tools, labelled as mixed (maintainer request, 2026-11-12). Built for a Work or Code thread's own turns, where the connection check saw the runtime accept the tool endpoint (macOS): the adapter reports `appManagedToolsAtFullAccess: "mixed"` and the thread's access details show the label. Not built yet: a child agent session, a routine's own Browser target and a saved flow are not offered tools on a mixed runtime, and nothing is reported as mixed on Linux.
 - The private endpoint binds calls to that connection's immutable session and exact offered tool catalogue.
 - Process exit, stream failure, interruption and scope cleanup retire pending tool requests.
 
@@ -2958,7 +2958,7 @@ Status: Built. Since: 2026-10-26. Detail: [Enterprise provider identity: authent
 Each organization sign-in uses the narrowest flow that works. The organization registers its own client, and Octant needs no account of its own.
 
 - The organization registers a public client in its own tenant and enters its client id; reusing another product's client id is refused.
-- The desktop signs in with authorization code and PKCE on a loopback redirect; a device code is a per-instance opt-in for a host without the desktop app, and may be shown in a local desktop window, not only a terminal (maintainer request, 2026-11-12); not built yet: today it is shown only in a terminal.
+- The desktop signs in with authorization code and PKCE on a loopback redirect; a device code is a per-instance opt-in for a host without the desktop app, and may be shown in a local desktop window, not only a terminal (maintainer request, 2026-11-12). Built: the desktop's main process reaches the host-local sign-in for its own window; a paired device and a remote browser still cannot begin one or see a code.
 - Continuous access evaluation is not requested.
 - Cloud request signing uses the cloud's single sign-on device authorization held in the broker; stored long-lived access keys are refused, and the person's existing cloud profile is read only under the opt-in "Use my AWS profile"; not built yet: today reading the person's cloud profile files is refused.
 
@@ -2980,7 +2980,7 @@ Status: Partly built. Since: 2026-10-26. Detail: [Enterprise provider identity: 
 An outside driver is a harness-endpoint transport only, installed from outside Octant. Review, install, trust and enable are one local-window flow, and each later step to use is a separate local-window action that the flow does not imply.
 
 - Only harness endpoints are admitted; outside agent CLIs and managed processes are not.
-- One "Install and trust" flow covers inspect, install, trust and enable; digest-bound trust and confinement are unchanged, and add provider, connection check and Verify tools stay separate actions (maintainer request, 2026-11-12). Not built yet: today inspect, install, trust and enable are four separate actions. Structured references, tool calls, routines and remote clients cannot perform them.
+- One "Install and trust" flow covers inspect, install, trust and enable; digest-bound trust and confinement are unchanged, and add provider, connection check and Verify tools stay separate actions (maintainer request, 2026-11-12). Built: the package review is the one confirmation, the host runs the steps in order through the separate actions' own lifecycle methods, and a refused step stops the flow with the earlier steps standing and is named to the person. Each step stays available on its own, and the host refuses the flow for a package that holds no provider driver. Structured references, tool calls, routines and remote clients cannot perform them.
 - A driver is a single ES module on the server's runtime, with no executables, native addons or install scripts.
 - Outside harness endpoints work in Chat, Work and Code with verified-model tools, like bundled endpoints.
 - The live loopback smoke on macOS is owed by the maintainer; on Linux every outside driver stays host-prohibited.

@@ -1245,6 +1245,19 @@ export function createHostBridge(
             }
             return { status: answer.status, body: answer.body };
           },
+          // An organization sign-in with a device code. Main checks the
+          // request's shape and adds the desktop secret; the code it returns is
+          // shown only in this local window.
+          providerDeviceSignIn: async (request: unknown) => {
+            const answer = (await ipc.invoke(IPC_CHANNELS.providerDeviceSignIn, request)) as {
+              readonly status?: unknown;
+              readonly body?: unknown;
+            } | null;
+            if (typeof answer?.status !== "number") {
+              throw new Error("Octant sign-in with a code is unavailable.");
+            }
+            return { status: answer.status, body: answer.body };
+          },
           hubAdministrationRequest: async (operation: string, body?: unknown) => {
             // Main refuses an unknown operation; the preload stays free of the
             // operation table because its body decoders pull in npm modules a
@@ -1463,6 +1476,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
   "agentAccessRequest",
+  "providerDeviceSignIn",
   "openMovedThreadThere",
   "subscribePrepareToShutDown",
   "reportShutdownMovesOffered",

@@ -337,6 +337,10 @@ import {
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
 import { AgentAccessControlFailure, installAgentAccessIpcHandlers } from "./agentAccessControls";
+import {
+  installProviderDeviceSignInIpcHandlers,
+  ProviderDeviceSignInFailure,
+} from "./providerDeviceSignInControls";
 import { openMovedThreadThere } from "./threadMoveOpenThere";
 import {
   installPairedComputerIpcHandlers,
@@ -3377,6 +3381,21 @@ function installIpcHandlers(): void {
       const context = ownedWindowContext(event as IpcMainInvokeEvent);
       if (activeServerUrl === undefined) {
         throw new AgentAccessControlFailure("Octant agent access is unavailable.");
+      }
+      return {
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability: context.capability,
+        fetch: globalThis.fetch,
+      };
+    },
+  });
+  installProviderDeviceSignInIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    runtimeFor: (event) => {
+      const context = ownedWindowContext(event as IpcMainInvokeEvent);
+      if (activeServerUrl === undefined) {
+        throw new ProviderDeviceSignInFailure("Octant sign-in with a code is unavailable.");
       }
       return {
         serverUrl: activeServerUrl,

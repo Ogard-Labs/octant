@@ -863,8 +863,9 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 At Full access a runtime whose inherited configuration cannot prove that
 exclusivity is still offered Octant's tools, labelled as mixed; below Full
-access the rule is unchanged (maintainer request, 2026-11-12; not built yet:
-today such a runtime is offered none at any level).
+access the rule is unchanged (maintainer request, 2026-11-12). Built for a
+Work or Code thread's own turns; what remains is named in
+[Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 
 **Browser and Computer are tools, not mentions.** The host offers them on
 every eligible turn, and the agent uses them when the person's request needs
@@ -5621,7 +5622,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; one "Install and trust" flow covers inspect, install, trust and
   enable, with digest-bound trust and confinement unchanged (maintainer
-  request, 2026-11-12; not built yet: today these are separate steps); the catalog lists effective outside drivers in their own group from
+  request, 2026-11-12; built, with each step still available on its own); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
@@ -5954,8 +5955,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and switching an instance between a key and a sign-in, or changing its
   tenant, client, or base URL, deletes the stored credential and forgets the
   grant before the change is journaled. A device-code sign-in begins only for
-  an instance opted in to it, and only from the host-local
-  `octant provider sign-in` command (see "Organization sign-in on a host
+  an instance opted in to it, and only on the host: from the host-local
+  `octant provider sign-in` command or a local desktop window (see "Organization sign-in on a host
   without the desktop app" under [security and authority](#security-and-authority)).
   An OpenAI-compatible or Anthropic-compatible gateway speaks
   `directory-oauth` against the organization's own OpenID Connect issuer (the
@@ -14703,8 +14704,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   no `Origin`, loopback), and the private listener never forwards them; the
   browser sign-in route never begins a device code. A code may be shown in a
   local desktop window as well as in the terminal that asked for it
-  (maintainer request, 2026-11-12; not built yet: today a code appears only
-  in the terminal). The broker builds the tenant's device
+  (maintainer request, 2026-11-12; built: the desktop's main process calls
+  the same two routes for its own window, adding the bridge secret). The broker builds the tenant's device
   authorization URL from its closed issuer host and refuses a verification
   page off a closed list; the server follows an issued code until the broker
   settles it, so an interrupted command never leaves a grant without a
