@@ -79,7 +79,6 @@ describe("importing a Mermaid flowchart", () => {
   });
 
   it("reads graph LR, a plain line, a text label, and an underscored id", () => {
-    expect(refusal("graph LR\n  api_gateway(Gateway) -- reads --- db[(Store)]").line).toBe(2);
     const block = imported("graph LR\n  api_gateway(Gateway) -- reads --- db[Store]");
     expect(block).toMatchObject({
       flow: "right",
@@ -96,12 +95,11 @@ describe("importing a Mermaid flowchart", () => {
       ["  classDef hot fill:#f00", 2],
       ['  click a href "https://example.com"', 2],
       ["  style a fill:#f00", 2],
-      ["  a ==> b", 2],
       ["  a <--> b", 2],
       ["  a -.- b", 2],
-      ["  a((Circle)) --> b", 2],
+      ["  a{{Hexagon}} --> b", 2],
+      ["  a[[Subroutine]] --> b", 2],
       ["  a>Flag] --> b", 2],
-      ["  a & b --> c", 2],
     ] as const) {
       const result = refusal(`flowchart TD\n${statement}`);
       expect(result.reason).toBe("unsupported-construct");
@@ -109,12 +107,96 @@ describe("importing a Mermaid flowchart", () => {
     }
   });
 
-  it("refuses a bottom-up direction, a nested subgraph, and two ids that collide", () => {
-    expect(refusal("flowchart BT\n a --> b").reason).toBe("unsupported-construct");
-    expect(refusal("flowchart TD\n subgraph one\n subgraph two\n a\n end\n end").reason).toBe(
-      "unsupported-construct",
-    );
+  it("refuses an unknown direction, subgraphs nested past the catalog's depth, and two ids that collide", () => {
+    expect(refusal("flowchart XY\n a --> b").reason).toBe("unsupported-construct");
+    const deep =
+      "flowchart TD\n subgraph one\n subgraph two\n subgraph three\n subgraph four\n a\n end\n end\n end\n end";
+    expect(refusal(deep)).toMatchObject({ reason: "unsupported-construct", line: 5 });
     expect(refusal("flowchart TD\n a_b --> a-b").reason).toBe("unsupported-construct");
+    expect(
+      refusal("flowchart TD\n subgraph one\n a\n end\n subgraph two\n a --> b\n end"),
+    ).toMatchObject({ reason: "unsupported-construct", line: 6 });
+  });
+
+  it("reads a bottom-up or right-to-left flowchart as the same graph, laid out down or right", () => {
+    expect(imported("flowchart BT\n a --> b")).toMatchObject({
+      flow: "down",
+      edges: [{ source: "a", target: "b" }],
+    });
+    expect(imported("graph RL\n a --> b")).toMatchObject({
+      flow: "right",
+      edges: [{ source: "a", target: "b" }],
+    });
+  });
+
+  it("reads a circle as a terminator and a cylinder as a database node", () => {
+    expect(imported("flowchart TD\n s((Start)) --> db[(Orders<br/>store)]")).toMatchObject({
+      nodes: [
+        { nodeId: "s", label: "Start", role: "terminator" },
+        { nodeId: "db", label: "Orders store", icon: "database" },
+      ],
+    });
+  });
+
+  it("reads thick and longer links as arrows, and fans an ampersand list out into one edge per pair", () => {
+    const block = imported(
+      "flowchart LR\n a ==> b\n b == heavy ==> c\n c ---> d\n d -.-> e\n a & b --> x & y",
+    );
+    expect(block).toMatchObject({
+      edges: [
+        { source: "a", target: "b", style: "arrow" },
+        { source: "b", target: "c", style: "arrow", label: "heavy" },
+        { source: "c", target: "d", style: "arrow" },
+        { source: "d", target: "e", style: "dashed" },
+        { source: "a", target: "x", style: "arrow" },
+        { source: "a", target: "y", style: "arrow" },
+        { source: "b", target: "x", style: "arrow" },
+        { source: "b", target: "y", style: "arrow" },
+      ],
+    });
+    // An ampersand inside a label is the label's.
+    expect(imported("flowchart TD\n rd[Research & Development] --> ops")).toMatchObject({
+      nodes: [{ nodeId: "rd", label: "Research & Development" }, { nodeId: "ops" }],
+    });
+  });
+
+  it("nests a subgraph inside its parent, keeps a node in its innermost one, and skips a direction hint", () => {
+    const block = imported(
+      [
+        "flowchart TD",
+        "  subgraph cloud [Cloud]",
+        "    direction LR",
+        "    subgraph zone [Zone A]",
+        "      api --> db",
+        "    end",
+        "  end",
+        "  user --> api",
+      ].join("\n"),
+    );
+    expect(block).toMatchObject({
+      groups: [
+        { groupId: "cloud", label: "Cloud", nodeIds: [] },
+        { groupId: "zone", label: "Zone A", nodeIds: ["api", "db"], parentGroupId: "cloud" },
+      ],
+    });
+    expect(() =>
+      validateCanvasDefinition({
+        schemaVersion: block.schemaVersion,
+        title: "Zones",
+        provenance: {
+          mode: "chat",
+          hostId: "local",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+          providerInstanceId: "44444444-4444-4444-8444-444444444444",
+          modelId: "octant-test-model",
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        sourceManifest: [],
+        blocks: [block],
+      }),
+    ).not.toThrow();
   });
 });
 
@@ -202,6 +284,42 @@ describe("importing the other Mermaid diagram kinds", () => {
       [String(initial?.stateId), "start"],
       ["start", "end"],
       ["end", String(final?.stateId)],
+    ]);
+  });
+
+  it("reads a sequence's activation shorthand, its lost and async arrows, and skips autonumber", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  autonumber",
+        "  Client->>+API: request",
+        "  API-)Queue: enqueue",
+        "  API--xClient: dropped",
+        "  API-->>-Client: response",
+      ].join("\n"),
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.messages.map((entry) => [entry.from, entry.to, entry.label])).toEqual([
+      ["Client", "API", "request"],
+      ["API", "Queue", "enqueue"],
+      ["API", "Client", "dropped"],
+      ["API", "Client", "response"],
+    ]);
+    expect(block.activations).toMatchObject([
+      { participantId: "API", startMessageId: "m1", endMessageId: "m4" },
+    ]);
+    expect(refusal("sequenceDiagram\n  A->>B: hi\n  B-->>-A: bye").line).toBe(3);
+  });
+
+  it("reads a state's description as its label and skips a direction hint", () => {
+    const block = imported(
+      "stateDiagram-v2\n  direction LR\n  idle : Waiting for work\n  [*] --> idle\n  idle --> busy : job",
+    );
+    if (block.kind !== "state") throw new Error("not a state diagram");
+    expect(block.states).toMatchObject([
+      { stateId: "idle", label: "Waiting for work" },
+      { stateId: "pseudo:start" },
+      { stateId: "busy", label: "busy" },
     ]);
   });
 
