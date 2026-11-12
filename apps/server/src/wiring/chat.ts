@@ -708,7 +708,11 @@ export function wireChat(deps: ChatDependencies) {
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
-    yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
+    // At start every running attempt is one the previous host was giving when
+    // it stopped; the host continues those once it is up (wiring/continuation.ts).
+    const { cutOff: chatAttemptsCutOffByRestart } = yield* Effect.promise(() =>
+      chatService.reapStaleProviderSessions({ staleAfterMs: 0 }),
+    );
     yield* Effect.promise(() => browserCaptures.recover());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -868,6 +872,7 @@ export function wireChat(deps: ChatDependencies) {
     messageExpiryTimer.unref();
     yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(messageExpiryTimer)));
     return {
+      chatAttemptsCutOffByRestart,
       chatHiddenThreadIds,
       chatRoutes,
       chatService,

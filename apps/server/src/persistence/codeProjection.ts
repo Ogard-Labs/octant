@@ -940,12 +940,24 @@ function unsettledOperationHead(
   return head?.aggregate_version;
 }
 
+/**
+ * A provider turn this start's reconciliation found still running: the turn
+ * the previous host was carrying when it stopped. Only these were cut off by
+ * this restart; a turn already waiting before it was cut off by an earlier
+ * one, or is waiting on something else, such as a usage limit.
+ */
+export interface CodeTurnCutOffByRestart {
+  readonly threadId: CodeThreadId;
+  readonly operationId: string;
+}
+
 export function reconcileCodeRestart(input: {
   readonly connection: SqliteConnection;
   readonly journal: Journal;
   readonly reconciledAt: string;
   readonly uuid?: () => string;
-}): void {
+}): ReadonlyArray<CodeTurnCutOffByRestart> {
+  const cutOff: CodeTurnCutOffByRestart[] = [];
   const uuid = input.uuid ?? randomUUID;
   const correlationId = uuid();
   const checkoutRows = input.connection
@@ -1072,6 +1084,8 @@ export function reconcileCodeRestart(input: {
     // whether the thread is still owed anything. The reconciliation time lives
     // on the event instead.
     const reconciled = decodeCodeRuntimeWork({ ...work, state });
+    if (work.kind === "provider-turn")
+      cutOff.push({ threadId: work.threadId, operationId: String(work.id) });
     input.journal.append({
       aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
       expectedVersion: row.aggregate_version,
@@ -1190,6 +1204,7 @@ export function reconcileCodeRestart(input: {
       ],
     });
   }
+  return cutOff;
 }
 
 /**

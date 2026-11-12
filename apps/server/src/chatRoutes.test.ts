@@ -8,6 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { MachineChangeFeed } from "./machineChangeFeed";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createChatRouteHandler } from "./chatRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { ChatServiceError } from "./chat/chatService";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -194,6 +196,60 @@ describe("Chat routes", () => {
 
     expect(response?.status).toBe(400);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses a paired device changing Continue after restart for a Chat thread or the Chat setting", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000050";
+    const commands = [
+      {
+        kind: "set-chat-thread-restart-continuation",
+        threadId: threadFixture.id,
+        expectedVersion: 1,
+        continueAfterRestart: false,
+      },
+      {
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        restartContinuation: false,
+      },
+    ];
+    for (const command of commands) {
+      const remote = request("/api/chat/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000051" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      const refused = await route(remote);
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    const local = await route(
+      request("/api/chat/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(commands[0]),
+      }),
+    );
+    expect(local?.status).toBe(200);
   });
 
   it("rejects unsupported attachment media types", async () => {

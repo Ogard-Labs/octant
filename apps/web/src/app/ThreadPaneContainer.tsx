@@ -71,6 +71,7 @@ export interface ThreadPaneContainerProps {
     | "setCodeThreadCoordinator"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
+    | "setCodeThreadRestartContinuation"
     | "setThreadExportNotice"
     | "activateContentTab"
     | "activatePane"
