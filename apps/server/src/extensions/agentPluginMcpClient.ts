@@ -9,6 +9,13 @@ export class McpHttpStatusError extends Error {
   }
 }
 
+export class McpJsonRpcError extends Error {
+  constructor(readonly serverMessage: string) {
+    super("MCP server returned an application error.");
+    this.name = "McpJsonRpcError";
+  }
+}
+
 export interface McpToolDefinition {
   readonly name: string;
   readonly description?: string;
@@ -319,8 +326,7 @@ class StdioJsonRpcTransport implements JsonRpcTransport {
     if (pending === undefined) return;
     this.#pending.delete(id);
     if ("error" in message) {
-      const error = (message as { error?: { message?: string } }).error;
-      pending.reject(new Error(error?.message ?? "MCP request failed."));
+      pending.reject(mcpJsonRpcError((message as { error?: unknown }).error));
       return;
     }
     pending.resolve((message as { result?: unknown }).result);
@@ -370,7 +376,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
   async request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const id = this.#nextId++;
     const response = await this.#post({ jsonrpc: "2.0", id, method, params }, signal);
-    let payload: { readonly result?: unknown; readonly error?: { readonly message?: string } };
+    let payload: { readonly result?: unknown; readonly error?: unknown };
     try {
       const contentType = response.headers.get("content-type") ?? "";
       payload = contentType.includes("text/event-stream")
@@ -389,7 +395,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
       throw error;
     }
     // An application-level refusal does not invalidate a healthy MCP session.
-    if (payload.error) throw new Error(payload.error.message ?? "MCP request failed.");
+    if (payload.error) throw mcpJsonRpcError(payload.error);
     return payload.result;
   }
 
@@ -461,7 +467,7 @@ async function readMatchingSseResponse(
   response: Response,
   requestId: number,
   signal?: AbortSignal,
-): Promise<{ readonly result?: unknown; readonly error?: { readonly message?: string } }> {
+): Promise<{ readonly result?: unknown; readonly error?: unknown }> {
   if (response.body === null) throw new Error("MCP HTTP SSE response was empty.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -501,7 +507,7 @@ async function readMatchingSseResponse(
           (payload as { id?: unknown }).id === requestId
         ) {
           await reader.cancel().catch(() => undefined);
-          return payload as { result?: unknown; error?: { message?: string } };
+          return payload as { result?: unknown; error?: unknown };
         }
       }
     }
@@ -510,4 +516,15 @@ async function readMatchingSseResponse(
     signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
+}
+
+function mcpJsonRpcError(error: unknown): McpJsonRpcError {
+  const message =
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+      ? error.message
+      : "MCP request failed.";
+  return new McpJsonRpcError(message.slice(0, 4_096));
 }

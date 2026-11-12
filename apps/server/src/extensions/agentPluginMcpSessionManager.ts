@@ -20,6 +20,7 @@ import { watchedTextOf, watchOutsideContent } from "@octant/domain/shield-watche
 import {
   connectAgentPluginMcpSession,
   McpHttpStatusError,
+  McpJsonRpcError,
   type AgentPluginMcpSession,
   type AgentPluginMcpStdioProcessPort,
   type McpToolDefinition,
@@ -493,6 +494,12 @@ export class AgentPluginMcpSessionManager {
               isError: true,
             };
           }
+          if (error instanceof McpJsonRpcError) {
+            return {
+              ...this.#taintToolResult(thread.id, { error: error.serverMessage }),
+              isError: true,
+            };
+          }
           if (controller.signal.aborted) {
             await this.#close(indexed.sessionKey, record);
             const desired = this.#desired.get(indexed.sessionKey);
@@ -512,9 +519,7 @@ export class AgentPluginMcpSessionManager {
             result: {
               error: timedOut
                 ? "MCP tool call timed out."
-                : error instanceof Error
-                  ? error.message
-                  : "MCP tool call failed",
+                : "MCP tool call failed.",
             },
             isError: true,
           };

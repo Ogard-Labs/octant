@@ -1479,7 +1479,7 @@ export class ChatTurnRunner {
                     ),
                   );
                   if (executionSignal?.aborted || execution === undefined) return;
-                  if (execution.isError !== true && execution.outsideContent !== undefined) {
+                  if (execution.outsideContent !== undefined) {
                     yield* markToolRow(
                       event.requestId,
                       event.toolName,
