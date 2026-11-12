@@ -153,6 +153,8 @@ export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
 export * from "./toolEgressPolicy";
 export * from "./safeNetworkPolicy";
+export * from "./networkAddressPolicy";
+export * from "./canvasNetworkPolicy";
 export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
 export * from "./artifactMirrorPolicy";
