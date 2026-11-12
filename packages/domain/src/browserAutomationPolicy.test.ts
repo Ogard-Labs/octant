@@ -104,6 +104,21 @@ describe("evaluateBrowserAction", () => {
     expect(result.kind).toBe("denied");
   });
 
+  it("lets a page that admits every site navigate to any http or https address", () => {
+    const everySite = {
+      ...activeContext,
+      policy: { ...activeContext.policy, allowedOrigins: ["*"] },
+    };
+    expect(
+      evaluateBrowserAction(makeRequest({ target: "https://anywhere.com" }), everySite, authority)
+        .kind,
+    ).toBe("allowed");
+    expect(
+      evaluateBrowserAction(makeRequest({ target: "file:///etc/hosts" }), everySite, authority)
+        .kind,
+    ).toBe("denied");
+  });
+
   it("fails closed when the navigation allowlist is empty", () => {
     const openPolicy = {
       ...activeContext,
@@ -334,6 +349,13 @@ describe("which keys an agent may press", () => {
 });
 
 describe("originAllowed", () => {
+  it("admits every http and https address under the any-site entry, and nothing else", () => {
+    expect(originAllowed("https://one.example/a", ["*"])).toBe(true);
+    expect(originAllowed("http://127.0.0.1:4321/", ["*"])).toBe(true);
+    expect(originAllowed("file:///etc/hosts", ["*"])).toBe(false);
+    expect(originAllowed("https://one.example/a", [])).toBe(false);
+  });
+
   it("treats a site's www host and its bare host as one place", () => {
     expect(originAllowed("https://www.vg.no/", ["https://vg.no"])).toBe(true);
     expect(originAllowed("https://vg.no/front", ["https://www.vg.no"])).toBe(true);

@@ -218,8 +218,25 @@ the page, the workspace, or the person is reached.
 - At Full access a Private page needs no site approval and may navigate
   across origins, so this refusal is left there to profile pages, which keep
   their site approval ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Not built yet: today a Private page at Full
-  access still asks per origin and is refused outside its approved origins.
+  maintainer request, 2026-11-12). Built, in Work and Code:
+  - The agent tool opens the page with one allowlist entry, `*`, which stands
+    for every http and https site. The browser service admits that entry only
+    from the agent tool of a thread at Full access, alone, and never beside a
+    stored profile; a window, a paired device, and a profile switch cannot
+    open such a page. Credential-field protection, Take over and Hand back,
+    and the paired-device reach are the same on it as on any page.
+  - A Private page opened below Full access holds its one site. When the
+    thread is at Full access and the agent navigates it to another origin, the
+    tool closes it and opens the any-site page there instead of refusing; a
+    link or redirect on the one-site page that leaves its origin is still
+    refused until then.
+  - A page that admits every site has no site approval to stand on below Full
+    access. When the thread's level drops, the agent's next `navigate` closes
+    it and opens a one-site page through the ordinary approval, and every
+    other operation answers `browser-navigation-required`. Plan still reads
+    it, because Plan cannot move it.
+  - At Full access a different model or a person-switched Private page needs
+    no approval either; the ask that rebinding raises is a site approval.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile

@@ -98,6 +98,7 @@ import {
   type SurfaceProtocolSend,
 } from "./browserSurfaceFrames";
 import {
+  ANY_BROWSER_ORIGIN,
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -3590,7 +3591,11 @@ function normalizeUrl(value: string): string {
 function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   if (target === "about:blank") return true;
   try {
-    return sameSiteOriginAllowed(normalizeUrl(target), allowedOrigins.map(normalizeUrl));
+    return sameSiteOriginAllowed(
+      normalizeUrl(target),
+      // The any-site entry is not an address; it passes through as it is.
+      allowedOrigins.map((entry) => (entry === ANY_BROWSER_ORIGIN ? entry : normalizeUrl(entry))),
+    );
   } catch {
     return false;
   }

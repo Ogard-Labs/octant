@@ -289,8 +289,7 @@ thread made.
   [the Full access rule](../architecture.md#security-and-authority), where a
   Private page needs no site approval. An unanswered approval waits in Needs
   you instead of expiring (maintainer request, 2026-11-12). Not built yet:
-  today an unanswered approval expires, and a Private page at Full access
-  still asks per origin.
+  today an unanswered approval expires.
 - **Remembered per profile.** "Always allow" on that approval remembers the pair
   (origin, profile) in the shell settings
   (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
@@ -304,8 +303,15 @@ thread made.
   in this profile", which remembers the profile itself, so no later origin in
   that profile asks. Only the person's answer at the approval sets it, it
   covers no other profile, and it is listed and forgotten in the same Settings
-  list (maintainer request, 2026-11-12). Not built yet: today every origin in
-  a profile asks or is remembered one at a time.
+  list (maintainer request, 2026-11-12). Built: the answer is stored in
+  `rememberedBrowserProfileSites` as the profile with the site `*`, so it is
+  journaled, grows only through the approval answer, and is forgotten like a
+  pair; a settings write can add neither it nor a pair it would cover. A
+  Project profile is one Project's by construction; the Personal profile and a
+  named account are allowed in every Project that uses them, as their
+  remembered pairs are. The answer changes no open page: a page already open
+  in the profile keeps the one site it was approved for, and the agent reaches
+  another site by `stop` and `navigate`, which then does not ask.
 - **Rebinding to a different model or authority still asks**: a remembered pair
   covers the page, not a new controller. A person-switched replacement for the
   same live task/model/authority uses the ordinary site/profile approval policy,

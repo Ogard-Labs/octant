@@ -723,11 +723,13 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         windowId,
         threadId,
+        // At Full access a Private page needs no site approval and admits every site.
         policy: expect.objectContaining({
           profileMode: "isolated",
-          allowedOrigins: ["https://example.com"],
+          allowedOrigins: ["*"],
           credentialFieldProtection: true,
         }),
+        fullAccessAgent: true,
       }),
     );
     expect(act).toHaveBeenCalledWith(
@@ -742,6 +744,106 @@ describe("Code app-managed tools", () => {
         status: "running",
         page: { title: "Example", text: "Readable page text", observationRevision: 7 },
       },
+    });
+  });
+
+  describe("a Private page and the thread's level", () => {
+    function fixture(executionPolicy: "full-access" | "approval-gated", everySite: boolean) {
+      const authority = browserAuthority();
+      const open = browserSnapshot(authority);
+      if (open.context === undefined) throw Error("Missing test context");
+      const active: BrowserAutomationSnapshot = everySite
+        ? {
+            ...open,
+            context: {
+              ...open.context,
+              policy: { ...open.context.policy, allowedOrigins: ["*"] },
+            },
+          }
+        : open;
+      let current: BrowserAutomationSnapshot = active;
+      const request = vi.fn(async () => "approved" as const);
+      const create = vi.fn(async (_input: { policy: { allowedOrigins: readonly string[] } }) => {
+        current = active;
+        return active;
+      });
+      const act = vi.fn(async () => active);
+      const releaseThread = vi.fn(async () => {
+        current = { status: "ready", threadId: active.threadId, evidence: [] };
+        return current;
+      });
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: thread({ executionPolicy }),
+        readThread: () => thread({ executionPolicy }),
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          // The page was opened and approved by this thread before.
+          isApproved: () => true,
+          request,
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browser: {
+          resolveAuthority: () => authority,
+          inspectThread: () => current,
+          create,
+          act,
+          releaseThread,
+        },
+      });
+      const run = (input: Record<string, unknown>) =>
+        tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
+      return { run, request, create, act, releaseThread };
+    }
+
+    it("navigates across origins at Full access without asking or reopening the page", async () => {
+      const f = fixture("full-access", true);
+      const result = await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(result.isError).toBe(false);
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.releaseThread).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.act).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ target: "https://elsewhere.example/b" }),
+        }),
+      );
+    });
+
+    it("reopens a one-site page at Full access when the agent navigates elsewhere", async () => {
+      const f = fixture("full-access", false);
+      await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.releaseThread).toHaveBeenCalledOnce();
+      expect(f.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
+    });
+
+    it("leaves a one-site page as it is below Full access, so another origin stays refused", async () => {
+      const f = fixture("approval-gated", false);
+      await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(f.releaseThread).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.act).toHaveBeenCalledOnce();
+    });
+
+    it("stops using a page that admits every site once the thread is below Full access", async () => {
+      const reading = fixture("approval-gated", true);
+      expect(await reading.run({ operation: "snapshot" })).toMatchObject({
+        isError: true,
+        result: { error: "browser-navigation-required" },
+      });
+      expect(reading.act).not.toHaveBeenCalled();
+
+      const navigating = fixture("approval-gated", true);
+      await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(navigating.releaseThread).toHaveBeenCalledOnce();
+      expect(navigating.request).toHaveBeenCalledWith("https://elsewhere.example", undefined);
+      expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
+        "https://elsewhere.example",
+      ]);
     });
   });
 
@@ -850,9 +952,12 @@ describe("Code app-managed tools", () => {
           expect.objectContaining({
             policy: expect.objectContaining({
               profile: expect.objectContaining({ kind: profile }),
+              // A signed-in page holds the one site the person approved.
+              allowedOrigins: ["https://example.com"],
             }),
           }),
         );
+        expect(f.create.mock.calls[0]?.[0]).not.toHaveProperty("fullAccessAgent");
       },
     );
     it("uses an explicitly selected account default while still asking for that account's site authority", async () => {

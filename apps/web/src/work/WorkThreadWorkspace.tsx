@@ -1627,7 +1627,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
 
   const pendingBrowserApproval = browserApprovals[0];
-  const decideBrowserApproval = async (decision: "approved" | "denied", remember?: boolean) => {
+  const decideBrowserApproval = async (
+    decision: "approved" | "denied",
+    remember?: "site" | "profile",
+  ) => {
     if (
       pendingBrowserApproval === undefined ||
       props.browserAutomationClient?.decideApproval === undefined ||
@@ -1641,7 +1644,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       await props.browserAutomationClient.decideApproval({
         approvalId: pendingBrowserApproval.approvalId,
         decision,
-        ...(remember === true ? { remember: true } : {}),
+        ...(remember === "site" ? { remember: true } : {}),
+        ...(remember === "profile" ? { rememberProfile: true } : {}),
       });
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
@@ -1649,7 +1653,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       // An always-allow grant is journaled by the server, outside this
       // window's shell commands — the shell controller re-reads on the signal
       // so its next settings edit does not conflict on a stale version.
-      if (decision === "approved" && remember === true) announceShellSettingsWritten();
+      if (decision === "approved" && remember !== undefined) announceShellSettingsWritten();
     } catch {
       setBrowserApprovalMessage(
         "Browser approval could not be sent. Keep this request open and retry.",
@@ -2727,15 +2731,28 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 pendingBrowserApproval.download === undefined &&
                 pendingBrowserApproval.signIn === undefined &&
                 pendingBrowserApproval.script === undefined ? (
-                  <OctantButton
-                    disabled={browserApprovalBusy}
-                    onClick={() => void decideBrowserApproval("approved", true)}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Always allow
-                  </OctantButton>
+                  <>
+                    <OctantButton
+                      disabled={browserApprovalBusy}
+                      onClick={() => void decideBrowserApproval("approved", "site")}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Always allow
+                    </OctantButton>
+                    {pendingBrowserApproval.profile === undefined ? null : (
+                      <OctantButton
+                        disabled={browserApprovalBusy}
+                        onClick={() => void decideBrowserApproval("approved", "profile")}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Allow all sites in this profile
+                      </OctantButton>
+                    )}
+                  </>
                 ) : null}
                 <OctantButton
                   disabled={browserApprovalBusy}

@@ -54,6 +54,7 @@ import {
 } from "./browserCredentialUseService";
 import {
   MAX_BROWSER_HELD_DOWNLOADS,
+  ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
   MAX_PROJECT_AGENT_PAGES,
@@ -538,6 +539,12 @@ export class BrowserAutomationService {
      * local window unless the scope is the host acting alone.
      */
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
+    /**
+     * Set only by the agent tool for a thread at Full access, whose Private
+     * page needs no site approval. No route sets it, so a window or a paired
+     * device cannot open a page that admits every site.
+     */
+    readonly fullAccessAgent?: true;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -560,7 +567,12 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
+    const denied = this.#authorizeCreate(
+      input.action,
+      input.policy,
+      input.threadId,
+      input.fullAccessAgent === true,
+    );
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -675,7 +687,12 @@ export class BrowserAutomationService {
           };
           return;
         }
-        const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
+        const refreshedDenial = this.#authorizeCreate(
+          input.action,
+          input.policy,
+          input.threadId,
+          input.fullAccessAgent === true,
+        );
         if (refreshedDenial !== undefined) {
           owned.status = "failed";
           owned.failure = refreshedDenial;
@@ -2867,6 +2884,7 @@ export class BrowserAutomationService {
     request: ToolActionRequest,
     policy: BrowserContextPolicy,
     threadId: BrowserThreadId,
+    fullAccessAgent: boolean,
   ): BrowserAutomationFailure | undefined {
     if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent())
       return { category: "unauthorized", message: "Browser execution owner is no longer current." };
@@ -2881,6 +2899,17 @@ export class BrowserAutomationService {
     });
     if (decision.kind === "deny" || decision.kind === "prompt") {
       return mapToolCallDenial(decision.reason, request);
+    }
+    // Every site is the reach of one page only: the Private page the agent
+    // opens at Full access. A stored profile keeps its site approval per
+    // origin at every level, so it never carries the any-site entry.
+    if (
+      policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) &&
+      (!fullAccessAgent ||
+        policy.allowedOrigins.length !== 1 ||
+        storedBrowserProfile(policy.profile) !== undefined)
+    ) {
+      return { category: "policy-denied", message: "Browser context policy exceeds host limits." };
     }
     if (
       policy.allowedOrigins.length === 0 ||

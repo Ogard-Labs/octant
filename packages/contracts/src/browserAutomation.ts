@@ -16,6 +16,17 @@ export const MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS = 54 * 1024;
  * the same navigation admission as the first.
  */
 export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
+
+/**
+ * The entry that stands for every http and https site. In a context's
+ * `allowedOrigins` it is the Private page an agent opened at Full access,
+ * which needs no site approval and may navigate across origins; the host
+ * admits it from no other caller and never beside a stored profile. As the
+ * `origin` of a remembered profile site it is the person's "Allow all sites
+ * in this profile" answer. `*` is not an origin a URL can have, so it never
+ * collides with a real site.
+ */
+export const ANY_BROWSER_ORIGIN = "*";
 /** How many contexts one thread inspect may name. Stopping windows can pile up. */
 export const MAX_BROWSER_THREAD_CONTEXTS = 8;
 

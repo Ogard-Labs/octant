@@ -763,8 +763,10 @@ At Full access a Private page needs no site approval and may navigate across
 origins; a profile page keeps its site approval at every level, which the
 person can remember or widen to "Allow all sites in this profile"
 ([the Full access rule](#security-and-authority); maintainer request,
-2026-11-12). Not built yet: today a Private page asks for each site at Full
-access too, and no profile-wide answer exists.
+2026-11-12). Built: the agent tool opens that Private page with the any-site
+entry in its allowlist, which the browser service admits from no other caller
+and never beside a stored profile
+([Browser for agents](design/browser-agent-tool.md#refusal-and-expiry-recovery)).
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
 other one as `plan-mode-read-only`, a recording included, from one table of

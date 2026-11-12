@@ -65,6 +65,7 @@ import {
   isToolAllowedByAllowlist,
   defaultShellSettings,
   enabledModes,
+  browserProfileSiteListed,
   isBrowserProfileSiteRemembered,
 } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
@@ -175,9 +176,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const stored = persistence.readShellSettings();
         const current = stored?.settings ?? defaultShellSettings();
-        if (
-          isBrowserProfileSiteRemembered(current.rememberedBrowserProfileSites, origin, profile)
-        ) {
+        if (browserProfileSiteListed(current.rememberedBrowserProfileSites, origin, profile)) {
           return;
         }
         try {

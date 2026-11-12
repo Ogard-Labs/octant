@@ -111,6 +111,39 @@ describe("TerminalBrowserApprovalPrompt", () => {
     );
   });
 
+  it("offers to allow all sites in the profile on the agent's signed-in site approval, and never on a Private one", async () => {
+    const browser = client([
+      { ...approval(), profile: { kind: "personal" } } as unknown as BrowserToolApproval,
+    ]);
+    const { unmount } = render(
+      <TerminalBrowserApprovalPrompt client={browser} threadId={threadId} threadTitle="Thread" />,
+    );
+
+    const card = await screen.findByRole("group", { name: "Browser origin approval" });
+    expect(card).toHaveTextContent(
+      "Let the agent use https://example.com in the Personal profile?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Allow all sites in this profile" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: "22222222-2222-4222-8222-222222222222",
+        decision: "approved",
+        rememberProfile: true,
+      }),
+    );
+    unmount();
+
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={client([approval()])}
+        threadId={threadId}
+        threadTitle="Thread"
+      />,
+    );
+    await screen.findByRole("group", { name: "Browser request from a terminal" });
+    expect(screen.queryByRole("button", { name: "Allow all sites in this profile" })).toBeNull();
+  });
+
   it("shows only this Code thread's requests, not another thread's or a Work thread's", async () => {
     const browser = client([
       approval({ threadId: "33333333-3333-4333-8333-333333333333" }),

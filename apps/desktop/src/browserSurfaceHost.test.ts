@@ -2300,6 +2300,34 @@ describe("BrowserSurfaceHost", () => {
     ).rejects.toThrow("allowlist");
   });
 
+  it("lets a page that admits every site move to another origin with nobody driving, and holds a one-site page", async () => {
+    // The any-site entry is the agent's Private page at Full access: a link
+    // or redirect may leave the first origin without the person's hand on it.
+    const navigationPrevented = async (allowedOrigins: ReadonlyArray<string>) => {
+      const created = view();
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: [...allowedOrigins],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 4,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const preventDefault = vi.fn();
+      vi.mocked(created.webContents.on).mock.calls.find(
+        ([name]) => name === "will-navigate",
+      )?.[1]?.({ preventDefault }, { url: "https://research.test/a" });
+      return preventDefault.mock.calls.length > 0;
+    };
+
+    expect(await navigationPrevented(["*"])).toBe(false);
+    expect(await navigationPrevented(["https://example.com"])).toBe(true);
+  });
+
   it("refuses a page the agent could not manage to leave", async () => {
     const created = view();
     const host = createBrowserSurfaceHost({ createView: () => created });

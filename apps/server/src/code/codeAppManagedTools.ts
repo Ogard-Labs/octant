@@ -12,7 +12,9 @@ import { browserToolImage } from "../browser/browserToolImage";
 import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
 import { browserDownloadQuestion } from "@octant/domain";
 import {
+  browserCallOrigin,
   browserOperationRefusedInPlan,
+  browserPageReach,
   browserToolAction,
   browserPageScriptToolResult,
   browserDownloadSavedResult,
@@ -57,6 +59,7 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
   sameToolActionAuthority,
@@ -528,6 +531,8 @@ export interface CodeAppManagedToolsOptions {
         readonly maxConcurrentTabs: number;
         readonly sessionTimeoutMs: number;
       };
+      /** The agent's own open at Full access; only it may ask for every site. */
+      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -1472,16 +1477,36 @@ async function browserToolOne(
         : (options.browserSignIn.refusal(options.windowId) ?? signInPageRefusal(snapshot));
     if (refusal !== undefined) return failure(refusal);
   }
-  const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+  let existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
   if (existing === undefined && snapshot.context !== undefined) {
     options.browserApproval?.forget(String(snapshot.context.contextId));
   }
-  const origin =
-    existing === undefined
-      ? input.operation === "navigate"
-        ? allowedOrigin(input.url)
-        : undefined
-      : existing.policy.allowedOrigins.join(", ");
+  if (existing !== undefined) {
+    const reach = browserPageReach({
+      existing,
+      fullAccess: currentAuthorityFailure(options) === undefined,
+      plan: currentPosture(options) === "plan",
+      privateNavigation:
+        input.operation === "navigate" &&
+        (input.profile ??
+          options.readThread(options.windowId, options.thread.id)?.browserTaskProfile ??
+          "private") === "private"
+          ? input.url
+          : undefined,
+    });
+    if (reach !== "kept") {
+      if (reach === "navigation-required" && input.operation !== "navigate") {
+        return failure("browser-navigation-required");
+      }
+      // The same stop and navigate the refusal would have asked the agent for.
+      options.browserApproval?.forget(String(existing.contextId));
+      options.browserProfiles?.forgetBinding(String(existing.contextId));
+      snapshot = await options.browser.releaseThread(options.windowId, threadId);
+      if (signal?.aborted) return failure("tool-interrupted");
+      existing = undefined;
+    }
+  }
+  const origin = browserCallOrigin(input, existing, snapshot.observation?.url);
   if (origin === undefined)
     return failure(
       input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
@@ -1533,14 +1558,11 @@ async function browserToolOne(
     const remembered =
       (existing === undefined || (boundIdentity && binding?.approval === "pending")) &&
       profiles.approvals.isRemembered?.(origin, profile) === true;
-    // Full access still authorizes a new Private page. It never grants a stored
-    // profile or lets a different model inherit a person-switched page.
-    const privatePending =
-      profile === undefined &&
-      boundIdentity &&
-      binding?.approval === "pending" &&
-      currentAuthorityFailure(options) === undefined;
-    if (!approved && !remembered && !privatePending) {
+    // At Full access a Private page needs no site approval, a person-switched
+    // one included. It never grants a stored profile.
+    const privateAtFullAccess =
+      profile === undefined && currentAuthorityFailure(options) === undefined;
+    if (!approved && !remembered && !privateAtFullAccess) {
       const outcome = await profiles.approvals.request({
         windowId: options.windowId,
         threadId: String(threadId),
@@ -1588,6 +1610,9 @@ async function browserToolOne(
   }
   if (existing === undefined) {
     const action = actionRequest(options, authority);
+    // At Full access a Private page needs no site approval and may navigate
+    // across origins; a page in a signed-in profile holds the site it asked for.
+    const opensEverySite = profile === undefined && !requiresApproval;
     const created = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
       options.browser!.create({
         windowId: options.windowId,
@@ -1596,11 +1621,12 @@ async function browserToolOne(
         policy: {
           ...(profile === undefined ? {} : { profile }),
           profileMode: "isolated",
-          allowedOrigins: [origin],
+          allowedOrigins: [opensEverySite ? ANY_BROWSER_ORIGIN : origin],
           credentialFieldProtection: true,
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 600_000,
         },
+        ...(opensEverySite ? { fullAccessAgent: true as const } : {}),
       }),
     );
     if (created.kind === "failure") return failure(created.reason);
