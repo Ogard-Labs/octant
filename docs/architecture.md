@@ -11051,6 +11051,22 @@ linked from a secret store, Save, Sign in). The steps never name a vendor
 screen the catalog cannot vouch for; the guide link stays the authority for
 those.
 
+**Composio.** The catalog lists Composio's hosted MCP server
+(`https://connect.composio.dev/mcp`, probed 2026-11-12: 401 with resource
+metadata, an authorization server with PKCE S256 and public dynamic
+registration) as one sign-in entry. It is how a person reaches Gmail, Google
+Drive and other apps whose vendors offer Octant no client of its own: the
+person signs in to Composio, and Composio holds the vendor sign-ins. That is a
+different custody from every other entry: Composio stores those credentials
+encrypted on its servers, and the content the agent reads or writes passes
+through them, so the vendor's own authorization never reaches the broker.
+Octant does not know Composio's retention. The entry therefore carries a
+`permissionNotice` that says so before sign-in; the sign-in grant to Composio
+itself lives in the credential broker like any other. Per-call approvals,
+taint rules and the confined launch apply unchanged. No Composio API key
+entry exists: the sign-in covers personal and organization accounts alike,
+chosen on Composio's side.
+
 **Atlassian and Airtable setup.** Both non-featured entries use the existing
 MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
 uses `https://mcp.atlassian.com/v2/mcp`; its path-scoped issuer, published DCR and
