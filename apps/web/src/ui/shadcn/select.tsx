@@ -18,14 +18,14 @@ export function SelectTrigger({
     <SelectPrimitive.Trigger
       className={cn(
         fieldPaint,
-        "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       data-slot="select-trigger"
       {...props}
     >
       {children ?? <SelectPrimitive.Value />}
-      <SelectPrimitive.Icon className="text-muted-foreground opacity-50">
+      <SelectPrimitive.Icon className="text-muted-foreground">
         <ChevronDown aria-hidden="true" data-icon="inline-end" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>

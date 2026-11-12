@@ -442,6 +442,22 @@ describe("the public-block visual language", () => {
     expect(system).not.toMatch(/\.composer-model-picker__trigger:disabled\s*\{/);
   });
 
+  it("dims a disabled control by one shared opacity that keeps its label readable", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    // 0.75 keeps the muted ink at 3:1 or more on the light page and the dark card.
+    expect(system).toMatch(/--oct-disabled-opacity:\s*0\.75;/);
+    const recipes = sourceFiles(join(webRoot, "ui/shadcn"), ".tsx").map((path) => ({
+      path: relative(webRoot, path),
+      source: readFileSync(path, "utf8"),
+    }));
+    for (const { path, source } of recipes) {
+      expect(source, path).not.toMatch(/(?:disabled|data-disabled):opacity-\d/);
+    }
+    // A select's chevron is not dimmed while the select is enabled.
+    const select = readFileSync(join(webRoot, "ui/shadcn/select.tsx"), "utf8");
+    expect(select).not.toMatch(/text-muted-foreground opacity-/);
+  });
+
   it("does not add a wrapper focus halo around the Issues search", () => {
     const github = readFileSync(join(webRoot, "styles/github.css"), "utf8");
     const input =
