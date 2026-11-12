@@ -1365,8 +1365,13 @@ after pressing Stop in Chat, Work or Code. The server commands kill
 that attempt's own runtime process tree and nothing else, journals the attempt
 `cancelled`, and leaves the thread usable and its session resumable. A runtime
 that serves several threads from one process (Codex, OpenCode) reports
-`forceStop` unsupported: the command is refused, the UI never offers it, and
-Stop settles the attempt at once as before. For a provider that supports it, a
+`forceStop` unsupported: the command is refused and the UI never offers it. In
+Chat, its Stop still waits for the runtime to confirm the turn ended before the
+attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
+attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
+confirmed. The provider may still be running this response."), which frees the
+thread without claiming the work stopped. While a Stop is unanswered the
+composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
 (`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then

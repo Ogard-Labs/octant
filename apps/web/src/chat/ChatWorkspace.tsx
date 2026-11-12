@@ -1838,6 +1838,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             {...(activeAttempt === undefined
               ? {}
               : {
+                  stopping: stoppingAttemptId !== undefined,
                   onStop: () => {
                     setStopRequestedFor(String(activeAttempt.id));
                     void props.controller.execute({

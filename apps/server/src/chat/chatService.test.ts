@@ -263,6 +263,8 @@ function openFixture(options?: {
     readonly modelId: string;
   }>;
   readonly chatEnabled?: { current: boolean };
+  /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
+  readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
@@ -714,6 +716,9 @@ function openFixture(options?: {
     recordExternalContentIngestion:
       options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options?.stopConfirmationMs === undefined
+      ? {}
+      : { stopConfirmationMs: options.stopConfirmationMs }),
     ...(options?.awaitsHarnessApproval === undefined
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
@@ -4577,55 +4582,66 @@ describe("ChatService", () => {
     expect(p95).toBeLessThan(1_000);
   }, 30_000);
 
-  it("refuses to force-stop a turn whose provider shares one process and still stops it at once", async () => {
-    const queue = Effect.runSync(Queue.unbounded<never>());
-    let acquired = false;
-    const driver = {
-      acquire: () =>
-        Effect.sync(() => {
-          acquired = true;
-        }).pipe(
-          Effect.as({
-            subscribe: Effect.succeed(Stream.fromQueue(queue)),
-            start: (input: { readonly sessionId: string }) =>
-              Effect.succeed({ sessionId: input.sessionId }),
-            send: () => Effect.never,
-            interrupt: () => Effect.never,
-            stop: () => Effect.void,
-            answerApproval: () => Effect.void,
-            answerUserInput: () => Effect.void,
-            answerTool: () => Effect.void,
-          }),
-        ),
-    } as unknown as ProviderDriver;
-    const { service } = openFixture({ driver });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Shared process",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    void service.execute({
-      kind: "send-chat-turn",
-      threadId: created.thread.id,
-      expectedVersion: created.thread.version,
-      prompt: "Hang",
-    });
-    await until(() => acquired);
-    const running = service.read(created.thread.id);
-    const command = {
-      threadId: created.thread.id,
-      expectedVersion: running.thread.version,
-      turnId: running.turns[0]!.id,
-      attemptId: running.turns[0]!.attempts[0]!.id,
-    };
+  it.each([
+    ["confirms the stop", "cancelled", undefined],
+    ["never confirms the stop", "interrupted", "stop-unconfirmed"],
+  ] as const)(
+    "on a provider that shares one process, refuses force stop and shows Cancelled only when the runtime %s",
+    async (_case, settled, failureCode) => {
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      let acquired = false;
+      const driver = {
+        acquire: () =>
+          Effect.sync(() => {
+            acquired = true;
+          }).pipe(
+            Effect.as({
+              subscribe: Effect.succeed(Stream.fromQueue(queue)),
+              start: (input: { readonly sessionId: string }) =>
+                Effect.succeed({ sessionId: input.sessionId }),
+              send: () => Effect.never,
+              interrupt: () => (settled === "cancelled" ? Effect.void : Effect.never),
+              stop: () => Effect.void,
+              answerApproval: () => Effect.void,
+              answerUserInput: () => Effect.void,
+              answerTool: () => Effect.void,
+            }),
+          ),
+      } as unknown as ProviderDriver;
+      const { service } = openFixture({ driver, stopConfirmationMs: 50 });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Shared process",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      void service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hang",
+      });
+      await until(() => acquired);
+      const running = service.read(created.thread.id);
+      const command = {
+        threadId: created.thread.id,
+        expectedVersion: running.thread.version,
+        turnId: running.turns[0]!.id,
+        attemptId: running.turns[0]!.attempts[0]!.id,
+      };
+      const attempt = () => service.read(created.thread.id).turns[0]!.attempts[0]!;
 
-    await expect(
-      service.execute({ kind: "force-stop-chat-turn", ...command }),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    await service.execute({ kind: "interrupt-chat-turn", ...command });
-    expect(service.read(created.thread.id).turns[0]!.attempts[0]!.outcome).toBe("cancelled");
-  });
+      await expect(
+        service.execute({ kind: "force-stop-chat-turn", ...command }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      await service.execute({ kind: "interrupt-chat-turn", ...command });
+      // Stop alone is not proof the runtime stopped, so the turn is not yet
+      // recorded as cancelled.
+      if (settled === "interrupted") expect(attempt().outcome).toBe("queued");
+      await until(() => attempt().outcome === settled);
+      expect(attempt().failure?.code).toBe(failureCode);
+    },
+  );
 
   it("rejects a queued stale send before it can journal an orphaned context plan", async () => {
     const probeResult = probeFixture();
