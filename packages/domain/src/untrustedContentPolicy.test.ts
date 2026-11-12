@@ -7,6 +7,7 @@ import {
   emptyThreadContentTaint,
   nativeHarnessResultTaintsThread,
   originTaintsThread,
+  outsideContentRefusesDelegation,
   projectThreadContentTaint,
   searchQueryRefusalUnderTaint,
 } from "./untrustedContentPolicy";
@@ -319,5 +320,25 @@ describe("a person's clear of a thread's outside-content mark", () => {
       reason: "network-tool-on-tainted-thread",
       rememberable: false,
     });
+  });
+});
+
+describe("delegation on a thread that read outside content", () => {
+  it("refuses to start a helper below Full access", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: false }),
+    ).toBe(true);
+  });
+
+  it("lets a Full access thread keep delegating", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: true }),
+    ).toBe(false);
+  });
+
+  it("never refuses a thread that read nothing from outside", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: false, fullAccessThread: false }),
+    ).toBe(false);
   });
 });

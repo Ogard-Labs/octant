@@ -93,6 +93,7 @@ import { SpendCeilingService } from "../spendCeilingService";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
@@ -441,6 +442,34 @@ export function createAgentRunControlWorkspace(
             : parent,
       }),
   };
+}
+
+/**
+ * Whether what a thread read from outside stops it from starting or keeping a
+ * helper. The level is read from the thread as it stands now, so lowering a
+ * thread from Full access gates its next delegation.
+ */
+function outsideContentGatesHelpers(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  parentThreadId: string,
+): boolean {
+  const readLevel = (): boolean => {
+    try {
+      const work = workThreadProjection.read(decodeWorkThreadId(parentThreadId));
+      if (work !== undefined) return work.access === "full-access";
+      const code = persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
+      return code?.executionPolicy === "full-access";
+    } catch {
+      // An id neither mode decodes is a Chat thread, which has no Full access.
+      return false;
+    }
+  };
+  return outsideContentRefusesDelegation({
+    externalContentIngested: readThreadExternalContentTaint(persistence.connection, parentThreadId)
+      .externalContentIngested,
+    fullAccessThread: readLevel(),
+  });
 }
 
 async function resolveAgentRunParentCheckout(
@@ -939,8 +968,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           run,
           startsHelpers: () => agentRunSettingsStore.current().creationPosture === "automatic",
           isTainted: (waiter) =>
-            readThreadExternalContentTaint(persistence.connection, String(waiter.parentThreadId))
-              .externalContentIngested,
+            outsideContentGatesHelpers(
+              persistence,
+              workThreadProjection,
+              String(waiter.parentThreadId),
+            ),
           parentThread: (waiter) =>
             readAgentRunParentThread(persistence, workThreadProjection, waiter),
           parentLiveAuthority: agentRunParentAuthority,
@@ -1179,8 +1211,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         );
       },
       isTainted: () =>
-        readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
-          .externalContentIngested,
+        outsideContentGatesHelpers(persistence, workThreadProjection, input.parentThreadId),
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,

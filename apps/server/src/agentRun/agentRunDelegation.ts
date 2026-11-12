@@ -108,6 +108,7 @@ export interface AgentRunDelegationOptions {
   readonly uuid: () => string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
   readonly routing?: AgentRunDelegationRouting;
+  /** Outside content the thread read gates its helpers; never true at Full access. */
   readonly isTainted?: () => boolean;
   readonly isPaused?: () => boolean;
   readonly projectId?: string | undefined;

@@ -2474,7 +2474,7 @@ visible. Off, paused, and unauthorized parents cannot start helpers. A parent
 that read outside content can: at Full access delegation is not refused and
 the mark follows into the child; below Full access the person (the reviewer at
 Auto) is asked once per thread (maintainer request, 2026-11-12). Not built
-yet: today a tainted parent cannot start helpers at any level.
+yet: below Full access a tainted parent is still refused rather than asked.
 
 Parent conversation context is opt-in and fixed at admission. Chat uses its
 admitted conversation; Work and Code expose bounded accepted prompts and
