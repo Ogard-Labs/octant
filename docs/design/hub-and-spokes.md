@@ -716,20 +716,27 @@ from their phone or laptop what they could do sitting at any of them. An
   changing that host's hub and peer grants; and copying sign-ins
   ([Shared sign-ins](#shared-sign-ins)). Each use is journaled on the host
   with the device and `owner-unlock`.
-- **Threads, the Browser, and terminals.** An owner device the person marked
-  may also raise a thread to Full access or start one there (exception 7 of
-  [the Full access rule](../architecture.md#security-and-authority); the
-  choice keeps its own unlock), navigate and type in the host's agent
-  Browser, write to a thread terminal, and answer a profile's site approvals
-  (maintainer request, 2026-11-12). Any other paired device is unchanged. Not
-  built yet: today an owner device changes an existing thread's or Project's
-  posture, controls only an already-open Code Private page for 60 seconds as
-  above, starts no thread, writes to no terminal, and answers no site
-  approval; the [recovery inventory](#recovery-inventory) records what is
-  built.
-- **Before a paired client's merge.** A host may also ask a paired phone or
-  web client's merge for an owner unlock, under a switch its window sets, off
-  by default. The owner device answers a challenge this host's owner route
+- **Threads, the Browser, and terminals.** Raising a thread to Full access or
+  starting one there, navigating and typing in the host's agent Browser, and
+  writing to a thread terminal are open to a device the host's own person
+  paired with that host, with no owner mark and no unlock
+  (maintainer decision, 2026-11-12; who is asking is not an exception of
+  [the Full access rule](../architecture.md#security-and-authority)). The host
+  reads who admitted a device from its own approval record: a device it knows
+  only through the hub's roster, a guest and an owner device included, is not
+  such a device there and keeps the owner rules of this section: on a host it
+  did not pair with directly an owner device changes an existing thread's or
+  Project's posture with its own unlock, controls only an already-open Code
+  Private page for 60 seconds as above, starts no thread, writes to no
+  terminal, and answers no site approval; the
+  [recovery inventory](#recovery-inventory) records what is built. Not built
+  yet: no paired device takes the Browser page over from the agent or hands it
+  back.
+- **Before a paired client's merge.** A paired client's merge needs no owner
+  unlock when the host's own person paired the device (maintainer decision,
+  2026-11-12). A host may still ask the merge of a phone or web client the
+  hub's roster introduced for an owner unlock, under a switch its window sets,
+  off by default; the owner device answers a challenge this host's owner route
   issued for the merge route's own path and body, and the merge carries the
   proof. The rule and its rationale are in
   [Architecture: pull-request merge](../architecture.md#modes-chat-work-and-code).
@@ -834,21 +841,24 @@ window on a host always has that host's authority and needs no other device.
 Losing one device never locks the person out, and a lost device is removed
 from any device they still have.
 
-| Situation                                                   | What the person does                                                                                                                                                                                  |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new phone or laptop                                   | Scan the hub's QR code or type its code over the private network. With Confirm new members on, compare the short code and confirm in a spoke's window or on an owner device                           |
-| Approve an agent's risky step                               | Answer it in the spoke's own window, or on a member that spoke lets answer approvals (a guest phone, by default)                                                                                      |
-| Turn on Full access, merge, copy a sign-in, or add an owner | In the host's own window, or on an owner device with its own fresh unlock for that action                                                                                                             |
-| Lose the phone                                              | On a laptop's window, or another owner device: Remove the phone. Confirm and administer from the laptop's window until a new phone joins; mark the new phone as owner there                           |
-| Lose a laptop                                               | Remove it from the hub (from a window on the hub, an owner device, or the hub's shell). Every spoke drops what it held for that laptop at the next roster; revoke anything left from each spoke       |
-| Lose every owner device                                     | Sit at any spoke and use its window. For a headless hub, reach it over SSH on the private network and run `octant hub join-code --owner`; the device that joins with that code is the hub's new owner |
-| The hub is down                                             | Members switch to the standby. Approvals and window powers on each spoke keep working, because they never went through the hub                                                                        |
-| The hub is lost for good                                    | Promote the standby on its own window; spokes follow it as decision H11 says. With no standby, set up a new hub and join each spoke to it from that spoke's window                                    |
-| An alert shows a member the person did not add              | Tap Remove in the alert on any spoke or owner device, then check the hub; a member nobody added means the hub may be compromised                                                                      |
+| Situation                                                   | What the person does                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new phone or laptop                                   | Scan the hub's QR code or type its code over the private network. With Confirm new members on, compare the short code and confirm in a spoke's window or on an owner device                                                                                                                       |
+| Approve an agent's risky step                               | Answer it in the spoke's own window, or on a member that spoke lets answer approvals (a guest phone, by default)                                                                                                                                                                                  |
+| Turn on Full access, merge, copy a sign-in, or add an owner | Full access and merge: in the host's own window or on a device the host's own person paired with it; a device the host knows only through the roster needs an owner device's own fresh unlock. A sign-in copy or a new owner: the host's own window, or an owner device with its own fresh unlock |
+| Lose the phone                                              | On a laptop's window, or another owner device: Remove the phone. Confirm and administer from the laptop's window until a new phone joins; mark the new phone as owner there                                                                                                                       |
+| Lose a laptop                                               | Remove it from the hub (from a window on the hub, an owner device, or the hub's shell). Every spoke drops what it held for that laptop at the next roster; revoke anything left from each spoke                                                                                                   |
+| Lose every owner device                                     | Sit at any spoke and use its window. For a headless hub, reach it over SSH on the private network and run `octant hub join-code --owner`; the device that joins with that code is the hub's new owner                                                                                             |
+| The hub is down                                             | Members switch to the standby. Approvals and window powers on each spoke keep working, because they never went through the hub                                                                                                                                                                    |
+| The hub is lost for good                                    | Promote the standby on its own window; spokes follow it as decision H11 says. With no standby, set up a new hub and join each spoke to it from that spoke's window                                                                                                                                |
+| An alert shows a member the person did not add              | Tap Remove in the alert on any spoke or owner device, then check the hub; a member nobody added means the hub may be compromised                                                                                                                                                                  |
 
 Owner powers on a stolen device still need the person's face, finger,
-passcode, or passkey, so a thief has only ordinary member powers until the
-device is removed.
+passcode, or passkey, so on a host that knows the device only through the roster
+a thief has only ordinary member powers until the device is removed. On a host
+the device paired with directly it is the person, so a thief with the unlocked
+device holds a window's powers there, Full access included, until its session
+expires or the device is revoked (maintainer decision, 2026-11-12).
 
 ### Shared sign-ins
 

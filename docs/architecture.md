@@ -248,9 +248,13 @@ The design rests on a small set of invariants that every package obeys:
 - **Remote clients never exceed what the host granted.** Remote clients never
   exceed host, mode, provider, Project, or thread authority. A hub or peer host
   acting on another host is a remote client there, held to the grant that
-  host's person chose. A person's own owner device may use a local window's
-  powers on a host only after a fresh unlock on that device; agents, routines,
-  and peer hosts never do
+  host's person chose. A person's own paired device, once authenticated, is
+  the person: a device the host's own person paired may do on the host what a
+  local window may, on every route the private listener forwards, with no
+  owner-device requirement and no extra unlock (maintainer decision,
+  2026-11-12). Agents, routines, and peer hosts never gain that, and a device
+  the host knows only through the hub's roster uses a local window's powers
+  only as an owner device, after a fresh unlock on that device
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
 - **Owner Browser control is a separate person capability.** An enrolled owner
   may unlock one already-open visible native Code Private page for at most
@@ -258,7 +262,10 @@ The design rests on a small set of invariants that every package obeys:
   window and task authority. Credential-bearing frames use a volatile human
   response, never an agent observation or artifact. Stop, disconnect and expiry
   leave the existing person hold; explicit Hand back requires the agent to read
-  again. Other resources and ordinary paired callers remain refused. The owning
+  again. A device the host's own person paired navigates and types in the
+  Browser as a local window does, so this unlock gates nothing for it; other
+  resources and hub-introduced callers remain refused. Not built yet: no paired
+  device takes the page over from the agent or hands it back. The owning
   rules are [Owner control of an open Code page](design/browser-agent-tool.md#owner-control-of-an-open-code-page).
 - **Privacy is about third parties.** Preserve local-first and
   privacy-preserving defaults. Add telemetry, external calls, credential
@@ -618,8 +625,10 @@ stored in the journaled Code settings, turns the bundled server off, and the
 host then answers `turned-off`. A person can also add a `repo-tooling` server,
 which runs the repository's own tooling: it starts only after the person at a
 local window approves it for a checkout or the Code Project (a journaled
-`shell-commands` approval through the local-only
-`POST /api/code/language/approvals`), never in Plan or for a paired device,
+`shell-commands` approval through
+`POST /api/code/language/approvals`, which a device the host's own person
+paired also answers and is journaled for), never in Plan or for any other
+device session,
 may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
@@ -2950,15 +2959,17 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   confirmation. No provider, plugin, routine, hub or peer host reaches the
   routes. Merge when ready from a paired device is built, under its own rule
   below. An agent's merge on a Project setting or routine is built, under the
-  merge rules above. Built: a host may ask a paired client's merge for a
-  fresh unlock on one of its owner devices first
+  merge rules above. Built: a host may ask the merge of a paired client the
+  hub's roster introduced for a fresh unlock on one of its owner devices first;
+  a device the host's own person paired merges as a local window does, with no
+  unlock (maintainer decision, 2026-11-12)
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
   **Owner unlock before a phone or browser merges** is a host switch, off by
   default and set only from a window on that host
   (`POST /api/desktop/hub/paired-merge-unlock`; each change is journaled), so
   no paired client is locked out until the person turns it on. While it is on,
-  the merge, stack, and Merge when ready routes answer a paired client's
-  request that carries no valid unlock with `owner-unlock-required`, a plain
+  the merge, stack, and Merge when ready routes answer a hub-introduced
+  client's request that carries no valid unlock with `owner-unlock-required`, a plain
   reason, and the host's hub member id, before the service is reached, so
   nothing merges. The owner device asks the host's owner route
   (`/api/hub/owner/challenge`, a signed member request) for a challenge bound
@@ -2972,8 +2983,8 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   or the hub's own member, and journals `owner-merge-unlocked` with the owner.
   A missing, unreadable, replayed, expired, mismatched, unverified, or unlisted
   unlock is refused with its reason. The reviewed-head confirmation and the
-  required-checks gate still apply after it. A local window's click needs no
-  unlock. Hub and peer hosts never merge on a person's behalf.
+  required-checks gate still apply after it. A local window's click and a
+  merge from a device the host's own person paired need no unlock. Hub and peer hosts never merge on a person's behalf.
   Rationale for the narrower choices taken: the proof names no owner, because
   the challenge was issued to one owner the owner route authenticated, so the
   host takes that owner and its key from its own list and never from the
@@ -3557,7 +3568,9 @@ the thread it came from.
   access included. A Code run's thread is created at that mode (the Project's
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
-  Work. Only a local window sets the opt-in: a paired device is refused at the
+  Work. Only the host's own person sets the opt-in, at a local window or on a
+  device they paired (maintainer decision, 2026-11-12): every other device
+  session is refused at the
   route, and a routine an agent proposes never has it. A person may instead
   **pick a level on the routine itself** (`runLevel` on the definition, one of
   Ask first, Accept edits, Auto, or Full access; at most one of this and the
@@ -3567,7 +3580,8 @@ the thread it came from.
   start at, and a Work run's turn takes the pick as its ceiling, so it is
   clamped to the thread's own level (`clampWorkAccess`). A pick can therefore
   lower a run below its Project's level and never raise it above what the
-  person allowed there. Only a local window sets it, a paired device is
+  person allowed there. Only a local window or a device the host's own person
+  paired sets it, every other device session is
   refused at the route, a routine an agent proposes never has it, and a Chat
   routine cannot carry it. The editor saves **Ask first** explicitly as
   `runLevel: "ask-first"` for Work and Code, including when a person edits and
@@ -3580,7 +3594,8 @@ the thread it came from.
   A Code
   routine may also be created with **Merge the pull requests it opens**
   (`agentMerge: "allowed"` on the definition, journaled with every revision and
-  copied into each run's snapshot); only a local window sets it, a paired device
+  copied into each run's snapshot); only a local window or a device the host's
+  own person paired sets it, every other device session
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
@@ -10821,8 +10836,10 @@ the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
 approvals, remembered grants, taint rules, and the confined launch apply
 unchanged; the package is installed, trusted and switched on as one act,
-because the person just typed it in. Only a local window may add one
-(`/api/extensions/user-servers`); a paired device cannot. A value the person
+because the person just typed it in. Only a local window or a device the
+host's own person paired may add one (`/api/extensions/user-servers`;
+maintainer decision, 2026-11-12); a hub-introduced device and an agent grant
+cannot. A value the person
 marks secret never enters the package: the host stores it in the credential
 broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
 `mcp-server-credential` Keychain service or Secret Service attribute) and the
@@ -10951,7 +10968,8 @@ is skipped rather than failing the turn, so a disabled or removed plugin
 never blocks work. A pin grants nothing: every tool call still
 asks, or uses a remembered approval in that Project, and the resolver's
 catalog, mode and provider checks apply as for an explicit selection. Chat
-has no Project and no pins. Only a local window sets a pin; a paired device
+has no Project and no pins. Only a local window or a device the host's own
+person paired sets a pin; any other paired device
 may read the list. Uninstalling a package forgets its pins everywhere.
 
 **Where a package works, on its card.** Each installed package's card says in
@@ -12026,18 +12044,37 @@ mechanisms are:
     6. Billed or off-machine desktops: the spend cap is mandatory, and
        inside it the confirmation of each billed or off-machine lease and
        each transfer to a cloud desktop is a setting, on by default.
-    7. Who may choose Full access: a local window, or an owner device the
-       person marked. No other paired device and no agent grant raises a
-       thread to it.
-    8. The one-time warning when a machine or a Project first picks it.
+    7. The one-time warning when a machine or a Project first picks it.
+
+    Who is asking is not on the list. A device the host's own person paired
+    sets a thread, a Project, or the default to Full access and starts a
+    thread there exactly as a local window does, with no owner-device
+    requirement and no extra unlock, and an agent grant runs at Full access
+    when the person chose that level for the grant (maintainer decision,
+    2026-11-12). Built: the server takes the thread, Project, and default
+    commands from such a device in Work and Code and journals the device as
+    their actor; the paired browser's shell and the phone show the thread
+    mode, the Project default, and the default for new threads, with the
+    one-time warning (once per host on the phone). A device the host knows
+    only through the hub's roster, and a device whose approval the host's
+    journal does not prove, are still refused; a roster member that is an
+    owner device raises a level only through the owner route with its own
+    unlock
+    ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
 
     Rationale: the same agent already holds an unwrapped shell and an open
     network at this level, so an ask on a download, a site, a Model Context
     Protocol tool, or a device effect costs the person's attention and
     protects nothing the shell does not already reach. The list keeps the
     asks whose effect is irreversible, visible to other people, spends
-    money, or acts on what only the person holds. Not built yet: the rules
-    this replaces still ask today; each owning section marks its own.
+    money, or acts on what only the person holds. An authenticated paired
+    device is the person, so holding it to less than a local window adds
+    friction for the person and stops nobody else. What protects the host is
+    unchanged: the device's own key, the pinned host identity, bounded
+    sessions, the journal recording every action with the device as its
+    actor, and revocation, which ends the device's reach at once. Not built
+    yet: the rules this replaces still ask today; each owning section marks
+    its own.
 
   - **Unattended work.** At every level a wait is the safe state, so an ask
     never turns into a refusal by timing out: an unanswered approval or
@@ -12123,9 +12160,10 @@ mechanisms are:
       runtime that cannot keep it), "Keep the sandbox at Full access" in
       Settings › Code › Access and Settings › Work, and "Sandbox at Full
       access" beside a Project's default mode. In the terminal: `octant
-settings sandbox on|off [--work]`. Only a window on this host can turn
+settings sandbox on|off [--work]`. Only a window on this host or a device
+      its person paired can turn
       it off for a Full access thread, because that change names Full access,
-      which a paired device that is not an owner device cannot.
+      which a device the host's own person did not pair cannot.
       Verified with the real Seatbelt profile on macOS: writes inside the
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
@@ -12179,8 +12217,8 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
     answer leaves new Work threads at Ask first. A new Work thread takes its
     Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a paired device that is not an
-    owner device cannot pick Full access for it.
+    first, Accept edits, or Full access, and a device the host's own person
+    did not pair cannot pick Full access for it.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
     thread. The Browser asks at Full access only on a signed-in profile; a
@@ -12429,12 +12467,13 @@ access` agree); a thread's own change is journaled as
   Project modes existed starts its threads in Full access, as it did. Full
   access needs no native confirmation and is always journaled on the thread:
   session-only Full access is gone, and a session grant left from before is
-  revoked on the thread's next mode change. A paired device may lower a
+  revoked on the thread's next mode change. A device the host's own person
+  paired raises a thread to Full access and starts one there as a local window
+  does ([the Full access rule](#security-and-authority)). A device the host
+  knows only through the hub's roster may lower a
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
-  access is chosen in the Octant window on this host." An owner device the
-  person marked may do both (maintainer request, 2026-11-12; not built yet:
-  today it is refused as any paired device is). `octant agent` keeps
+  access is chosen in the Octant window on this host. `octant agent` keeps
   sending Full access exactly when the Project remembers it, and
   `octant agent --access <mode>` asks for any mode on a new thread:
   `full-access` is remembered for the Code Project through the same
@@ -14031,7 +14070,97 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Remote requests are classified fail-closed by an admission policy and route
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
-  journaled with its principal. A hub acting on its spoke, or a spoke
+  journaled with its principal. An authenticated paired device the host's own
+  person paired is the person and holds what a local window holds on every
+  route the private listener forwards (maintainer decision, 2026-11-12): the
+  split of actions into ones a device may approve and ones that need the host
+  no longer holds it. What does not change: a new
+  device is paired only with the approval of a party the host already trusts
+  (a local window or an already paired device), every session is signed by the
+  device's key against the pinned host identity over TLS, the pairing and
+  sign-in rate limits hold, secrets are redacted and never journaled or
+  logged, credentials are stored only in the credential broker, and authority
+  is checked on the host.
+  - **How a device qualifies.** The approval record journaled with a device's
+    registration says who let it on: `user-approved` when the host's person
+    approved the pairing at a local window, or when a device that already acts
+    as that person approved it, and `hub-introduced` when the hub's roster
+    brought it. The gateway reads that record on each request and marks the
+    principal; `authorizePrincipalAction` judges a device so marked as
+    `person-paired-device`, which passes the local-host-required actions, and
+    the product dispatch hands it every forwarded route. A roster member (a
+    guest and an owner device included), a principal built without that mark,
+    and an agent grant's session stay `remote-device`, held to the remote
+    action catalogue, and each opened route refuses them itself. No device
+    becomes a local window or mints a native or local receipt. The host tells
+    a client which it holds: `GET /api/remote/auth/device` answers
+    `actsAsHostPerson`, true only for a person-paired device; the field is
+    optional, and a client reads anything but a plain yes (an older host, a
+    refusal, an unreachable host) as restricted and hides what the host would
+    refuse. The answer shapes only what a client shows; the host decides every
+    request from its own record.
+  - **What a person-paired device does.** As a local window does, with no
+    owner unlock: sets a thread, a Project, or the default to Full access and
+    starts a Work or Code thread there; changes a Project's access, actions,
+    Developer tools, desktop recipe, provider trust, "Agents may merge",
+    coordinator and wake switches, and Shield model; remembers a tool approval
+    and reads and revokes remembered ones; installs, updates, trusts, enables,
+    and removes a package, adds a server, pins a plugin, and signs in to or
+    reconnects a server; adds, changes, and removes a provider, starts a
+    provider sign-in, and stores, replaces, or removes a provider key
+    ([Provider credentials](#security-and-authority)); navigates and types in
+    the host's agent Browser and reviews its session, upload, and download
+    permissions; writes to a thread terminal and lists, reads, and starts a
+    thread from a terminal session; merges a pull request or a stack, acts on
+    a pull request, and switches Merge when ready and Auto-fix; sets a
+    routine's level and agent merge; answers native harness approvals and
+    questions and a thread's network access proposals, a Project rule included;
+    approves a language server or debug start; reviews and clears a thread's
+    outside-content mark; edits person memory and spend ceilings; saves and
+    deletes benchmark suites and starts, cancels, and purges runs; changes
+    Canvas public links; asks for a compaction; sets Continue after restart;
+    reads the pending requests it can answer, fleet activity, provider limits
+    (and asks for a refresh), and the protected files list, which it also
+    changes; controls the host (status, data map, service lifecycle, backup,
+    restore guidance, memory limits, retention, purge); and lists, renames,
+    and revokes paired devices, makes a pairing code, and approves or denies a
+    new device's request. It never approves a request made with its own key,
+    and revoking every device takes the asking one with the rest. The paired
+    browser offers these where its shell has a control: the thread mode
+    picker, Default modes, starting a Work or Code thread, tool prompts,
+    Settings › Extensions and Providers (key entry included), and Paired
+    devices. The phone offers the thread, Project, and default modes and
+    Always allow in this Project on a rememberable tool prompt.
+  - **What stays on the host.** The private listener forwards these to no
+    device, a person-paired one included: the listener's own controls
+    and the rest of the desktop bridge, whose routes answer only the bridge
+    secret a window on the host holds and whose native controls (a folder
+    picker, an external editor) exist only there; shell settings; linking a secret store and
+    pointing a key at it, which are acts at the machine; provider cloud
+    sessions; scanning the host for installed provider commands; skill
+    folders; the replica store and its membership; and the whole host's
+    export, bulk data with no bound for a remote caller. Not built yet: usage
+    reset, server Projects, disk cleanup, design systems, file-arrival and
+    event routines, and diagnostics are not forwarded either, and creating or
+    widening an agent grant stays on the loopback administration channel. In
+    the Browser no device takes the page over from the agent or hands it
+    back, reads a signed-in profile's page or a capture, grants login
+    permission, chooses a task profile, or runs, saves, or deletes a flow.
+    Removing a provider together with its key is not offered to a device.
+  - **The journal names the device.** A person-paired device's change is
+    journaled with the device as its actor (`remote-device`, its id), resolved
+    once from the authenticated principal and never from the request; a local
+    window's change stays the local person's, and what the host does on its
+    own keeps the host's actor. A server test refuses a module that judges a
+    device as the person without resolving that actor. Not built yet: a Code
+    operation's own events are journaled as the system (the records it writes
+    for the person name the device); the Browser automation routes' changes
+    still name a fixed actor (session and transfer permissions name the
+    device); a provider sign-in the host completes after a restart loses the
+    device that began it; and a device-code or cloud sign-in is not
+    attributed to a device.
+
+  A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
@@ -14039,7 +14168,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   another machine on the person's own network is a third such principal, held
   to an agent grant the person creates over the loopback administration
   channel (`/api/desktop/agent-access`, `octant agent-access`): named Projects,
-  modes, a highest level below Full access, tools, models, limits, and expiry.
+  modes, a highest level (Full access included when the person chooses it for
+  the grant; maintainer decision, 2026-11-12; the grant's guard holds the agent
+  to that level and to its closed list), tools, models, limits, and expiry.
   It reaches only `POST /api/agent-access/claim` and `POST
 /api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
   Tailscale sources only, authenticated by a signed bridge proof or a bearer
@@ -14052,34 +14183,38 @@ approval-gated` command that undoes it. The terminal shows no one-time
   window; a paired device may list them and revoke one through
   `/api/agent-grants`, never make or widen one
   ([Agent access from other machines](design/agent-access.md)). The listener, pairing tickets, pairing
-  decisions, and device inventory are administered only over the host's
-  loopback administration channel — the desktop bridge secret plus a
-  registered window capability — which both Settings → Remote access and the
-  `octant listener` / `octant pair` / `octant auth` commands use; the private
-  listener forwards none of those routes. A listener enabled there is
+  decisions, and device inventory are administered by a local window over the
+  host's loopback administration channel (the desktop bridge secret plus a
+  registered window capability, which both Settings → Remote access and the
+  `octant listener` / `octant pair` / `octant auth` commands use). Pairing
+  tickets, pairing decisions, and the device inventory are also administered
+  by a device the host's own person paired, over its own session under
+  `/api/remote/`, so a new device is always
+  approved by a party the host already trusts (maintainer decision,
+  2026-11-12); the listener itself is administered only over the loopback
+  channel, and the private listener forwards none of its routes. A listener enabled there is
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), with a pasted certificate's TLS key or, for a self-made
   certificate, only that it is self-made, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
-  A paired client may click, hover, scroll, and press keys in the host's agent
+  A paired client the host's own person paired uses the host's agent Browser
+  as a local window does: it navigates, types, and sends every page action
+  the route takes, under the host's navigation guards and site approvals. A
+  paired client the hub's roster introduced may click, hover, scroll, and
+  press keys in the host's agent
   browser, and list its tabs, but may not navigate it, type into it, choose a
   list option, drag, upload, save a download, or open, switch, or close a tab. Those clicks
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
-  so a paired client cannot take the host browser to a new origin.
-  A paired client also cannot take the page over from the agent or hand it
-  back; that hold is the person's at a window of this computer, checked by the
-  route, and the gateway does not admit its paths
+  so such a client cannot take the host browser to a new origin.
+  No paired client takes the page over from the agent or hands it
+  back yet; that hold is the person's at a window of this computer, checked by the
+  route
   ([Person and agent together](design/browser-agent-tool.md#person-and-agent-together)).
-  An owner device the person marked at a local window is the exception
-  (maintainer request, 2026-11-12): it may raise a thread to Full access or
-  start one there, navigate and type in the host's agent Browser, write to a
-  thread terminal, and answer profile site approvals. Its approval answers
-  ride the five-minute unlock session by default; an unlock for each answer is
-  a setting. Every other paired device keeps the limits above
+  An owner device the person marked at a local window, on a host that knows
+  it only through the roster, raises a thread's or Project's level through the
+  owner route with its own unlock and is otherwise held as a roster member
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Not built yet: today these four are refused to an owner device as to any
-  other paired device.
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget
@@ -14192,6 +14327,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     certificate's SubjectPublicKeyInfo, not of its PEM text. It is shown in
     Settings and by `octant listener` for the person to compare, and no
     client pins it.
+
 - **Desktop identity controls.** The desktop-owned native signing service is
   separate from the listener/member P-256 identity above, the roster signer,
   owner-presence unlock and the profile/control UUID. It keeps a random

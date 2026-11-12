@@ -32,22 +32,23 @@ is a bot's permission ([Bots](bots.md)). This design uses:
 
 ## 2. Requirements
 
-| ID    | Requirement                                                                                                                                                                                                                     |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-1  | An outside agent on another machine on the person's private network can start a Chat, Work, or Code thread in a Project its grant names, send further prompts, read the result, answer the thread's questions, and stop a turn. |
-| FR-2  | Telling a bot "open an agent in my repo in Octant and fix x" works with one tool call, as it does locally (`start_work` with a Project).                                                                                        |
-| FR-3  | The person creates a grant, sees every grant with its last use, and revokes or changes it from a local window or the CLI; a paired device can see and revoke grants but not create or widen them.                               |
-| FR-4  | Approvals and other requests a thread raises wait on the person in Octant's Needs you list, named as coming from the agent's thread, and reach the person's phone like any other.                                               |
-| SEC-1 | An outside agent never exceeds its grant, and the grant never exceeds what a paired device may do: no Full access, no remembered answers, no approvals, no administration, no terminals, no host Browser.                       |
-| SEC-2 | Every mutation is journaled with the outside-agent principal; no agent key or secret enters the journal.                                                                                                                        |
-| SEC-3 | Revocation takes effect on the next request and ends open sessions and in-flight requests, as device revocation does.                                                                                                           |
-| SEC-4 | Reach stays on the person's own network: LAN-private and Tailscale source classes only. Nothing is operated by Octant (AA-11).                                                                                                  |
-| SEC-5 | Prompts from an outside agent are outside content: the thread is marked from its first turn, as a thread that read outside content is.                                                                                          |
-| NFR-1 | Spend is bounded per grant: running turns at once, turns per day, and request rate.                                                                                                                                             |
-| CON-1 | No Octant-operated relay, account, or service (Principles; [Current Release Boundary](../architecture.md#current-release-boundary)).                                                                                            |
-| CON-2 | Remote transport and authority are host concerns, not a plugin seam: like the listener, agent access is host transport.                                                                                                         |
+| ID    | Requirement                                                                                                                                                                                                                                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-1  | An outside agent on another machine on the person's private network can start a Chat, Work, or Code thread in a Project its grant names, send further prompts, read the result, answer the thread's questions, and stop a turn.                                                                                                                                                  |
+| FR-2  | Telling a bot "open an agent in my repo in Octant and fix x" works with one tool call, as it does locally (`start_work` with a Project).                                                                                                                                                                                                                                         |
+| FR-3  | The person creates a grant, sees every grant with its last use, and revokes or changes it from a local window or the CLI; a paired device can see and revoke grants but not create or widen them.                                                                                                                                                                                |
+| FR-4  | Approvals and other requests a thread raises wait on the person in Octant's Needs you list, named as coming from the agent's thread, and reach the person's phone like any other.                                                                                                                                                                                                |
+| SEC-1 | An outside agent never exceeds its grant, and a grant never carries remembered answers, approvals, administration, terminals, or the host Browser. A grant's highest level may be Full access when the person chooses it for that grant (maintainer decision, 2026-11-12). An agent grant is not a paired device: the rule that a paired device is the person does not reach it. |
+| SEC-2 | Every mutation is journaled with the outside-agent principal; no agent key or secret enters the journal.                                                                                                                                                                                                                                                                         |
+| SEC-3 | Revocation takes effect on the next request and ends open sessions and in-flight requests, as device revocation does.                                                                                                                                                                                                                                                            |
+| SEC-4 | Reach stays on the person's own network: LAN-private and Tailscale source classes only. Nothing is operated by Octant (AA-11).                                                                                                                                                                                                                                                   |
+| SEC-5 | Prompts from an outside agent are outside content: the thread is marked from its first turn, as a thread that read outside content is.                                                                                                                                                                                                                                           |
+| NFR-1 | Spend is bounded per grant: running turns at once, turns per day, and request rate.                                                                                                                                                                                                                                                                                              |
+| CON-1 | No Octant-operated relay, account, or service (Principles; [Current Release Boundary](../architecture.md#current-release-boundary)).                                                                                                                                                                                                                                             |
+| CON-2 | Remote transport and authority are host concerns, not a plugin seam: like the listener, agent access is host transport.                                                                                                                                                                                                                                                          |
 
-Out of scope: outside agents answering approvals, choosing Full access, adding
+Out of scope: outside agents answering approvals, choosing a level above their
+grant's own, adding
 or binding Projects, reading credentials, changing settings, administering the
 listener, pairing, or other grants; agent-to-agent work between hosts (that is
 [Hub and spokes](hub-and-spokes.md)); and any path over the public internet
@@ -135,18 +136,18 @@ that no device holds, so nothing addressed to a device reaches an agent.
 
 An agent grant records:
 
-| Field         | Values                                                                                                      | Default                    |
-| ------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------- |
-| Name          | Shown on its threads and in Needs you                                                                       | Required                   |
-| Projects      | An explicit list of active Projects                                                                         | Required for Work and Code |
-| Modes         | Any of Chat, Work, Code; Chat threads it starts are filed under no Project unless one is named              | The listed Projects' types |
-| Highest level | Ask first, Accept edits, Auto, or Plan; never Full access, and never above the Project's own                | Ask first                  |
-| Threads       | Its own threads only, or every thread in its Projects                                                       | Its own                    |
-| Tools         | `start_work`, `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_threads`, `list_waiting` | All but `answer_question`  |
-| Models        | Any the host offers, or a named list                                                                        | Any                        |
-| Limits        | Running turns at once; turns per day; requests per minute                                                   | 2; 50; 60                  |
-| Expiry        | 30 days idle and at most 90 days absolute, as a paired device                                               | 30 / 90 days               |
-| Connection    | Bridge, direct, or both                                                                                     | Bridge                     |
+| Field         | Values                                                                                                                       | Default                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Name          | Shown on its threads and in Needs you                                                                                        | Required                   |
+| Projects      | An explicit list of active Projects                                                                                          | Required for Work and Code |
+| Modes         | Any of Chat, Work, Code; Chat threads it starts are filed under no Project unless one is named                               | The listed Projects' types |
+| Highest level | Ask first, Accept edits, Auto, Plan, or Full access when the person chooses it for this grant; never above the Project's own | Ask first                  |
+| Threads       | Its own threads only, or every thread in its Projects                                                                        | Its own                    |
+| Tools         | `start_work`, `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_threads`, `list_waiting`                  | All but `answer_question`  |
+| Models        | Any the host offers, or a named list                                                                                         | Any                        |
+| Limits        | Running turns at once; turns per day; requests per minute                                                                    | 2; 50; 60                  |
+| Expiry        | 30 days idle and at most 90 days absolute, as a paired device                                                                | 30 / 90 days               |
+| Connection    | Bridge, direct, or both                                                                                                      | Bridge                     |
 
 There is no `add_project`: binding a folder is a local-host action. A Project
 leaving the list, archived, or rebound drops out of the grant at once.
@@ -246,7 +247,8 @@ A grant that narrows narrows the agent's existing threads too. Every thread in
 reach, whether the agent started it or the person did in a granted Project, is
 in scope only while its mode and Project are in the grant. The agent may start
 a turn or send an answer only on a thread whose current access is within the
-grant's highest level (never the Full access sandbox) and whose current model
+grant's highest level (Full access, and its sandbox choice, only when the
+grant names it) and whose current model
 is one the grant includes; otherwise the turn is refused, and the person can
 change the thread. Every prompt and answer an agent sends marks its thread as
 outside content before it is sent, and nothing is sent when the mark cannot be
@@ -267,31 +269,31 @@ id is the grant's scope id.
 
 ## 5. Threat model
 
-| Threat                                     | Control                                                                                                                                                      | Residual risk                                                             |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| A stolen bearer key is replayed            | Private-network source classes only; scope; limits; expiry; last use and source shown; one-step rotate and revoke. Bridge mode carries no replayable secret. | Whoever holds a direct key can act within its grant until it is revoked.  |
-| A compromised agent sends harmful prompts  | No Full access; the person answers approvals; prompts are outside content, so marked-thread rules apply; Projects named explicitly; spend limits.            | It can spend turns and read replies of its own threads within the limits. |
-| Prompt injection exfiltrates through reads | Reads cover only threads in scope and only replies, questions, and waiting rows; no files, diffs, or terminal output.                                        | A reply the agent itself caused can contain what the thread read.         |
-| The agent widens its own authority         | Grants are created and widened only from a local window or loopback CLI; no administrative route is on the surface; identity in the payload is refused.      | None known.                                                               |
-| Host impersonation                         | Bridge pins the listener certificate from the connection code; direct mode relies on the Tailscale certificate.                                              | Direct mode trusts the tailnet name's public certificate.                 |
-| Guessing keys or tickets                   | 256-bit keys; five-minute single-use tickets with five failures; per-source budgets like pairing; one `unauthorized` for every failure.                      | None known.                                                               |
-| Approval flooding                          | Running turns and turns per day are capped per grant; each pending request names the agent, and revoking it stops new ones.                                  | The person still sees the requests already raised.                        |
+| Threat                                     | Control                                                                                                                                                                                                             | Residual risk                                                                                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A stolen bearer key is replayed            | Private-network source classes only; scope; limits; expiry; last use and source shown; one-step rotate and revoke. Bridge mode carries no replayable secret.                                                        | Whoever holds a direct key can act within its grant until it is revoked.                                                                                  |
+| A compromised agent sends harmful prompts  | Full access only where the person chose it for the grant; below it the person answers approvals and marked-thread rules apply; prompts are outside content at every level; Projects named explicitly; spend limits. | It can spend turns and read replies of its own threads within the limits; on a Full access grant its prompts run unasked, which is what the person chose. |
+| Prompt injection exfiltrates through reads | Reads cover only threads in scope and only replies, questions, and waiting rows; no files, diffs, or terminal output.                                                                                               | A reply the agent itself caused can contain what the thread read.                                                                                         |
+| The agent widens its own authority         | Grants are created and widened only from a local window or loopback CLI; no administrative route is on the surface; identity in the payload is refused.                                                             | None known.                                                                                                                                               |
+| Host impersonation                         | Bridge pins the listener certificate from the connection code; direct mode relies on the Tailscale certificate.                                                                                                     | Direct mode trusts the tailnet name's public certificate.                                                                                                 |
+| Guessing keys or tickets                   | 256-bit keys; five-minute single-use tickets with five failures; per-source budgets like pairing; one `unauthorized` for every failure.                                                                             | None known.                                                                                                                                               |
+| Approval flooding                          | Running turns and turns per day are capped per grant; each pending request names the agent, and revoking it stops new ones.                                                                                         | The person still sees the requests already raised.                                                                                                        |
 
 ## 6. Decisions
 
-| ID    | Decision                                                                                                                                                   | Status   |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| AA-1  | An outside agent is its own principal, found and journaled by its grant; product routes see it as a paired-device principal with the grant's scope id.     | Approved |
-| AA-2  | Its authority is an agent grant: named Projects, modes, highest level (never Full access), tools, models, limits, and expiry, inside paired-device clamps. | Approved |
-| AA-3  | Grants are created and widened only from a local window or the loopback CLI; a paired device may view and revoke.                                          | Approved |
-| AA-4  | The only route an outside agent reaches is `POST /api/agent-access/mcp` on a new listener surface; the tools run in process under the principal.           | Approved |
-| AA-5  | The bridge (`octant agent mcp --connection`) is the recommended connection: a key pair made on the agent's machine, signed requests, pinned TLS.           | Approved |
-| AA-6  | Direct Streamable HTTP with a bearer key is opt-in per grant and needs the listener's Tailscale certificate.                                               | Approved |
-| AA-7  | No `add_project` and no approvals: binding folders and answering approvals stay with the person.                                                           | Approved |
-| AA-8  | Prompts from an outside agent are outside content; its threads are marked from the first turn.                                                             | Approved |
-| AA-9  | Revocation voids credentials at once and ends sessions and in-flight requests; running turns continue unless the person also stops them.                   | Approved |
-| AA-10 | Spend limits per grant: running turns at once, turns per day, requests per minute.                                                                         | Approved |
-| AA-11 | Reach stays on the person's own network; hosted bots on the public internet are not supported.                                                             | Approved |
+| ID    | Decision                                                                                                                                                                                                                                                       | Status   |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| AA-1  | An outside agent is its own principal, found and journaled by its grant; product routes see it as a paired-device principal with the grant's scope id.                                                                                                         | Approved |
+| AA-2  | Its authority is an agent grant: named Projects, modes, highest level (Full access when the person chooses it for the grant), tools, models, limits, and expiry, inside the clamps of a restricted device session. Its prompts stay marked as outside content. | Approved |
+| AA-3  | Grants are created and widened only from a local window or the loopback CLI; a paired device may view and revoke.                                                                                                                                              | Approved |
+| AA-4  | The only route an outside agent reaches is `POST /api/agent-access/mcp` on a new listener surface; the tools run in process under the principal.                                                                                                               | Approved |
+| AA-5  | The bridge (`octant agent mcp --connection`) is the recommended connection: a key pair made on the agent's machine, signed requests, pinned TLS.                                                                                                               | Approved |
+| AA-6  | Direct Streamable HTTP with a bearer key is opt-in per grant and needs the listener's Tailscale certificate.                                                                                                                                                   | Approved |
+| AA-7  | No `add_project` and no approvals: binding folders and answering approvals stay with the person.                                                                                                                                                               | Approved |
+| AA-8  | Prompts from an outside agent are outside content; its threads are marked from the first turn.                                                                                                                                                                 | Approved |
+| AA-9  | Revocation voids credentials at once and ends sessions and in-flight requests; running turns continue unless the person also stops them.                                                                                                                       | Approved |
+| AA-10 | Spend limits per grant: running turns at once, turns per day, requests per minute.                                                                                                                                                                             | Approved |
+| AA-11 | Reach stays on the person's own network; hosted bots on the public internet are not supported.                                                                                                                                                                 | Approved |
 
 ### AA-11: reach from the public internet (decided: option 1)
 
@@ -322,7 +324,7 @@ maintainer decision and its own threat review.
    handler, grant and remote checks, limits, outside-content marking, journal
    attribution, revocation through the request registry. Escape tests: an
    outside agent calling every forwarded product route, an administrative
-   route, a Project outside its grant, Full access, an approval answer, and an
+   route, a Project outside its grant, a level above its grant's highest, an approval answer, and an
    identity smuggled in the payload.
 3. **Bridge:** connection codes, `octant agent-access join`, signed requests,
    and `octant agent mcp --connection`.

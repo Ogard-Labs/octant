@@ -29,7 +29,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
-| [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 1            | 1                   |
+| [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 1       | 5            | 1                   |
@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 11      | 2            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 8       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 5       | 4            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 4       | 1            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 3       | 2            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
@@ -62,12 +62,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
-| [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
+| [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 3       | 5            | 0                   |
 | [Hubs and Nightly](#hubs-and-nightly)                                                 | 5         | 1       | 4            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **250**   | **162** | **83**       | **5**               |
+| **All areas**                                                                         | **250**   | **160** | **86**       | **4**               |
 
 ## Principles and hard lines
 
@@ -102,7 +102,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Overview and principles
 
 ### The Full access rule
 
-At Full access, in Work and Code, nothing prompts, nothing expires into a refusal, and nothing is refused because the thread read outside content, except the closed list of eight exceptions below (maintainer request, 2026-11-12). A rule anywhere that asks at Full access and is not on the list is wrong, and the list wins. Adding an ask at Full access means adding it to the list in the owning specification in the same change, with its reason.
+At Full access, in Work and Code, nothing prompts, nothing expires into a refusal, and nothing is refused because the thread read outside content, except the closed list of seven exceptions below (maintainer request, 2026-11-12). A rule anywhere that asks at Full access and is not on the list is wrong, and the list wins. Adding an ask at Full access means adding it to the list in the owning specification in the same change, with its reason.
 
 - Every hard line: no telemetry, secrets never journaled, signed updates, authority checked on the host, the journal, Plan read-only, spend ceilings, and an agent never marking a thread Done.
 - Merge, plain force-push and push to the default branch, which follow the pull-request merge rules and the Project's "Agents may merge" switch.
@@ -110,12 +110,12 @@ At Full access, in Work and Code, nothing prompts, nothing expires into a refusa
 - The Browser on a signed-in profile: a site approval per origin and profile, which the person can remember or widen to "Allow all sites in this profile". A Private page needs none.
 - Paying, buying, or sending a message as the person through the Browser or Computer (an email, a chat, a social post, a form that sends a message). A pull-request comment or review reply is not such a send and follows the pull-request rules.
 - Billed or off-machine desktops: the spend cap is mandatory, and inside it the confirmation of each billed or off-machine lease and each transfer to a cloud desktop is a setting, on by default.
-- Who may choose Full access: a local window, or an owner device the person marked. No other paired device and no agent grant raises a thread to it.
 - The one-time warning when a machine or a Project first picks Full access.
+- Who is asking is not on the list: a device the host's own person paired sets a thread, a Project, or the default to Full access and starts a thread there exactly as a local window does, with no owner-device requirement and no extra unlock, and an agent grant runs at Full access when the person chose that level for the grant (maintainer decision, 2026-11-12). Built on the server for thread, Project and default in Work and Code, journaled with the device as actor, with the controls in the paired browser's shell and on the phone. A device the host knows only through the hub's roster, and one whose approval the journal does not prove, are still refused.
 - Unattended work: at every level a wait is the safe state, so an unanswered approval or question waits in Needs you until a person answers it and never turns into a refusal by timing out. A time, count or size limit is a default the person can change in Settings unless it protects a hard line or the integrity of stored data; a fixed constant states its reason beside it.
-- Not built yet: the rules this replaces still ask, expire or refuse today, and the limits are still constants; each entry below marks its own.
+- Not built yet: the other rules this replaces still ask, expire or refuse today, and the limits are still constants; each entry below marks its own.
 
-Status: Designed, not built. Since: 2026-11-12. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
+Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
 ### Local-first with a closed list of outside calls
 
@@ -2019,14 +2019,17 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Worktr
 Pairing issues a revocable device key, and the private listener is HTTPS on a LAN or private-mesh address with a host-owned identity. A remote principal never exceeds host, mode, provider, Project or thread authority.
 
 - Remote requests are classified fail-closed by an admission policy and route classifier, cannot mint local receipts, and every remote mutation is journaled with its principal.
-- The listener, pairing tickets and decisions, and the device inventory are administered only over the host's loopback administration channel; the private listener forwards none of those routes.
+- A device the host's own person paired is the person and holds what a local window holds on every route the private listener forwards (maintainer decision, 2026-11-12). It qualifies by the approval record journaled with its registration: approved by the host's person at a local window, or by a device that already acts as that person. The host reports `actsAsHostPerson` to the client, which reads anything else as restricted. A hub-roster member, a principal without that proof and an agent grant stay held to the remote action catalogue.
+- Its changes are journaled with the device as their actor. Not built yet: a Code operation's own events are journaled as the system, the Browser automation routes' changes name a fixed actor, a provider sign-in completed after a restart loses the device that began it, and a device-code or cloud sign-in is not attributed to a device.
+- The listener is administered only over the host's loopback administration channel, and the private listener forwards none of its routes. Pairing tickets and decisions and the device inventory are administered there too, and by a device the host's own person paired ([App pairing code and one-step pairing](#app-pairing-code-and-one-step-pairing)).
+- Kept on the host for every device: the listener's controls and the desktop bridge with its native controls, shell settings, secret stores, provider cloud sessions, the replica store and the whole host's export. Not built yet: usage reset, server Projects, disk cleanup, design systems, file-arrival and event routines, and diagnostics are not forwarded to a person-paired device either.
 - The listener serves HTTPS only on one person-selected private address and explicit port; wildcard, public and ambiguous binds are rejected and certificate validation is never bypassed. _Here only._
 - Enabling or retargeting the listener needs a local confirmation showing address, port, origin, certificate identity and exposure class. _Here only._
 - Every state-changing remote request carries a device-key proof, replay nonce, CSRF value and exact-origin check; a cookie alone authorizes nothing. _Here only._
 - Sessions have idle and absolute lifetimes and rotate; revoking a device drops its sessions and streams before the response completes. _Here only._
-- Approvals are classified remote-approvable or local-host-required: pairing, listener and device management, root binding, extension trust and install, provider credentials and native-only actions are local-host-required, and an unknown action defaults to local-host-required or unavailable. _Here only._
+- Approvals are classified remote-approvable or local-host-required: pairing, listener and device management, root binding, extension trust and install, provider credentials and native-only actions are local-host-required, and an unknown action defaults to local-host-required or unavailable. A device the host's own person paired passes the local-host-required class; no device mints a local receipt or becomes a local window. _Here only._
 - Remote clients never queue authority-bearing mutations offline; disconnected data is stale and read-only. _Here only._
-- An owner device the person marked at a local window may raise a thread to Full access or start one there and answer profile site approvals. Its approval answers ride the five-minute unlock session by default, and per-answer unlock is a setting; other paired devices are unchanged (maintainer request, 2026-11-12). Not built yet: today an owner device raises a thread's level only through owner posture recovery, starts none at Full access, answers no site approval, and unlocks for each runtime approval answer ([Hub failover and owner devices](#hub-failover-and-owner-devices)).
+- An owner device on a host that knows it only through the hub's roster is not such a device there: it raises a thread's level only through owner posture recovery with its own unlock. Its approval answers ride the five-minute unlock session by default, and per-answer unlock is a setting (maintainer request, 2026-11-12). Not built yet: today it unlocks for each runtime approval answer ([Hub failover and owner devices](#hub-failover-and-owner-devices)).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
@@ -2035,9 +2038,9 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 Each thread surface (conversation, host browser, terminal output, simulator screenshot, canvas, file preview) names one action that reads it and a separate action that acts on it.
 
 - A companion client derives each surface's reach (unavailable, read-only or interactive) from the host's catalog and never declares it. _Here only._
-- Observing and in-page gestures (click, press, scroll) are remote-approvable; opening, navigating, typing, closing a tab and terminal writes are local-host-required, except that an owner device the person marked at a local window may navigate and type in the host's agent Browser and write to a thread terminal (maintainer request, 2026-11-12); not built yet: today they are local-host-required for every paired device. _Here only._
+- Observing and in-page gestures (click, press, scroll) are remote-approvable; opening, navigating, typing, closing a tab and terminal writes are local-host-required, which a device the host's own person paired passes: it navigates and types in the host's agent Browser and writes to a thread terminal (maintainer decision, 2026-11-12). Not built yet: no paired device takes the Browser page over from the agent or hands it back, reads a signed-in profile's page or a capture, or runs a saved flow. _Here only._
 - A companion says when its picture is stale and offers only surfaces it can fill. _Here only._
-- A paired client that is not an owner device may click, hover, scroll and press keys in the host's agent browser and list its tabs, but may not navigate, type, choose a list option, drag, upload, or open, switch or close a tab, and cannot take it to a new origin.
+- A paired client the host's own person did not pair may click, hover, scroll and press keys in the host's agent browser and list its tabs, but may not navigate, type, choose a list option, drag, upload, or open, switch or close a tab, and cannot take it to a new origin.
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
@@ -2119,7 +2122,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Proxy 
 
 An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
 
-- A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
+- A grant names its Projects, modes, highest access level (Full access when the person chooses it for the grant; maintainer decision, 2026-11-12), tools, models, spend limits and expiry, inside every clamp of a restricted device session and its own closed list of routes; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
 - The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
 - It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
@@ -2132,13 +2135,14 @@ Status: Built. Since: 2026-11-11. Detail: [Agent access from other machines](age
 
 ### Provider keys on a host without the desktop app
 
-A provider API key is entered only through the desktop renderer or the host-local `octant provider key` command, never through a browser.
+A provider API key is entered through the desktop renderer, the host-local `octant provider key` command, or a device the host's own person paired; never through an unpaired loopback browser.
 
 - The key is read without echo from a terminal or from standard input with `--stdin`, and is never accepted as an argument, flag or environment variable.
 - The command sends the key once over the loopback administration session; the server requires the bridge secret and a window capability and refuses any request with an `Origin` header.
 - Storage uses the host credential store; a locked, absent or unreachable store fails as `credential-store-unavailable` with no fallback to a file, the data directory or an environment variable.
 - `set` on an existing key needs `--replace`, a pool of several keys refuses a replace, and `remove` never widens authority.
 - Each store, replace or remove is journaled before and after as a request and outcome with no key, length, prefix or hash, and unsettled requests are cleared at host start.
+- A device the host's own person paired reads key status and sets, replaces and removes a key and edits a provider's key pool under `/api/providers/credentials/`, over its authenticated session; the routes refuse a hub-introduced device, an unproved pairing, an agent grant, a local window and the bridge secret. The key travels only in the request body to the credential broker, is never returned, journaled or logged, and the journaled request and outcome name the device. The paired browser's Settings › Providers offers it; removing a provider together with its key is not offered to a device (maintainer decision, 2026-11-12).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Provider keys on a host without the desktop app](../architecture.md#security-and-authority).
 
@@ -2147,11 +2151,11 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Provid
 The host, not a provider child and not the renderer, owns provider sign-in flows, and tokens stay in the credential broker.
 
 - A local principal may start a PKCE or device-code sign-in; state and the code verifier are checked, the redirect is one-shot, and an unanswered consent times out.
-- The journal records the terms acknowledgment and public sign-in state, never a token, authorization code or verifier; a remote principal cannot acknowledge terms, start the flow or refresh.
+- The journal records the terms acknowledgment and public sign-in state, never a token, authorization code or verifier; a device the host's own person paired acknowledges terms and starts a sign-in as a local window does, journaled as the device (maintainer decision, 2026-11-12), and no other remote principal can acknowledge terms, start the flow or refresh. Not built yet: a sign-in the host completes after a restart is not attributed to the device that began it, and a device-code or cloud sign-in is not attributed to a device.
 - A device-code sign-in on a host without the desktop app appears only in the terminal that asked for it, through loopback administration routes the private listener never forwards.
 - The broker signs cloud requests itself with the platform's crypto and no cloud SDK, only within the scope stored at sign-in; portal sessions, refresh tokens and role secret keys never leave it.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority, Host-driven provider sign-in](../architecture.md#security-and-authority).
+Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Host-driven provider sign-in](../architecture.md#security-and-authority).
 
 ### One-use credential cards
 
@@ -3110,10 +3114,11 @@ The host is authoritative for mode, Project, thread, provider, approval and Done
 
 - A notification is awareness, never authority; opening it lands on the thread under the ordinary session and biometric gate.
 - A new phone capability is a new input or output on an existing route class, admitted by the fail-closed remote route classifier.
+- On a host whose own person paired it, the phone sets a thread's mode, the open thread's Project mode and the default for new threads, Full access included, with the one-time warning kept per host and no owner unlock, and offers Always allow in this Project on a rememberable tool prompt (maintainer decision, 2026-11-12). A restricted session sees neither. Not built yet: the rest of what the host accepts from such a device (packages, providers and keys, paired devices, host controls) has no phone screen.
 - Sensors are touched only on an explicit, visible user act.
 - The app receives no over-the-air code updates; every build carries its own JavaScript.
 
-Status: Built. Since: 2026-10-26. Detail: [Mobile maturity: the phone stays a remote client](mobile-maturity.md#the-phone-stays-a-remote-client).
+Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: the phone stays a remote client](mobile-maturity.md#the-phone-stays-a-remote-client).
 
 ### Phone push notifications
 
@@ -3173,7 +3178,7 @@ One hub is active at a time, with a named standby that stands in only while the 
 - A standby promotes to hub for good only by a local action the person confirms.
 - One unlock (biometrics, passcode or passkey) covers five minutes of administration; Full access, merge, credential copy, owner changes, a thread move's ticket and private approval reads need their own. Runtime approval answers ride the five-minute unlock session by default, and per-answer unlock is a setting (maintainer request, 2026-11-12); not built yet: today each runtime approval answer needs its own unlock. An owner phone confirming a move a window holds unlocks once on its own device and answers the destination's challenge itself; only the ticket id reaches the source.
 - Spokes honor owner devices by default, ticked at join and untickable.
-- An owner device the person marked at a local window may raise a thread to Full access or start one there, navigate and type in the host's agent Browser, write to a thread terminal, and answer profile site approvals; other paired devices are unchanged (maintainer request, 2026-11-12). Not built yet: today an owner device changes a thread's level only through the posture recovery below, starts no thread at Full access, and has none of that Browser, terminal or site-approval reach.
+- The owner unlock no longer gates a device the host's own person paired with that host: it raises a thread to Full access or starts one there, navigates and types in the host's agent Browser, writes to a thread terminal, and merges with no unlock (maintainer decision, 2026-11-12). Acts through the hub keep it: on a host that knows it only through the roster, an owner device changes a thread's level only through the posture recovery below, starts no thread at Full access, has none of that Browser or terminal reach, and its merge may be asked for an owner unlock under the host's switch.
 - Code posture recovery is built through the existing owner route, synchronous Code/Project service transactions and Settings/phone controls. Its current-state token binds versions, binding and checkout identity; Full access needs its own fresh proof, and the journal names the owner device. Physical unlock remains a separate unrun check. The [recovery inventory](hub-and-spokes.md#recovery-inventory) separates posture recovery, bounded one-use runtime approval recovery, restores, action launches and browser/profile transfers; an owner unlock adds none of those grants implicitly.
 - Local Work thread access recovery uses the same signed owner route, target/current-Project digest and fresh Full access proof, with the Work service journaling the owner principal. Its four levels remain distinct from Code Plan and persistence; neither a running turn nor a waiting approval is resumed or answered by the change. Server Projects retain their separate boundary.
 - One-use owner recovery of local Code and Work runtime file and confined Shell approvals is built through separate fresh signed read and answer routes. Complete bounded Read/Write/Edit facts or the entire supported native Shell command and verified admitted-root working directory, plus exact owner/host/thread/Project/binding/callback/action digests, are mandatory; target change or replay refuses before effect. Runtime answers use once scope. Durable admission prevents retry after uncertainty and records owner attribution without private action contents. Unsupported Shell runtimes, Plan/Full access callbacks, background or sandbox-escape inputs, credentials, Browser/profile, publishing, structured Git administration and remembered grants remain excluded; missing complete facts stay unavailable. Existing paired-device Code answer authority is unchanged. See [owner runtime approval recovery](hub-and-spokes.md#owner-runtime-approval-recovery).
