@@ -716,9 +716,20 @@ export class Journal {
         this.#connection.exec("RELEASE octant_derived_views");
         return;
       } catch (error) {
+        if (isSqliteStorageFailure(error) || applying === undefined) {
+          // A real SQLITE_FULL can roll back the whole transaction on its own,
+          // taking this savepoint with it; "no such savepoint" from the cleanup
+          // would then replace the failure that says the disk is full.
+          try {
+            this.#connection.exec("ROLLBACK TO octant_derived_views");
+            this.#connection.exec("RELEASE octant_derived_views");
+          } catch {
+            // The storage failure below is the one that explains the append.
+          }
+          throw error;
+        }
         this.#connection.exec("ROLLBACK TO octant_derived_views");
         this.#connection.exec("RELEASE octant_derived_views");
-        if (isSqliteStorageFailure(error) || applying === undefined) throw error;
         recordQuarantine(
           this.#connection,
           applying.name,

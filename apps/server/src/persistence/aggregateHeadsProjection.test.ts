@@ -233,6 +233,46 @@ describe("AggregateHeadsProjection", () => {
     },
   );
 
+  it("still says the disk is full when SQLite itself fills up inside a derived view", () => {
+    // A real SQLITE_FULL can roll back the whole transaction on its own, which
+    // removes the derived views' savepoint. Cleaning up that savepoint must not
+    // replace the storage failure with "no such savepoint".
+    const connection = openConnection();
+    connection.exec("CREATE TABLE fixture_blob (body BLOB)");
+    const fillsTheDisk: Projection = {
+      name: "fixture-fills-the-disk",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: (database) => {
+        database
+          .prepare("INSERT INTO fixture_blob (body) VALUES (zeroblob(?))")
+          .run(64 * 1024 * 1024);
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(fillsTheDisk);
+    const journal = createJournal(connection, projections);
+    const { page_count: pages } = connection.prepare("PRAGMA page_count").get() as {
+      readonly page_count: number;
+    };
+    connection.exec(`PRAGMA max_page_count = ${pages + 64}`);
+
+    let failure: unknown;
+    try {
+      journal.append(appendRequest());
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(JournalWriteFailed);
+    expect(failure).toMatchObject({ reason: "disk-full" });
+    expect(connection.prepare("SELECT count(*) AS count FROM event_journal").get()).toEqual({
+      count: 0,
+    });
+    connection.close();
+  });
+
   it("commits a Stop-shaped append when a derived view throws, holds that view, and a rebuild restores it", () => {
     const connection = openConnection();
     connection.exec("CREATE TABLE fixture_derived (global_sequence INTEGER PRIMARY KEY)");
