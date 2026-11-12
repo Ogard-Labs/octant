@@ -5828,3 +5828,16 @@
   min-height: 1lh;
   margin: 0;
 }
+
+/* Forced colours drop the tint that shows an option is chosen, so the choice
+   is drawn as a thick system-colour border and the header keeps its edge. */
+@media (forced-colors: active) {
+  .decision-form .provider-question-card__choice[data-checked] {
+    border: 3px solid Highlight;
+  }
+
+  .decision-form__header {
+    background: Canvas;
+    border-bottom-color: CanvasText;
+  }
+}
