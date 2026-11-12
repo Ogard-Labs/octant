@@ -584,9 +584,10 @@ ends at once when the thread, its posture, its checkout, the confirmation, or
 the Project goes. An agent may also start, control and read a debug session:
 unasked at Full access, approval-gated per configuration below it, and refused
 in Plan; a paired device that is not an owner device stays refused (maintainer
-request, 2026-11-12). Not built yet: today the routes under `/api/code/debug/`
-are local-window only with no remote action and no agent tool reaches a
-session. Nothing a session
+request, 2026-11-12). The host's start decision follows this rule and skips
+the confirmation at Full access. Not built yet: today the routes under
+`/api/code/debug/` are local-window only with no remote action and no agent
+tool reaches a session. Nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
 breakpoints (configuration saved locally per endpoint/window/thread/checkout,

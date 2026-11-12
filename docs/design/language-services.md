@@ -1104,14 +1104,20 @@ format nobody has).
   uninstall), needs a new confirmation. At Full access a start needs no
   confirmation; Plan refuses it
   ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Not built yet: today Start is a person's
-  act at a local window every time, Full access does not skip the
-  confirmation, and no agent starts a session.
+  maintainer request, 2026-11-12). Built on the host: the start decision
+  launches an unconfirmed configuration at Full access, for a person at a
+  local window and for an agent, and a session there keeps running with no
+  approval on record until the thread leaves Full access, which ends it as
+  `network-changed`. Not built yet: the Run and debug panel still offers
+  Start only on a confirmed configuration, so a person at Full access
+  confirms once before starting from it, and no agent tool calls the
+  decision, so no agent starts a session.
 - **Launch decision.** A pure `decideDebugSessionStart` takes the host
   platform, the thread's mode and posture, who caused the start, the approval,
   and whether the configuration's paths still resolve. It returns a launch
   shape or the first refusal in this order: `unsupported-platform`,
-  `mode-prohibited`, `plan-read-only`, `local-host-required`, `approval-required`,
+  `mode-prohibited`, `plan-read-only`, `local-host-required` (a paired
+  device), `approval-required` (below Full access only),
   `configuration-invalid`. The read-side checks of the companion (`no-reach`,
   `thread-inactive`, `checkout-mismatch`, `checkout-unavailable`) run first,
   and `confinement-unavailable` last; nothing launches until all pass.
@@ -1272,9 +1278,13 @@ frame ends the session. Each request has a 10-second deadline and reports
   thread's session: unasked at Full access, approval-gated per configuration
   below it, and refused in Plan
   ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Not built yet: today no provider, tool
-  call, subagent, routine, or hook can start, control, or read a session, and
-  nothing a session shows enters a prompt.
+  maintainer request, 2026-11-12). A routine's turn is an agent's and
+  follows its thread's level the same way. Built: the start decision accepts
+  an agent as the starter under exactly these rules. Not built yet: there is
+  no agent debug tool, and listing configurations, confirming, and every
+  request on a session still refuse anything but a local window, so today no
+  provider, tool call, subagent, routine, or hook can start, control, or read
+  a session, and nothing a session shows enters a prompt.
 - **Code only, macOS and Linux.** As the companion.
 
 **Decision DB7: paired devices neither
@@ -1294,7 +1304,8 @@ request, 2026-11-12). Recommended because at Full access the same agent
 already runs the program from an unwrapped shell and reads what it prints, so
 refusing the debugger there protects nothing. Rejected: no agent debug tools,
 the earlier rule; a read-only agent tool for the stopped state only. Not built
-yet: today there are no agent debug tools.
+yet: today there are no agent debug tools; only the start decision follows
+this rule.
 
 ### Debugger data and privacy
 
