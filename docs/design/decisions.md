@@ -1151,11 +1151,12 @@ After a crash, a force quit or a reboot, the host continues each turn the restar
 
 - Only a turn the previous host was still running qualifies: a turn its person stopped, a turn that failed and a turn already waiting before the restart do not. A clean shutdown, as a reboot performs, leaves its turns as a crash would.
 - The continuation is the same message a person's Resume sends: inspect first, do not repeat what may already have taken effect, ask again for approvals and answers.
-- The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown, when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in.
+- Each mode has its own switch: Settings › Chat, Settings › Work and Settings › Code › Continue after restart, each on by default, because each mode already keeps its own settings record. Every thread's menu carries its own switch. Both are changed only at a window on this computer.
+- The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown (Code: Chat and Work journal no such step), when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in. A turn that never reached its provider waits too, so the person's message is sent again rather than lost.
 - Each recovery identity is continued at most once, and the crash-loop count survives the restart it counts.
 - Dispatch needs no window: it runs under the host's own scope and rechecks authority, posture and the spend ceiling through ordinary turn admission at that moment. Messages queued behind the cut-off turn follow the continuation; a queue its person paused stays paused.
 - Each start reports the threads it continued and the ones that wait, with links, in a notice: "Octant restarted. Continued N threads; M need you."
-- Built for Code only. Chat, Work, subagent runs, coordinator wakes and goal loops are not built yet. A packaged-app `kill -9` smoke is a maintainer live check still owed.
+- Built for Code, Chat and Work. A Chat answer the start interrupts and a Work turn the start settles as cut off are continued through each mode's ordinary send, so a person's own "continue" and the host's take the same path. A Chat answer already waiting on a question or approval at the restart is still settled interrupted when it is answered; asking it again is not built. Subagent runs, coordinator wakes, goal loops and settling lost remote steps at start are not built yet. A packaged-app `kill -9` smoke is a maintainer live check still owed.
 
 Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -1223,7 +1224,7 @@ Unsent drafts stay on the client that typed them. Messages submitted while a tur
 - Drafts are not journaled, not in diagnostics and not sent to a provider until the user sends; deleting or purging the thread removes them.
 - Queue metadata and ordering are journaled; prompt bodies and attachments stay in purgeable private storage, and thread purge removes them.
 - Every dispatch rechecks the current Project, provider, model, checkout, access and context policy through ordinary turn admission.
-- Changed authority, uncertain delivery, the person's own cancel and a Work Done mark hold the queue until an authenticated user resumes it. After an ordinary provider failure or a clean restart the queue continues by itself once, with no review of the queued messages first, and a second failure in a row holds it (maintainer request, 2026-11-12). Not built yet: today any cancellation, failure or restart also holds the queue. The one exception built today is a Code thread the host continues after a restart cut its turn off: its restart hold lifts under the host's scope, so its messages follow the continuation and still hold if that continuation fails or is cancelled ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)).
+- Changed authority, uncertain delivery, the person's own cancel and a Work Done mark hold the queue until an authenticated user resumes it. After an ordinary provider failure or a clean restart the queue continues by itself once, with no review of the queued messages first, and a second failure in a row holds it (maintainer request, 2026-11-12). Not built yet: today any cancellation, failure or restart also holds the queue. The one exception built today is a Chat, Work or Code thread the host continues after a restart cut its turn off: its restart hold lifts under the host's scope, so its messages follow the continuation and still hold if that continuation fails or is cancelled ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)).
 - A paired device may queue a message (maintainer request, 2026-11-12). Not built yet: today paired remote queue commands stay unavailable until dispatch can revalidate the originating device's grants.
 
 Status: Partly built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
@@ -1500,7 +1501,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 
 One journaled session per thread is the only state, and every surface reads and changes it through one route. A person redirects running work only through ordered steering notes and version-checked goal revisions.
 
-- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the setting "Resume interrupted turns after a restart" is on (off by default) and the turn has no uncertain side effect, when it resumes by itself (maintainer request, 2026-11-12); not built yet: today a person always resumes it. Lost turns and dead approvals are journaled.
+- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the host lifts it to continue a turn a restart cut off ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off), on by default); a turn whose last effect is uncertain still waits for a person (maintainer request, 2026-11-12). Lost turns and dead approvals are journaled.
 - The lead's approvals and questions block until any surface answers, do not expire, and are capped at 32 waiting (maintainer request, 2026-11-12); not built yet: today they expire after ten minutes. A pending one marks the thread as needing the person.
 - Built: the provider-neutral app-owned `ask-user` tool can collect up to four related single-choice or multiple-choice questions inline in Chat, Work and Code, with selection limits, unselected recommendations, written alternatives and an optional comment. It creates no Canvas and grants no permissions.
 - Unsent questionnaire choices and comments remain in memory on their source screen across navigation and deferral. They do not transfer to another window, survive a screen reload, or carry into a changed, settled, cancelled or recovered request; restoring them sends nothing.
@@ -2419,7 +2420,7 @@ Status: Built. Since: —. Detail: [Workspace: Sidebar thread status](workspace.
 
 ### Resuming after a host restart
 
-A turn cut off by a host restart shows a notice with an explicit Resume. Nothing continues automatically unless the person turned on "Resume interrupted turns after a restart" (off by default): then a turn with no uncertain side effect resumes by itself, and a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today nothing continues automatically.
+A turn cut off by a host restart continues by itself unless its thread is held ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)); a held thread shows a notice with an explicit Resume (maintainer request, 2026-11-12).
 
 - Resume queues one host-written continuation in the same thread, after re-checking window, provider and Project authority.
 - A second window, repeated click or lost response cannot queue a second continuation.

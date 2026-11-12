@@ -14,6 +14,8 @@ export interface WorkSettingsChange {
   readonly defaultAccess?: WorkAccess;
   /** Absent keeps the stored choice. */
   readonly defaultFullAccessSandbox?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly restartContinuation?: boolean;
 }
 
 export interface WorkSettingsController {
@@ -120,6 +122,9 @@ export function useWorkSettings(
           ...(change.defaultFullAccessSandbox === undefined
             ? {}
             : { defaultFullAccessSandbox: change.defaultFullAccessSandbox }),
+          ...(change.restartContinuation === undefined
+            ? {}
+            : { restartContinuation: change.restartContinuation }),
         });
         if ("kind" in result && result.kind === "settings-updated") {
           setSettings(result.settings);

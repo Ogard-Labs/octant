@@ -1,10 +1,12 @@
 import type { HostRestartRecovery } from "@octant/contracts/host-control";
 
-/** A Code thread this window can open, as its navigation lists it. */
+/** A thread this window can open, as its navigation lists it. */
 export interface RestartNoticeThread {
+  readonly mode: HostRestartRecovery["continued"][number]["mode"];
   readonly threadId: string;
   readonly title: string;
-  readonly projectId: string;
+  /** Absent for a Chat thread outside any Project. */
+  readonly projectId?: string;
 }
 
 export interface HostRestartNotice {
@@ -32,13 +34,15 @@ export function hostRestartNotice(
   threads: ReadonlyArray<RestartNoticeThread>,
 ): HostRestartNotice | undefined {
   if (recovery === undefined) return undefined;
-  const visible = new Map(threads.map((thread) => [thread.threadId, thread]));
+  const key = (entry: { readonly mode: string; readonly threadId: string }) =>
+    `${entry.mode}:${entry.threadId}`;
+  const visible = new Map(threads.map((thread) => [key(thread), thread]));
   const continued = recovery.continued.flatMap((entry) => {
-    const thread = visible.get(entry.threadId);
+    const thread = visible.get(key(entry));
     return thread === undefined ? [] : [thread];
   });
   const held = recovery.held.flatMap((entry) => {
-    const thread = visible.get(entry.threadId);
+    const thread = visible.get(key(entry));
     return thread === undefined ? [] : [{ thread, detail: entry.detail }];
   });
   if (continued.length + held.length === 0) return undefined;

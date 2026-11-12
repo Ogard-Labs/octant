@@ -222,7 +222,7 @@ export const HostRestartRecoveryHold = Schema.Literal(
 );
 export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
 
-const RestartRecoveryMode = Schema.Literal("code");
+const RestartRecoveryMode = Schema.Literal("chat", "work", "code");
 const MAX_RESTART_RECOVERY_THREADS = 500;
 
 /**

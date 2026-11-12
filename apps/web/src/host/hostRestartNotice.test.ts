@@ -4,8 +4,10 @@ import { hostRestartNotice } from "./hostRestartNotice";
 
 const at = decodeUtcTimestamp("2026-11-12T09:00:00.000Z");
 const threads = [
-  { threadId: "continued", title: "Fix the parser", projectId: "project" },
-  { threadId: "held", title: "Ship the release", projectId: "project" },
+  { mode: "code" as const, threadId: "continued", title: "Fix the parser", projectId: "project" },
+  { mode: "code" as const, threadId: "held", title: "Ship the release", projectId: "project" },
+  { mode: "chat" as const, threadId: "answer", title: "Plan the trip" },
+  { mode: "work" as const, threadId: "brief", title: "Draft the brief", projectId: "project" },
 ];
 
 describe("hostRestartNotice", () => {
@@ -55,5 +57,30 @@ describe("hostRestartNotice", () => {
         threads,
       ),
     ).toMatchObject({ detail: "Continued 1 thread; 0 need you.", needsYou: false });
+  });
+
+  it("counts and opens Chat and Work threads by their own mode", () => {
+    const notice = hostRestartNotice(
+      {
+        at,
+        continued: [{ mode: "chat", threadId: "answer" }],
+        held: [
+          {
+            mode: "work",
+            threadId: "brief",
+            reason: "turned-off",
+            detail: "Continue after restart is off in Settings, so this thread waits for you.",
+          },
+          // The same id in another mode is another thread, which this window cannot open.
+          { mode: "code", threadId: "brief", reason: "crash-loop", detail: "Elsewhere." },
+        ],
+      },
+      threads,
+    );
+    expect(notice).toMatchObject({
+      detail:
+        "Continued 1 thread; 1 needs you. Draft the brief: Continue after restart is off in Settings, so this thread waits for you.",
+      open: threads[3],
+    });
   });
 });
