@@ -13,6 +13,10 @@ desktops, Browser for agents, Browser profiles) keep authority, and each built
 slice moves its rules into them and into
 [Decisions and requirements](decisions.md).
 
+Scope hold: bots take no new scope until
+[the Full access rule](../architecture.md#security-and-authority) is built
+(maintainer request, 2026-11-12).
+
 ## 1. Requirements
 
 ### Sources
@@ -137,9 +141,11 @@ slice moves its rules into them and into
   answered there; D-13 opens approvals to paired devices for bot
   conversations only, and the Mobile section is updated in slice 8.
 
-- **Conflict: Full access never prompts.** Architecture says no class
-  still prompts at Full access. FR-24 (S6) makes paying and sending ask at
-  every level; D-20 records the exception, and slice 5 updates the rule.
+- **Settled: Full access never prompts.** Architecture says nothing prompts
+  at Full access outside a closed list. FR-24 (S6) makes paying and sending
+  ask at every level; that is exception 5 of
+  [the Full access rule](../architecture.md#security-and-authority), which
+  D-20 records, so the two agree (maintainer request, 2026-11-12).
 - **Conflict: Browser and Computer first asks.** Site approvals and the
   first-action ask per app apply at every level today. In a bot's own
   desktop, which holds nothing of the host's, D-16 waives both (S7).
@@ -620,7 +626,8 @@ Choice: (b). A new bot starts at Auto when its provider has its own reviewer
 (Claude Code, Codex), else at Ask first, and the person can pick Auto with
 Octant Shield for any bot. When the provider's reviewer is withdrawn on a
 marked conversation, Shield answers; it still escalates irreversible, publish
-and new-egress actions to the person. Never Full access by default.
+and new-egress actions to the person. A bot does not start at Full access by
+default, and the person may change that (maintainer request, 2026-11-12).
 Consequences: this matches Architecture's Reviewed level, where Shield may
 answer on a marked thread within its limits.
 
@@ -653,8 +660,9 @@ Choice: paying, buying, or sending a message as the person asks at every
 level, Full access and routines included, when the Browser or Computer
 classifies the action as such. Other actions follow the access level. The
 card can be answered from the phone in one tap (D-13).
-Consequences: Architecture's "no class still prompts at Full access" gains
-this one exception in slice 5.
+Consequences: this is exception 5 of
+[the Full access rule](../architecture.md#security-and-authority), which
+Architecture already carries (maintainer request, 2026-11-12).
 
 ### D-21: A local bot desktop starts without a card (Accepted, 2026-11-08)
 
@@ -758,7 +766,7 @@ D-9, D-11 to D-14. Q-8 is answered by D-22 and Q-9 by D-17 (S7).
 | Routine and subagent turns refuse sign-in (`sign-in-needs-a-person`); 1Password fill needs a person per use.                        | Slice 6 adds per-login grants (D-8, D-9).                                             |
 | The remote web shell does not serve the desktop sidebar or rail.                                                                    | Slice 7 serves the rail bots and the list.                                            |
 | The phone cannot answer approvals.                                                                                                  | Slices 7 and 8 let paired devices answer bot cards (D-13); threads keep today's rule. |
-| Full access never prompts (Architecture, Guardrail levels).                                                                         | Slice 5 adds the paying-and-sending exception (D-20).                                 |
+| Full access never prompts (Architecture, Guardrail levels).                                                                         | Already exception 5 of the Full access rule (D-20).                                   |
 | Browser site approvals and the per-app first-action ask apply at every level.                                                       | Slice 5 waives both inside a bot's own desktop (D-16).                                |
 | The Browser's attended login fill asks per use.                                                                                     | Slice 6: a bot's given login fills without asking on its sites (D-15).                |
 | Routine targets limit file-arrival and integration-event triggers; Full access routines need an opt-in.                             | Slice 3 (D-18).                                                                       |

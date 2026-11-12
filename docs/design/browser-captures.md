@@ -83,11 +83,13 @@ the Browser pane
 
 ## Retention
 
-- A thread keeps its newest 32 captures, screenshots and recordings together.
+- A thread keeps its newest 200 captures, screenshots and recordings together.
+  The count is a Settings default the person can change (maintainer request,
+  2026-11-12). Not built yet: today the window is a fixed 32.
 - At most 8 of them are recordings. Keeping a ninth recording drops the
   thread's oldest recording, never a screenshot: within the window, every
   screenshot is kept and only the newest 8 recordings are.
-- Retention is a rule over the journal: the newest 32 aggregate versions
+- Retention is a rule over the journal: the newest 200 aggregate versions
   survive, of those the recordings past the newest 8 do not, and listing reads
   exactly what remains (`browserRetainedCaptures`). Reading, the export
   records, a Canvas design asset, and recovery all go through that listing, so
@@ -95,10 +97,10 @@ the Browser pane
   its bytes are removed when the recording that replaced it is kept, and
   otherwise by the next recovery pass.
 - Rationale for the recording cap: a recording may be 2 MiB, about fifty
-  screenshots, so 32 recordings could hold about 64 MiB per thread. Eight hold
+  screenshots, so 200 recordings could hold about 400 MiB per thread. Eight hold
   about 16 MiB, enough for the checks a pull request shows. Dropping the
   oldest recording rather than the oldest capture keeps a new recording from
-  pushing out the screenshots the proof's steps name; the 32-version window
+  pushing out the screenshots the proof's steps name; the 200-version window
   still ages out the oldest capture of either kind as before, so screenshots
   keep exactly the room they had.
 - Removing the bytes of an older capture is repeatable cleanup. `recover` at host
@@ -205,7 +207,7 @@ The marked-up picture is an attachment of that message, not a capture.
   screenshot through the person's Screenshot route and then reads that capture
   back through the ordinary image read, so the credential-field refusal, the
   `browser.capture-kept@1` record naming the person, the thread's taint, the
-  32-capture window and the capture strip all behave as for a screenshot. A
+  capture window and the capture strip all behave as for a screenshot. A
   capture that was not kept says why in the Screenshot control's own words and
   no drawing starts. The two routes check different things: take needs the
   window to be allowed to act on the thread's Browser, read needs it to be able
@@ -290,7 +292,7 @@ The marked-up picture is an attachment of that message, not a capture.
   thread's "Browser captures" strip, including when the drawing is discarded,
   because the still is an ordinary kept capture. Drawing on a kept capture trades
   this for one source of pictures and one place that decides whether a page may
-  be pictured; a thread's newest 32 captures window ages them out as usual.
+  be pictured; a thread's capture window ages them out as usual.
 - **Sharpness.** The still is the bounded capture picture (about 40 KiB, up to
   1280 pixels wide), so it is soft beside the page: small text on it can blur.
   Drawing does not raise its quality.

@@ -34,7 +34,7 @@ export function DialogViewport({
 
 export function DialogPopup({ className, ...props }: ComponentProps<typeof DialogPrimitive.Popup>) {
   return (
-    <DialogPrimitive.Popup className={cn("relative p-4 outline-none", className)} {...props} />
+    <DialogPrimitive.Popup className={cn("relative p-3 outline-none", className)} {...props} />
   );
 }
 

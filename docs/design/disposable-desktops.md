@@ -157,8 +157,9 @@ the confinement the host has now.
   settings; an agent cannot create or edit it.
 - **Lease.** A thread leases a desktop from its Project's recipe. The lease is
   the unit of ownership: it belongs to exactly one thread and is never
-  transferred. A thread may hold at most two leases; the host caps live leases
-  across all threads. Work and Code threads may lease; Chat cannot (a Chat
+  transferred. A thread may hold at most two leases by default; the host caps
+  live leases across all threads ([decision 4](#maintainer-decisions)).
+  Work and Code threads may lease; Chat cannot (a Chat
   Project has no root to send an artifact from, and Chat never offers
   Browser). Code is delivered first.
 - **Tab.** A Desktop tab is a view onto one lease. Two leases are two tabs.
@@ -228,13 +229,20 @@ lease anyway.
   which only its own thread may release. An agent cannot Retry.
 - **Acquiring** is an effect. Plan refuses it. Approval-gated and
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
-  provider. For a provider that bills the person, a person confirms every
-  billed lease in every posture, Full access included
-  ([decision 2](#maintainer-decisions)). A person also confirms every lease
-  whose desktop runs off this machine (a placement whose locality is not
-  host-local), in every posture, their own Start included: it runs where they
-  should know of before it starts, and it can outlive this host
-  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). A person who
+  provider. For a provider that bills the person, the monthly cap is
+  mandatory, and inside it a person confirms each billed lease in every
+  posture, Full access included, while the setting "Confirm each billed
+  desktop" is on, which is the default. Only a person at a local window
+  changes that setting, as with the cap. With it off, a billed lease inside
+  the cap follows the thread's level as a host-local one does
+  ([decision 2](#maintainer-decisions); exception 6 of
+  [the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). Not built yet: today every billed lease is
+  confirmed and there is no setting. A lease whose desktop runs off this machine (a placement whose locality is
+  not host-local) follows the same setting, their own Start included: it runs
+  where they should know of before it starts, and it can outlive this host
+  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). Not built yet:
+  today a person confirms every off-machine lease in every posture. A person who
   acquires a host-local desktop has already decided and is not asked again;
   Plan still refuses them, and a billed or off-machine lease still asks. The
   host re-checks authority after the answer, and an answer given for one
@@ -274,7 +282,10 @@ lease anyway.
   Service or session bus, no SSH agent, an allowlisted environment with no
   `OCTANT_*` value, a private writable home and inbox under a host-private lease
   directory, and its own network namespace. It cannot reach the host's loopback,
-  so it can never reach the Octant server. Standard streams carry the launch's
+  so it can never reach the Octant server. Its network is a filtered egress
+  proxy that refuses loopback, private, and host addresses
+  ([decision 5](#maintainer-decisions); maintainer request, 2026-11-12). Not
+  built yet: today a host-local desktop has no network. Standard streams carry the launch's
   screen and control protocol. A separately approved
   [lease-bound preview](#lease-bound-dev-server-preview) may expose only its
   exact owned socket inode in that desktop's existing private home.
@@ -301,7 +312,12 @@ lease anyway.
   bringing a file back from a desktop is not in scope.
 - A transfer is an effect: Plan refuses; approval-gated asks with the path,
   size, hash, and destination. A transfer to a cloud desktop sends data off the
-  machine to the person's provider and always asks, in every posture.
+  machine to the person's provider and asks unless the person turned
+  "Confirm each billed desktop" off, which covers off-machine leases and
+  transfers alike (exception 6 of
+  [the Full access rule](../architecture.md#security-and-authority);
+  maintainer request, 2026-11-12). Not built yet: today it always asks, in
+  every posture.
 
 ### Lifecycle and teardown
 
@@ -310,7 +326,10 @@ lease anyway.
   recipe or its credential is removed, when the provider plugin is disabled, or
   when computer use is turned off. Ending always destroys the desktop.
 - Every lease has a hard expiry. A person may extend it up to the recipe
-  maximum; an agent cannot extend a lease. The host asks the driver to move the
+  maximum. An agent may extend a host-local lease of its own thread up to that
+  maximum, under the rules acquiring one follows; an agent cannot extend a
+  billed lease (maintainer request, 2026-11-12). Not built yet: today an agent
+  cannot extend any lease. The host asks the driver to move the
   provider-side expiry first and accepts the extension only when the driver
   confirms the new expiry; otherwise the extension is refused, the original
   expiry stands, and the lease ends on time. Idle release applies when no tab
@@ -532,8 +551,12 @@ alternatives considered and the reason for the choice follow it.
    honest about what is provider-specific, and a person can use the account
    they already have. Rejected: one cloud provider only, which would let the
    seam quietly take one vendor's shape.
-2. **Who may acquire a billed lease.** A person confirms every billed lease in
-   every posture. Rejected: ordinary posture rules, as for any effect. Spending
+2. **Who may acquire a billed lease.** The monthly cap is mandatory. Inside it
+   a person confirms each billed lease in every posture while the setting
+   "Confirm each billed desktop" is on, which is the default (exception 6 of
+   [the Full access rule](../architecture.md#security-and-authority);
+   maintainer request, 2026-11-12). Not built yet: today every billed lease is
+   confirmed and there is no setting. Rejected: ordinary posture rules, as for any effect. Spending
    the person's money is not a code effect Full access covers.
 3. **Paired devices.** Any client that may open the thread may view and operate
    its desktop. Rejected: view only from paired devices, and local windows
@@ -543,9 +566,17 @@ alternatives considered and the reason for the choice follow it.
 4. **Lease limits.** A lease expires after 30 minutes and a person may extend
    it to a recipe maximum of 4 hours; an idle lease is released after
    15 minutes; a thread holds at most two leases; a host runs at most two live
-   host-local leases.
+   host-local leases. These are defaults a person can change: lease length,
+   maximum, and idle release in the recipe, and the per-thread and per-host
+   counts in Settings (Unattended work, beside
+   [the Full access rule](../architecture.md#security-and-authority);
+   maintainer request, 2026-11-12). A billed lease always keeps a hard expiry.
+   Not built yet: today the two counts are constants.
 5. **Host-local network.** A desktop retains its isolated network namespace.
-   General host-local network remains refused. The later accepted
+   A host-local desktop gets network through a filtered egress proxy that
+   refuses loopback, private, and host addresses, never by sharing the host's
+   namespace (maintainer request, 2026-11-12). Not built yet: today host-local
+   network is refused. The later accepted
    [lease-bound preview](#lease-bound-dev-server-preview) is one explicitly
    approved local HTTP/WebSocket port through a private authenticated bridge,
    not a recipe network grant or access to other host ports.

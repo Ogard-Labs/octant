@@ -3,6 +3,7 @@ import type { ReplayFailureReason } from "./journalErrors";
 import type { Journal, JournalCompatibility } from "./journal";
 import {
   type Projection,
+  ProjectionQuarantined,
   ProjectionRegistry,
   rebuildProjection,
   rebuildProjections,
@@ -22,7 +23,15 @@ export interface DatabaseStatus {
   }>;
   readonly quarantineCount: number;
   readonly integrity: "ok" | "failed";
+  /**
+   * Readiness, judged by the authoritative projections alone. A held derived
+   * view lags or is quarantined without making the store unready: no command
+   * or authority check reads it, so it is listed in `heldDerivedViews`
+   * instead, and db:rebuild repairs it.
+   */
   readonly state: DatabaseRecoveryState;
+  /** Derived views that are quarantined or lagging, present only when any are. */
+  readonly heldDerivedViews?: ReadonlyArray<string>;
   readonly recoveryReason?: "journal-incompatible";
 }
 
@@ -81,6 +90,8 @@ export interface RebuildInput extends RecoveryInput {
 export interface RebuildResult {
   readonly rebuilt: ReadonlyArray<string>;
   readonly journalHead: number;
+  /** Derived views that still could not apply an event and stay quarantined. */
+  readonly held?: ReadonlyArray<string>;
 }
 
 export class UnknownProjection extends Data.TaggedError("UnknownProjection")<{
@@ -94,13 +105,14 @@ export class IsolatedProjectionRebuildRejected extends Data.TaggedError(
   readonly dependentProjectionName: string;
 }> {}
 
-interface CountRow {
-  readonly count: number;
-}
-
 interface CheckpointRow {
   readonly projection_name: string;
   readonly last_sequence: number;
+}
+
+interface QuarantineCountRow {
+  readonly projection_name: string;
+  readonly count: number;
 }
 
 interface AggregateEventRow {
@@ -228,9 +240,25 @@ function inspectDatabase(input: RecoveryInput): {
     issues.push({ kind: "aggregate-head-orphan", aggregateType: orphan.aggregate_type });
   }
 
-  const quarantineCount = count(
-    input.connection.prepare("SELECT count(*) AS count FROM event_quarantine").get(),
+  const quarantineRows = input.connection
+    .prepare(
+      "SELECT projection_name, count(*) AS count FROM event_quarantine GROUP BY projection_name",
+    )
+    .all() as ReadonlyArray<QuarantineCountRow>;
+  const derivedNames = new Set(
+    input.projections
+      .all()
+      .filter((projection) => projection.derived === true)
+      .map((projection) => projection.name),
   );
+  let quarantineCount = 0;
+  let authoritativeQuarantineCount = 0;
+  const quarantinedDerived = new Set<string>();
+  for (const row of quarantineRows) {
+    quarantineCount += row.count;
+    if (derivedNames.has(row.projection_name)) quarantinedDerived.add(row.projection_name);
+    else authoritativeQuarantineCount += row.count;
+  }
   const checkpoints = input.connection
     .prepare("SELECT projection_name, last_sequence FROM projection_checkpoints")
     .all() as ReadonlyArray<CheckpointRow>;
@@ -255,7 +283,16 @@ function inspectDatabase(input: RecoveryInput): {
       });
     }
   }
-  const lagging = projections.some((projection) => projection.lag > 0);
+  const lagging = projections.some(
+    (projection) => projection.lag > 0 && !derivedNames.has(projection.name),
+  );
+  const heldDerivedViews = projections
+    .filter(
+      (projection) =>
+        derivedNames.has(projection.name) &&
+        (projection.lag > 0 || quarantinedDerived.has(projection.name)),
+    )
+    .map((projection) => projection.name);
 
   return {
     status: {
@@ -265,24 +302,74 @@ function inspectDatabase(input: RecoveryInput): {
       projections,
       quarantineCount,
       integrity: integrityOk ? "ok" : "failed",
-      state: classifyState({ invalid: issues.length > 0, quarantineCount, lagging }),
+      state: classifyState({
+        invalid: issues.length > 0,
+        quarantineCount: authoritativeQuarantineCount,
+        lagging,
+      }),
+      ...(heldDerivedViews.length === 0 ? {} : { heldDerivedViews }),
       ...(compatibility.compatible ? {} : { recoveryReason: "journal-incompatible" as const }),
     },
     issues,
   };
 }
 
+/**
+ * Damage a full rebuild from the journal repairs without changing the journal.
+ * Every issue here lives in a projection table (aggregate heads are one) or a
+ * projection checkpoint. A failed SQLite integrity check, a version gap inside
+ * the journal, or a journal row this build cannot decode is journal damage: a
+ * rebuild would replay the same rows and cannot fix it, so it stays a refusal.
+ */
+const PROJECTION_ISSUE_KINDS: ReadonlySet<DatabaseVerificationIssue["kind"]> = new Set([
+  "aggregate-head-mismatch",
+  "aggregate-head-orphan",
+  "checkpoint-ahead",
+]);
+
+export function damageIsProjectionOnly(verification: DatabaseVerification): boolean {
+  return (
+    verification.integrity === "ok" &&
+    verification.issues.every((issue) => PROJECTION_ISSUE_KINDS.has(issue.kind))
+  );
+}
+
+/**
+ * Rebuilds the authoritative projections as one unit, then each derived view
+ * on its own. A derived view that still cannot apply an event is quarantined
+ * again and reported as held, without undoing the authoritative repair: no
+ * authoritative projection depends on a derived one.
+ */
 export function rebuildAll(input: RebuildInput): RebuildResult {
   const ordered = orderByDependencies(input.projections.all());
+  const authoritative = ordered.filter((projection) => projection.derived !== true);
   rebuildProjections({
     connection: input.connection,
     journal: input.journal,
-    projections: ordered,
+    projections: authoritative,
     clock: input.clock,
   });
+  const rebuilt = authoritative.map((projection) => projection.name);
+  const held: Array<string> = [];
+  for (const projection of ordered) {
+    if (projection.derived !== true) continue;
+    try {
+      rebuildProjection({
+        connection: input.connection,
+        journal: input.journal,
+        projection,
+        clock: input.clock,
+      });
+      rebuilt.push(projection.name);
+    } catch (error) {
+      if (!(error instanceof ProjectionQuarantined)) throw error;
+      held.push(projection.name);
+    }
+  }
   return {
-    rebuilt: ordered.map((projection) => projection.name),
+    rebuilt,
     journalHead: input.journal.headSequence(),
+    ...(held.length === 0 ? {} : { held }),
   };
 }
 
@@ -327,10 +414,6 @@ function orderByDependencies(projections: ReadonlyArray<Projection>): ReadonlyAr
   }
   for (const projection of projections) visit(projection);
   return ordered;
-}
-
-function count(row: unknown): number {
-  return (row as CountRow).count;
 }
 
 function numberValue(row: unknown): number {

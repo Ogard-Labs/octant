@@ -30,6 +30,36 @@ describe("Machine change route", () => {
     expect(subscribe).toHaveBeenCalledWith({ afterSequence: 4, signal: expect.any(AbortSignal) });
   });
 
+  it("passes a cursor's epoch to the feed and refuses a malformed one", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield { kind: "snapshot-required" as const, sequence: 0, epoch: "new-process" };
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createMachineChangeRouteHandler({
+      feed: { subscribe },
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const request = (query: string) =>
+      route(
+        new Request(`http://127.0.0.1/api/machine/changes?${query}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+
+    const response = await request("afterSequence=4&epoch=old-process");
+    expect(response?.status).toBe(200);
+    await expect(response?.text()).resolves.toContain('"epoch":"new-process"');
+    expect(subscribe).toHaveBeenCalledWith({
+      afterSequence: 4,
+      epoch: "old-process",
+      signal: expect.any(AbortSignal),
+    });
+    expect((await request("afterSequence=4&epoch=not%20valid"))?.status).toBe(400);
+    expect((await request("afterSequence=4&other=1"))?.status).toBe(400);
+  });
+
   it("keeps allowed renderer origins visible on authorization failures", async () => {
     const route = createMachineChangeRouteHandler({
       feed: { subscribe: async function* () {} },

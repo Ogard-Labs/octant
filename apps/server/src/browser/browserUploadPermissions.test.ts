@@ -15,6 +15,7 @@ import {
   decodeAutomationId,
   decodeCodeRelativePath,
 } from "@octant/contracts";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { BrowserUploadPermissions } from "./browserUploadPermissions";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import type { BrowserSessionTarget } from "@octant/contracts/browser-session-grants";
@@ -38,7 +39,7 @@ const target: BrowserSessionTarget = {
     extension: { kind: "core" },
   }),
 };
-async function fixture(absoluteFolderLabels = false) {
+async function fixture(absoluteFolderLabels = false, now: () => number = Date.now) {
   const directory = await mkdtemp(join(tmpdir(), "octant-upload-permission-"));
   const root = join(directory, "reports");
   await mkdir(root);
@@ -61,7 +62,7 @@ async function fixture(absoluteFolderLabels = false) {
   });
   const record = vi.fn();
   const service = new BrowserUploadPermissions({
-    now: Date.now,
+    now,
     uuid: () => crypto.randomUUID(),
     isLocalWindow: () => true,
     canReview: () => true,
@@ -169,6 +170,30 @@ it("requires explicit review, rejects changed content and shares one quota acros
     expect(first.signal.aborted).toBe(true);
   } finally {
     await f.cleanup();
+  }
+});
+it("ends an upload permission after its elapsed minutes even when the wall clock is set back", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const grantedAt = Date.UTC(2026, 10, 1);
+  vi.setSystemTime(grantedAt);
+  let elapsedMs = 1_000;
+  const clock = new ProcessAuthorityClock({
+    wallClock: () => Date.now(),
+    suspendAwareElapsedSource: () => elapsedMs,
+  });
+  const f = await fixture(false, clock.now());
+  try {
+    expect(await f.grant()).toMatchObject({ kind: "upload-permission-granted" });
+    const prepared = f.service.prepare(f.input);
+    if (prepared === undefined) throw Error("Missing prepared policy");
+    elapsedMs += 16 * 60_000;
+    vi.setSystemTime(grantedAt - 60 * 60 * 1_000);
+    f.service.revalidate();
+    expect(prepared.signal.aborted).toBe(true);
+    expect(f.service.prepare(f.input)).toBeUndefined();
+  } finally {
+    await f.cleanup();
+    vi.useRealTimers();
   }
 });
 it("refuses a revoked pending review, changed recipient and a replaced approved source folder identity", async () => {

@@ -661,6 +661,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
       const asked: Array<string> = [];
       const ingested: Array<string> = [];
       const computer = createComputerUseToolService({
+        now: () => Date.now(),
         leases: createLeasedComputerUsePort(service, projection),
         settings: () => ({ enabled: true, automaticUpdates: true }),
         authority: () => authority,

@@ -299,7 +299,7 @@ describe("startOctantServer", () => {
       .mockResolvedValue();
     const reapSessions = vi
       .spyOn(ChatService.prototype, "reapStaleProviderSessions")
-      .mockResolvedValue({ reaped: 0, resumable: 0 });
+      .mockResolvedValue({ reaped: 0, resumable: 0, cutOff: [] });
 
     await Effect.runPromise(
       Effect.scoped(
@@ -3606,6 +3606,24 @@ describe("startOctantServer", () => {
       '{"product":"Octant","status":"failed","category":"storage-unavailable","message":"Octant storage is unavailable."}',
     );
     expect(output).not.toContain("sqlite");
+  });
+
+  it("names what a refused store needs so the desktop can offer only actions that help", () => {
+    const output = fatalStartupOutput(
+      new PersistenceStartupFailed({
+        category: "recovery-required",
+        message: "Octant storage requires recovery before startup.",
+        recovery: "removal-unfinished",
+      }),
+    );
+
+    expect(JSON.parse(output)).toEqual({
+      product: "Octant",
+      status: "failed",
+      category: "recovery-required",
+      message: "Octant storage requires recovery before startup.",
+      recovery: "removal-unfinished",
+    });
   });
 
   it("reports the Windows startup boundary without exposing its underlying dependency details", () => {

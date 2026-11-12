@@ -1208,6 +1208,7 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
       "not-authorized",
       "host-not-offered",
       "lost-in-restart",
+      "posture-changed",
     ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),

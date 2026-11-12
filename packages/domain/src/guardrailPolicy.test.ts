@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_UNSUPPORTED_REASON,
+  approvalAnswerUnderPosture,
+  approvalPostureOf,
   defaultFullAccessSandboxFor,
   defaultPermissionModeFor,
   defaultWorkPermissionModeFor,
@@ -422,5 +424,48 @@ describe("lowering and scope", () => {
       }),
     ).toBe("thread");
     expect(guardrailScopeOf({ mode: "plan", globalDefault: "auto" })).toBe("thread");
+  });
+});
+
+describe("answering an approval after the posture changed", () => {
+  const askFirst = approvalPostureOf({
+    executionPolicy: "approval-gated",
+    permissionPersistence: "current-session",
+  });
+  const auto = approvalPostureOf({
+    executionPolicy: "approval-gated",
+    autoApprove: true,
+    permissionPersistence: "current-session",
+  });
+  const plan = approvalPostureOf({
+    executionPolicy: "plan",
+    permissionPersistence: "current-session",
+  });
+
+  it("delivers an allow given under the posture the thread still holds", () => {
+    expect(
+      approvalAnswerUnderPosture({ approved: true, askedUnder: askFirst, current: askFirst }),
+    ).toBe("deliver");
+  });
+
+  it("asks again when an allow was given under a posture the thread no longer holds", () => {
+    expect(
+      approvalAnswerUnderPosture({ approved: true, askedUnder: askFirst, current: plan }),
+    ).toBe("ask-again");
+    expect(
+      approvalAnswerUnderPosture({ approved: true, askedUnder: askFirst, current: auto }),
+    ).toBe("ask-again");
+    expect(
+      approvalAnswerUnderPosture({ approved: true, askedUnder: undefined, current: askFirst }),
+    ).toBe("ask-again");
+    expect(
+      approvalAnswerUnderPosture({ approved: true, askedUnder: askFirst, current: undefined }),
+    ).toBe("ask-again");
+  });
+
+  it("delivers a denial whatever the posture became", () => {
+    expect(
+      approvalAnswerUnderPosture({ approved: false, askedUnder: askFirst, current: plan }),
+    ).toBe("deliver");
   });
 });

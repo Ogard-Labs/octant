@@ -137,8 +137,8 @@ whole with no Project named, its owner being the thread in its provenance
 (the host-export Canvas record once required a Project, which left every
 such Canvas out of the cut). It is never mirrored (the
 mirror files artifacts by Project; the receipt says so and journals
-`skipped`), never published to an artifact replica, and not shared (see
-[Shares](#shares)). It is listed in the host-wide artifact library for a
+`skipped`), never published to an artifact replica, and shared only through
+the export destinations (see [Shares](#shares)). It is listed in the host-wide artifact library for a
 window on this host, under no Project, while its thread still holds it — the
 same rule that authorizes its tab — and a paired device sees none of it,
 having no Project to be clamped to (see
@@ -854,9 +854,11 @@ before a desktop release publishes them, as
 
 A share names the Project it is taken from, and a reader's access is judged
 against that Project, so a Canvas owned by a Chat thread outside every
-Project is not shared: the share overview answers no authority for it, and a
-share request is refused `scope-mismatch` with the reason. It stays in its
-thread; export is how it leaves.
+Project takes no Project share: the share overview answers no authority for it, and a
+share request is refused `scope-mismatch` with the reason. The person can
+share it through the export destinations instead, which need no Project
+(maintainer request, 2026-11-12). Not built yet: today it leaves only as a
+folder export.
 
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).
@@ -1231,7 +1233,10 @@ that board), the artifact SVG sidecar and thumbnail (the layout scaled into the
 band), and the HTML export (the layout drawn inline as plain SVG elements with
 no script, id, or external reference) place the same nodes; the Markdown
 export names a shaped node by its role.
-Mermaid is never rendered. The pure `importCanvasMermaid` translates a bounded
+Mermaid outside the translated subset is drawn by a bundled renderer inside
+the existing sandboxed, no-network frame, and its raw source shows only when
+that rendering fails (maintainer request, 2026-11-12). Not built yet: today
+Mermaid is never rendered and such a source stays a code block. The pure `importCanvasMermaid` translates a bounded
 subset into the typed blocks above: a `flowchart` or `graph` (TD/TB or LR;
 `[ ]` process, `{ }` decision, `([ ])` terminator, `( )` the plain box;
 `-->`, `---`, and `-.->` links with a piped or inline label; one level of
@@ -1252,7 +1257,8 @@ refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,
 `create` and `revise`: a `code-excerpt` block with language `mermaid` and no
 source id is replaced by its translation under the same block id before the
 document is validated, and the result lists each such block as `imported` or
-`kept-as-code` with the reason. A refused source stays the code block it was.
+`kept-as-code` with the reason. A refused source stays the code block it was,
+which the bundled renderer then draws.
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
 may nest by parent id, labeled transitions, and initial and final roles. Three
@@ -1642,7 +1648,10 @@ revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
-wait five minutes for a provider event before cutting a turn off, as Code does.
+wait the stalled-turn limit for a provider event before cutting a turn off, as Code does.
+The limit is a setting in Settings › Providers & Models, 30 minutes by default,
+which may be turned off (maintainer request, 2026-11-12). Not built yet: today
+it is a fixed five minutes.
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer.
@@ -1695,7 +1704,12 @@ renderer named) and serves the page with
 script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
 font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
 form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
-`Cache-Control: no-store`; a refusal carries the same headers. Declared
+`Cache-Control: no-store`; a refusal carries the same headers. A design or
+prototype has a per-Canvas **Allow network** switch, off by default, that only
+the person sets, never an agent, a routine, or a paired device; while it is
+on, that Canvas's running page is served with a policy that lets it make
+network requests, and nothing else about its sandbox changes (maintainer
+request, 2026-11-12). Not built yet: today no design page reaches the network. Declared
 images are resolved under the version's provenance and written in as `data:`
 images: every image once, and a repeated reference only while the page's
 images stay within the design's 5 MiB as base64, after which it draws a

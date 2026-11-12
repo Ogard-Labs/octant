@@ -14,6 +14,8 @@ export type ConnectorAuth =
       readonly clientSetup?: "registered";
       readonly setupGuide?: string;
       readonly requestedScopes?: readonly string[];
+      /** Numbered steps shown beside Client setup: what to do at the vendor, then in Octant. */
+      readonly setupSteps?: readonly string[];
       /** Plain-language authority disclosed before app consent, not a tool approval. */
       readonly permissionNotice?: string;
     }
@@ -41,6 +43,12 @@ export interface ConnectorCatalogEntry {
   /** The vendor's own page on connecting to this server, shown beside the entry. */
   readonly docs: string;
   readonly auth: ConnectorAuth;
+  /**
+   * Hosts a locally started connector may reach through the host's proxy
+   * (`*.example.com` covers the names below example.com). Only an entry that
+   * names some is ever granted a network path; a hosted entry never has any.
+   */
+  readonly egress?: ReadonlyArray<string>;
 }
 
 export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string>> = {
@@ -70,6 +78,24 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
 export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
   "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
 
+/**
+ * The Octant half of registering an app, the same for every entry that needs
+ * one. The vendor half stays with each entry, drawn only from what its own
+ * entry and guide already say, so a step never invents a vendor screen.
+ */
+const REGISTERED_APP_FINISH_STEPS: readonly string[] = [
+  "Paste the app's client ID into Client setup. If the app has a client secret, link its 1Password item there; link a secret store in Settings first.",
+  "Save client setup, then press Sign in and approve access in your browser.",
+];
+
+function registeredAppSteps(...vendorSteps: readonly string[]): readonly string[] {
+  return [
+    ...vendorSteps,
+    "Give the app the callback address shown in Client setup as its redirect address.",
+    ...REGISTERED_APP_FINISH_STEPS,
+  ];
+}
+
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
   ...GOOGLE_WORKSPACE_SERVICES.map(
     (service): ConnectorCatalogEntry => ({
@@ -84,6 +110,12 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
         clientSetup: "registered",
         setupGuide: "https://developers.google.com/workspace/guides/create-credentials#desktop-app",
         requestedScopes: service.scopes,
+        setupSteps: [
+          "In your own Google Cloud project, create a Desktop app client with Use this client for an AI-powered agent selected (the Google guide above shows where).",
+          `Enable ${service.api} and ${service.mcpApi} in that project.`,
+          "Paste the client ID into Client setup. This client needs no secret.",
+          "Save client setup, then press Sign in and approve access in your browser.",
+        ],
         permissionNotice: `Developer Preview requires an enrolled Workspace account and project. ${service.description} Public distribution requires Google's permission or general availability.`,
       },
     }),
@@ -101,6 +133,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       clientSetup: "registered",
       setupGuide: "https://docs.slack.dev/ai/slack-mcp-server/",
       requestedScopes: ["search:read.public"],
+      setupSteps: registeredAppSteps(
+        "Register a Slack app you own, as the Slack guide above describes, and grant it only the search:read.public scope.",
+      ),
     },
   },
   {
@@ -151,6 +186,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       clientSetup: "registered",
       setupGuide:
         "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+      setupSteps: registeredAppSteps(
+        "In your HubSpot account, create your own MCP connector as the HubSpot guide above describes.",
+      ),
       permissionNotice:
         "Can read and write CRM data allowed by your HubSpot permissions and consent. Available tools depend on your subscription and account configuration. Create your own MCP connector and link its client secret before signing in.",
     },
@@ -229,6 +267,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       setupGuide:
         "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps",
       requestedScopes: ["read:user", "repo", "offline_access"],
+      setupSteps: registeredAppSteps(
+        "Register a GitHub OAuth App you own, as the GitHub guide above describes.",
+      ),
       permissionNotice: GITHUB_REPOSITORY_PERMISSION_NOTICE,
     },
   },
@@ -247,6 +288,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       setupGuide:
         "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
       requestedScopes: ["read:user", "offline_access"],
+      setupSteps: registeredAppSteps(
+        "Register a GitHub OAuth App you own, as the GitHub guide above describes.",
+      ),
     },
   },
   {
@@ -545,6 +589,20 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     auth: { kind: "sign-in" },
   },
   {
+    id: "composio",
+    displayName: "Composio",
+    description: "Reach Gmail, Google Drive and many other apps through Composio's hosted service.",
+    category: "business",
+    keywords: ["gmail", "google drive", "google calendar", "email", "aggregator", "integrations"],
+    url: "https://connect.composio.dev/mcp",
+    docs: "https://docs.composio.dev/docs/composio-connect",
+    auth: {
+      kind: "sign-in",
+      permissionNotice:
+        "Composio is a third-party hosted service. It stores the sign-ins you give it for other apps, and the content the agent reads or writes in them passes through its servers, not only between this Mac and the app. Octant does not control how long Composio keeps it.",
+    },
+  },
+  {
     id: "intercom",
     displayName: "Intercom",
     description: "Search conversations, contacts, and articles.",
@@ -576,6 +634,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       kind: "sign-in",
       clientSetup: "registered",
       setupGuide: "https://developer.box.com/guides/box-mcp/remote/",
+      setupSteps: registeredAppSteps(
+        "Ask a Box admin to enable the Box MCP Server integration, as the Box guide above describes, and open its settings.",
+      ),
       permissionNotice:
         "Can read and change files and folders your Box account can reach, within the scopes set on the integration. A Box admin enables the Box MCP Server integration; copy its client ID and link its client secret before signing in.",
     },
