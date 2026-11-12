@@ -4568,6 +4568,14 @@ function LaunchedShell(
         closeBottomPanelTab(surface);
         return;
       case "reveal":
+        // The bottom panel holds the tool but is not on screen: a reader
+        // stands over it, or the panel is closed. The guard above only leaves
+        // a reader that hides the dock, and a review shows the dock beside
+        // it, so without this the press did nothing there.
+        if (readerOpen) closeWorkspaceReaders();
+        if (!bottomPanelPresentation.open) {
+          persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
+        }
         return;
     }
   }
@@ -6013,7 +6021,8 @@ function LaunchedShell(
    * the workspace while it is open, so any navigation that targets a draft or
    * thread dismisses the reader first instead of opening the destination
    * invisibly behind it.
-   */ function closeWorkspaceReaders() {
+   */
+  function closeWorkspaceReaders() {
     setProjectsListOpen(false);
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);

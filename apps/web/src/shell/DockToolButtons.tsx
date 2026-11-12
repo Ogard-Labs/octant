@@ -172,6 +172,10 @@ function MoreTools(props: {
                         : { "aria-description": tool.disabledReason, disabled: true })}
                       checked={tool.pressed}
                       className="workspace-disclosure__action window-no-drag"
+                      // A checkbox item keeps its menu open by default; this one
+                      // opens or closes a pane, so the menu closes and focus
+                      // goes back to its button.
+                      closeOnClick
                       key={tool.id}
                       label={tool.label}
                       onCheckedChange={() => {
