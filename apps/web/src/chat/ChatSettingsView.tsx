@@ -73,6 +73,10 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           ? next.fallbackProviderInstanceId
           : current.fallbackProviderInstanceId,
         fallbackModelId: fallbackUntouched ? next.fallbackModelId : current.fallbackModelId,
+        restartContinuation:
+          current.restartContinuation === before.restartContinuation
+            ? next.restartContinuation
+            : current.restartContinuation,
       };
     });
   }
@@ -184,6 +188,10 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
               modelId: next.fallbackModelId as ProviderModelId,
             },
           }),
+      // Sent only when it changes: a save from elsewhere keeps the stored choice.
+      ...(next.restartContinuation === (props.settings.restartContinuation !== false)
+        ? {}
+        : { restartContinuation: next.restartContinuation }),
     };
     setSaving(true);
     try {
@@ -373,6 +381,22 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             value={draft.defaultPersonalityInstructions}
           />
         </SettingRow>
+        <SettingRow
+          description="When Octant stops in the middle of an answer, from a crash, a quit, or a restart of this computer, the thread picks the answer up by itself when Octant opens again. This applies to every Chat thread, not only new ones. A thread can turn this off from its menu."
+          label="Continue after restart"
+          scope="mode"
+          settingId="chat-restart-continuation"
+        >
+          <OctantSwitch
+            checked={draft.restartContinuation}
+            disabled={busy}
+            label="Continue after restart"
+            onCheckedChange={(restartContinuation) => {
+              setDraft((current) => ({ ...current, restartContinuation }));
+              void commit({ restartContinuation });
+            }}
+          />
+        </SettingRow>
       </form>
       {/* Outside the card so the reserved line never reads as an empty row. */}
       <div className="settings-feedback-slot" aria-live="polite">
@@ -414,6 +438,7 @@ function draftFrom(settings: ChatSettings) {
         : String(settings.providerFallback.providerInstanceId),
     fallbackModelId:
       settings.providerFallback === undefined ? "" : String(settings.providerFallback.modelId),
+    restartContinuation: settings.restartContinuation !== false,
   };
 }
 

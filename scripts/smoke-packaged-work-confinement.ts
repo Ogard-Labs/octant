@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { link, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { packageWorkConfinementGate } from "./package-work-confinement-gate";
@@ -124,7 +124,11 @@ async function runWithTimeout(command: readonly string[], timeoutMilliseconds: n
     stdout: "pipe",
     stderr: "pipe",
   });
-  const timeout = setTimeout(() => child.kill("SIGTERM"), timeoutMilliseconds);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, timeoutMilliseconds);
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -135,6 +139,12 @@ async function runWithTimeout(command: readonly string[], timeoutMilliseconds: n
     // A stage runs as its own process, so its own failure message exists only
     // in this stderr; without it a hosted run shows just the exit code.
     process.stderr.write(stderr);
+    // A timeout's SIGTERM leaves no stderr of its own, so name the step it stopped.
+    if (timedOut) {
+      process.stderr.write(
+        `timed-out-step=${basename(command[0] ?? "")} ${command.at(-1) ?? ""}\n`,
+      );
+    }
     throw new Error(
       `Work confinement host failed with category ProcessExit${exitCode}: ${stderr.length > 0 ? "stderr" : "no-stderr"}`,
     );
@@ -185,9 +195,12 @@ export async function smokePackagedWorkConfinement(
     const combinedResults: ProbeResult[] = [];
     const script = fileURLToPath(import.meta.url);
     for (const childStage of ["authentication", "lifecycle", "operations", "cleanup"]) {
+      // A stage packages the app, then runs several steps each bounded at 30
+      // seconds, so it needs a larger budget of its own: on the hosted macos-15
+      // runner a 30 second stage budget stopped authentication midway.
       const output = await runWithTimeout(
         [process.execPath, script, "--stage", childStage],
-        30_000,
+        300_000,
       );
       combinedResults.push(...parseProbeResults(output));
     }

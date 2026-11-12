@@ -98,6 +98,19 @@ export function setCodeThreadMessageWake(thread: CodeThread, wake: boolean): Cod
   };
 }
 
+/** The thread's Continue after restart switch. */
+export function setCodeThreadRestartContinuation(
+  thread: CodeThread,
+  continueAfterRestart: boolean,
+): CodeCommand {
+  return {
+    kind: "set-code-thread-restart-continuation",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    continueAfterRestart,
+  };
+}
+
 /** A worker's Wake for coordinator switch. */
 export function setCodeThreadCoordinatorWake(thread: CodeThread, wake: boolean): CodeCommand {
   return {

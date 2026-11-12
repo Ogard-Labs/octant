@@ -489,6 +489,12 @@ export const ChatThread = Schema.Struct({
    * on this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * Set when a person turned off **Continue after restart** for this thread:
+   * an answer a host restart cuts off waits for them instead of continuing by
+   * itself. Absent, the Chat setting decides.
+   */
+  restartContinuationOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Work and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -519,6 +525,12 @@ export const ChatSettings = Schema.Struct({
   searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
   defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
   providerFallback: Schema.optional(ChatProviderFallback),
+  /**
+   * Settings › Chat › Continue after restart: whether the host continues, by
+   * itself, an answer a restart cut off. Absent is on, which is also what a
+   * store persisted before the switch existed reads as.
+   */
+  restartContinuation: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 })
@@ -643,6 +655,13 @@ export const ChangeChatInstructionsCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-instructions"),
   ...ChatThreadCommandFields,
   personalityInstructions: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+
+/** The thread's Continue after restart switch; only a person at a local window. */
+export const SetChatThreadRestartContinuationCommand = Schema.Struct({
+  kind: Schema.Literal("set-chat-thread-restart-continuation"),
+  ...ChatThreadCommandFields,
+  continueAfterRestart: Schema.Boolean,
 }).annotations(strict);
 
 export const SendChatTurnCommand = Schema.Struct({
@@ -831,6 +850,8 @@ export const UpdateChatSettingsCommand = Schema.Struct({
   searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
   defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
   providerFallback: Schema.optional(ChatProviderFallback),
+  /** Absent keeps the stored choice. */
+  restartContinuation: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
   .pipe(
@@ -939,6 +960,7 @@ export const ChatCommand = Schema.Union(
   SelectChatMultiModelPoolCommand,
   ChangeChatResearchCommand,
   ChangeChatInstructionsCommand,
+  SetChatThreadRestartContinuationCommand,
   SendChatTurnCommand,
   RewindChatThreadCommand,
   BranchChatThreadCommand,

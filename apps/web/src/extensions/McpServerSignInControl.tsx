@@ -18,6 +18,7 @@ export interface McpServerSignInControlProps {
   readonly registration?: {
     readonly guideUrl: string;
     readonly requestedScopes: readonly string[];
+    readonly setupSteps?: readonly string[];
     readonly permissionNotice?: string;
   };
   /** Told when the sign-in state changes after the first read, so a listing beside it can read again. */
@@ -172,6 +173,13 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         <a href={props.registration.guideUrl} target="_blank" rel="noreferrer">
           App registration guide
         </a>
+        {props.registration.setupSteps === undefined ? null : (
+          <ol className="mcp-sign-in__steps">
+            {props.registration.setupSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        )}
         <span>Requested permission: {props.registration.requestedScopes.join(", ")}</span>
         {props.registration.permissionNotice === undefined ? null : (
           <span>{props.registration.permissionNotice}</span>

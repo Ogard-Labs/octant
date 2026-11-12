@@ -15,6 +15,7 @@ export function codeThreadCoordinatorActions(
     | "setCodeThreadCoordinator"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
+    | "setCodeThreadRestartContinuation"
     | "setThreadExportNotice"
   >,
 ): Required<ThreadCoordinatorActions> {
@@ -31,6 +32,10 @@ export function codeThreadCoordinatorActions(
     onSetCoordinatorWake: (threadId, wake) =>
       void actions
         .setCodeThreadCoordinatorWake(decodeCodeThreadId(threadId), wake)
+        .then(noteRefusal),
+    onSetRestartContinuation: (threadId, continueAfterRestart) =>
+      void actions
+        .setCodeThreadRestartContinuation(decodeCodeThreadId(threadId), continueAfterRestart)
         .then(noteRefusal),
   };
 }

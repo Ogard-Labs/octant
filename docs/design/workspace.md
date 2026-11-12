@@ -38,12 +38,11 @@ A conversation whose turn was cut off by a host restart shows a notice above
 its composer: "Octant restarted before this turn finished. Review any changes
 before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
-connection alone do not show it. By default no interrupted turn continues by
-itself. One setting, "Resume interrupted turns after a restart", off by
-default, changes that: when it is on, a turn with no uncertain side effect
-resumes by itself, and a turn whose last effect is uncertain still waits for
-the person (maintainer request, 2026-11-12). Not built yet: today the setting
-does not exist and every interrupted turn waits for Resume.
+connection alone do not show it. A turn a restart cut off continues by
+itself, once, as the host, unless its thread is held: Continue after restart is
+off in Settings or for the thread, its last effect is uncertain, or its provider
+cannot resume it. Only a held thread shows this notice (maintainer request,
+2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.
@@ -382,7 +381,11 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   thread a coordinator once its creation is confirmed, before the first
   message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
   coordinating** on a coordinator (never on a worker), the **Wake when a message
-  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
+  the **Continue after restart** checkbox, on until a person turns it off for
+  that thread ([Architecture: Persistence](../architecture.md#persistence)).
+  A Chat or Work thread's row menu carries the same **Continue after restart**
+  checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.

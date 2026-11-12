@@ -773,6 +773,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readCodeThread: persistence.readCodeThread,
           readCodeCheckout: persistence.readCodeCheckout,
           readCodeRuntimeWorkAggregateVersion: persistence.readCodeRuntimeWorkAggregateVersion,
+          readCodeRuntimeWorks: persistence.readCodeRuntimeWorks,
           readReviewFinding: persistence.readCodeReviewFinding,
           readReviewFindings: persistence.readCodeReviewFindings,
         },

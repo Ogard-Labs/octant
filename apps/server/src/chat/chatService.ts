@@ -271,6 +271,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
+import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
@@ -706,6 +707,11 @@ export interface ChatServiceOptions {
    * rejecting a valid first send.
    */
   readonly providerChangeProbeSettleMs?: number;
+  /**
+   * How long a Stop on a provider that shares one process across threads waits
+   * for the runtime to confirm the turn ended before recording it unconfirmed.
+   */
+  readonly stopConfirmationMs?: number;
   readonly providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
@@ -946,6 +952,13 @@ export interface MovedChatThreadImport {
   readonly unsentAttachments?: ReadonlyArray<MovedChatAttachment>;
 }
 
+/** An answer the previous host was giving when it stopped, interrupted at this start. */
+export interface ChatAttemptCutOffByRestart {
+  readonly threadId: ChatThreadId;
+  readonly turnId: ChatTurn["id"];
+  readonly attemptId: ChatAttempt["id"];
+}
+
 export class ChatServiceError extends Error {
   override readonly name = "ChatServiceError";
 
@@ -1065,6 +1078,13 @@ export interface ChatSubscribeOptions {
   readonly appended?: boolean;
 }
 
+/**
+ * How long a Stop on a shared-process provider (Codex, OpenCode) waits for the
+ * runtime to confirm the turn ended: the same grace a provider that owns its
+ * process gives before Force stop is offered.
+ */
+const STOP_CONFIRMATION_MS = 10_000;
+
 export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
@@ -1090,6 +1110,7 @@ export class ChatService {
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerChangeProbeSettleMs: number;
+  readonly #stopConfirmationMs: number;
   readonly #providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
@@ -1180,6 +1201,7 @@ export class ChatService {
       this.#contextMaintenanceShutdownTimeoutMs = options.contextMaintenanceShutdownTimeoutMs;
     }
     this.#providerChangeProbeSettleMs = options.providerChangeProbeSettleMs ?? 1_500;
+    this.#stopConfirmationMs = options.stopConfirmationMs ?? STOP_CONFIRMATION_MS;
     this.#hiddenThreadIds = options.hiddenThreadIds ?? (() => EMPTY_HIDDEN_THREAD_IDS);
     this.#resolveSideChatReturns = options.resolveSideChatReturns;
     if (options.resolveSideChatSourceContext !== undefined) {
@@ -1665,6 +1687,7 @@ export class ChatService {
         case "select-chat-multi-model-pool":
         case "change-chat-research":
         case "change-chat-instructions":
+        case "set-chat-thread-restart-continuation":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#updateThread(command),
           );
@@ -2017,6 +2040,57 @@ export class ChatService {
     }
   }
 
+  /**
+   * Whether the answer a restart cut off is still owed a continuation, and
+   * whether the thread's provider can take up the session it ran in. Only
+   * the conversation's tail is owed one: a Retry, a new message or a rewind
+   * since means the person already moved on. A provider that keeps its own
+   * conversation continues only the session the cut-off attempt recorded,
+   * and only after the provider answered in it; before that, Octant cannot
+   * tell whether the message reached the session, so the person sends it.
+   */
+  restartContinuationReadiness(cut: ChatAttemptCutOffByRestart): RestartContinuationReadiness {
+    const thread = this.#persistence.readChatThread(cut.threadId);
+    if (thread === undefined || thread.lifecycle !== "active") return { kind: "settled" };
+    const view = this.#persistence.readChatThreadView(cut.threadId);
+    const tail = activeChatTurns(view?.turns ?? []).at(-1);
+    const attempt = tail?.attempts.at(-1);
+    if (
+      tail === undefined ||
+      attempt === undefined ||
+      String(tail.id) !== String(cut.turnId) ||
+      String(attempt.id) !== String(cut.attemptId) ||
+      attempt.outcome !== "interrupted"
+    )
+      return { kind: "settled" };
+    const owed = {
+      kind: "owed" as const,
+      continuationOf: tail.submissionId === undefined ? undefined : String(tail.submissionId),
+      optedOut: thread.restartContinuationOff === true,
+    };
+    let ownership: "provider" | "host" | "host-resumable" | undefined;
+    try {
+      ownership = this.#driver(
+        decodeProviderInstanceId(attempt.providerInstanceId),
+      ).conversationOwnership;
+    } catch {
+      return { ...owed, cannotResume: "This thread's provider is unavailable." };
+    }
+    if (ownership !== "provider") return owed;
+    if (attempt.resumeCursor === undefined)
+      return {
+        ...owed,
+        cannotResume: "This thread's provider cannot resume the session the answer ran in.",
+      };
+    if (attempt.responseRefs.length === 0)
+      return {
+        ...owed,
+        cannotResume:
+          "The answer stopped before its provider replied, so Octant cannot tell whether your message reached it. Send it again.",
+      };
+    return owed;
+  }
+
   /** A restored question or approval has no runtime to receive it after recovery. */
   settleCutOffTurns(threadId: ChatThreadId): void {
     const view = this.#persistence.readChatThreadView(threadId);
@@ -2049,13 +2123,22 @@ export class ChatService {
     }
   }
 
-  async reapStaleProviderSessions(input?: {
-    readonly staleAfterMs?: number;
-  }): Promise<{ readonly reaped: number; readonly resumable: number }> {
+  /**
+   * Interrupts every attempt the journal still reads as running that this
+   * process does not own. At start that is every answer the previous host was
+   * giving when it stopped, so `cutOff` names exactly the attempts this
+   * restart cut off; an attempt already interrupted, or waiting, is retained.
+   */
+  async reapStaleProviderSessions(input?: { readonly staleAfterMs?: number }): Promise<{
+    readonly reaped: number;
+    readonly resumable: number;
+    readonly cutOff: ReadonlyArray<ChatAttemptCutOffByRestart>;
+  }> {
     const staleAfterMs = input?.staleAfterMs ?? 10 * 60 * 1_000;
     const now = Date.parse(this.#clock());
     let reaped = 0;
     let resumable = 0;
+    const cutOff: ChatAttemptCutOffByRestart[] = [];
     for (const thread of this.#persistence.readChatThreads()) {
       let view: ChatThreadView | undefined;
       try {
@@ -2091,6 +2174,7 @@ export class ChatService {
         version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
         reaped += 1;
         if (disposition.resumable) resumable += 1;
+        cutOff.push({ threadId: thread.id, turnId: attempt.turnId, attemptId: attempt.id });
       };
       for (const turn of view.turns) {
         for (const attempt of turn.attempts) {
@@ -2131,7 +2215,7 @@ export class ChatService {
         }
       }
     }
-    return { reaped, resumable };
+    return { reaped, resumable, cutOff };
   }
 
   async recoverManagedAttachments(): Promise<void> {
@@ -2406,6 +2490,12 @@ export class ChatService {
         ...(searxngBaseUrl === undefined ? {} : { searxngBaseUrl }),
         defaultPersonalityInstructions: command.defaultPersonalityInstructions,
         ...(providerFallback === undefined ? {} : { providerFallback }),
+        // Absent keeps the stored choice, and absent reads as on, so only a
+        // stored off needs a value.
+        ...((command.restartContinuation ??
+          this.#persistence.readChatSettings()?.settings.restartContinuation) === false
+          ? { restartContinuation: false }
+          : {}),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       } satisfies ChatSettings;
@@ -2427,6 +2517,18 @@ export class ChatService {
       next = {
         ...current,
         title: command.title,
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
+    } else if (command.kind === "set-chat-thread-restart-continuation") {
+      const off = !command.continueAfterRestart;
+      if ((current.restartContinuationOff === true) === off) {
+        return { kind: "thread-updated", thread: current };
+      }
+      const { restartContinuationOff: _off, ...rest } = current;
+      next = {
+        ...rest,
+        ...(off ? { restartContinuationOff: true as const } : {}),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -4064,6 +4166,45 @@ export class ChatService {
     return { kind: "attempt-updated", attempt: accepted.attempt };
   }
 
+  #settleUnconfirmedStopLater(threadId: ChatThreadId, attemptId: ChatAttempt["id"]): void {
+    const timer = setTimeout(() => {
+      try {
+        const current = this.#persistence
+          .readChatThreadView(threadId)
+          ?.turns.flatMap((turn) => turn.attempts)
+          .find((candidate) => String(candidate.id) === String(attemptId));
+        if (
+          current === undefined ||
+          (current.outcome !== "queued" && current.outcome !== "streaming")
+        )
+          return;
+        const unconfirmed = transitionChatAttempt(current, {
+          outcome: "interrupted",
+          updatedAt: decodeTimestamp(this.#clock()),
+          failure: { code: decodeDiagnosticFailureCode("stop-unconfirmed") },
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+          expectedVersion: readAggregateVersion(
+            this.#persistence.connection,
+            "chat-thread",
+            threadId,
+          ),
+          events: [
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: unconfirmed,
+            }),
+          ],
+        });
+      } catch {
+        // A thread deleted or a journal unavailable meanwhile leaves the
+        // attempt to restart reconciliation, which interrupts it.
+      }
+    }, this.#stopConfirmationMs);
+    timer.unref?.();
+  }
+
   async #interruptTurn(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "interrupt-chat-turn" }>,
   ): Promise<ChatCommandResult> {
@@ -4081,11 +4222,17 @@ export class ChatService {
     }
     const controller = this.#activeAttempts.get(String(command.attemptId));
     controller?.abort();
-    // A runtime that can be force-stopped keeps the attempt streaming until it
-    // really ends, so the person can see a Stop that did not take and reach for
-    // Force stop. A runtime that cannot be killed alone settles at once, as it
-    // always has, so a stuck turn never strands the thread.
-    if (controller !== undefined && this.#turnRunner.canForceStop(String(command.attemptId))) {
+    // A Stop is only a request: the attempt keeps running until the runtime
+    // confirms the turn ended, and the runner then records it cancelled. A
+    // runtime that can be force-stopped waits for the person, who sees a Stop
+    // that did not take and can reach for Force stop. One that shares its
+    // process cannot be killed alone, so after a short wait the turn is
+    // recorded as a Stop the runtime never confirmed: the thread is freed
+    // without claiming the work stopped.
+    if (controller !== undefined) {
+      if (!this.#turnRunner.canForceStop(String(command.attemptId))) {
+        this.#settleUnconfirmedStopLater(thread.id, attempt.id);
+      }
       return { kind: "attempt-updated", attempt };
     }
     const timestamp = decodeTimestamp(this.#clock());

@@ -49,6 +49,7 @@ export function buildWorkThreadNavigation(
         updatedAt: thread.updatedAt,
         ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
         ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+        ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
       };
     });
 }

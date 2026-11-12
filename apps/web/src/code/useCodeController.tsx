@@ -122,6 +122,7 @@ import {
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
+  setCodeThreadRestartContinuation,
   snoozeCodeThread,
   wakeCodeThread,
 } from "./codeThreadCommands";
@@ -210,6 +211,8 @@ export interface CodeThreadNavigationItem {
   readonly messageWake?: true;
   /** A person turned off this worker's Wake for coordinator. */
   readonly coordinatorWakeOff?: true;
+  /** A person turned off Continue after restart for this thread. */
+  readonly restartContinuationOff?: true;
 }
 
 /**
@@ -2086,6 +2089,9 @@ export function useCodeController(options: CodeControllerOptions) {
               : { coordinatorThreadId: thread.coordinatorThreadId }),
             ...(thread.messageWake === true ? { messageWake: true as const } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true as const } : {}),
+            ...(thread.restartContinuationOff === true
+              ? { restartContinuationOff: true as const }
+              : {}),
             updatedAt: thread.updatedAt,
           };
         })
@@ -2560,6 +2566,13 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => setCodeThreadCoordinatorWake(thread, wake)),
     [restCommand],
   );
+  const setThreadRestartContinuation = useCallback(
+    (threadId: CodeThreadId, continueAfterRestart: boolean) =>
+      restCommand(threadId, (thread) =>
+        setCodeThreadRestartContinuation(thread, continueAfterRestart),
+      ),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -2670,6 +2683,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly restartContinuation?: boolean;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -2818,6 +2832,12 @@ export function useCodeController(options: CodeControllerOptions) {
           restoreFailedPrompt();
           return false;
         }
+        // The running turn's identity is what Stop names, so a Stop that lands
+        // after this turn is replaced cannot stop the next one.
+        activeTurnOperations.current.set(String(view.thread.id), {
+          operationId,
+          status: "running",
+        });
         setTurnStatus("running");
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
@@ -3155,6 +3175,7 @@ export function useCodeController(options: CodeControllerOptions) {
       return false;
     }
     const cancellationThreadId = String(view.thread.id);
+    const stoppingTurn = activeTurnOperations.current.get(cancellationThreadId)?.operationId;
     const scope = {
       operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
       threadId: view.thread.id,
@@ -3169,6 +3190,10 @@ export function useCodeController(options: CodeControllerOptions) {
       const result = await client.executeOperation({
         kind: "cancel-provider-turn",
         ...scope,
+        // Naming the turn keeps a Stop that lands after this turn was replaced
+        // from stopping the one that replaced it. A turn this window has not
+        // learned the identity of yet is stopped as before.
+        ...(stoppingTurn === undefined ? {} : { turnOperationId: stoppingTurn }),
       });
       if (result.kind === "operation-failed") {
         setCancellationError(result.failure.message);
@@ -3274,6 +3299,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setThreadCoordinator,
     setThreadCoordinatorWake,
     setThreadMessageWake,
+    setThreadRestartContinuation,
     rebindThreadCheckout,
     renameThread,
     providerRequests,

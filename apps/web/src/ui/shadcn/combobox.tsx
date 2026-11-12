@@ -13,7 +13,7 @@ export function ComboboxInputGroup({
   return (
     <ComboboxPrimitive.InputGroup
       className={cn(
-        "relative flex h-[round(2.154rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] outline-none focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 window-no-drag",
+        "relative flex h-[round(2.154rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] outline-none window-no-drag",
         className,
       )}
       data-slot="combobox-input-group"
