@@ -3110,7 +3110,9 @@ surface. The mobile app has a separate design system under
 True page tabs, segmented choices, and pane identity are intentionally
 different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
 semantics. `OctantToggleGroup` owns the enclosed track used for mutually
-exclusive values. Each split pane keeps its close action on the trailing edge of its header;
+exclusive values. A recipe styles the state attribute
+the installed Base UI part writes (a selected tab is `data-active`, a pressed
+toggle `data-pressed`, a checked switch `data-checked`), never one it invents. Each split pane keeps its close action on the trailing edge of its header;
 only a pane underneath the window controls reserves space for that cluster.
 The split-pane drag handle alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab

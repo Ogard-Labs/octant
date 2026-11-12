@@ -844,8 +844,10 @@ describe("the public-block visual language", () => {
 
     expect(tabs).toContain("inline-flex h-8 w-fit items-center gap-1 text-muted-foreground");
     expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
-    expect(tabs).toContain("data-selected:bg-muted");
-    expect(tabs).not.toContain("data-selected:shadow-sm");
+    // Base UI writes `data-active` on the selected tab, never `data-selected`.
+    expect(tabs).toContain("data-active:bg-muted");
+    expect(tabs).not.toContain("data-selected");
+    expect(tabs).not.toContain("data-active:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
     // An item inside the padded track takes the control corner less the
     // padding, never below 2px.
