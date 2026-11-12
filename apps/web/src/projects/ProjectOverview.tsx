@@ -118,6 +118,11 @@ export interface ProjectOverviewProps {
   readonly windowCapability?: string;
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /**
+   * Runs this Code Project's language services from its own toolchain. The
+   * host accepts it only from a window on its own machine.
+   */
+  readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
@@ -596,6 +601,13 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
+            {props.project.type === "code" && props.onOwnToolchainChange !== undefined ? (
+              <OwnToolchainSetting
+                disabled={archived || connectionStale}
+                enabled={props.project.ownToolchain === "enabled"}
+                onChange={(enabled) => props.onOwnToolchainChange?.(props.project.id, enabled)}
+              />
+            ) : null}
             {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-desktop-recipe`}
@@ -670,6 +682,48 @@ function WorkStatusFileSetting(props: {
           describedBy={descriptionId}
           disabled={props.disabled || pending}
           label="Keep a status file"
+          onCheckedChange={(enabled) => {
+            setPending(true);
+            void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A Code Project's choice to run language services from its own copy of a
+ * toolchain. The description says what that costs, because the Project's copy
+ * is a program the repository supplies and each checkout then asks before it
+ * runs.
+ */
+function OwnToolchainSetting(props: {
+  readonly disabled: boolean;
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean> | undefined;
+}) {
+  // Each command asserts the Project version it read, so the switch waits
+  // for one change before it takes the next.
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Language services toolchain</h3>
+          <p id={descriptionId}>
+            Type errors and go to definition use the TypeScript this Project installs instead of the
+            one bundled with Octant. That runs code from the repository, so each checkout asks you
+            to allow it first, it never runs in Plan, and it can write the checkout and reach the
+            hosts this Project's network rules allow. Only this computer can change this.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.enabled}
+          describedBy={descriptionId}
+          disabled={props.disabled || pending}
+          label="Use the Project's own toolchain"
           onCheckedChange={(enabled) => {
             setPending(true);
             void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));

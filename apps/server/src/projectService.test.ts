@@ -1108,6 +1108,33 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Code Project turns on its own toolchain and refuses a Chat Project", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-own-toolchain",
+        projectId: chatId,
+        expectedVersion: 1,
+        ownToolchain: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-code-project-own-toolchain",
+      projectId: workId,
+      expectedVersion: 1,
+      ownToolchain: "enabled",
+    });
+    expect(result).toMatchObject({
+      kind: "code-project-own-toolchain-changed",
+      project: { ownToolchain: "enabled", version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.code-own-toolchain-changed@1",
+    );
+  });
+
   it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const actions = [

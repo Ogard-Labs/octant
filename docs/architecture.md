@@ -591,19 +591,25 @@ may then write the checkout and run programs as a terminal does, and reaches
 the network through its own `proxied` egress proxy under the Project's rules,
 audited like a harness command's launch
 ([Repository tooling](design/language-services.md#repository-tooling)).
-A per-Project setting, "Use the Project's own toolchain", is specified there
-too (maintainer request, 2026-11-12; not built yet).
+A Code Project's switch, "Use the Project's own toolchain" (`ownToolchain`,
+off by default, set only from a window on this host, journaled as
+`project.code-own-toolchain-changed@1`), runs that Project's TypeScript
+server from the checkout's own install instead, as a `repo-tooling` server
+under the same approval, Plan refusal, local-host start, and confinement
+(maintainer request, 2026-11-12;
+[rules](design/language-services.md#user-added-servers)).
 Agents read the same servers through one read-only app-managed tool,
 `octant_code` (`code-language` in the closed catalog), whose `diagnostics`,
 `definition`, and `references` operations are allowed in Plan and ask nothing.
 It is offered on a Code turn whose provider carries Octant's tools only when a
 server an agent may start (`static` and effective, so the Settings switch is
 honoured) covers a file a bounded scan finds in the turn's checkout or extra
-folders. It reads the saved file, never an editor's draft, returns at most
-200 references, never starts a server that runs
-repository tooling, and may read through one that is already approved and
-running (maintainer request, 2026-11-12; not built yet: today it never reads
-through one, approved or not)
+folders, or a server that runs repository tooling is already running there
+for a turn outside Plan. It reads the saved file, never an editor's draft,
+returns at most 200 references, never starts a server that runs
+repository tooling, and reads through one only while it is already approved
+and running, outside Plan, marking that answer as outside content
+(maintainer request, 2026-11-12)
 ([agent read rules](design/language-services.md#agent-read-rules)).
 The debugger's seam and session host are built: the `debug-adapter`
 component kind (Code only, quarantined like any executable component), the

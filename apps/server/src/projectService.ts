@@ -53,6 +53,7 @@ import {
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectAgentMerge,
+  changeCodeProjectOwnToolchain,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
@@ -865,6 +866,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAgentMerge(current, command.agentMerge, timestamp);
           kind = "code-project-agent-merge-changed";
           eventName = "project.code-agent-merge-changed@1";
+        } else if (command.kind === "change-code-project-own-toolchain") {
+          project = changeCodeProjectOwnToolchain(current, command.ownToolchain, timestamp);
+          kind = "code-project-own-toolchain-changed";
+          eventName = "project.code-own-toolchain-changed@1";
         } else if (command.kind === "change-code-project-actions") {
           project = changeCodeProjectActions(current, command.actions, timestamp);
           kind = "code-project-actions-changed";
