@@ -1,12 +1,8 @@
 import { decodeEventActor, type EventActor } from "@octant/contracts";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 
-/**
- * The actor a change made at one of this host's own windows is journaled
- * with. Host callers that act for the person with no request (a routine, a
- * benchmark) pass it too.
- */
-export const LOCAL_PERSON_ACTOR: EventActor = decodeEventActor({
+/** The actor a change made at one of this host's own windows is journaled with. */
+const LOCAL_PERSON_ACTOR: EventActor = decodeEventActor({
   kind: "local-user",
   actorId: OCTANT_LOCAL_ACTOR_ID,
 });
@@ -29,7 +25,8 @@ export type ActingPrincipal =
  *
  * Routes resolve this once from the authenticated principal and hand it to the
  * service as an argument; no service reads it from ambient state or from
- * anything the request carried.
+ * anything the request carried. A service called with no actor journals the
+ * local person, as the host's own callers (a routine, a benchmark) rely on.
  */
 export function eventActorForPrincipal(principal: ActingPrincipal | undefined): EventActor {
   if (principal?.kind !== "remote-device") return LOCAL_PERSON_ACTOR;
