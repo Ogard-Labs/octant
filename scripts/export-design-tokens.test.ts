@@ -56,6 +56,16 @@ describe("reading the stylesheets", () => {
     expect(tokens.get("--c")).toMatchObject({ dark: "#000", light: "#fff" });
   });
 
+  it("keeps a light override when a later :root block redeclares the token", () => {
+    const light = 'html[data-octant-theme-mode="light"]';
+    const tokens = cascade([
+      { declarations: declare(":root { --c: #000; }"), applies: "both" },
+      { declarations: declare(`${light} { --c: #fff; }`, light), applies: "light" },
+      { declarations: declare(":root { --c: #111; }"), applies: "both" },
+    ]);
+    expect(tokens.get("--c")).toMatchObject({ dark: "#111", light: "#fff" });
+  });
+
   it("refuses a name declared twice in one block", () => {
     expect(() => declare(":root { --a: 1px; --a: 2px; }")).toThrow(/declared twice/);
   });

@@ -1,8 +1,9 @@
 /* Octant minimum recipes: the app's controls and surfaces in plain CSS.
  *
  * Hand-written, and built from the tokens in tokens.css only. It holds no
- * colour, no radius and no shadow of its own, so it follows a token change
- * and the light/dark switch. A test refuses a raw colour here and a token
+ * colour literal, radius or shadow of its own (a few tints are mixed from
+ * exported colour tokens), so it follows a token change and the light/dark
+ * switch. A test refuses a raw colour here and a token
  * this file reads that tokens.css does not define.
  *
  * Load tokens.css first. Put `class="oct-root"` on the page's root element.

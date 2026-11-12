@@ -163,30 +163,36 @@ export interface CascadeBlock {
   readonly applies: "both" | "light";
 }
 
-/** Applies blocks in cascade order, so a later declaration wins in the modes it covers. */
+/**
+ * Applies the `both` blocks in cascade order, then the `light` blocks. A light
+ * selector (`html[data-octant-theme-mode="light"]`) outranks `:root` by
+ * specificity whatever the file order, so its value wins in light even when a
+ * `:root` block that follows redeclares the token.
+ */
 export function cascade(blocks: ReadonlyArray<CascadeBlock>): ReadonlyMap<string, SourceToken> {
   const tokens = new Map<string, SourceToken>();
-  for (const block of blocks) {
+  for (const block of blocks.filter((candidate) => candidate.applies === "both")) {
+    for (const declaration of block.declarations) {
+      tokens.set(declaration.name, {
+        name: declaration.name,
+        dark: pickLightDark(declaration.value, "dark"),
+        light: pickLightDark(declaration.value, "light"),
+        file: declaration.file,
+      });
+    }
+  }
+  for (const block of blocks.filter((candidate) => candidate.applies === "light")) {
     for (const declaration of block.declarations) {
       const previous = tokens.get(declaration.name);
-      if (block.applies === "light") {
-        if (previous === undefined) {
-          throw new TokenExportError(
-            `${declaration.file}: ${declaration.name} has a light override but no base value`,
-          );
-        }
-        tokens.set(declaration.name, {
-          ...previous,
-          light: pickLightDark(declaration.value, "light"),
-        });
-      } else {
-        tokens.set(declaration.name, {
-          name: declaration.name,
-          dark: pickLightDark(declaration.value, "dark"),
-          light: pickLightDark(declaration.value, "light"),
-          file: declaration.file,
-        });
+      if (previous === undefined) {
+        throw new TokenExportError(
+          `${declaration.file}: ${declaration.name} has a light override but no base value`,
+        );
       }
+      tokens.set(declaration.name, {
+        ...previous,
+        light: pickLightDark(declaration.value, "light"),
+      });
     }
   }
   return tokens;

@@ -2199,7 +2199,7 @@ The design system can be reused outside the app from one generated token set, ne
 
 - `packages/theme/tokens/tokens.css` and `tokens.json` are generated from the renderer's stylesheets and checked against the theme package's colour defaults; they keep the app's own names, and are never edited.
 - A repository check fails when the generated files are stale and names the command that regenerates them.
-- The minimum recipes (`recipes.css`) are built from the tokens only, and a test refuses a raw colour or an undefined token there.
+- The minimum recipes (`recipes.css`) are built from the tokens only: no colour literal, a few tints mixed from exported colour tokens, and a test refuses a raw colour or an undefined token there.
 
 Status: Built. Since: 2026-11-12. Detail: [Design tokens and the app feel](design-tokens.md).
 

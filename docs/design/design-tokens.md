@@ -120,7 +120,8 @@ that owns each is named.
 face; code and identifiers use `--oct-font-mono`. There are eight roles and the
 export carries each recipe as `--oct-role-<role>-{family,size,weight,tracking,leading}`:
 title, title-hero, page-title, section-label, row-label, row-detail, meta,
-meta-mono. A title is never the size and weight of the text it heads. Weights are
+meta-mono. The hero exports size, tracking and leading only, so a consumer takes
+its family and weight from the title role. A title is never the size and weight of the text it heads. Weights are
 one ladder: regular for reading, medium for labels and names, strong for
 emphasis, and `--oct-weight-title` for the large title alone. Nothing is set
 between steps (no 11.5 or 12.5px).
@@ -294,9 +295,9 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
 
 ## Appendix: minimum recipes
 
-`recipes.css` is the complete set. It is plain CSS, holds no colour, radius or
-shadow of its own, and is checked by a test that refuses a raw colour or a token
-the export does not define. Add `class="oct-root"` to the page and use:
+`recipes.css` is the complete set. It is plain CSS with no colour literal, radius
+or shadow of its own; a few tints are mixed from exported colour tokens. A test
+refuses a raw colour or a token the export does not define. Add `class="oct-root"` to the page and use:
 
 | Recipe      | Classes                                                                                               | Built from                                                                              |
 | ----------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -344,6 +345,14 @@ button that reads as a flat web button is a regression.
 
 ## Known limits
 
+- The export carries each token's default value. The app overrides some of them
+  by context, and the export does not: Glass (`.shell--material-translucent`,
+  `apps/web/src/styles/shell.css:53`) replaces the card fill with a tint of the
+  ink and the xs, sm and md shadows with the glass-raised shadow; some layers
+  repoint `--oct-surface` (`apps/web/src/styles/surface.css:1009`, `:1024`);
+  increased contrast swaps the three text roles for their high-contrast values
+  (`apps/web/src/styles.css:4880`); and at 680px and narrower the hero title's
+  size is replaced by `--oct-text-2xl` (`surface.css:665`).
 - The icon stroke is written as `1.5` in the stylesheets and in the recipes; it
   is not yet a token, so it is not in the export.
 - `apps/share` declares its own hand-written radius and type set for an embedded
