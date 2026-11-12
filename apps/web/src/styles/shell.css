@@ -4583,18 +4583,31 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
 /* A tool tile can be as narrow as 280px, where the row's words no longer fit
    beside the history capsule: the profile and availability controls keep their
    icon, name, and tooltip and drop their words, and who holds the page keeps
-   its words but ends in an ellipsis instead of running over its neighbour. */
-@container browser-workspace (max-width: 479px) {
-  .browser-profile-control {
-    padding: 0 var(--oct-space-2);
-  }
-  .browser-profile-control span,
+   its words but ends in an ellipsis instead of running over its neighbour.
+   The availability sentence is the longest of them (157px) and the address
+   field must keep 160px, so its words go first, below 640px, instead of being
+   cut to "Agent can use t…". The profile word (51px) goes below 520px so the field keeps 160px. */
+@container browser-workspace (max-width: 639px) {
   .browser-workspace__availability-label {
     display: none;
   }
   .browser-workspace__agent-availability {
     flex: none;
     max-width: none;
+  }
+  /* With its words gone the recovery action is a bare glyph: keep it a target. */
+  .browser-workspace__agent-availability > button {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+@container browser-workspace (max-width: 519px) {
+  .browser-profile-control {
+    padding: 0 var(--oct-space-2);
+  }
+  .browser-profile-control span {
+    display: none;
   }
   .browser-workspace__control-state {
     flex: none;
@@ -4606,6 +4619,41 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+/* With a page open the row also holds who holds the page, Take over, Screenshot
+   and Stop. Beside those the address field was 26 to 90px wide from 360px to
+   720px. Below 880px it takes its own row at the full width, and below 720px
+   the words that no longer fit whole (the profile, the availability sentence,
+   Take over) give way before anything is cut. Each control keeps its name and
+   tooltip. */
+@container browser-workspace (max-width: 879px) {
+  .browser-workspace__chrome:has(.browser-workspace__take-over) {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-workspace__omnibox {
+    order: 1;
+    flex-basis: 100%;
+  }
+}
+
+/* At 360px the row is 12px too long by a gap's worth and Stop dropped to a
+   line of its own, so the gaps tighten. */
+@container browser-workspace (max-width: 419px) {
+  .browser-workspace__chrome:has(.browser-workspace__take-over),
+  .right-utility-dock__tool .browser-workspace__chrome:has(.browser-workspace__take-over) {
+    column-gap: 4px;
+  }
+}
+
+@container browser-workspace (max-width: 719px) {
+  .browser-workspace__chrome:has(.browser-workspace__take-over) .browser-profile-control span,
+  .browser-workspace__chrome:has(.browser-workspace__take-over)
+    .browser-workspace__availability-label,
+  .browser-workspace__take-over-label {
+    display: none;
   }
 }
 
