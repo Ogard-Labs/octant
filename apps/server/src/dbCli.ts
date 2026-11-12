@@ -124,12 +124,17 @@ export function runDatabaseCommand(
         output = services.verify();
         if (!output.valid) exitCode = 1;
         break;
-      case "rebuild":
-        output =
+      case "rebuild": {
+        const rebuilt =
           parsed.projectionName === undefined
             ? services.rebuildAll()
             : services.rebuildProjection(parsed.projectionName);
+        // A derived view that still cannot apply an event stays quarantined;
+        // the rest of the store was repaired, but the repair is not complete.
+        if (rebuilt.held !== undefined) exitCode = 1;
+        output = rebuilt;
         break;
+      }
       case "backup":
         output = services.backup();
         break;

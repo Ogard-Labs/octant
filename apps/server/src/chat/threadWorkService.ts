@@ -22,7 +22,11 @@ import {
 } from "@octant/domain/thread-work-policy";
 import { defaultShellSettings } from "@octant/domain";
 import { Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import {
@@ -412,7 +416,7 @@ export class ThreadWorkService {
       );
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#unavailable();
+      return this.#unavailable(error);
     }
     if (error instanceof Error && error.name === "EventPayloadInvalid") {
       return new ThreadWorkServiceError(
@@ -422,11 +426,11 @@ export class ThreadWorkService {
     return this.#unavailable();
   }
 
-  #unavailable(): ThreadWorkServiceError {
+  #unavailable(error?: unknown): ThreadWorkServiceError {
     return new ThreadWorkServiceError(
       decodeChatFailure({
         category: "unavailable",
-        message: "Thread work storage is unavailable.",
+        message: persistenceFailureMessage(error, "Thread work storage is unavailable."),
       }),
     );
   }

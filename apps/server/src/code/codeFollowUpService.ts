@@ -19,7 +19,11 @@ import {
   evaluateCodeFollowUpTrigger,
 } from "@octant/domain/code-follow-up-policy";
 import { Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import {
@@ -313,7 +317,7 @@ export class CodeFollowUpService {
       );
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#unavailable();
+      return this.#unavailable(error);
     }
     if (error instanceof Error && error.name === "EventPayloadInvalid") {
       return new CodeFollowUpServiceError(
@@ -325,11 +329,11 @@ export class CodeFollowUpService {
     );
   }
 
-  #unavailable(): CodeFollowUpServiceError {
+  #unavailable(error?: unknown): CodeFollowUpServiceError {
     return new CodeFollowUpServiceError(
       decodeCodeFailure({
         category: "unavailable",
-        message: "Thread follow-up storage is unavailable.",
+        message: persistenceFailureMessage(error, "Thread follow-up storage is unavailable."),
       }),
     );
   }

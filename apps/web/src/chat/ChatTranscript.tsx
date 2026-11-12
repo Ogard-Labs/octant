@@ -189,6 +189,8 @@ const attemptFailureSentences: Record<string, string> = {
   "invalid-configuration": "The provider refused its configured arguments.",
   "missing-turn-bound": "The spend ceiling refused this turn's cost estimate.",
   "no-visible-reply": "The provider finished without producing a reply.",
+  "output-budget-exceeded":
+    "The turn streamed more output than Octant keeps and was stopped; the reply so far is kept.",
   overrun: "The turn exceeded its spend ceiling.",
   "provider-failed": "The provider reported a failure.",
   protocol: "The provider did not answer the turn protocol correctly.",

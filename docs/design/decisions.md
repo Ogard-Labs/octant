@@ -1102,6 +1102,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 - The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
+- A turn's streamed text and reasoning are bounded at 32 MiB: past it the turn keeps what was journaled, ends with a truncation marker, and stops. A write that fails on a full disk commits nothing and tells the person the disk is full.
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -1110,6 +1111,7 @@ Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.m
 Unreadable events and unsafe migrations fail closed. Octant never skips an undecodable event and reports current.
 
 - A malformed, contract-invalid, unsupported-version or unapplicable event is quarantined: its projection keeps its last valid state and readiness becomes recovery-required with a typed reason that discloses no payload. _Here only._
+- A projection is authoritative unless it declares itself a derived view that no command or authority check reads (today only diagnostics exports). An authoritative projection that fails rolls back the whole append; a derived view that fails is quarantined and held alone, its lag reported, while the append commits and readiness stays current. `db:rebuild` repairs it and reports one that still fails.
 - Only a successful explicit projection rebuild retires quarantine; startup never clears it. Ambiguous recovery state resolves to waiting or recovery-required, never done or healthy. _Here only._
 - Migrations are ordered, forward-only and checksum-verified, applied in transactions before the server reports ready, with a store backup first.
 - A changed checksum or an unknown newer migration fails closed.
@@ -1123,6 +1125,7 @@ A restart recovers what the journal can prove and never guesses that an ambiguou
 - Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. One setting, "Resume interrupted turns after a restart", off by default, lets a turn with no uncertain side effect resume by itself; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today no interrupted turn resumes by itself.
 - Outstanding approvals are recovered, but a parked provider question settles the attempt interrupted because the session that would consume the answer died.
 - Clients catch up from the authoritative snapshot, keep retrying while the host is unreachable, and renew a remote session from the device key rather than re-pairing.
+- A Machine change cursor names the host process (epoch) it came from; a cursor from an earlier process is answered with a snapshot, never resumed, and the renderer's retries are jittered.
 - Removing a host on the phone sends nothing to the host, so it does not revoke the device.
 
 Status: Partly built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).

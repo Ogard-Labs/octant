@@ -4558,6 +4558,18 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Streamed output and a full disk.** Text and reasoning deltas are exempt
+  from a turn's event budget, so each turn also has a streamed-output budget
+  of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A
+  Chat or Code turn that streams past it keeps everything already journaled,
+  journals `[Output truncated by Octant.]` as its last text, interrupts the
+  provider, and ends (Chat: interrupted with `output-budget-exceeded`; Code:
+  failed, as at its event budget). A Work reply is held to 64 KiB with the
+  same marker, counted as it arrives and frozen once truncated. An append that
+  fails on a full disk (`SQLITE_FULL`) commits nothing and carries
+  `reason: "disk-full"`, and every service that reports a failed write says
+  the disk is full and to free space, rather than that persistence is
+  temporarily unavailable.
 - **Startup check.** Startup decodes journal rows to prove the journal is
   readable, then records a disposable watermark: the sequence it verified
   through plus a fingerprint of the exact server build (a hash of every chunk of
@@ -4589,6 +4601,31 @@ flowchart LR
   Automations are also in memory; the host rebuilds them with their own
   hydration after catch-up instead, which leaves them empty and reported
   unloaded rather than partial when it cannot finish (see the next item).
+- **Authoritative projections and derived views.** Every projection applies
+  inside the append's transaction. A projection is authoritative unless it
+  declares `derived`: a failure in an authoritative projection rolls the
+  whole append back (`ProjectionApplicationFailed`), because a command,
+  authority check, or invariant reads its rows. A derived view is one nothing
+  decides from. It applies inside a savepoint; when it throws, its writes are
+  undone, it alone is quarantined at that event and held (it skips every
+  later event and its checkpoint stops advancing, so its lag shows), and the
+  append commits, so a bug in a view never blocks Stop, an approval, or a
+  turn's own events. A storage failure still fails the append. Startup
+  catch-up holds a failing derived view the same way instead of refusing to
+  start, and readiness (`state`) is judged by authoritative projections
+  alone: `db:status` lists a held view under `heldDerivedViews`, `db:verify`
+  still reports the store invalid, and `db:rebuild` replays it (authoritative
+  projections first as one unit, then each derived view on its own, reporting
+  any that still fail as `held` with exit code 1). An authoritative
+  projection may not depend on a derived one. Today only `diagnostics-exports`
+  is derived: its incidents are journaled beside failing turns, and the export
+  that reads them refuses when one is missing. Rationale: usage
+  (`usage`, `code-usage`) feeds spend-ceiling admission and product feedback
+  enforces its note limit and lifecycle from its rows, so both stay
+  authoritative; cache and latency statistics live in process memory, not in
+  journal projections. On the runtime registry (40 projections), a one-event
+  append measured p50 0.67–0.71 ms and p95 1.21–1.40 ms before the split and
+  p50 0.64–0.74 ms and p95 1.13–1.31 ms after, within run-to-run noise.
 - **Startup hydration reads a store's own rows.** Every in-memory store and
   projection rebuilds at start from its own aggregate types, read in journal
   order through the (type, sequence) index, so no store reads, decodes, or
@@ -4994,7 +5031,16 @@ or .zip>` write the same files, built by one host command
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
   approvals, follow-up offers and message queues use their own metadata-only
-  Machine change topics. A renderer re-reads the authoritative scoped API
+  Machine change topics. Feed sequences are per process, so every frame also
+  carries the host process's epoch, minted at start, and a client resumes
+  with both (`afterSequence` and `epoch`). A cursor from another process gets
+  `snapshot-required` whatever its sequence, since a restart's changes are
+  otherwise missed when the old cursor sits below the new head; a client
+  that sends no epoch (older than epochs) is judged by sequence alone, and a
+  client names an epoch only after a host has reported one, so it still
+  reads an older host. The renderer's reconnect backoff is jittered between
+  half and all of its delay, so a host's windows do not all retry at once. A
+  renderer re-reads the authoritative scoped API
   after a notice, on reconnect or becoming visible, and every thirty seconds
   as recovery. Hidden windows stop recovery timers. In-memory approval
   services publish both creation and settlement, including expiry and

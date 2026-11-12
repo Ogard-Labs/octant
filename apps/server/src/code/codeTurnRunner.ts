@@ -46,7 +46,10 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   makeIdleTimeout,
+  makeStreamedOutputBudget,
   makeTurnTextParagraphs,
+  MAX_TURN_STREAMED_OUTPUT_BYTES,
+  STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
@@ -273,21 +276,26 @@ export interface CodeTurnRunnerInput {
 export interface CodeTurnRunnerOptions {
   /** Maximum discrete (non-delta) provider events per turn. */
   readonly maxEvents?: number;
+  /** Most streamed text and reasoning bytes per turn. */
+  readonly maxStreamedOutputBytes?: number;
   /** Inactivity window after which a silent turn is interrupted. */
   readonly timeoutMs?: number;
 }
 
 export class CodeTurnRunner {
   readonly #maxEvents: number;
+  readonly #maxStreamedOutputBytes: number;
   readonly #timeoutMs: number;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
     const maxEvents = this.#maxEvents;
+    const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
     const timeoutMs = this.#timeoutMs;
 
     return Effect.gen(function* () {
@@ -522,6 +530,24 @@ export class CodeTurnRunner {
                     .interrupt(input.sessionId)
                     .pipe(Effect.catchAll(() => Effect.void));
                   return yield* fail("interrupted", "Code turn was cancelled.");
+                }
+                if (
+                  (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
+                  streamedOutput(event) === "exceeded"
+                ) {
+                  // What was journaled stays, and the transcript ends in words
+                  // that say Octant stopped keeping the output.
+                  yield* input.persistEvent(
+                    yield* normalizeProviderEvent(
+                      input,
+                      { ...event, kind: "text-delta", text: STREAMED_OUTPUT_TRUNCATION_MARKER },
+                      compactions.compacted,
+                    ),
+                  );
+                  yield* connection
+                    .interrupt(input.sessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return yield* fail("failed", "Code turn exceeded its streamed output budget.");
                 }
 
                 const boundedEvent = boundProviderEventInput(event);

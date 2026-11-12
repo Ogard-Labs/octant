@@ -46,7 +46,30 @@ export class ThreadIdInUse extends Data.TaggedError("ThreadIdInUse")<{
 
 export class JournalWriteFailed extends Data.TaggedError("JournalWriteFailed")<{
   readonly operation: "append";
+  /** Set when SQLite reported the disk full, so a person can be told why. */
+  readonly reason?: "disk-full";
 }> {}
+
+/**
+ * What a person reads when a write failed because the disk is full. The
+ * generic "temporarily unavailable" sentence suggested waiting, which never
+ * helps: the write fails until space is freed.
+ */
+export const DISK_FULL_MESSAGE =
+  "Octant could not save because the disk is full. Free up disk space, then try again.";
+
+/** The disk-full sentence for a write that failed on a full disk, otherwise `fallback`. */
+export function persistenceFailureMessage(error: unknown, fallback: string): string {
+  return error instanceof JournalWriteFailed && error.reason === "disk-full"
+    ? DISK_FULL_MESSAGE
+    : fallback;
+}
+
+export function isSqliteDiskFull(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = error.code;
+  return typeof code === "string" && (code === "SQLITE_FULL" || code.startsWith("SQLITE_FULL_"));
+}
 
 export type SqliteFailureKind = "unique-constraint" | "write-race" | "storage";
 

@@ -80,6 +80,7 @@ import {
   ProjectionStorageFailed,
   catchUpProjection,
   quarantineIncompatibleJournal,
+  rebuildProjection,
 } from "./projection";
 import {
   readMemoryEntry,
@@ -443,7 +444,14 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     }> = [];
     for (const projection of projections.all()) {
       const startedAt = performance.now();
-      catchUpProjection({ connection, journal, projection, clock });
+      try {
+        catchUpProjection({ connection, journal, projection, clock });
+      } catch (error) {
+        // A derived view that cannot apply an event stays quarantined and
+        // held behind it, as it does when an append hits the same failure;
+        // no command reads it, so it does not stop the host from starting.
+        if (!(projection.derived === true && error instanceof ProjectionQuarantined)) throw error;
+      }
       projectionCatchUp.push({
         projection: projection.name,
         durationMs: Math.max(0, performance.now() - startedAt),
@@ -484,6 +492,30 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     if (status.state === "quarantined" && status.integrity === "ok" && compatibility.compatible) {
       rebuildAll({ connection, journal, projections, clock });
       status = databaseStatus({ connection, journal, projections, compatibility });
+    } else if (status.heldDerivedViews !== undefined && status.integrity === "ok") {
+      // A held view that catch-up brought to the head (a fixed build applied
+      // the event it failed on) still has its quarantine row, which would
+      // hold it again at the next append. Only a rebuild retires the row.
+      const caughtUp = status.projections.filter(
+        (projection) => projection.lag === 0 && status.heldDerivedViews?.includes(projection.name),
+      );
+      for (const { name } of caughtUp) {
+        const projection = projections.get(name);
+        if (projection === undefined) continue;
+        try {
+          rebuildProjection({ connection, journal, projection, clock });
+        } catch (error) {
+          if (!(error instanceof ProjectionQuarantined)) throw error;
+        }
+      }
+      if (caughtUp.length > 0) {
+        status = databaseStatus({ connection, journal, projections, compatibility });
+      }
+    }
+    if (status.heldDerivedViews !== undefined) {
+      console.warn(
+        `Octant derived view(s) ${status.heldDerivedViews.join(", ")} are quarantined; run db:rebuild after updating to repair them.`,
+      );
     }
     if (status.state !== "current" || status.integrity !== "ok") {
       throw new PersistenceStartupFailed({
