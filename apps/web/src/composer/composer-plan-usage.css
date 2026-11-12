@@ -1,4 +1,4 @@
-/* The start screen's context row, just above the pill: where the
+/* The start screen's context row, just above the box: where the
    thread runs on the left, how much of the plan is left on the right. It has
    no fill or edge of its own, like a thread's strip, and the meters drop to
    their own right-aligned line when the chips leave no room. */

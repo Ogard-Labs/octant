@@ -51,7 +51,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
             <OctantInput
               aria-label={`Rename ${space.name}`}
               autoFocus
-              className="zen-spaces__rename rounded-full"
+              className="zen-spaces__rename rounded-md"
               defaultValue={space.name}
               key={String(space.spaceId)}
               onBlur={() => setRenaming(null)}
@@ -74,7 +74,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
           <div className="zen-spaces__space" key={String(space.spaceId)}>
             <OctantButton
               aria-selected={showing}
-              className={`zen-spaces__tab${showing ? " zen-spaces__tab--showing" : ""} rounded-full`}
+              className={`zen-spaces__tab${showing ? " zen-spaces__tab--showing" : ""} rounded-md`}
               onClick={() => props.onShowSpace?.(space.spaceId)}
               onDoubleClick={() => setRenaming(String(space.spaceId))}
               role="tab"
@@ -88,7 +88,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
             {ordered.length > 1 && props.onRemoveSpace !== undefined ? (
               <OctantButton
                 aria-label={`Remove ${space.name}`}
-                className="zen-spaces__remove rounded-full"
+                className="zen-spaces__remove rounded-md"
                 disabled={props.busy === true}
                 onClick={() => props.onRemoveSpace?.(space.spaceId)}
                 size="sm"
@@ -103,7 +103,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
       })}
       <OctantButton
         aria-label="Add a space"
-        className="zen-spaces__add rounded-full"
+        className="zen-spaces__add rounded-md"
         disabled={props.busy === true || full || props.onAddSpace === undefined}
         onClick={() => props.onAddSpace?.(`Space ${String(ordered.length + 1)}`)}
         size="sm"

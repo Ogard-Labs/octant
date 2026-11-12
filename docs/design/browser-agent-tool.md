@@ -912,10 +912,10 @@ packaged, personal-account or cross-platform acceptance evidence.
 ### Take over and Hand back
 
 - While a page is open, the Browser pane's toolbar carries **Take over** as an icon
-  button after the address field (in the More menu when the pane is narrow), on the desktop and the headless Browser alike. One click
+  button after the address field (in the More menu when the trailing icons do not fit), on the desktop and the headless Browser alike. One click
   holds every agent Browser call on that page for the person: the sign-in
   hold, under another name (`waitingForPerson` is `take-over`), not a second
-  mechanism. The status mark then reads "You have the page" and the toolbar shows **Hand back**
+  mechanism. The status icon then reads "You have the page" and the toolbar shows **Hand back**
   in place of Take over. Hand back releases the hold.
 - While held, an agent Browser call is refused with `browser-person-took-over`
   and a message saying the person took over and that it should say it is
@@ -1228,7 +1228,7 @@ Several threads of one Project may each drive their own page at the same time.
   thread's live Browser authority, and returns the page's title and host, the
   thread's id and title, and whether an agent drives it. It returns no page text
   and no picture; a selected page's picture is read through its own thread's
-  route, under that thread's authority, as the floating preview reads it. A
+  route, under that thread's authority, as the dock's Browser card reads it. A
   paired device gets a page in a stored profile named by its existence alone.
 - An agent counts as driving a page while an agent action is queued or running
   on it and for 15 seconds after the last one ends; a CLI in a terminal grant

@@ -75,7 +75,13 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
 import { BrowserProfileControl } from "./BrowserProfileControl";
-import { BrowserExtensionsButton } from "./BrowserExtensionsButton";
+import {
+  BrowserExtensionsButton,
+  extensionMenuItems,
+  openBrowserExtension,
+  useBrowserExtensions,
+} from "./BrowserExtensionsButton";
+import { foldedTrailing, type BrowserToolbarTrailing } from "./browserToolbarFold";
 import {
   profileChoiceOf,
   readRememberedProfileChoice,
@@ -144,13 +150,6 @@ export interface BrowserWorkspaceProps {
    */
   readonly canDrawOnPage?: boolean;
 }
-
-/**
- * The pane width under which the hold button no longer fits beside an address
- * field of at least 120px: three 28px history buttons, the extensions and more
- * buttons, the hold button, 4px gaps and the row's insets.
- */
-const HOLD_FOLD_WIDTH = 340;
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [url, setUrl] = useState("");
@@ -1160,8 +1159,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     : snapshot?.waitingForPerson === undefined
       ? `${Math.ceil((snapshot?.context?.policy.sessionTimeoutMs ?? 600_000) / 60_000)}m idle`
       : "Person hold";
-  // One status mark in the address field says who may use the page, who holds
-  // it and for how long; the words are its name and tooltip, not a row of text.
+  // A status icon after the address says who may use the page, who holds it and
+  // for how long; the words are its name and tooltip, not a row of text. At
+  // rest (no page, nothing loading, the agent not blocked) it is not drawn, and
+  // the availability sentence is part of the profile icon's tooltip instead.
   const statusText = [
     agentDriving ? undefined : agentNote.message,
     [controlLabel, idleNote].filter((part) => part !== undefined).join(" · "),
@@ -1184,31 +1185,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             title: "Hold the agent's Browser calls while you use the page",
           } as const)
         : undefined;
-  // The row keeps the address at least ADDRESS_MIN_WIDTH wide: when the pane is
-  // too narrow for the hold button beside it, that button moves into the more
-  // menu. Back, forward and reload stay.
+  const showStatus =
+    activeContext || nativeState?.loading === true || agentNote.omission !== undefined;
+  const storedProfile = storedProfileOf(snapshot?.context?.policy.profile);
+  const extensions = useBrowserExtensions({
+    client: props.client,
+    profile: nativeContext && activeContext ? storedProfile : undefined,
+    refreshKey: snapshot?.context === undefined ? undefined : String(snapshot.context.contextId),
+  });
   const chromeWidth = useElementWidth(chrome);
-  const foldHold = chromeWidth !== undefined && chromeWidth < HOLD_FOLD_WIDTH;
   const canCredential =
     nativeContext !== undefined &&
     activeContext &&
     props.client.manageCredentialUse !== undefined &&
     (snapshot?.context?.authority.mode === "work" || snapshot?.context?.authority.mode === "code");
-  const moreItems: ReadonlyArray<OctantMenuItem> = [
-    ...(holdAction !== undefined && foldHold
-      ? [
-          {
-            icon:
-              holdAction.hold === "hand-back" ? (
-                <Undo2 aria-hidden="true" size={16} />
-              ) : (
-                <Hand aria-hidden="true" size={16} />
-              ),
-            label: holdAction.label,
-            value: holdAction.hold,
-          },
-        ]
-      : []),
+  const baseMoreItems: ReadonlyArray<OctantMenuItem> = [
     ...(activeContext &&
     snapshot?.ownerController !== undefined &&
     props.client.takeOver !== undefined
@@ -1298,7 +1289,58 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         ]
       : []),
   ];
+  // Trailing icons that do not fit move into the More menu, from the left of
+  // the list; the profile is last and stays.
+  const trailing: ReadonlyArray<BrowserToolbarTrailing> = [
+    ...(showStatus ? (["status"] as const) : []),
+    ...(holdAction === undefined ? [] : (["hold"] as const)),
+    ...(extensions.length > 0 && storedProfile !== undefined ? (["extensions"] as const) : []),
+    "profile",
+  ];
+  const folded = foldedTrailing({
+    rowWidth: chromeWidth,
+    visible: trailing,
+    moreHasItems: baseMoreItems.length > 0,
+  });
+  const moreItems: ReadonlyArray<OctantMenuItem> = [
+    ...(folded.has("status")
+      ? [
+          {
+            ...(agentDriving ? {} : { description: agentNote.message }),
+            disabled: true,
+            icon: <Eye aria-hidden="true" size={16} />,
+            label: [controlLabel, idleNote].filter((part) => part !== undefined).join(" · "),
+            value: "status",
+          },
+        ]
+      : []),
+    ...(holdAction !== undefined && folded.has("hold")
+      ? [
+          {
+            icon:
+              holdAction.hold === "hand-back" ? (
+                <Undo2 aria-hidden="true" size={16} />
+              ) : (
+                <Hand aria-hidden="true" size={16} />
+              ),
+            label: holdAction.label,
+            value: holdAction.hold,
+          },
+        ]
+      : []),
+    ...(folded.has("extensions") ? extensionMenuItems(extensions) : []),
+    ...baseMoreItems,
+  ];
   function runMoreItem(value: string): void {
+    if (value.startsWith("popup:") || value.startsWith("options:")) {
+      openBrowserExtension({
+        value,
+        profile: storedProfile,
+        hostBridge: props.hostBridge,
+        anchor: moreAnchor.current,
+      });
+      return;
+    }
     switch (value) {
       case "take-over":
       case "hand-back":
@@ -1397,41 +1439,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </OctantIconButton>
         <div className="browser-workspace__field">
-          <span className="browser-workspace__lead">
-            <BrowserProfileControl
-              accounts={accounts}
-              disabled={
-                starting ||
-                selectingTaskProfile ||
-                (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
-              }
-              iconOnly
-              {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
-              onChange={(choice) => void chooseProfile(choice)}
-              profile={
-                taskProfileApplies
-                  ? (taskProfile?.profile ?? "private")
-                  : activeContext
-                    ? profileChoiceOf(storedProfileOf(snapshot?.context?.policy.profile))
-                    : profileChoice
-              }
-              projectProfileAvailable
-              signedInPagesAvailable={nativeSupported}
-              {...(taskProfileApplies || props.client.manageProfiles === undefined
-                ? {}
-                : { onSignOut: () => signOutOfProfile() })}
-            />
+          {committedAddress === undefined ? null : (
             <span
               aria-label={addressSecurityLabel}
               className="browser-workspace__mark"
               role="img"
-              title={
-                committedAddress === undefined
-                  ? "Enter an HTTP or HTTPS address"
-                  : secureAddress
-                    ? "Secure HTTPS connection"
-                    : "HTTP connection is not secure"
-              }
+              title={secureAddress ? "Secure HTTPS connection" : "HTTP connection is not secure"}
             >
               {secureAddress ? (
                 <LockKeyhole aria-hidden="true" size={14} />
@@ -1439,23 +1452,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 <Globe2 aria-hidden="true" size={14} />
               )}
             </span>
-            <span
-              aria-label={statusText}
-              className="browser-workspace__mark"
-              role="img"
-              title={statusText}
-            >
-              {nativeState?.loading || nativeState?.control === "agent" ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  className="browser-workspace__control-spinner"
-                  size={14}
-                />
-              ) : (
-                <Eye aria-hidden="true" size={14} />
-              )}
-            </span>
-          </span>
+          )}
           <form
             className="browser-workspace__omnibox"
             noValidate
@@ -1485,7 +1482,25 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </span>
           </form>
         </div>
-        {holdAction === undefined || foldHold ? null : (
+        {!trailing.includes("status") || folded.has("status") ? null : (
+          <span
+            aria-label={statusText}
+            className="browser-workspace__status"
+            role="img"
+            title={statusText}
+          >
+            {nativeState?.loading || agentDriving ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="browser-workspace__control-spinner"
+                size={16}
+              />
+            ) : (
+              <Eye aria-hidden="true" size={16} />
+            )}
+          </span>
+        )}
+        {holdAction === undefined || folded.has("hold") ? null : (
           <OctantIconButton
             label={holdAction.label}
             onClick={() => void holdPage(holdAction.hold)}
@@ -1499,12 +1514,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             )}
           </OctantIconButton>
         )}
-        {nativeContext && activeContext ? (
+        {folded.has("extensions") || !trailing.includes("extensions") ? null : (
           <BrowserExtensionsButton
-            agentDriving={nativeState?.control === "agent"}
+            agentDriving={agentDriving}
             client={props.client}
+            extensions={extensions}
             hostBridge={props.hostBridge}
-            profile={storedProfileOf(snapshot?.context?.policy.profile)}
+            profile={storedProfile}
             refreshKey={
               snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
             }
@@ -1512,7 +1528,31 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               ? {}
               : { onManage: props.onManageExtensions })}
           />
-        ) : null}
+        )}
+        <BrowserProfileControl
+          accounts={accounts}
+          {...(showStatus ? {} : { description: agentNote.message })}
+          disabled={
+            starting ||
+            selectingTaskProfile ||
+            (taskProfileSupported && !props.startFresh && taskProfileRead !== "ready")
+          }
+          iconOnly
+          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
+          onChange={(choice) => void chooseProfile(choice)}
+          profile={
+            taskProfileApplies
+              ? (taskProfile?.profile ?? "private")
+              : activeContext
+                ? profileChoiceOf(storedProfile)
+                : profileChoice
+          }
+          projectProfileAvailable
+          signedInPagesAvailable={nativeSupported}
+          {...(taskProfileApplies || props.client.manageProfiles === undefined
+            ? {}
+            : { onSignOut: () => signOutOfProfile() })}
+        />
         {moreItems.length === 0 ? null : (
           <span className="browser-workspace__more" ref={moreAnchor}>
             <OctantMenu
@@ -1551,7 +1591,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {snapshot?.observation?.title === undefined ? null : (
             <span>{snapshot.observation.title}</span>
           )}
-          {agentDriving ? null : <span>{agentNote.message}</span>}
+          {showStatus ? <span>{statusText}</span> : null}
         </span>
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (

@@ -181,12 +181,23 @@ describe("BrowserWorkspace", () => {
       threadId,
     } as const;
     const view = render(<BrowserWorkspace client={browser} tab={tab as never} />);
-    expect(await screen.findByText("Agent can use this Browser.")).toBeVisible();
+    // With no page open the sentence rides on the profile icon's tooltip.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Agent can use this Browser."),
+      ),
+    );
+    expect(screen.queryByRole("img", { name: /idle/ })).toBeNull();
     const disconnected = client();
     vi.mocked(disconnected.inspectThread).mockRejectedValue(new Error("disconnected"));
     view.rerender(<BrowserWorkspace client={disconnected} tab={tab as never} />);
-    expect(screen.queryByText("Agent can use this Browser.")).toBeNull();
-    expect(screen.getByText("Browser availability is unknown.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Browser availability is unknown."),
+      ),
+    );
   });
   it("keeps an invalid host response inside polling failure handling", async () => {
     const browser = client();
@@ -197,7 +208,10 @@ describe("BrowserWorkspace", () => {
         tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
       />,
     );
-    expect(await screen.findByText("Browser availability is unknown.")).toBeVisible();
+    expect(await screen.findByRole("button", { name: /^Browser profile/ })).toHaveAttribute(
+      "title",
+      expect.stringContaining("Browser availability is unknown."),
+    );
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
     expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
   });
@@ -220,7 +234,7 @@ describe("BrowserWorkspace", () => {
     for (const selector of [
       ".browser-workspace__chrome",
       ".browser-workspace__field",
-      ".browser-workspace__lead-button",
+      ".browser-workspace__status",
       ".browser-workspace__mark",
     ]) {
       const rule = styles.match(new RegExp(`${selector.replace(".", "\\.")} \\{([^}]*)\\}`))?.[1];
@@ -1737,23 +1751,48 @@ describe("BrowserWorkspace", () => {
       };
     }
 
-    it("draws one row: history icons, then the address field, then the trailing buttons", async () => {
+    it("draws one row: history icons, the address field, then the trailing buttons", async () => {
       await renderHeadless(holdingClient());
       const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
       if (row === null) throw new Error("The toolbar row is missing.");
       const order = [...row.querySelectorAll("button, input")].map((control) =>
         control.getAttribute("aria-label"),
       );
-      expect(order.slice(0, 3)).toEqual(["Back", "Forward", "Reload"]);
-      expect(order.indexOf("Browser URL")).toBeGreaterThan(2);
+      const profile = order.findIndex((name) => name?.startsWith("Browser profile") === true);
+      // Keyboard order is the visual order: history, the address, Take over, the
+      // profile icon, then the more menu.
+      expect(order.slice(0, 4)).toEqual(["Back", "Forward", "Reload", "Browser URL"]);
+      expect(order.indexOf("Take over")).toBe(4);
+      expect(profile).toBe(5);
       expect(order.at(-1)).toBe("More Browser actions");
-      // Keyboard order is the visual order: the profile icon leads the field, the
-      // address follows it, and Take over comes before the more menu.
-      expect(order.indexOf(order.find((name) => name?.startsWith("Browser profile")) ?? "")).toBe(
-        3,
-      );
-      expect(order.indexOf("Take over")).toBeGreaterThan(order.indexOf("Browser URL"));
       expect(within(row).queryByText("Preview")).toBeNull();
+    });
+
+    it("draws an empty address field and no status icon while no page is open", async () => {
+      render(
+        <BrowserWorkspace
+          client={client()}
+          tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
+        />,
+      );
+      const profile = await screen.findByRole("button", { name: /^Browser profile/ });
+      const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
+      expect(row?.querySelector(".browser-workspace__field [role=img]")).toBeNull();
+      expect(row?.querySelector("[role=img]")).toBeNull();
+      expect(screen.queryByRole("button", { name: "More Browser actions" })).toBeNull();
+      expect(profile).toBeVisible();
+    });
+
+    it("draws the status icon after the address while a page is open", async () => {
+      await renderHeadless(holdingClient());
+      const row = document.querySelector<HTMLElement>(".browser-workspace__chrome");
+      if (row === null) throw new Error("The toolbar row is missing.");
+      const field = row.querySelector(".browser-workspace__field");
+      expect(field?.querySelector("[role=img]")).toBeNull();
+      const status = within(row).getByRole("img", { name: /idle/ });
+      expect(
+        status.compareDocumentPosition(screen.getByRole("button", { name: "Take over" })),
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
 
     it("keeps every other action reachable from the more menu", async () => {
@@ -1761,24 +1800,29 @@ describe("BrowserWorkspace", () => {
       expect(await moreActionNames()).toEqual(["Stop this Browser session"]);
     });
 
-    it("moves Take over into the more menu when the row is too narrow for the address beside it", async () => {
+    it("moves the status and Take over into the more menu when the row is too narrow for the address beside them", async () => {
       const restore = widthOfToolbar(300);
       try {
         await renderHeadless(holdingClient());
         expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
-        expect(await moreActionNames()).toContain("Take over");
+        expect(screen.queryByRole("img", { name: /idle/ })).toBeNull();
+        expect(await moreActionNames()).toEqual(
+          expect.arrayContaining(["Take over", "Stop this Browser session"]),
+        );
         expect(screen.getByRole("button", { name: "Back" })).toBeVisible();
         expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeVisible();
+        expect(screen.getByRole("button", { name: /^Browser profile/ })).toBeVisible();
       } finally {
         restore();
       }
     });
 
-    it("keeps Take over beside the address when the row is wide", async () => {
+    it("keeps the status and Take over beside the address when the row is wide", async () => {
       const restore = widthOfToolbar(640);
       try {
         await renderHeadless(holdingClient());
         expect(screen.getByRole("button", { name: "Take over" })).toBeVisible();
+        expect(screen.getByRole("img", { name: /idle/ })).toBeVisible();
         expect(await moreActionNames()).not.toContain("Take over");
       } finally {
         restore();

@@ -13,12 +13,16 @@ import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/cha
 import { decodeCodeBoardView } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "../composer/useNewTaskPrompt";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
 import { createCodeThreadControllers } from "../code/codeThreadControllers";
+import {
+  agentBrowserCardContext,
+  resetBrowserCardActivityForTests,
+} from "../threadActivity/browserCardActivity";
 import {
   codeClient,
   gitObservation,
@@ -72,6 +76,8 @@ const codeTabs: ReadonlyArray<
     { role: "region", name: "Review findings and correction draft" },
   ],
 ];
+
+afterEach(resetBrowserCardActivityForTests);
 
 describe("WorkspaceView welcome", () => {
   const welcome = {
@@ -561,7 +567,7 @@ describe("WorkspaceView Code tab registration", () => {
     ).toBeVisible();
   });
 
-  it("mounts the exact-thread Browser activity preview over an active Code conversation", async () => {
+  it("offers the exact thread's live Browser session to the shell and the dock, and draws nothing over the conversation", async () => {
     const base = propsFor(codeTab("code-overview", "Browser owner"));
     const onRevealBrowserActivity = vi.fn();
     const onOpenSurface = vi.fn();
@@ -596,9 +602,13 @@ describe("WorkspaceView Code tab registration", () => {
       />,
     );
 
-    const preview = await screen.findByRole("button", { name: "Open Browser: Preview page" });
-    expect(preview).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Open Browser tab" })).toBeNull();
+    await waitFor(() =>
+      expect(agentBrowserCardContext(String(codeIds.thread))).toBe(
+        "30000000-0000-4000-8000-000000000001",
+      ),
+    );
+    expect(screen.queryByRole("button", { name: /Open Browser/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Browser preview" })).toBeNull();
     await waitFor(() =>
       expect(onRevealBrowserActivity).toHaveBeenCalledWith({
         paneId: ids.pane,
@@ -608,15 +618,7 @@ describe("WorkspaceView Code tab registration", () => {
     );
     expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
     expect(onOpenSurface).not.toHaveBeenCalled();
-    fireEvent.click(preview);
-    // Opening the preview is the person's own request, not an offer the shell
-    // may remember away.
-    expect(onOpenThreadBrowser).toHaveBeenCalledWith({
-      paneId: ids.pane,
-      threadId: String(codeIds.thread),
-    });
-    expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
-    expect(onOpenSurface).not.toHaveBeenCalled();
+    expect(onOpenThreadBrowser).not.toHaveBeenCalled();
 
     unmount();
     render(
@@ -627,12 +629,11 @@ describe("WorkspaceView Code tab registration", () => {
         onRevealBrowserActivity={onRevealBrowserActivity}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Open Browser: Preview page" })).toBeVisible();
     await waitFor(() => expect(onRevealBrowserActivity).toHaveBeenCalledTimes(2));
     expect(onOpenSurface).not.toHaveBeenCalled();
   });
 
-  it("draws no Browser preview while the dock or bottom panel shows this thread's Browser", async () => {
+  it("offers no Browser card while the dock or bottom panel shows this thread's Browser", async () => {
     const base = propsFor(codeTab("code-overview", "Browser owner"));
     const inspectThread = vi.fn(async () => ({
       status: "running",
@@ -666,6 +667,7 @@ describe("WorkspaceView Code tab registration", () => {
       { threadId: codeIds.thread, freshPicture: false },
       expect.any(AbortSignal),
     );
+    await waitFor(() => expect(agentBrowserCardContext(String(codeIds.thread))).toBeUndefined());
     expect(screen.queryByRole("group", { name: "Browser preview" })).toBeNull();
   });
 

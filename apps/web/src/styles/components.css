@@ -41,7 +41,7 @@
   box-shadow: none;
 }
 
-/* Compact pill chip. */
+/* Compact chip. */
 .octant-chip {
   display: inline-flex;
   min-height: 26px;
@@ -51,7 +51,7 @@
   color: var(--oct-muted);
   background: transparent;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
@@ -448,36 +448,6 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
   }
 }
 
-/* The Browser preview's caption, count, and close control sit on the picture
-   in the same glass; without transparency they take the opaque floating fill
-   and nothing else, since the picture already carries the shadow. */
-html[data-octant-reduced-transparency="true"] .browser-pip__caption,
-html[data-octant-reduced-transparency="true"] .browser-pip__count,
-html[data-octant-reduced-transparency="true"] .browser-pip__profile,
-html[data-octant-reduced-transparency="true"] .browser-pip__close {
-  background: var(--octant-floating);
-  backdrop-filter: none;
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .browser-pip__caption,
-  .browser-pip__count,
-  .browser-pip__profile,
-  .browser-pip__close {
-    background: var(--octant-floating);
-    backdrop-filter: none;
-  }
-}
-
-@supports not (backdrop-filter: blur(1px)) {
-  .browser-pip__caption,
-  .browser-pip__count,
-  .browser-pip__profile,
-  .browser-pip__close {
-    background: var(--octant-floating);
-  }
-}
-
 html[data-octant-increased-contrast="true"] .octant-glass,
 html[data-octant-increased-contrast="true"] .octant-chip,
 html[data-octant-increased-contrast="true"] .octant-menu__popup,
@@ -575,7 +545,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   /* Fill, edge, and shadow are the shared dialog's. A strong border plus the
      overlay's ring gave search a 2px edge the command palette beside it does
      not have. */
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
 }
 
 .thread-search__field {
@@ -1837,7 +1807,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   max-width: 100%;
   padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-fill-4);
   color: var(--oct-fg);
 }
@@ -1879,7 +1849,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   max-width: 100%;
   padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-fill-4);
   color: var(--oct-fg);
   text-decoration: none;

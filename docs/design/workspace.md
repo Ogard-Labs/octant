@@ -561,17 +561,17 @@ when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), then a breadcrumb: the Project in meta text, a slash,
 and the title. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
-faster, with no fixed floor so a narrow pane keeps its status pill); without a
+faster, with no fixed floor so a narrow pane keeps its status chip); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" chip (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
-approval, or on a question the turn asked, is not running: the pill reads
+approval, or on a question the turn asked, is not running: the chip reads
 "Needs you", with no spinner, until someone decides or answers. A surface that is not a thread shows no environment mark.
 With content tabs open the bar holds the drag handle and the tabs alone: the
-Project and the Running or Needs you pill leave it. A Project name ahead of
+Project and the Running or Needs you chip leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
 · Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
@@ -865,8 +865,10 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
 with an Arrange menu (Move left, right, up and down where the caps allow, Show
-alone, Hide from view) and Close at its trailing edge; a tool that is open but not
-shown is marked on its button in the title band's tool row. Stacked, a page showed four bars and named the tool
+alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
+trailing edge; a tool that is open but not shown is marked on its button in the title band's
+tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
+Stacked, a page showed four bars and named the tool
 three times. A divider is a hairline that shows a quiet strong role while hovered
 or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
@@ -1010,7 +1012,9 @@ launcher groups them, each a checked item while that tool is shown, and after th
 tools the pull requests the thread is already about under "Relevant to this thread". A button is present
 only where the thread can use the tool. Pressing one opens the tool as a tile beside the
 focused one (alone when the dock is empty) and widens and shows the dock; pressing it
-again closes the tool (the Browser closes every page). A button reads pressed while its
+again closes the tool (the Browser closes every page), except that a pressed Browser or Terminal button
+minimises its tool to a card on the dock's shelf instead (see **Minimised tools**), so the page or
+shell stays running and in view. A button reads pressed while its
 tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
 the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
 is not refused: its press shows it in the focused tile's place, the replaced tool stays
@@ -1021,8 +1025,8 @@ movement, and its width is part of the trailing cluster the pane header reserves
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
 Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
 below for an open tool that is not on screen, Show alone, Hide from view and the
-moves the caps allow for a tile, New Terminal on Terminal and New Browser page on
-Browser, and Close. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
+moves the caps allow for a tile, Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
+Browser, and Close. A minimised tool's button is not pressed, carries the dot, and reads "Minimised to a card"; pressing it restores the tool. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
 shows the tool beside, the lower third below, and anywhere else replaces the
 focused tile. A tool opened from More tools has neither: it is shown beside the
 focused tile (in its place at the caps) and is then arranged, hidden and closed
@@ -1119,31 +1123,156 @@ a new shell. When no process remains, the tab offers **Start terminal**.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility-and-reliability). While an agent's Browser
-session is live and the thread's Browser is out of sight, a small live preview
-of its active page floats over the thread as a small preview (sized by `.browser-pip`), resting in one of
-the four corners of the thread frame (top right by default), draggable between
-them with an arrow-key twin, and remembered per client. Out of sight means no
-pane shows the thread's shared Browser and neither the dock (as a shown tile, or
-as its one tool) nor the bottom panel has it as its active tool (a tab bound to
-one link or local server is a page of its own and does not count); the preview leaves as soon as the Browser appears and returns
-when it closes. Clicking it shows the Browser (the dock when the thread is the
-dock's subject, else the pane), the close control hides it for that session, and
-the page's title or host shows only under the pointer or focus. A bottom corner
-rests above the composer by measuring it; the preview ranks below the window
-chrome. It holds a skeleton at the page's aspect ratio until the
-first frame and never prints status prose. It reads the same host snapshot the
-Browser pane reads, asks for a fresh picture only while it is on screen, pauses
-with the window, and backs off while the page does not change. Computer Use keeps
-its separate card.
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility-and-reliability). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+live cards on a shelf at the foot of the dock, so a page or a shell can be
+watched, and seen to answer, while another tool or only the dock's overview is
+in front. A floating preview of the Browser, drawn over the thread, covered the
+thread's own text and could not show a shell at all; the cards replace it.
+Every Browser page is one Browser tool and every dock Terminal views the
+thread's one shell, so minimising either takes the whole tool and leaves one
+card, never one for each tab. A minimised tool is an open tab that is in no
+tile and is nobody's selected tab; if it was the only tool shown the overview
+returns, and with tiles focus moves as it does when a tile is hidden. Choosing
+any of its tabs, from a drop, brings the
+whole tool back as the focused tile's tool, as any hidden tool comes back; its
+card brings it back as a tile of its own (see **A card**). The state, with the
+place each minimised tool stood in, is window-local presentation stored with the
+thread's open tools; the bottom panel never has one.
+
+- **Ways in.** A tile's **Arrange <tool>** menu offers **Minimise to card** for the
+  Browser and the Terminal only, after **Hide from view**. The Browser and
+  Terminal buttons in the title band's tool row offer the same item on their
+  context menu (right click, the menu key or Shift+F10), after the placements
+  and before New Terminal or New Browser page. Pressing a pressed Browser or
+  Terminal button minimises it instead of closing it, so the page or shell keeps
+  running in view on the shelf; closing stays the tile bar's **Close** and
+  **Close <tool>** on the button's menu, and every other tool keeps its rule
+  that a press on a pressed button closes it. The tile bar has no button of its
+  own for it, so a tile still has one bar and one name. Minimising never closes
+  or stops the tool and never sends anything to a page or a shell. Where the
+  tile's Arrange menu minimised it, focus goes to the card's expand control,
+  since the control it was on has left; it is taken only while focus is still on
+  the page body or in the closing menu, so a person who has since moved it keeps
+  it where they put it.
+- **The button of a minimised tool** is not pressed, carries the open dot, and
+  its description reads "Minimised to a card". Pressing it shows the tool
+  (see **A card**) and shows the dock when it was closed; it never replaces a
+  shown tool unless both columns are full. Its context menu offers New Terminal
+  or New Browser page and Close, with no placements, since it has no tile. In
+  the drawer (960px and under) no tool is minimised: a press there replaces the
+  tool shown, as for any tool, and never minimises.
+- **The shelf.** A group named **Minimised tools** at the foot of the dock body,
+  under the overview when no tool is shown and under the tiles when tools are
+  shown. It takes its natural height and holds at most two cards (Browser,
+  Terminal). A card is compact: an 8px inset, a 28px bar (icon, name, Show, Hide
+  card, each button a 24px target) over a preview 104px tall, 152px in all.
+  Two cards stand side by side, half the width each with an 8px gap, once each can
+  have 160px (a dock about 352px wide or wider) and stack below that; one card
+  takes the whole width and keeps the 104px preview. Side by side they need 168px
+  and stay clear of the cap in any dock 420px tall or taller. The shelf is never
+  more than two fifths of the dock and scrolls inside past that, which only a very
+  short dock, or two stacked cards in a dock under about 820px tall, reaches; the
+  tiles above keep their floors and measure the space that is left. The modal dock
+  (960px and below) has no room for it and draws none; the state is kept, and
+  there the tool's button reads as any open tool's, so nothing leads nowhere.
+- **A card** is one of the dock's cards: the tool's icon, a title, **Show
+  <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
+  itself the expand control (named "Show <tool>, live preview"); the preview is
+  drawn inert under that one button, so nothing in it can take focus or act.
+  Show brings the tool back as a tile of its own (the Browser as the page it
+  last showed), focused, and returns the keyboard to the tool's button in the row. It returns to the place it
+  was minimised from while that place still exists: the same row of a column it
+  shared, or a column of its own again at the same position, when there is room
+  under the caps. Otherwise it becomes the last tile: a new column while there is
+  room for one, else the end of the last column that has room (the last column
+  first, then the other). With nothing shown it is the one
+  tool shown. It never takes over a shown tool's tile, so no shown tool remounts;
+  only when both columns are full does it take the focused tile's, as choosing
+  its tab would. A tool that was the only one shown leaves no place. Hide card removes the card and
+  nothing else: the tool goes back to being an ordinary open tool, its button
+  reading open but not shown (the dot and "Open"), and no page or shell is closed or stopped (closing a tab with its
+  own browser context ends that context, which a card that only previews must
+  never do; the floating preview it replaces only hid itself). The keyboard goes
+  to the tool's button in the row, else the dock toggle, looked for again as the
+  row re-renders so focus never falls to the page. Pressing the button shows the
+  tool. Closing the tool stays the tile bar's close and **Close** on its button's
+  menu. A card never starts a process, never writes to the journal and never sends input
+  to a shell or a page, and it shows nothing the tool could not show this window
+  under the same checks. A paired remote window has no dock and gets none of it.
+- **The Browser card** shows the page's title, or its host, with the profile's
+  name beside it where the page lives in one (a signed-in page acts as the
+  person's account) and the page count past one, over a picture of the page
+  cropped to the preview from its top left, never stretched. It reads the same host
+  snapshot the Browser pane reads (a page that lives in a Browser context of its
+  own is read by that context, as the pane reads it, never through the thread's
+  current context, which leaves such pages out; a context that is gone or stopped
+  makes the preview say "Page not available" instead of holding a skeleton), and asks for a fresh picture only while the
+  card is on screen: no card, no request for one. It polls every second while a
+  session is live and every five otherwise, backs off while the page does not
+  change, and pauses with the window. A stale or missing picture is a neutral
+  skeleton with no status prose.
+- **The agent's session.** While an agent's Browser session is live and the
+  thread's Browser is out of sight, the Browser is a card on the shelf without
+  the person minimising it, as long as it has a tab. Out of sight means no pane
+  shows the thread's shared Browser and neither the dock (as a shown tile, or as
+  its one tool) nor the bottom panel has it as its active tool (a tab bound to one
+  link or local server is a page of its own and does not count). A card is only a
+  preview, so it is never what "in sight" means: it does not stop the Browser
+  being brought forward when the agent hands the page over to sign in, and it
+  does not stop a new session opening the Browser tool once, except that a
+  session announced while the person has the Browser minimised leaves it
+  minimised, its card or the dock toggle's dot being the sign (the sign-in
+  hand-over, which the person has to act on, still restores it). That holds only
+  where the shelf is drawn: the narrow window's modal dock has neither card nor
+  dot, so there a new session opens the Browser like any other tab, which clears
+  the minimised flag (a window that grows again shows the Browser as a tool, not
+  as a card). Hiding the card,
+  or closing the Browser's tab, dismisses it for that session, kept for the life of the page
+  because the dock remounts; a later session shows it again. A Browser whose
+  session is not live is a card only if the person minimised it. The thread pane
+  keeps polling for the session without asking for a picture, and tells the dock.
+- **The dock toggle.** The dock is closed on a thread whose agent Browser is live
+  and has a tab: its card cannot be seen, so the window's dock toggle carries one
+  quiet dot described as "Browser is active". It is a dot, never a count or an
+  accent ring, and the modal dock, which draws no shelf, shows none.
+- **The Terminal card** shows the shell's current tail, live, in a read-only
+  instance of the terminal engine at the smallest type the terminal settings
+  allow, filling the preview (the shell's last lines, as many as the 104px preview holds), with no input, no focus and no resize sent to the shell.
+  It reads the shell's state and follows the host's live stream, whose first
+  frame is the tail, and stops it when the card goes away; it keeps only a few
+  KiB of tail, drawn at most once an animation frame and appended to the terminal
+  rather than rewritten, with a cut only at a line start, so a chatty shell is
+  not redrawn every frame. It respects the stream limits: a host that refuses the
+  stream makes the card say "Preview unavailable" and stay usable. A stream that
+  ends or is refused, or a shell that starts later, is read again after 5 s,
+  doubling to 60 s, up to six tries (the count starts over when frames flow
+  again), paused while the window is hidden, and the card says "Preview ended"
+  when it gives up. A card belongs to one thread: it starts from nothing for
+  another thread's shell and never shows the previous thread's text. A thread
+  that cannot have a Terminal gets no Terminal card. It never attaches, because attaching is a
+  journaled operation and a card that did so on a timer once wrote thousands of
+  entries for one thread; it never starts a shell. A thread with no shell running
+  says "No terminal running", and expanding opens the tool, where the person may
+  start one. A card that never had a shell to show keeps that plain note when its
+  retries run out; only a tail that was followed can say "Preview ended". A card
+  that is not following a shell looks once more when it is seen again (the window
+  becoming visible, the pointer or the keyboard arriving, or Show), never more than
+  once every five seconds and never on a timer: one fresh read, which follows a
+  shell that started in the meantime and otherwise changes nothing. An exited or interrupted shell says so in the card's head. Output
+  that arrives while the pointer and keyboard are off the card shows a small quiet
+  dot named "New output", which goes when the pointer enters, the card takes
+  focus, or the tool is restored.
+
+Computer Use keeps its own activity card over the thread, separate from these.
 
 **Browser availability.** While no agent drives the page, the thread's pane and
 Project dock show a server-reported availability fact: available (read-only in
 Plan), omitted with its specific tool-transport, task-constraint or host-capability
 reason and an existing recovery action, or Unknown when disconnected/unreported.
 The same policy composes the Browser tool; the renderer never infers permission.
-The status is a mark inside the address field's start whose name and tooltip carry the
-sentence; its recovery action is an item in the toolbar's More menu. Site approvals,
+The status is an icon after the address field whose name and tooltip carry the
+sentence (drawn only while a page is open, loading, or the agent cannot use the Browser; at rest the sentence is in the
+profile icon's tooltip); its recovery action is an item in the toolbar's More menu. Site approvals,
 Take over, Hand back and the active-agent indicator retain their existing behavior. This fact is a reading, never a grant. The provider remedy opens the owning
 thread's existing provider/model picker. A constraints remedy opens that task's
 access report; saved profile constraints cannot be removed by raising its access
@@ -1164,14 +1293,14 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the profile icon at the start of the address field, whose menu also signs out of a
-stored profile. A puzzle-piece extensions button trails the field when an extension is
+the profile icon after the address field, whose menu also signs out of a
+stored profile. A puzzle-piece extensions button precedes it when an extension is
 enabled in the page's profile: it lists them, opens a popup or options page, and
-carries a count while the agent drives the page; the driver indicator and the
-floating preview name a stored profile while the agent drives it. **Take over.**
+carries a count while the agent drives the page; the status icon and the
+Browser card name a stored profile while the agent drives it. **Take over.**
 While a page is open, the toolbar carries a **Take over** icon button after the
-address field (in the More menu when the pane is under 340px). One click
-holds every agent Browser call on the page; the status mark then reads "You have
+address field (in the More menu when the trailing icons do not fit). One click
+holds every agent Browser call on the page; the status icon then reads "You have
 the page" and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
 neither shows. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".
@@ -1184,7 +1313,7 @@ then one tab per thread's page in front. A tab names the page (its title, else
 its host) and the thread that owns it by thread title, with an "Agent active"
 mark while that thread's agent drives the page and for 15 seconds after its
 last action. Choosing a tab shows that thread's own picture of the page, the one
-its floating preview shows, with no address bar and nothing to click, and an
+its Browser card shows, with no address bar and nothing to click, and an
 Open thread control that opens the owning thread; choosing "Your page" returns
 to the person's browser. No tab action moves a page from one thread to another,
 and a thread's agent never sees another thread's page. A paired device sees the
@@ -1197,9 +1326,9 @@ person's own page already lives there, so it is where several threads' pages
 sit side by side without giving any thread a view of another's. The tabs use
 the shared tab rail, which wraps rather than scrolls so no tab hides off the
 edge of a narrow dock. **Browser toolbar.** One row under the tile bar: plain back, forward and reload
-icons, the address field (the control corner, never a pill) with the profile,
-connection and status marks inside its start, then trailing icon buttons and a
-More menu; the exact rules are in [Design system](../../DESIGN.md). **Browser captures.** The Browser pane toolbar has a
+icons, the address field (the control corner, never a pill) with only the
+connection mark inside its start, then trailing icon buttons (status, Take over,
+extensions, profile) and a More menu; the exact rules are in [Design system](../../DESIGN.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot item in its More menu (a camera icon, with Open in default browser) that keeps the
 page's picture with the thread, and, in a Work or Code thread's Browser, a
 **Draw on page** item (a pen-line icon after it) that keeps the same capture,

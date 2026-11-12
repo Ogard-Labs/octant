@@ -24,6 +24,8 @@ export interface BrowserProfileControlProps {
   readonly disabled?: boolean;
   /** An icon at the start of the Browser's address field; its name and tooltip carry the words. */
   readonly iconOnly?: boolean;
+  /** A sentence added to the icon's tooltip, such as what the agent may do with the page. */
+  readonly description?: string;
   readonly onChange: (choice: BrowserProfileChoice) => void;
   /** Absent where the host cannot clear a profile; the menu then omits the action. */
   readonly onSignOut?: () => Promise<void> | void;
@@ -110,12 +112,12 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
         }
         triggerClassName={
           props.iconOnly === true
-            ? `${octantButtonClassName({ variant: "ghost", size: "icon" })} browser-workspace__lead-button`
+            ? `${octantButtonClassName({ variant: "ghost", size: "icon" })} shell-icon-button`
             : "browser-profile-control"
         }
         triggerDisabled={props.disabled === true}
         triggerLabel={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
-        triggerTitle={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
+        triggerTitle={`${props.label ?? "Browser profile"}: ${label(props.profile)}${props.description === undefined ? "" : `. ${props.description}`}`}
         value={props.profile}
       />
       <OctantDialogPresence>

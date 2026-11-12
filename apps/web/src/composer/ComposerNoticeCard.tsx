@@ -4,9 +4,9 @@ import { bySeverity, noticeRole, type ComposerNoticeItem } from "./ComposerNotic
 
 /**
  * Everything a composer has to say about its thread or about sending, as one
- * group directly above the pill: a card for each notice, the most severe
- * first, so the pill itself holds only attach, the prompt, the microphone and
- * send. Drawn inside the pill, a tinted bar fought its corner and read as part
+ * group directly above the box: a card for each notice, the most severe
+ * first, so the box itself holds only attach, the prompt, the microphone and
+ * send. Drawn inside the box, a tinted bar fought its corner and read as part
  * of the message. The group is empty, and takes no room, when nothing applies.
  *
  * `children` are notices that own their own state (the Project offer, the

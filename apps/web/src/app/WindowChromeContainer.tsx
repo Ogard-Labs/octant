@@ -22,6 +22,8 @@ export interface WindowChromeContainerProps {
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelPresentedOpen: boolean;
   readonly dockAvailable: boolean;
+  /** The agent's Browser is live and has a card the closed dock is holding. */
+  readonly dockBrowserActive: boolean;
   readonly dockPresentedOpen: boolean;
   /** Value-stable between renders; see the model in App. */
   readonly dockTools?: DockToolButtonsModel;
@@ -54,6 +56,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     bottomPanelAvailable,
     bottomPanelPresentedOpen,
     dockAvailable,
+    dockBrowserActive,
     dockPresentedOpen,
     hostReservesTitlebarInset,
     isNarrow,
@@ -69,6 +72,9 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
       bottomPanelExpanded={bottomPanelPresentedOpen}
       dockAvailable={dockAvailable}
+      // The modal dock draws no shelf, so a dot there would promise a card
+      // that cannot be shown.
+      dockBrowserActive={dockBrowserActive && !dockPresentedOpen && !isNarrow}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
       {...(props.dockTools === undefined
