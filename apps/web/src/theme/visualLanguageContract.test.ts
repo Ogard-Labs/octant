@@ -588,6 +588,9 @@ describe("the public-block visual language", () => {
       const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
       for (const block of source.matchAll(/([^{}]*):focus-visible[^{}]*\{([^}]*)\}/g)) {
         const where = `${relative(webRoot, file)} on ${block[1]?.trim() ?? ""}`;
+        // A hidden file input has no box to edge, so its tile wears the shared
+        // edge for it; the rule is pinned to that edge colour further down.
+        if (block[1]?.includes(".zen-appearance__upload:has(")) continue;
         expect(block[2], `${where} suppresses the focus edge`).not.toMatch(
           /outline:\s*(?:none|0)\b/,
         );
@@ -1660,5 +1663,27 @@ describe("shared recipes against the global stylesheets", () => {
     expect(strays).toEqual([]);
     const card = readFileSync(join(webRoot, "ui/shadcn/card.tsx"), "utf8");
     expect(card).toMatch(/<h2[^>]*className=\{cn\("m-0 text-base /);
+  });
+
+  it("draws the one focus edge on every shared recipe, with no ring, halo or second outline", () => {
+    const strays: string[] = [];
+    for (const path of sourceFiles(join(webRoot, "ui"), ".tsx")) {
+      if (path.endsWith(".test.tsx")) continue;
+      const source = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const match of source.matchAll(
+        /(?:focus|focus-visible|focus-within|has-focus-visible):(?:ring|outline|shadow|border)[\w\-/[\]]*/g,
+      ))
+        strays.push(`${relative(webRoot, path)}: ${match[0]}`);
+    }
+    expect(strays).toEqual([]);
+    // A picture's tile has no box to inset into; it takes the same edge, from
+    // the keyboard only, outside the picture.
+    const zen = readFileSync(join(webRoot, "styles/zen.css"), "utf8");
+    expect(zen).toMatch(
+      /\.zen-appearance__upload:has\(:focus-visible\) \.zen-appearance__thumb \{\s*outline: 2px solid var\(--oct-focus-edge\);/,
+    );
+    expect(zen).not.toMatch(/\.zen-appearance__upload:focus-within/);
   });
 });

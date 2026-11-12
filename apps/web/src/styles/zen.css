@@ -791,8 +791,12 @@ img.zen-appearance__thumb {
   white-space: nowrap;
 }
 
-.zen-appearance__upload:focus-within .zen-appearance__thumb {
-  outline: 2px solid var(--oct-fg);
+/* The file input is hidden, so the tile wears the shared focus edge for it:
+   only for the keyboard (a click on the tile must paint nothing), in the edge
+   colour rather than the full ink the chosen picture's ring uses, and just
+   outside the picture so the edge does not cover it. */
+.zen-appearance__upload:has(:focus-visible) .zen-appearance__thumb {
+  outline: 2px solid var(--oct-focus-edge);
   outline-offset: 2px;
 }
 
