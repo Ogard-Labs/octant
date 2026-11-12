@@ -927,6 +927,9 @@ function LibraryDetail(props: LibraryDetailProps) {
                   registration: {
                     guideUrl: item.connectorAuth.setupGuide,
                     requestedScopes: item.connectorAuth.requestedScopes ?? [],
+                    ...(item.connectorAuth.setupSteps === undefined
+                      ? {}
+                      : { setupSteps: item.connectorAuth.setupSteps }),
                     ...(item.connectorAuth.permissionNotice === undefined
                       ? {}
                       : { permissionNotice: item.connectorAuth.permissionNotice }),

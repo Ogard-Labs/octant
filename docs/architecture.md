@@ -11043,6 +11043,13 @@ sight on this computer and Show hidden brings every entry back; that
 preference lives in the renderer's storage, since it changes nothing on the
 host. Connecting works only from the Octant window on the host, like Add
 MCP server.
+An entry that needs an app the person registers also carries numbered
+`setupSteps`, shown beside Client setup before sign-in: the vendor's part,
+worded only from what the entry and its linked guide already say, then
+Octant's part (the callback address, the client ID, an optional client secret
+linked from a secret store, Save, Sign in). The steps never name a vendor
+screen the catalog cannot vouch for; the guide link stays the authority for
+those.
 
 **Atlassian and Airtable setup.** Both non-featured entries use the existing
 MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
