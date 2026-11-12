@@ -31,18 +31,21 @@ export async function listMobileExtensionToolApprovals(input: {
 }
 
 /**
- * Approves one call or denies it. A paired device never sends `remember`:
- * "always allow in this Project" is a local window's answer, and the host
- * refuses it from here.
+ * Approves one call or denies it. `remember` asks the host to always allow
+ * the tool in its Project; the host takes that only for a prompt it marked
+ * rememberable and from a session that acts as its own person, so a caller
+ * sends it only then.
  */
 export async function decideMobileExtensionToolApproval(input: {
   readonly transport: MobileRemoteTransport;
   readonly approvalId: string;
   readonly decision: "approved" | "denied";
+  readonly remember?: true;
 }): Promise<"accepted" | "refused"> {
   const decision = decodeExtensionToolApprovalDecision({
     approvalId: input.approvalId,
     decision: input.decision,
+    ...(input.remember === true && input.decision === "approved" ? { remember: true } : {}),
   });
   const response = await input.transport.authenticatedFetch({
     method: "POST",

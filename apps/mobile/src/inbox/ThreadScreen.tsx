@@ -365,7 +365,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
         {activeSurface === "browser" ? null : (
           <>
             {offlineDemo || transport === undefined ? null : (
-              <ExtensionToolApprovalCard threadId={selected.threadId} transport={transport} />
+              <ExtensionToolApprovalCard
+                actsAsHostPerson={standing.actsAsHostPerson}
+                threadId={selected.threadId}
+                transport={transport}
+              />
             )}
             {offlineDemo || transport === undefined ? null : (
               <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />

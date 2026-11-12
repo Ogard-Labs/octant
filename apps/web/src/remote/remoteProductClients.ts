@@ -6,7 +6,12 @@ import {
   createDefaultDeviceKeyStore,
   createRemoteProductFetch,
   type RemoteSessionBridge,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import {
+  createExtensionClient,
+  type ExtensionClient,
+} from "@octant/client-runtime/extension-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
@@ -61,6 +66,25 @@ export interface RemoteProductClients {
 // `createRemoteProductFetch`.
 const REMOTE_CLIENT_BASE_URL = "http://127.0.0.1";
 const NO_WINDOW_CAPABILITY = "";
+
+/**
+ * The extension client over the session: a thread's waiting tool prompts and
+ * their answers for every paired browser, and what the host takes only from
+ * its own person (remembering an answer, remembered approvals) when `session`
+ * says this browser acts as that person. Built apart from the other clients
+ * because the host's word on the session arrives after they exist.
+ */
+export function createRemoteExtensionClient(
+  bridge: RemoteSessionBridge,
+  session: RemoteSessionStanding,
+): ExtensionClient {
+  return createExtensionClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
+    session,
+  });
+}
 
 /**
  * The ordinary product clients, carried over the paired device's

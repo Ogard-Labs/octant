@@ -21,7 +21,7 @@ import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
 import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
-import { createRemoteProductClients } from "./remoteProductClients";
+import { createRemoteExtensionClient, createRemoteProductClients } from "./remoteProductClients";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
 
@@ -67,6 +67,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       current = false;
     };
   }, [props.bridge, ready]);
+  const extensionClient = useMemo(
+    () => createRemoteExtensionClient(props.bridge, standing),
+    [props.bridge, standing],
+  );
   const localHostSurfaces = useMemo(
     () => listRemoteShellSurfacesByAvailability("local-host-only", standing),
     [standing],
@@ -168,6 +172,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           actsAsHostPerson={standing.actsAsHostPerson}
           clients={clients}
           connected={connected}
+          extensionClient={extensionClient}
           mode={activeMode}
         />
       </ContinuityScreenContext.Provider>

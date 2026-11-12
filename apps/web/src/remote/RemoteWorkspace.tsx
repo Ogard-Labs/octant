@@ -28,6 +28,7 @@ import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
 import type { ReplyDetailReading } from "@octant/contracts/shell";
 import {
@@ -47,6 +48,8 @@ export interface RemoteWorkspaceProps {
    * absent, the session is shown as restricted.
    */
   readonly actsAsHostPerson?: boolean;
+  /** Shows each thread its waiting tool prompts; absent, none is shown. */
+  readonly extensionClient?: ExtensionClient;
 }
 
 /**
@@ -133,6 +136,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
         <RemoteChatSurface
           clients={props.clients}
           connected={props.connected}
+          extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
@@ -147,6 +151,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
         <RemoteWorkSurface
           clients={props.clients}
           connected={props.connected}
+          extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
@@ -158,6 +163,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
         <RemoteCodeSurface
           clients={props.clients}
           connected={props.connected}
+          extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
           providerGroups={providerGroups}
@@ -204,6 +210,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
 
 interface RemoteSurfaceProps {
   readonly clients: RemoteProductClients;
+  readonly extensionClient: ExtensionClient | undefined;
   readonly connected: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly onNavigate: () => void;
@@ -285,6 +292,9 @@ function RemoteChatSurface(
         <ChatWorkspace
           canvasClient={props.clients.canvas}
           controller={controller}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
           narrow
           onOpenCanvas={props.onOpenCanvas}
           providerGroups={props.providerGroups}
@@ -344,6 +354,9 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
           mutationClient={props.clients.workMutation}
           requestClient={props.clients.workRequest}
           providerGroups={props.providerGroups}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
           onThreadUpdated={workNavigation.applyThread}
         />
       )}
@@ -389,6 +402,9 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"
             controller={controller}
+            {...(props.extensionClient === undefined
+              ? {}
+              : { extensionClient: props.extensionClient })}
             pairedDevice
             threadId={activeThreadId}
             providerGroups={props.providerGroups}

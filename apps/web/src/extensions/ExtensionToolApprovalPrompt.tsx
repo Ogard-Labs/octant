@@ -87,8 +87,8 @@ export function ExtensionToolApprovalPrompt(props: {
   }, [client, pendingPackageId]);
 
   if (pending === undefined || client === undefined) return null;
-  // Remembering an answer is a local window's authority; the host refuses it
-  // from a paired device, so it is not offered there at all.
+  // The host remembers an answer for a local window and for a device its own
+  // person paired; it refuses every other session, which is not offered it.
   const canRemember = pending.rememberable && client.toolGrantsAvailable;
 
   async function decide(decision: "approved" | "denied", remember?: true) {

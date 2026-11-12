@@ -23,6 +23,8 @@ const INPUT_LINES = 6;
 export interface ExtensionToolApprovalCardProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
+  /** What the host said of this session; absent reads as restricted. */
+  readonly actsAsHostPerson?: boolean;
   readonly refreshIntervalMs?: number;
   /** Confirms Allow on this phone; the device's own biometrics when absent. */
   readonly authenticator?: BiometricAuthenticator;
@@ -30,9 +32,11 @@ export interface ExtensionToolApprovalCardProps {
 
 /**
  * An MCP tool call this phone's turn made waits on the host until someone
- * answers it, here or at a local window that may drive the thread. The phone
- * offers Allow (this one call) and Deny only: "always allow in this Project" is a local
- * window's answer, and the host refuses it from a paired device.
+ * answers it, here or at a local window that may drive the thread. Allow
+ * covers this one call. "Always allow in this Project" is offered as a window
+ * offers it: for a prompt the host marked rememberable, to a session that
+ * acts as the host's own person. The host refuses it from any other session,
+ * which is offered Allow and Deny only.
  */
 export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps) {
   const { colors } = useTheme();
@@ -55,7 +59,8 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
   const pending = resource.value?.[0];
   if (pending === undefined) return null;
 
-  const decide = async (decision: "approved" | "denied") => {
+  const canRemember = pending.rememberable && props.actsAsHostPerson === true;
+  const decide = async (decision: "approved" | "denied", remember?: true) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -65,6 +70,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
           transport: props.transport,
           approvalId: String(pending.approvalId),
           decision,
+          ...(remember === undefined ? {} : { remember }),
         });
       // Denying is the safe direction, so only Allow asks for confirmation.
       const outcome: ConfirmedSendResult<Awaited<ReturnType<typeof send>>> =
@@ -129,6 +135,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
       <ApprovalDecisionButtons
         busy={busy}
         onAllow={() => void decide("approved")}
+        onAllowProject={canRemember ? () => void decide("approved", true) : undefined}
         onDeny={() => void decide("denied")}
       />
       {resource.error === undefined ? null : (

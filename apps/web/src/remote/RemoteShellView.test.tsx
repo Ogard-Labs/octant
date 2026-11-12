@@ -87,10 +87,37 @@ interface ProductRequest {
 }
 
 /** A fake host that answers the reads the remote workspace performs. */
-function answerProduct(seen: ProductRequest[], withCanvas = false) {
+function answerProduct(seen: ProductRequest[], withCanvas = false, withToolPrompt = false) {
+  let toolPromptAnswered = false;
   return (input: ProductRequest): Response => {
     seen.push(input);
     const { method, path, body } = input;
+    if (withToolPrompt && method === "POST" && path === "/api/extensions/tool-approvals") {
+      if ((body as { readonly kind?: string }).kind === "decide") {
+        toolPromptAnswered = true;
+        return Response.json({ accepted: true });
+      }
+      return Response.json(
+        toolPromptAnswered
+          ? []
+          : [
+              {
+                approvalId: "70000000-0000-4000-8000-000000000001",
+                threadId: chatThreadId,
+                projectId: chatProjectId,
+                extensionId: "70000000-0000-4000-8000-000000000002",
+                packageId: "70000000-0000-4000-8000-000000000003",
+                componentId: "server",
+                serverName: "notes",
+                providerToolName: "plugin__notes__search",
+                mcpToolName: "search",
+                inputJson: '{"q":"plan"}',
+                requestedAt: now,
+                rememberable: true,
+              },
+            ],
+      );
+    }
     if (method === "GET" && path === "/api/canvas/thread-reference-cards") {
       return Response.json({
         mode: "chat",
@@ -374,9 +401,10 @@ async function readyBridge(
   seen: ProductRequest[] = [],
   withCanvas = false,
   actsAsHostPerson?: boolean,
+  withToolPrompt = false,
 ) {
   const server = createFakeRemoteServer({
-    handleProductRequest: answerProduct(seen, withCanvas),
+    handleProductRequest: answerProduct(seen, withCanvas, withToolPrompt),
     ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
   });
   const pairingStore = createInMemoryDeviceKeyStore();
@@ -574,6 +602,43 @@ describe("RemoteShellView", () => {
       expect(screen.queryByRole("region", { name: "Default modes" })).toBeNull();
       unmount();
     }
+  });
+
+  it("shows a waiting tool prompt to the host's own person, who may always allow the tool in its Project", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+    await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
+    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Always allow in this Project" }));
+
+    await waitFor(() =>
+      expect(
+        seen
+          .filter((request) => request.path === "/api/extensions/tool-approvals")
+          .map((request) => request.body),
+      ).toContainEqual({
+        kind: "decide",
+        approvalId: "70000000-0000-4000-8000-000000000001",
+        decision: "approved",
+        remember: true,
+      }),
+    );
+  });
+
+  it("shows a restricted session the tool prompt with one approval and a denial, and nothing to remember", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+    await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
+    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow in this Project" })).toBeNull();
   });
 
   it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {

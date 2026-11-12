@@ -9,16 +9,33 @@ export interface ApprovalDecisionButtonsProps {
   readonly onDeny: () => void;
   /** Absent when the host would ignore a session-wide choice. */
   readonly onAllowSession?: (() => void) | undefined;
+  /** Absent when the host would not remember the answer for the Project. */
+  readonly onAllowProject?: (() => void) | undefined;
 }
 
 /**
  * The answers to an approval, stacked so a thumb cannot hit the wrong one:
- * Allow is the filled primary, Deny is outlined, and the broader "this session"
- * choice is a quiet text button last, away from the single-use answers.
+ * Allow is the filled primary, Deny is outlined, and a broader choice ("this
+ * session", "always in this Project") is a quiet text button last, away from
+ * the single-use answers.
  */
 export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
   const { colors } = useTheme();
   const state = { disabled: props.busy, busy: props.busy };
+  const broader = (label: string, onPress: (() => void) | undefined) =>
+    onPress === undefined ? null : (
+      <Pressable
+        accessibilityLabel={label}
+        accessibilityRole="button"
+        accessibilityState={state}
+        disabled={props.busy}
+        hitSlop={8}
+        onPress={onPress}
+        style={[styles.button, styles.secondary, props.busy ? styles.busy : null]}
+      >
+        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>{label}</Text>
+      </Pressable>
+    );
   return (
     <View style={styles.stack} testID="mobile-approval-decisions">
       <Pressable
@@ -49,21 +66,8 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
           {MOBILE_COPY.approvalDeny}
         </Text>
       </Pressable>
-      {props.onAllowSession === undefined ? null : (
-        <Pressable
-          accessibilityLabel={MOBILE_COPY.approvalAllowSession}
-          accessibilityRole="button"
-          accessibilityState={state}
-          disabled={props.busy}
-          hitSlop={8}
-          onPress={props.onAllowSession}
-          style={[styles.button, styles.secondary, props.busy ? styles.busy : null]}
-        >
-          <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-            {MOBILE_COPY.approvalAllowSession}
-          </Text>
-        </Pressable>
-      )}
+      {broader(MOBILE_COPY.approvalAllowSession, props.onAllowSession)}
+      {broader(MOBILE_COPY.approvalAllowProject, props.onAllowProject)}
     </View>
   );
 }
