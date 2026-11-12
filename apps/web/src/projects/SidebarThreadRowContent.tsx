@@ -78,7 +78,7 @@ export function SidebarThreadRowContent(props: {
         </span>
       )}
       <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.title}</span>
+        <span className="oct-nav-name sidebar-navigation__thread-title">{props.title}</span>
         {hasFacts ? (
           <span className="sidebar-navigation__thread-facts">
             {startedBy === undefined ? null : (

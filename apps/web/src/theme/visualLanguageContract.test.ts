@@ -155,12 +155,10 @@ describe("the public-block visual language", () => {
     expect(shell).toMatch(
       /\.project-action-buttons \[data-slot="button"\] \{\s*height: var\(--oct-rail-button-h\);\s*border-radius: var\(--oct-radius-sm\);/,
     );
-    expect(dock).toMatch(/\.dock-quick-tools__tool \{\s*height: var\(--oct-rail-button-h\);\s*\}/);
-    expect(readFileSync(join(webRoot, "shell/RightUtilityDockSurface.tsx"), "utf8")).toContain(
-      'className="dock-quick-tools__tool window-no-drag rounded-lg"',
-    );
-    expect(dock).toMatch(
-      /\.dock-quick-tools__tool:not\(\[data-labelled="true"\]\) \{\s*width: var\(--oct-rail-button-h\);/,
+    // The dock's own quick tools are gone; a tool's button in the band is the
+    // window button itself, so it cannot be a fourth shape.
+    expect(readFileSync(join(webRoot, "shell/DockToolButtons.tsx"), "utf8")).toContain(
+      'className="window-chrome__button dock-tool-buttons__button"',
     );
     // A divider the pointer rests on after a click kept a bright accent line.
     // Hover is the strong border, grabbed the meta ink; keyboard focus is the one
@@ -949,14 +947,20 @@ describe("the public-block visual language", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
-    // A rail group heading is the Section label role: its type is defined once,
-    // in the base rule, and the rail's rule only sets its room.
+    // A rail group label is the Navigation group label role: its type is
+    // defined once, in `oct-nav-group`, and neither rule here sets any.
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    const groupRole = surface.match(/(?:^|\n)\.oct-nav-group\s*\{[^}]+\}/)?.[0] ?? "";
     const sectionLabel = system.match(/(?:^|\n)\.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(sectionLabel).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
-    expect(sectionLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
-    expect(sectionLabel).toMatch(/letter-spacing:\s*var\(--oct-tracking-snug\)/);
+    expect(groupRole).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(groupRole).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
+    expect(groupRole).toMatch(/letter-spacing:\s*0/);
+    expect(sectionLabel).not.toMatch(/font-size|font-weight|letter-spacing/);
+    expect(readFileSync(join(webRoot, "shell/SettingsNavigation.tsx"), "utf8")).toContain(
+      "oct-nav-group setnav-section",
+    );
     expect(navigation).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     // The desktop rail shows its group labels; a quiet label is what separates
@@ -1204,19 +1208,6 @@ describe("the public-block visual language", () => {
     // The row sits in a scrolling column: a long thread list shrank it to its
     // min-height and left the wrapped second row of buttons under the list.
     expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
-  });
-
-  it("lets the dock's labelled quick tool ellipsize instead of clipping mid-word", () => {
-    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
-    const rule = (selector: string) =>
-      dock.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-
-    const tool = rule('\\.dock-quick-tools > \\.dock-quick-tools__tool\\[data-labelled="true"\\]');
-    expect(tool).toMatch(/min-width:\s*0/);
-    expect(tool).toMatch(/flex:\s*0 1 auto/);
-    expect(rule('\\.dock-quick-tools__tool\\[data-labelled="true"\\] > span')).toMatch(
-      /text-overflow:\s*ellipsis/,
-    );
   });
 
   it("lets the Review tool's heads wrap instead of overlapping or clipping at the dock's 280px minimum", () => {

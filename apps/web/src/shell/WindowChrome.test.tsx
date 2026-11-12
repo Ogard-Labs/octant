@@ -307,11 +307,13 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
     // "On" is a control pressed into the band, not the pointed-at wash: a
     // toggle that was on looked like one being hovered.
-    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control);",
-    );
-    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "box-shadow: var(--octant-shadow-control-pressed);",
+    // A tool button that is pressed and the dock toggle that is on share the
+    // one rule, so the two cannot drift into two looks.
+    const pressed = cssRule('.window-chrome__button[data-dock-tools-shown="true"]');
+    expect(pressed).toContain("background: var(--octant-control);");
+    expect(pressed).toContain("box-shadow: var(--octant-shadow-control-pressed);");
+    expect(shellStyles).toMatch(
+      /\.window-chrome__button\[aria-expanded="true"\],\s*\.window-chrome__button\[aria-pressed="true"\],\s*\.window-chrome__button\[data-dock-tools-shown="true"\] \{/,
     );
   });
 
@@ -939,6 +941,36 @@ describe("WindowChrome", () => {
 
     rerender(<WindowChrome {...props} dockAvailable={false} />);
     expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
+  });
+
+  it("draws the tool buttons before the bottom panel and dock toggles, and not at narrow widths", () => {
+    const dockTools = {
+      buttons: [
+        {
+          id: "files" as const,
+          label: "Files",
+          pressed: true,
+          open: false,
+          press: { kind: "close" as const, tabIds: ["files"] },
+          tabIds: ["files"],
+          menu: [],
+        },
+      ],
+      more: [],
+    };
+    const { props, rerender } = renderChrome({
+      dockAvailable: true,
+      dockTools,
+      onToggleDockTool: vi.fn(),
+    });
+    const tools = screen.getByRole("toolbar", { name: "Tools" });
+    const bottom = screen.getByRole("button", { name: "Open bottom panel" });
+    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(tools.compareDocumentPosition(bottom) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bottom.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(<WindowChrome {...props} isNarrow />);
+    expect(screen.queryByRole("toolbar", { name: "Tools" })).not.toBeInTheDocument();
   });
 
   it("moves the single utility dock action into narrow disclosure", async () => {

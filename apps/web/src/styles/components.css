@@ -1689,13 +1689,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   line-height: 1.35;
 }
 
-/* "Worked for 2m" is a fact about the turn: Meta, a step under the status
-   beside it. */
-.turn-header__worked-for {
-  font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-meta);
-}
-
 .turn-header__status {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2232,6 +2225,14 @@ html[data-octant-reduced-motion="true"] .turn-activity__status-icon {
   gap: var(--oct-space-2);
   opacity: 0;
   pointer-events: none;
+}
+
+/* An outside agent sent this prompt. Unlike the time it is always shown, so the
+   prompt is never read as the person's own words. */
+.agent-turn-sender {
+  display: block;
+  align-self: flex-end;
+  text-align: end;
 }
 
 .turn-user:hover .turn-message-meta,

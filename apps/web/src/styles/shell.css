@@ -699,24 +699,66 @@ html[data-octant-native-host="true"]
   border-color: transparent;
 }
 
-/* "On" (a panel is open, a menu is open) is a control pressed into the band:
-   a filled tile with the sunk shadow. It was the pointed-at wash, so a toggle
-   that was on looked like one being hovered. Pressing sinks it further. */
-.window-chrome__button[aria-expanded="true"] {
+/* "On" (a panel is open, a menu is open, a tool is on screen, the dock's
+   toggle is on) is one look: a control pressed into the band, a filled tile
+   with the sunk shadow. It was the pointed-at wash, so a toggle that was on
+   looked like one being hovered; and a tool button had a second, flat look of
+   its own. Pressing sinks it further. The dot under a tool marks one that is
+   open in the dock but not on screen. */
+.window-chrome__button[aria-expanded="true"],
+.window-chrome__button[aria-pressed="true"],
+.window-chrome__button[data-dock-tools-shown="true"] {
   color: var(--oct-fg);
   background: var(--octant-control);
   border-color: transparent;
   box-shadow: var(--octant-shadow-control-pressed);
 }
 
-.window-chrome__button[aria-expanded="true"]:hover {
+.window-chrome__button[aria-expanded="true"]:hover,
+.window-chrome__button[aria-pressed="true"]:hover,
+.window-chrome__button[data-dock-tools-shown="true"]:hover {
   background: var(--octant-control-hover);
 }
 
 .window-chrome__button:active,
-.window-chrome__button[aria-expanded="true"]:active {
+.window-chrome__button[aria-expanded="true"]:active,
+.window-chrome__button[aria-pressed="true"]:active,
+.window-chrome__button[data-dock-tools-shown="true"]:active {
   background: var(--octant-control-pressed);
   box-shadow: var(--octant-shadow-control-pressed);
+}
+
+.window-chrome__button[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
+.dock-tool-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tool-buttons__button {
+  position: relative;
+}
+
+/* The context-menu wrapper takes no box of its own, so the buttons keep their
+   spacing in the row. */
+.dock-tool-buttons__item {
+  display: contents;
+}
+
+.dock-tool-buttons__button[data-dock-open="true"]::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  content: "";
+  background: var(--oct-muted);
+  border-radius: 50%;
 }
 
 .window-chrome__overflow {
@@ -1475,13 +1517,8 @@ html[data-octant-native-host="true"]
   opacity: 0.78;
 }
 
-/* Names in navigation are medium weight: the weight, not a bigger size, is
-   what separates a name from the facts under it. */
+/* A name in navigation (`oct-nav-name`); this rule only truncates it. */
 .sidebar-navigation__thread-title {
-  color: var(--octant-text-primary);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4680,6 +4717,13 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   --octant-dialog-width: 760px;
   max-height: calc(100dvh - 32px);
   overflow: auto;
+}
+
+/* The composer adapter paints the app ground for a full pane; inside the
+   dialog that drew a square slab over the popup, clipping the composer's
+   corners and stopping short of the note under it. */
+.code-project-planner__review .code-composer-adapter {
+  background: transparent;
 }
 
 /* The review reuses the start screen's composer, but it is a decision inside a

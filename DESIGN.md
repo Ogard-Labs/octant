@@ -136,31 +136,48 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                                     |
-| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                   |
-| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                     |
-| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, and a thread's title in the title band (`oct-page-title`)                                 |
-| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)     |
-| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                         |
-| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), a Settings section's label, a sidebar or Settings rail group heading |
-| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option, sidebar row and thread title, an empty state's title                                      |
-| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                                            |
-| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                           |
-| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, a turn's time and "Worked for" (`oct-meta`)                |
-| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                   |
+| Role                   | Size            | Weight | Leading | Colour      | Where                                                                                                                                                                                                         |
+| ---------------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hero                   | 26              | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                                                                                                       |
+| Title                  | 28              | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                                                                                                         |
+| Page title             | 14              | 600    | 1.35    | primary     | A destination or Settings page (`oct-page-title`)                                                                                                                                                             |
+| Dialog title           | 17              | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)                                                                                         |
+| Reply heading          | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                                                                                                             |
+| Section label          | 14              | 600    | 1.3     | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
+| Row label              | 14              | 500    | 1.35    | primary     | A setting's row, a file row, an empty state's title                                                                                                                                                           |
+| Navigation name        | 13              | 400    | 1.35    | primary     | A thread's title in the sidebar and in the title band, the account row's name, a Settings rail item and "Back to app" (`oct-nav-name`; a Settings item rests in the muted ink until hovered, focused or open) |
+| Navigation group label | 12              | 400    | 1.3     | muted       | A sidebar group heading and a Settings rail group label, in sentence case (`oct-nav-group`; a group's count stays Meta)                                                                                       |
+| Menu option            | 13              | 500    | 1.35    | primary     | Every menu's option row: dropdown, context menu, select and combobox options, the model menu's model names (`oct-menu-option`)                                                                                |
+| Body                   | 13              | 400    | 1.5     | primary     | Interface text (the interface size, `body`)                                                                                                                                                                   |
+| Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
+| Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
+| Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
+| Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's pill (`oct-meta`)                                                                                         |
+| Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
-for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
-labels, controls, and every name in navigation (thread titles, sidebar rows,
-Settings sections), so a name stands apart from the facts under it by weight
-rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
-card titles, `strong`, the app's name, a destination's page title), and
-700 (`--oct-weight-title`) only for the large title. A count beside a label
-is Meta at 400; the one count at medium weight is a plan meter's figure, which
-stands with no label of its own (see Plan meters). The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
-weight above 600 outside the title roles in `styles/surface.css` as a
-`heavy-weight` finding and ratchets it against the baseline.
+for reading text and every name in navigation (thread titles, sidebar and
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`,
+`--oct-weight-display`) for labels, controls, a setting's row and a menu's
+options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
+`strong`, the app's name, a destination's page title), and 700
+(`--oct-weight-title`) only for the large title. A count beside a label is Meta
+at 400; the one count at medium weight is a plan meter's figure, which stands
+with no label of its own (see Plan meters). The welcome question is a prompt to
+answer, so it is regular weight. `bun run ui:check` counts a weight above 600
+outside the title roles in `styles/surface.css` as a `heavy-weight` finding and
+ratchets it against the baseline.
+
+_Rationale for the calm navigation._ Names in navigation at 14px and weight
+500 to 600 read louder than the rest of the app, not clearer. At the interface
+size and regular weight they read as a calm list, and the selected row's fill
+carries selection, not its weight. A group label is a quiet caption (12px,
+regular, muted), not a heading, so the rows it names stay the first thing read.
+An activity line in a thread ("Worked for", the turn's time) is the size of the
+text it sits between and is told apart by its muted ink, so it no longer reads
+as a smaller second voice. A reply's lines take 1.6 leading and its lists a
+16px indent so long answers breathe; the reply's size stays the person's own
+setting.
 
 A title is never the size and the weight of the text it heads. It is
 larger, heavier, or both, and has more room above it than below, so a reader
@@ -421,7 +438,7 @@ the native window's; no pane rounds a corner. Rationale: panes in a grid that
 is dragged, aligned and resized share edges, and a corner and a gap on each
 one made the grid read as loose cards. (The window was once one sheet divided
 by hairlines; before that, cards on a back of the sidebar's material, and most
-recently rounded panels 8px apart on the ground.) Pane headers and dock tabs
+recently rounded panels 8px apart on the ground.) Pane headers and the tool row
 stay in the title band. With Glass on, the ground and the panes are the Tint
 over the window's native material: the panes are a lighter tint than the
 ground; every pane (the thread, a tile, the bottom panel, the dock's
@@ -429,7 +446,9 @@ overview) is the same one fill (`--octant-pane-fill`), over a ground that is
 itself a tint, so text reads on a saturated desktop. Reader pages inside the
 stage are clear. Behind every page the application ground lies on the
 thread's pane, under the content, square like the pane. A pane header
-and the dock head share the title rail (`--oct-title-rail-h`). A native
+shares the title rail (`--oct-title-rail-h`) with the tool row; the dock's own
+header is an empty spacer under the band, so the first tile's top line is the
+only line there. A native
 Browser page inside a tile is placed by the tile's measured rectangle and is
 square; the corner of the page inside the tile belongs to the web renderer
 only. At 680px and below the workspace sidebar is an overlay drawer and the
@@ -699,8 +718,8 @@ keep the bare recipe. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
-computer, cloud for another host), the thread title at the sm step in medium
-weight, a pill chip naming the Project in meta ink, and in Code a second
+computer, cloud for another host), the thread title as a navigation name (13px,
+regular weight), a pill chip naming the Project in meta ink, and in Code a second
 chip naming the checkout's branch in the mono identifier face — no provider
 mark. The two chips shrink before the title does. While the host projects the
 thread as executing, a "Running" pill with a small spinner follows the chips.
@@ -2055,19 +2074,31 @@ overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/thread breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, bottom panel, and right dock remain window chrome. Above the right
-dock, in the same title band, sit its tools: while none is open, Environment by
-name and Terminal, Browser, Files, and the device tools as icons (each only
-where the thread can open it); once tools are open, the tab strip, where every
-open tool shows its icon and name, a long name ellipsizing at 10rem, and the
-tools that do not fit gather behind a count. Several Browsers are one Browser
-tab there: their pages sit in a row of their own at the top of the Browser,
-with a + for a new page, and closing the Browser tab closes every page. The
-Browser's toolbar groups back, forward, and reload in one rounded capsule
+Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
+tool: their pages sit in a row of their own at the top of the Browser, with a +
+for a new page, and closing the Browser closes every page.
+The Browser's toolbar groups back, forward, and reload in one rounded capsule
 beside a pill-shaped address field, followed by the driver indicator and a
 quiet ghost **Take over** button (secondary **Hand back** while the person has
 the page), both extra-small, which drop their words below 720px and keep their
-names. Environment is opened from that band or Add tool. Zen
+names. The right dock's tools are opened from a **tool row** at the right of the
+title band, before the bottom-panel and dock toggles: icon buttons for
+Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
+checkbox items for every other tool the thread can use (grouped as the launcher
+groups them), then the pull requests the thread is about under "Relevant to this
+thread"; each button only where the thread can use the tool. A button is the
+shell's icon button with the tool's own icon and its name as a tooltip,
+`aria-pressed` while the tool is on screen, a quiet 4px dot while the tool is
+open but not shown. At the tile caps a press shows a tool that is not shown in
+the focused tile's place and the button says "Shows in place of <the focused
+tool>"; on a new Code task the buttons are disabled with "Available once the
+task starts". The row is a
+toolbar named "Tools" with one Tab stop and arrow-key movement. The dock's own
+header is an empty band as tall as the title rail, so its panes start below it
+whatever the width; it holds no strip, Add tool, Show another tool or quick
+tools (the bottom panel keeps its strip and Add tool). At 960px and under the
+dock is a modal drawer over an inert band, so the same row stands in the
+drawer's header, a press replaces the one tool shown, and there is no dragging. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and
@@ -2443,20 +2474,18 @@ one "N finished" row; a row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not
-repeated here: they are on the composer. Tools open from the dock's title band
-(its quick tools or tab strip) or Add tool, which lists every tool that is not
-open. Add tool opens a menu in a portal anchored to the plus
-that was clicked, aligned to its start edge and kept inside the window by
-collision handling; it takes focus on its first tool, closes on Escape or an
-outside press, and returns focus to the plus. The bottom panel uses
-the same compact tool-tab and Add tool model for Review, Terminal, Browser,
+repeated here: they are on the composer. Tools open from the title band's tool row. More tools opens a menu in a
+portal anchored to its button, aligned to its end edge and kept inside the
+window by collision handling; it takes focus on its first item, closes on a pick,
+on Escape or on an outside press, and returns focus to its button. The bottom
+panel uses the compact tool-tab and Add tool model for Review, Terminal, Browser,
 Files, and Side chat where supported. Opening a tool in the dock leaves the
 bottom panel open: a Terminal below and a simulator and a page beside it are the
 point of having both regions. Only a tool the panel is already showing moves out
 of it, because one instance appears in one region at a time; Terminal
 immediately attaches or starts and preserves one server session when moved.
 
-Browser and Terminal are repeatable right-dock workspaces: Add tool creates a
+Browser and Terminal are repeatable right-dock workspaces: New Terminal and New Browser page on the tool's button menu create a
 new tab identity, an isolated Browser context or Terminal session, and a stable
 numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
@@ -2464,8 +2493,8 @@ still appears in only one region at a time.
 
 **Tool tiles.** The dock body shows one open tool by default. A maintainer
 testing an app in the simulator beside the page it served had to choose between
-them, so open tools can also be shown together as tiles, each one live, under
-the one tab strip. At most two columns of at most three tiles are shown; a
+them, so open tools can also be shown together as tiles, each one live, beside
+the one tool row. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
 puts the tool below in the last column. A tile is a region named for its tool
 with **one bar**, the tool's own header, 32px high in every tile so neighbouring
@@ -2473,11 +2502,10 @@ bars line up. Its leading edge names the tool once (the icon and name; for the
 Browser the bar is its row of pages, each with its close, and the new-page
 control, and with one page the page's title is the name) and its trailing edge
 holds the tile's controls: an **Arrange <tool>** menu button and a **Close
-<tool>** button that closes the tool as its strip tab's close does (every page
-for the Browser). Stacked, a page showed four bars (the strip, a "Browser"
+<tool>** button that closes the tool as pressing its button again does (every
+page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
-times, so the strip no longer repeats a shown tool and a tile has no caption
-over its bar. A tool alone has no bar of its own. The Arrange menu holds **Move
+times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no bar of its own. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when
 that move is possible within the caps (a one-column layout moved sideways makes the
 second column, and a column left empty goes), then **Show alone** and **Hide
@@ -2498,15 +2526,16 @@ when the tile area has the width: at 1440px with the sidebar open a second
 column widens the dock to about 620px and the columns stand side by side at about
 306px each (they stacked at 500px while the thread kept 560px), and in a narrower
 window "beside" stacks, which is why the head control promises no direction;
-the strip menu keeps explicit Show beside and Show below. Stacked columns stay
+a tool button's menu keeps an explicit Show below. Stacked columns stay
 resizable by a separator between them along the vertical axis, and no tile is
 ever under its floor: when stacked tiles cannot all fit the dock, the tile area
-scrolls with every tile at the floor. Choosing a tab that is shown
-focuses its tile; choosing one that is not replaces the focused tile's tool.
+scrolls with every tile at the floor. Pressing the button of a shown tool closes it; pressing one that is open but not
+shown shows it beside the focused tile; a drop on the middle of the dock replaces
+the focused tile's tool.
 All Browser tabs are pages of one Browser tool, so there is at most one Browser
 tile and choosing another page changes that tile's page; the dock remembers the
 page last shown and returns to it whenever the Browser is shown again, from its
-strip entry, a menu or a drag. A tile clips its tool to its box (it has no fill of
+button or a drag. A tile clips its tool to its box (it has no fill of
 its own), and gives the tool a definite height to scroll within, so one tool's
 rows are never painted over the next tile. A tile resolves its own
 tool: one that cannot be described for the active pane says so inside its tile,
@@ -2516,21 +2545,22 @@ positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
 
-With two or more tiles the strip lists only the open tools that are not
-shown, then Add tool and **Show another tool**; with every open tool shown it
-holds just those two controls, and with one tool shown it is the ordinary tab row.
-Its roving focus keeps working with fewer tabs, and choosing a hidden tab
-replaces the focused tile's tool. A hidden tab's context menu (right click, the
-menu key or Shift+F10) offers **Show beside** and **Show below**. A **Show another tool** button in the dock head, before Close, opens a
-menu of the same name that lists first the open tools that are not on screen and,
-after a separator, the other tools the thread can launch; it shows the choice
-with the focused tile in one step (opening it first when needed), beside it when
-the columns stand side by side and below it when they stack, leaves Browser
-out while a Browser is on screen, and is absent in the narrow dock and when the
-tile caps are full. It exists because a strip with four tools open fits two tabs
-at a usual dock width, and a tool in the overflow list has neither a menu nor a
-drop target. Dragging a tab onto the dock body does the same: the right third shows it beside, the lower third below, and anywhere
-else replaces the focused tile. With two columns shown and no width the person
+A tool's button carries the placement a tab menu once did. Its context
+menu (right click, the menu key or Shift+F10) offers **Show below** for an open
+tool that is not on screen (disabled when the caps refuse it), and, for a tile in
+a layout, **Show alone**, **Hide from view** and the moves that are possible,
+then **New Terminal** on Terminal and **New Browser page** on Browser, then
+**Close <tool>**; what does not apply is absent. These menus, and dragging,
+belong to the five tools with a button of their own (Environment, Terminal,
+Review, Browser, Files); a tool opened from More tools is shown the same way
+and is then arranged, hidden and closed from its own tile's bar, a tool alone
+having no bar and being closed by picking it again in More tools. Pressing a
+button shows a tool beside the focused tile in one step (opening it first when
+needed), beside it when the columns stand side by side and below it when they
+stack; when the tile caps are full it shows the tool in the focused tile's place
+and the tool it replaces stays open, hidden from view. Dragging an open tool's
+button onto the dock body does the same: the right third shows it
+beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
 has chosen, the dock widens to 840px (not saved), under the ceiling above;
 showing a tool beside, which makes the second column, clears the person's
 sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
@@ -2555,8 +2585,8 @@ show or hide belongs to the draft and is never saved as the window's choice;
 once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
 chrome visible.
 
-Environment is a right-dock tool, opened from the dock's title band (its
-quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
+Environment is a right-dock tool, opened from the title band's tool row and
+nowhere else. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. A card is a faint wash of the ink over the
 dock with no ring (increased contrast adds one), so it never paints the opaque
