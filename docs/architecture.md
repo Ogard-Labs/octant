@@ -5138,7 +5138,9 @@ or .zip>` write the same files, built by one host command
   person who reopens the app finds them settled and a thread held only by one
   is released when the remote proves how it ended. Start-up never waits on it:
   at most three threads are read at a time, each step's reads stop after 20
-  seconds, and server shutdown stops the pass. It runs as the host (the scope
+  seconds (the checkout-root probe included: its Git is killed and nothing
+  after an in-flight filesystem read starts), and server shutdown stops the
+  pass. It runs as the host (the scope
   a routine runs under) and looks only at an active thread whose Project the
   host still holds, through the thread's own checkout root, re-resolved and
   re-checked against the Project binding, and its own remote, and at the pull

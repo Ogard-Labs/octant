@@ -794,13 +794,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
-        resolveCheckoutRoot: async (windowId, thread, checkout) => {
+        resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {
           // A remote root names a folder on another machine, never one here:
           // a server Project's is named, never resolved, and only the turn's
           // server tools act on it. Any other remote root resolves nothing.
           if (checkout.kind === "remote-root")
             return serverCodeCheckoutRoot(serverProjectStore, thread);
-          const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
+          const root = await roots.resolve(windowId, thread, checkout, rootProbePath, signal);
           if (root === undefined) return undefined;
           const project = persistence.readProject(thread.projectId);
           if (project?.type !== "code") return undefined;
