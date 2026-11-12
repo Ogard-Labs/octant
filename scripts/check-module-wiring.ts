@@ -666,12 +666,6 @@ export function findUnregisteredRouteModules(
  * served endpoint has a caller (or is a routing prefix).
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  ...["/api/remote/devices", "/api/remote/pairing-requests", "/api/remote/pairing-tickets"].map(
-    (endpoint): [string, string] => [
-      endpoint,
-      "Paired devices and pairing requests as a paired device administers them, served by the host since 2026-11-12 ahead of the Settings controls a paired browser or phone calls them from. Remove once a client lists, renames, revokes or approves a device through them.",
-    ],
-  ),
   [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",

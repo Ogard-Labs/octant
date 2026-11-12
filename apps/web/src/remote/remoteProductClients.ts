@@ -18,6 +18,10 @@ import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-c
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import {
+  createPairedDeviceAdministrationClient,
+  type PairedDeviceAdministrationClient,
+} from "@octant/client-runtime/paired-device-administration-client";
+import {
   createProviderCredentialClient,
   type ProviderCredentialClient,
 } from "@octant/client-runtime/provider-credential-client";
@@ -89,6 +93,16 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/** The host's paired devices and pairing requests, administered over the session. */
+export function createRemotePairedDeviceAdministrationClient(
+  bridge: RemoteSessionBridge,
+): PairedDeviceAdministrationClient {
+  return createPairedDeviceAdministrationClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
   });
 }
 

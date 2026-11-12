@@ -1,4 +1,5 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import { useState } from "react";
@@ -12,8 +13,9 @@ import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
+import { RemotePairedDevices } from "./RemotePairedDevices";
 
-type HostSettingsSection = "extensions" | "providers";
+type HostSettingsSection = "extensions" | "providers" | "devices";
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
@@ -23,6 +25,7 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   { id: "extensions", label: "Extensions", surface: "extension-install" },
   { id: "providers", label: "Providers", surface: "provider-setup" },
+  { id: "devices", label: "Paired devices", surface: "device-management" },
 ];
 
 export interface RemoteHostSettingsProps {
@@ -32,6 +35,9 @@ export interface RemoteHostSettingsProps {
   readonly providerClient: ProviderClient;
   /** Stores, replaces and clears a provider key in the host's credential store. */
   readonly providerKeys: ProviderKeyHost;
+  readonly pairedDevices: PairedDeviceAdministrationClient;
+  /** The host's address as this browser reached it. */
+  readonly origin: string;
   /** Starts and polls a provider sign-in over the session. */
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
@@ -39,9 +45,10 @@ export interface RemoteHostSettingsProps {
 }
 
 /**
- * The host's Extensions and Providers settings in a browser the host's own
- * person paired: the same sections a local window's Settings mounts, driven by
- * clients that travel over the session (maintainer decision, 2026-11-12). A
+ * The host's Extensions, Providers and Paired devices settings in a browser
+ * the host's own person paired, driven by clients that travel over the
+ * session (maintainer decision, 2026-11-12). Extensions and Providers are the
+ * sections a local window's Settings mounts. A
  * section is offered only where the matrix says the host forwards its routes,
  * and each is closed until asked for so the shell opens without its reads.
  * The Providers section takes a key only where the matrix says the host
@@ -70,6 +77,9 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         ))}
       </div>
       {open === "extensions" ? <ExtensionsSettingsView client={props.extensionClient} /> : null}
+      {open === "devices" ? (
+        <RemotePairedDevices client={props.pairedDevices} origin={props.origin} />
+      ) : null}
       {open === "providers" ? (
         <RemoteProviderSettings
           client={props.providerClient}

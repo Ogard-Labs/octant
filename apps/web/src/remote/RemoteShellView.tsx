@@ -23,6 +23,7 @@ import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteExtensionClient,
+  createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
   createRemoteProviderCredentialClient,
   createRemoteProviderOAuth,
@@ -76,6 +77,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
+  );
+  const pairedDevices = useMemo(
+    () => createRemotePairedDeviceAdministrationClient(props.bridge),
+    [props.bridge],
   );
   const providerKeys = useMemo(
     () => createRemoteProviderCredentialClient(props.bridge),
@@ -199,6 +204,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
       <RemoteHostSettings
         extensionClient={extensionClient}
+        origin={origin}
+        pairedDevices={pairedDevices}
         providerClient={clients.provider}
         providerKeys={providerKeys}
         providerOAuth={providerOAuth}
