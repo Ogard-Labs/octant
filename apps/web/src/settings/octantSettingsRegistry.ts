@@ -184,13 +184,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
         {
-          id: settingId("thread-stats"),
-          label: "Stats line under the composer",
-          scope: "app",
-          keywords:
-            "thread stats line tokens cache hit speed tok/s first token latency cost usage composer show hide",
-        },
-        {
           id: settingId("usage-bars"),
           label: "Usage bars",
           scope: "app",
@@ -668,6 +661,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
+        },
+        {
+          id: settingId("host-worktrees"),
+          label: "Worktrees on this computer",
+          scope: "host",
+          keywords:
+            "worktrees agents stale scan computer home folder other tools git worktree remove prune disk space",
+        },
+        {
+          id: settingId("xcode-build-data"),
+          label: "Xcode builds",
+          scope: "host",
+          keywords:
+            "xcode derived data deriveddata build folders cache stale orphaned disk space remove",
         },
         {
           id: settingId("open-in-applications"),
@@ -1591,6 +1598,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Pair with another computer",
           scope: "host",
           keywords: "pair pairing another computer code",
+        },
+        {
+          id: settingId("agent-access"),
+          label: "Agents on other computers",
+          scope: "host",
+          keywords:
+            "agent access grant bot outside agent another computer mcp connection code key fingerprint confirm direct key revoke started by",
         },
         {
           id: settingId("browser-hub-code"),

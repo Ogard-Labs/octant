@@ -12,7 +12,7 @@ export type TextareaProps = ComponentProps<"textarea"> & {
  * fixed height, so `min-h` is a floor rather than the size.
  */
 const fieldRecipe = cn(
-  "flex field-sizing-content min-h-16 w-full px-2.5 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm",
+  "flex field-sizing-content min-h-16 w-full px-2.5 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm",
   fieldPaint,
 );
 

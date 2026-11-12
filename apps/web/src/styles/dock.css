@@ -30,12 +30,17 @@
   content: "";
 }
 
-/* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
-   which is what tells it apart from the pointer. */
-.right-utility-dock__resize:hover::before,
-.right-utility-dock__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
+.right-utility-dock__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.right-utility-dock__resize:active::before {
+  width: 2px;
+  background: var(--oct-meta);
 }
 
 .right-utility-dock__surface {
@@ -220,6 +225,7 @@
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
 }
 
 .dock-card__chevron {
@@ -267,12 +273,23 @@
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* A diff figure in a card row is the mono figure it is everywhere else, not a
+   name: it keeps the regular weight and the row's own line height. */
+.dock-card__label.diffstat {
+  font-weight: var(--oct-weight-regular);
+  line-height: inherit;
+}
+
+/* The fold row's own words are a hint, not a name: they keep the regular weight. */
 .dock-card__label--meta {
   color: var(--oct-meta);
+  font-weight: var(--oct-weight-regular);
 }
 
 .dock-card__meta {
@@ -511,6 +528,23 @@
   white-space: nowrap;
 }
 
+/* A delivery head's status line is the one part that can outgrow a narrow dock
+   (280px is the dock's minimum). It drops to a row of its own and wraps there,
+   instead of holding its one-line width and pushing the title's label over
+   itself: measured at 280px, "Local only · GitHub review mutation unavailable"
+   ran 14px past the edge and the "Review" label overlapped it. Wide docks fit
+   both on one line, so nothing moves there. */
+.right-utility-dock__tool .code-delivery-pane__toolbar {
+  flex-wrap: wrap;
+  row-gap: var(--oct-space-1);
+}
+
+.right-utility-dock__tool .code-delivery-pane__toolbar > p {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
   flex: none;
   padding: 0;
@@ -672,9 +706,13 @@
   content: "";
 }
 
-.bottom-utility-panel__resize:hover::before,
-.bottom-utility-panel__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+.bottom-utility-panel__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.bottom-utility-panel__resize:active::before {
+  height: 2px;
+  background: var(--oct-meta);
 }
 
 .bottom-utility-panel__toolbar {
@@ -962,20 +1000,20 @@
   border-radius: var(--oct-radius-md);
 }
 
-/* A dialog shares the layer menus, popovers and pickers float on (`z-50`),
-   so whichever opened last paints on top. At 51 the dialog outranked every
-   popup opened from inside it: in the narrow dock sheet the Canvas version
-   history and More menu opened behind the sheet, out of reach. */
+/* A dialog stands on the floating layer and every popup stands above it, so
+   a popup opened from inside a dialog is never behind it: in the narrow dock
+   sheet the Canvas version history and More menu once opened behind the sheet,
+   out of reach. A notice sits between the two. */
 .octant-dialog__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -1016,14 +1054,14 @@
    its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
 .octant-sheet__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;

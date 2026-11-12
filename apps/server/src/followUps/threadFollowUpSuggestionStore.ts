@@ -9,11 +9,13 @@ import {
   THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
   THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES,
   ThreadFollowUpActivated,
+  ThreadFollowUpNextMessageSpent,
   ThreadFollowUpsSuggested,
   decodeNativeHarnessSession,
   decodeNativeHarnessTurnId,
   decodeThreadFollowUpSuggestions,
   decodeThreadFollowUpsSuggested,
+  type FollowUpNextMessage,
   type FollowUpSuggestedBy,
   type NativeHarnessFollowUpCreation,
   type NativeHarnessFollowUpId,
@@ -38,12 +40,19 @@ type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 export function registerFollowUpSuggestionEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.suggested, 1, ThreadFollowUpsSuggested)
-    .register(THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.activated, 1, ThreadFollowUpActivated);
+    .register(THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.activated, 1, ThreadFollowUpActivated)
+    .register(
+      THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.nextMessageSpent,
+      1,
+      ThreadFollowUpNextMessageSpent,
+    );
 }
 
 interface SuggestionRecord {
   current: ThreadFollowUpsSuggested;
   activated: NativeHarnessFollowUpId[];
+  /** The person sent a message after this reply, so its predicted next message is gone. */
+  nextMessageSpent: boolean;
   /** What each activation created, so a retried confirmation gets the same answer. */
   created: Map<string, NativeHarnessFollowUpCreation>;
   /** Frames on this thread's own aggregate; harness frames replayed below do not count. */
@@ -98,8 +107,10 @@ export class ThreadFollowUpSuggestionStore {
   read(threadId: string): ThreadFollowUpSuggestions | undefined {
     const record = this.#records.get(threadId);
     if (record === undefined) return undefined;
+    const { nextMessage, ...current } = record.current;
     return decodeThreadFollowUpSuggestions({
-      ...record.current,
+      ...current,
+      ...(nextMessage === undefined || record.nextMessageSpent ? {} : { nextMessage }),
       activatedFollowUpIds: record.activated,
     });
   }
@@ -115,13 +126,15 @@ export class ThreadFollowUpSuggestionStore {
     readonly projectId?: ProjectId | undefined;
     readonly suggestedBy: FollowUpSuggestedBy;
     readonly followUps: NativeHarnessFollowUpSet | undefined;
+    readonly nextMessage?: FollowUpNextMessage | undefined;
   }): void {
     const record = this.#records.get(input.threadId);
-    if (input.followUps === undefined) {
-      const open = record?.current.followUps.suggestions.some(
-        (suggestion) => !record.activated.includes(suggestion.id),
-      );
-      if (open !== true) return;
+    if (input.followUps === undefined && input.nextMessage === undefined) {
+      const open =
+        record?.current.followUps.suggestions.some(
+          (suggestion) => !record.activated.includes(suggestion.id),
+        ) === true || hasOpenNextMessage(record);
+      if (!open) return;
     }
     const suggested = decodeThreadFollowUpsSuggested({
       threadId: input.threadId,
@@ -135,6 +148,7 @@ export class ThreadFollowUpSuggestionStore {
         turnId: decodeNativeHarnessTurnId(this.#uuid()),
         suggestions: [],
       },
+      ...(input.nextMessage === undefined ? {} : { nextMessage: input.nextMessage }),
     });
     const version = record?.version ?? 0;
     this.#append(
@@ -146,9 +160,31 @@ export class ThreadFollowUpSuggestionStore {
     this.#records.set(input.threadId, {
       current: suggested,
       activated: [],
+      nextMessageSpent: false,
       created: new Map(),
       version: version + 1,
     });
+  }
+
+  /**
+   * A turn started on the thread, so whatever the person sent, the reply's
+   * prediction of it is spent. Without this the empty composer offered the
+   * message just sent again for as long as the next turn ran, on every
+   * surface reading the thread.
+   */
+  spendNextMessage(threadId: string): void {
+    const record = this.#records.get(threadId);
+    if (record === undefined || !hasOpenNextMessage(record)) return;
+    this.#append(
+      threadId,
+      record.version,
+      THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.nextMessageSpent,
+      {
+        turnId: record.current.followUps.turnId,
+      },
+    );
+    record.version += 1;
+    record.nextMessageSpent = true;
   }
 
   activate(
@@ -219,9 +255,16 @@ export class ThreadFollowUpSuggestionStore {
       this.#records.set(threadId, {
         current: payload as ThreadFollowUpsSuggested,
         activated: [],
+        nextMessageSpent: false,
         created: new Map(),
         version: (record?.version ?? 0) + 1,
       });
+    } else if (
+      eventName === THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.nextMessageSpent &&
+      record !== undefined
+    ) {
+      record.version += 1;
+      record.nextMessageSpent = true;
     } else if (
       eventName === THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.activated &&
       record !== undefined
@@ -263,6 +306,7 @@ export class ThreadFollowUpSuggestionStore {
       this.#records.set(threadId, {
         current: { threadId, ...origin, followUps: payload as NativeHarnessFollowUpSet },
         activated: [],
+        nextMessageSpent: false,
         created: new Map(),
         version,
       });
@@ -271,6 +315,10 @@ export class ThreadFollowUpSuggestionStore {
       if (record !== undefined) this.#rememberParent(threadId, applyActivation(record, payload));
     }
   }
+}
+
+function hasOpenNextMessage(record: SuggestionRecord | undefined): boolean {
+  return record?.current.nextMessage !== undefined && !record.nextMessageSpent;
 }
 
 function applyActivation(

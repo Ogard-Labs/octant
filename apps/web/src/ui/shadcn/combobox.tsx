@@ -29,7 +29,7 @@ export function ComboboxInput({
   return (
     <ComboboxPrimitive.Input
       className={cn(
-        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-default disabled:opacity-50",
+        "h-full min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-foreground outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)",
         className,
       )}
       data-slot="combobox-input"
@@ -60,7 +60,10 @@ export function ComboboxPositioner({
 }: ComponentProps<typeof ComboboxPrimitive.Positioner>) {
   return (
     <ComboboxPrimitive.Positioner
-      className={cn("z-50 w-[var(--anchor-width)] outline-none window-no-drag", className)}
+      className={cn(
+        "z-[var(--oct-z-popup)] w-[var(--anchor-width)] outline-none window-no-drag",
+        className,
+      )}
       data-slot="combobox-positioner"
       {...props}
     />

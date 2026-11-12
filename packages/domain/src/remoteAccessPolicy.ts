@@ -103,6 +103,9 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "simulator.observe",
   "terminal.read",
   "automation.manage",
+  // Ending an outside agent's grant: it only takes authority away, so the
+  // person may do it from the phone that told them about the agent's work.
+  "agent-access.revoke",
   // Answering an MCP tool prompt raised by the device's own turn, approve
   // once or deny. Remembering the answer for the Project stays with a local
   // window; the approval service refuses it from a paired device.

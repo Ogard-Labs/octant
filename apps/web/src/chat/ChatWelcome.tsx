@@ -166,6 +166,43 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            // Connecting and reloading settle by themselves: progress. A
+            // disconnect, a refusal and an attachment refusal stay until
+            // resolved: cards.
+            progress={
+              props.errorMessage === undefined &&
+              (props.status === "loading" || props.status === "conflict-reload")
+                ? { text: statusMessage ?? "" }
+                : undefined
+            }
+            notices={
+              visibleStatusMessage === undefined ||
+              (props.errorMessage === undefined &&
+                (props.status === "loading" || props.status === "conflict-reload"))
+                ? []
+                : [
+                    {
+                      key: "status",
+                      tone: props.errorMessage === undefined ? "warning" : "danger",
+                      text: visibleStatusMessage,
+                      ...(!ready && props.status === "disconnected" && props.onRetry !== undefined
+                        ? {
+                            action: (
+                              <OctantButton
+                                className="chat-welcome__retry"
+                                onClick={props.onRetry}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Retry Chat
+                              </OctantButton>
+                            ),
+                          }
+                        : {}),
+                    },
+                  ]
+            }
             planUsage={{
               providerInstanceId:
                 props.selectedProviderInstanceId === undefined
@@ -322,25 +359,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             }}
           />
         </div>
-        {visibleStatusMessage === undefined ? null : (
-          /* ui-boundary-exception: compact-status */
-          <p
-            className="draft-thread__error"
-            role={props.errorMessage === undefined ? "status" : "alert"}
-          >
-            {visibleStatusMessage}
-          </p>
-        )}
-        {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
-          <OctantButton
-            className="chat-welcome__retry"
-            onClick={props.onRetry}
-            type="button"
-            variant="ghost"
-          >
-            Retry Chat
-          </OctantButton>
-        ) : null}
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
             {starterIdeas.map((idea) => {

@@ -1,11 +1,12 @@
 import { execFile as nodeExecFile, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { GitObservationPort } from "./gitObservationPort";
+import { GitObservationPort, type GitObservation } from "./gitObservationPort";
 
 const directories: string[] = [];
 
@@ -415,6 +416,296 @@ describe("GitObservationPort", () => {
     if (result.status !== "ready") return;
     expect(result.mergeability).toBe("clean");
   });
+
+  it("starts a fixed number of Git processes however many paths changed", async () => {
+    const repository = createRepository();
+    for (let index = 0; index < 10; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "before\n");
+    }
+    git(repository, "add", "--", ".");
+    git(repository, "commit", "-m", "tracked files");
+    for (let index = 0; index < 10; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "after\n");
+      writeFileSync(join(repository, `untracked-${index}.txt`), "new\n");
+    }
+    for (let index = 0; index < 5; index += 1) {
+      writeFileSync(join(repository, `staged-${index}.txt`), "staged\n");
+    }
+    git(repository, "add", "--", "staged-0.txt", "staged-1.txt", "staged-2.txt");
+    for (let index = 0; index < 5; index += 1) {
+      writeFileSync(join(repository, `extra-${index}.txt`), "extra\n");
+    }
+    const calls: string[][] = [];
+    const port = recordingPort((args) => calls.push([...args]));
+
+    const result = await port.observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toHaveLength(30);
+    expect(calls.length).toBeLessThanOrEqual(12);
+  });
+
+  it("keeps the fixed process count when a deleted file and an untracked directory sit among many changes", async () => {
+    const repository = createRepository();
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "before\n");
+    }
+    writeFileSync(join(repository, "deleted.txt"), "before\n");
+    git(repository, "add", "--", ".");
+    git(repository, "commit", "-m", "tracked files");
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(repository, `tracked-${index}.txt`), "after\n");
+    }
+    rmSync(join(repository, "deleted.txt"));
+    mkdirSync(join(repository, "untracked-directory"));
+    writeFileSync(join(repository, "untracked-directory", "inner.txt"), "new\n");
+    const calls: string[][] = [];
+    const port = recordingPort((args) => calls.push([...args]));
+
+    const result = await port.observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toEqual(
+      expect.arrayContaining(["deleted.txt", "untracked-directory"]),
+    );
+    expect(calls.length).toBeLessThanOrEqual(12);
+    expect(calls.filter((args) => args.includes("hash-object"))).toHaveLength(1);
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it("reads the same content ids as one Git call per path for every kind of change", async () => {
+    const repository = createRepository();
+    const tracked = [
+      "modified.txt",
+      "staged.txt",
+      "deleted.txt",
+      "old-name.txt",
+      "tracked space.txt",
+      "tracked\nnewline.txt",
+    ];
+    for (const name of tracked) writeFileSync(join(repository, name), "before\n");
+    git(repository, "add", "--", ...tracked);
+    git(repository, "commit", "-m", "tracked files");
+    writeFileSync(join(repository, "modified.txt"), "after\n");
+    writeFileSync(join(repository, "staged.txt"), "staged\n");
+    git(repository, "add", "--", "staged.txt");
+    rmSync(join(repository, "deleted.txt"));
+    git(repository, "mv", "old-name.txt", "new-name.txt");
+    writeFileSync(join(repository, "tracked space.txt"), "after\n");
+    writeFileSync(join(repository, "tracked\nnewline.txt"), "after\n");
+    writeFileSync(join(repository, "untracked.txt"), "new\n");
+    writeFileSync(join(repository, "new space.txt"), "new\n");
+    mkdirSync(join(repository, "untracked-directory"));
+    writeFileSync(join(repository, "untracked-directory", "inner.txt"), "new\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toEqual(
+      expect.arrayContaining([
+        "deleted.txt",
+        "old-name.txt",
+        "new-name.txt",
+        "untracked-directory",
+        "tracked\nnewline.txt",
+      ]),
+    );
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it("reads the same content ids as one Git call per path for an unmerged path", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "conflict.txt"), "base\n");
+    git(repository, "add", "--", "conflict.txt");
+    git(repository, "commit", "-m", "base");
+    git(repository, "checkout", "-q", "-b", "other");
+    writeFileSync(join(repository, "conflict.txt"), "other\n");
+    git(repository, "commit", "-a", "-m", "other");
+    git(repository, "checkout", "-q", "main");
+    writeFileSync(join(repository, "conflict.txt"), "main\n");
+    git(repository, "commit", "-a", "-m", "main");
+    expect(() => git(repository, "merge", "other")).toThrow();
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.statusEntries.map((entry) => `${entry.index}${entry.worktree}`)).toEqual(["UU"]);
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it("reads the same content ids as one Git call per path on an unborn branch", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "staged.txt"), "staged\n");
+    git(repository, "add", "--", "staged.txt");
+    writeFileSync(join(repository, "untracked.txt"), "new\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.head.kind).toBe("unborn");
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it("still reads ids for the other paths when one path of a batch was deleted", async () => {
+    const repository = createRepository();
+    for (const name of ["a.txt", "b.txt", "c.txt"]) writeFileSync(join(repository, name), "x\n");
+    git(repository, "add", "--", ".");
+    git(repository, "commit", "-m", "files");
+    writeFileSync(join(repository, "a.txt"), "changed\n");
+    rmSync(join(repository, "b.txt"));
+    writeFileSync(join(repository, "c.txt"), "changed\n");
+    const port = new GitObservationPort(confinedOptions());
+
+    const first = await port.observe(repository);
+    const firstOracle = first.status === "ready" ? oracleStateToken(first) : undefined;
+    writeFileSync(join(repository, "c.txt"), "changed again\n");
+    const second = await port.observe(repository);
+
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status !== "ready" || second.status !== "ready") return;
+    expect(first.stateToken).toBe(firstOracle);
+    // Only a surviving path's id can move the token here, because the status
+    // entries are unchanged between the two observations.
+    expect(second.statusEntries).toEqual(first.statusEntries);
+    expect(second.stateToken).not.toBe(first.stateToken);
+  });
+
+  it("reads index ids one path at a time when the batched listing fails", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "changed\n");
+    writeFileSync(join(repository, "untracked.txt"), "new\n");
+    git(repository, "add", "--", "README.md");
+    const port = recordingPort(
+      () => undefined,
+      (args) => (args.includes("ls-files") ? { exitCode: 128, stdout: "" } : undefined),
+    );
+
+    const result = await port.observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.stateToken).toBe(oracleStateToken(result));
+  });
+
+  it.each([
+    [
+      "a symlink to a regular file",
+      "link.txt",
+      (root: string) => symlinkSync("target.txt", join(root, "link.txt")),
+    ],
+    [
+      "a dangling symlink",
+      "link.txt",
+      (root: string) => symlinkSync("missing.txt", join(root, "link.txt")),
+    ],
+    [
+      "a symlink to a directory",
+      "link.txt",
+      (root: string) => symlinkSync("some-directory", join(root, "link.txt")),
+    ],
+  ])(
+    "reads the same content ids as one Git call per path for %s, with a fixed process count",
+    async (_name, _link, makeLink) => {
+      const repository = createRepository();
+      writeFileSync(join(repository, "target.txt"), "target\n");
+      mkdirSync(join(repository, "some-directory"));
+      for (let index = 0; index < 10; index += 1) {
+        writeFileSync(join(repository, `plain-${index}.txt`), "new\n");
+      }
+      makeLink(repository);
+      const calls: string[][] = [];
+      const port = recordingPort((args) => calls.push([...args]));
+
+      const result = await port.observe(repository);
+
+      expect(result.status).toBe("ready");
+      if (result.status !== "ready") return;
+      expect(result.changedPaths).toContain("link.txt");
+      expect(result.stateToken).toBe(oracleStateToken(result));
+      expect(calls.length).toBeLessThanOrEqual(12);
+    },
+  );
+
+  it("hashes a server checkout's changed paths through Git and never reads the local filesystem", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "edited.txt"), "one\n");
+    // A local path with the same names must not matter: the checkout is elsewhere.
+    const decoyRoot = join(temporaryDirectory(), "server-checkout");
+    mkdirSync(join(decoyRoot, "edited.txt"), { recursive: true });
+    const calls: string[][] = [];
+    const port = new GitObservationPort(
+      { ...confinedOptions(), onServer: true },
+      {
+        realpath: async (path) => path,
+        execFile: (file, args, environment, signal) =>
+          new Promise((resolve) => {
+            calls.push([...args]);
+            if (args.includes("--show-toplevel")) {
+              resolve({ exitCode: 0, stdout: `${decoyRoot}\n` });
+              return;
+            }
+            const rewritten = args.map((argument) =>
+              argument === decoyRoot ? repository : argument,
+            );
+            nodeExecFile(
+              file,
+              rewritten,
+              {
+                encoding: "buffer",
+                env: environment,
+                shell: false,
+                signal,
+                maxBuffer: 2 * 1024 * 1024,
+              },
+              (error, stdoutBytes) => {
+                resolve({
+                  exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+                  stdout: stdoutBytes.toString("utf8"),
+                });
+              },
+            );
+          }),
+      },
+    );
+
+    const first = await port.observe(decoyRoot);
+    writeFileSync(join(repository, "edited.txt"), "two\n");
+    const second = await port.observe(decoyRoot);
+
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status !== "ready" || second.status !== "ready") return;
+    expect(first.changedPaths).toEqual(["edited.txt"]);
+    expect(calls.some((args) => args.includes("hash-object"))).toBe(true);
+    expect(second.stateToken).not.toBe(first.stateToken);
+  });
+
+  it("keeps rewritten remote URLs as git reports them", async () => {
+    const repository = createRepository();
+    git(repository, "remote", "add", "origin", "gh:octant/one.git");
+    git(repository, "config", "url.https://github.com/.insteadOf", "gh:");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.remotes).toEqual([
+      {
+        name: "origin",
+        fetchUrl: "https://github.com/octant/one.git",
+        pushUrl: "https://github.com/octant/one.git",
+      },
+    ]);
+  });
 });
 
 function observationPortWithNumstat(stdout: string): GitObservationPort {
@@ -445,6 +736,81 @@ function observationPortWithNumstat(stdout: string): GitObservationPort {
         );
       }),
   });
+}
+
+/**
+ * A port that runs real Git and reports every command it starts. `override`
+ * answers a command in place of Git, for a failure Git will not produce itself.
+ */
+function recordingPort(
+  onCall: (args: readonly string[]) => void,
+  override: (args: readonly string[]) => { exitCode: number; stdout: string } | undefined = () =>
+    undefined,
+): GitObservationPort {
+  return new GitObservationPort(confinedOptions(), {
+    realpath,
+    execFile: (file, args, environment, signal) =>
+      new Promise((resolve) => {
+        onCall(args);
+        const replaced = override(args);
+        if (replaced !== undefined) {
+          resolve(replaced);
+          return;
+        }
+        nodeExecFile(
+          file,
+          [...args],
+          {
+            encoding: "buffer",
+            env: environment,
+            shell: false,
+            signal,
+            maxBuffer: 2 * 1024 * 1024,
+          },
+          (error, stdoutBytes) => {
+            resolve({
+              exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+              stdout: stdoutBytes.toString("utf8"),
+            });
+          },
+        );
+      }),
+  });
+}
+
+/**
+ * The state token the observation had when each changed path cost two Git
+ * processes: the worktree id from `hash-object`, the index id from `rev-parse`.
+ */
+function oracleStateToken(observation: GitObservation): string {
+  const objectId = (args: string[]): string | null => {
+    try {
+      const text = execFileSync("git", ["-C", observation.checkoutRoot, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(text) ? text : null;
+    } catch {
+      return null;
+    }
+  };
+  const contentObjects = observation.changedPaths.map((path) => ({
+    path,
+    objectId: objectId(["hash-object", "--no-filters", "--", path]),
+    indexObjectId: objectId(["rev-parse", "--verify", `:${path}`]),
+  }));
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        head: observation.head,
+        statusEntries: observation.statusEntries,
+        contentObjects,
+        remotes: observation.remotes,
+        upstream: observation.upstream,
+        worktrees: observation.worktrees,
+      }),
+    )
+    .digest("hex");
 }
 
 function createRepository(): string {

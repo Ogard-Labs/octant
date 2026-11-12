@@ -90,7 +90,7 @@ const DARK_OCTANT_TOKENS: Readonly<Record<string, string>> = {
   "control-pressed": "#322f25",
   border: "#312f2c",
   "border-strong": "#494844",
-  "divider-strong": "#787773",
+  "divider-strong": "#898883",
   "text-primary": "#f2f1ed",
   "text-secondary": "#959490",
   // 4.8:1 on the control fill, the darkest ground meta text sits on. The
@@ -171,7 +171,7 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
           pressed: 0.28,
           border: 0.22,
           borderStrong: 0.34,
-          divider: 0.52,
+          divider: 0.635,
           selection: 0.22,
         }
       : {
@@ -185,7 +185,7 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
           pressed: 0.345,
           border: 0.3,
           borderStrong: 0.4,
-          divider: 0.58,
+          divider: 0.635,
           selection: 0.3,
         };
   // An OLED preset's page really is black: the pixels switch off. The

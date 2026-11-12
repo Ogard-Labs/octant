@@ -1630,6 +1630,7 @@ function ActivityThreadButton(props: {
           : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}
+        threadId={props.thread.threadId}
         status={
           shows.status ? (
             <ThreadStatusMark

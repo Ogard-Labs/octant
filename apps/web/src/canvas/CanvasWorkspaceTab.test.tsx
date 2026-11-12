@@ -1756,16 +1756,27 @@ describe("CanvasWorkspaceTab in the narrow dock sheet", () => {
     return onClose;
   }
 
+  /** A layer as a number: written out, or one of the stylesheet's named layers. */
+  function layerNumber(value: string): number {
+    const named = /var\((--oct-z-[a-z-]+)\)/.exec(value);
+    if (named === null) return Number(value);
+    const token = new RegExp(`${named[1]}:\\s*(\\d+)`).exec(octantCss);
+    if (token === null) throw new Error(`No layer named ${named[1]}.`);
+    return Number(token[1]);
+  }
+
   /** The stacking order the root context gives a fixed or positioned box. */
   function rootLayer(element: Element): { readonly node: Element; readonly z: number } {
     for (let node: Element | null = element; node !== null; node = node.parentElement) {
-      const tailwind = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(node.getAttribute("class") ?? "");
-      if (tailwind !== null) return { node, z: Number(tailwind[1]) };
+      const tailwind = /(?:^|\s)z-(\d+|\[var\(--oct-z-[a-z-]+\)\])(?:\s|$)/.exec(
+        node.getAttribute("class") ?? "",
+      );
+      if (tailwind?.[1] !== undefined) return { node, z: layerNumber(tailwind[1]) };
       const declared = (node.getAttribute("class") ?? "")
         .split(/\s+/)
         .map((name) => cssDeclarations(`.${name}`, dockCss, false)["z-index"])
         .find((value) => value !== undefined);
-      if (declared !== undefined) return { node, z: Number(declared) };
+      if (declared !== undefined) return { node, z: layerNumber(declared) };
     }
     throw new Error("No stacking layer above the element.");
   }
@@ -1834,6 +1845,10 @@ const canvasCss = readFileSync(join(webRoot, "styles/canvas.css"), "utf8").repla
   "",
 );
 const dockCss = readFileSync(join(webRoot, "styles/dock.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+const octantCss = readFileSync(join(webRoot, "styles/octant.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
   "",
 );

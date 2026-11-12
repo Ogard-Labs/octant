@@ -1199,13 +1199,20 @@ sit side by side without giving any thread a view of another's. The tabs use
 the shared tab rail, which wraps rather than scrolls so no tab hides off the
 edge of a narrow dock. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
-page's picture with the thread, and a thread that kept screenshots shows a
+page's picture with the thread, and, in a Work or Code thread's Browser, a
+**Draw on page** button (a pen-line icon beside it) that keeps the same capture,
+shows it still in place of the page, and floats a drawing bar ("Drawing tools":
+Select, Pen, Box, Arrow, Text, one ink control, one stroke toggle, Undo, Redo,
+Delete, then **Add to chat** and **Discard drawing**) over its bottom centre; **Add to chat** puts the
+marked-up picture in that thread's composer as an ordinary image and sends
+nothing, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a
 thread with Browser steps also shows a folded _Browser proof_ panel there: the
 agent's steps as a numbered list with each capture under the step that took it.
 An agent's recording sits in the strip and the panel like a screenshot, still,
 with a play mark and its length, and plays when the person opens it.
-The rules are in [Browser captures](browser-captures.md) and
+The rules are in [Browser captures](browser-captures.md),
+[Marking up a capture](browser-captures.md#marking-up-a-capture) and
 [Proof](browser-captures.md#proof). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
@@ -1609,36 +1616,32 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
-Under the composer of every thread, in Chat, Work, and Code and for every provider, a
-quiet stats line states what the thread used: its turns, input and output tokens,
-thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the row under the box, right of
-the thread's context, one bar per window showing the share left; the stats line's
-switch hides the figures, not those bars
+At the top of the Thread info panel of every thread, in Chat, Work, and Code and for every
+provider, a compact block of figures states what the thread used: its turns, input and output
+tokens, thinking tokens when reported, the cache hit, output speed, time to first token, and
+cost. They are not under the composer. The provider's account limit windows stand in the row
+under the box, right of the thread's context, one bar per window showing the share left
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
 falling back to the Code thread's own report). A provider that reported neither windows
-nor usage shows no line. In a split workspace the line shows in the active pane only: the
-figures and limits come from one shell-wide scope, so an inactive pane shows no line rather
+nor usage shows no block. In a split workspace the block shows in the active pane only: the
+figures and limits come from one shell-wide scope, so an inactive pane shows no figures rather
 than another thread's numbers. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
 (`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
 session card, the terminal footer, and the phone's session panel all call, so
 the rules cannot drift. A figure the provider did not report, or whose denominator is zero, is
-absent; a provider that reported no usage shows no line. A cache hit is never
+absent; a provider that reported no usage shows no figures. A cache hit is never
 rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
 is per turn and includes some tool time; a cost says "est." unless the provider
-reported it and is absent when the model has no price. Clicking the line, or
+reported it and is absent when the model has no price. The block's Turn details link, or
 **Turn details** in the context meter's popover, opens one turn at a time (tokens,
 timing, retries, cost). The usage page's per-thread rows and the turn drill-in
 under each row call this same module, so a thread shows the same cache, speed,
-first-token, and cost figures there as under its composer. Those columns are
+first-token, and cost figures there as in its Thread info panel. Those columns are
 left out when no row can state them. The rows read `turnMetrics` on the existing
 usage query; they do not add a second accounting path. A reading of one thread
 uses that thread's totals. A reading that mixes threads and has scrolled past
-the latest turns says those rows cover only the turns still listed. The line is on by default; `showThreadStats` in the shell
-settings is the one shared preference, set from the eye button on the line, the
-switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
-only the line; the details stay reachable.
+the latest turns says those rows cover only the turns still listed. There is no hide control and no setting: the stored `showThreadStats` value stays in the shell settings schema so saved settings still decode, and nothing reads it.
 
 Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained
