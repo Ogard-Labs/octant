@@ -1403,7 +1403,7 @@ thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
 did not take stays visible. A Code Stop waits at most ten seconds
-(`CODE_STOP_CONFIRMATION_MS`) for the runtime to answer its interrupt, then
+(`STOP_CONFIRMATION_MS`, shared with Chat) for the runtime to answer its interrupt, then
 answers `interrupted` with "Stop was not confirmed. The provider may still be
 running this turn." The turn stays live and holds its thread until the
 runtime itself reports how it ended: its tool activity meanwhile is still
@@ -5189,7 +5189,9 @@ or .zip>` write the same files, built by one host command
   person who reopens the app finds them settled and a thread held only by one
   is released when the remote proves how it ended. Start-up never waits on it:
   at most three threads are read at a time, each step's reads stop after 20
-  seconds, and server shutdown stops the pass. It runs as the host (the scope
+  seconds (the checkout-root probe included: its Git is killed and nothing
+  after an in-flight filesystem read starts), and server shutdown stops the
+  pass. It runs as the host (the scope
   a routine runs under) and looks only at an active thread whose Project the
   host still holds, through the thread's own checkout root, re-resolved and
   re-checked against the Project binding, and its own remote, and at the pull

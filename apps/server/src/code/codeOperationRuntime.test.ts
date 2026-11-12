@@ -871,6 +871,27 @@ describe("CodeOperationRuntime", () => {
       }
     });
 
+    it("stops the checkout probe it abandons when the step's time is up", async () => {
+      let probeSignal: AbortSignal | undefined;
+      const fixture = runtimeFixture({
+        resolveCheckoutRoot: (_windowId, _thread, _checkout, signal) => {
+          probeSignal = signal;
+          return new Promise(() => {});
+        },
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(probeSignal?.aborted).toBe(true);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
     it("returns at once while a remote is still being asked, and lets go when stopped", async () => {
       let asked = false;
       const remoteHead = vi.fn(

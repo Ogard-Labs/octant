@@ -258,6 +258,7 @@ import {
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -332,7 +333,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
-  /** How long a Stop waits for the runtime to confirm it; defaults to {@link CODE_STOP_CONFIRMATION_MS}. */
+  /** How long a Stop waits for the runtime to confirm it; defaults to {@link STOP_CONFIRMATION_MS}. */
   readonly stopConfirmationMs?: number;
   /**
    * Whether a move holds the thread: frozen while it leaves this computer, or
@@ -1112,8 +1113,8 @@ export function createCodeOperationRuntime(
       const context = await approvalContext(options, command, thread, checkout);
       return context === undefined ? undefined : approvalContextDigest(context);
     },
-    resolveCheckoutRoot: async (windowId, thread, checkout) => {
-      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout);
+    resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {
+      const resolved = await options.resolveCheckoutRoot(windowId, thread, checkout, signal);
       const folders = extraFoldersOf(thread.projectId);
       const root =
         resolved === undefined || folders.length === 0
@@ -4995,7 +4996,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         Effect.runPromise(
           connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
         ),
-        this.#options.stopConfirmationMs ?? CODE_STOP_CONFIRMATION_MS,
+        this.#options.stopConfirmationMs ?? STOP_CONFIRMATION_MS,
       );
       // A Stop is only a request, and the caller hears back within the bound.
       // The turn stays live and holds the thread until the runtime itself
@@ -6443,15 +6444,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     );
   }
 }
-
-/**
- * How long a Stop waits for the runtime to confirm the turn ended: the same
- * grace Chat gives a shared-process runtime and the renderer waits before it
- * offers Force stop. A runtime that never answers the interrupt otherwise
- * left the person's Stop request waiting indefinitely; the turn itself stays
- * open until the runtime reports how it ended.
- */
-export const CODE_STOP_CONFIRMATION_MS = 10_000;
 
 const STOP_UNCONFIRMED_MESSAGE =
   "Stop was not confirmed. The provider may still be running this turn.";
