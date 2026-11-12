@@ -4846,6 +4846,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
+    if (
+      input.turnOperationId !== undefined &&
+      String(active.operationId) !== String(input.turnOperationId)
+    )
+      return turnState("failed", {
+        category: "failed",
+        message: "That turn has already ended, so Stop left the turn running now alone.",
+      });
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =

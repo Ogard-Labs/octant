@@ -1033,6 +1033,8 @@ export interface CodeOperationTurnPort {
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** When set, only this turn may be stopped; a different live turn is left running. */
+    readonly turnOperationId?: CodeOperationId;
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -4127,7 +4129,9 @@ export class CodeOperationService {
         for (const starting of this.#startingTurns) {
           if (
             String(starting.thread.id) === String(thread.id) &&
-            starting.checkoutRoot === root.checkoutRoot
+            starting.checkoutRoot === root.checkoutRoot &&
+            (command.turnOperationId === undefined ||
+              String(starting.operationId) === String(command.turnOperationId))
           ) {
             starting.cancelled = true;
             this.#startingTurns.delete(starting);
@@ -4137,6 +4141,9 @@ export class CodeOperationService {
         const cancelled = await this.#options.turns.cancel({
           thread,
           checkoutRoot: root.checkoutRoot,
+          ...(command.turnOperationId === undefined
+            ? {}
+            : { turnOperationId: command.turnOperationId }),
         });
         // A start the runtime has not taken on never will be now, so it is
         // journaled as stopped here: its preparation may not return for a long

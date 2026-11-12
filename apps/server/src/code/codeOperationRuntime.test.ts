@@ -689,6 +689,48 @@ describe("CodeOperationRuntime", () => {
     expect(p95).toBeLessThan(1_000);
   }, 30_000);
 
+  it("refuses a Stop meant for an earlier turn and leaves the newer turn running", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(23),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+      // A Stop the person pressed for a turn that has since been replaced
+      // arrives late, naming that earlier turn.
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(24),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(20),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(25),
+          threadId,
+          checkoutId,
+          turnOperationId: operationId(23),
+        }),
+      ).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each(["restore", "discard"] as const)(
     "refuses another thread's %s while a writing turn is live and allows it once the turn is cancelled",
     async (action) => {

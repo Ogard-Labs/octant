@@ -1389,7 +1389,11 @@ paused; with the slice, a Stop issued into that flood settled the turn at p95
 returns `stop-requested` while its exact request-owned supported runtime is
 still ending. Its force command requires the same request/thread/turn and an already-aborted owned controller. Code's force
 command additionally names the original turn operation, rejects replacement
-operations and requires that Stop already reached that controller. Neither path
+operations and requires that Stop already reached that controller. Code's Stop
+names the turn it was pressed for too: a Stop that names a turn no longer current
+is refused and leaves the newer turn running, so a Stop that arrives late cannot
+end a queued message the host sent on. A Stop that names no turn, from a client
+built before the field, still ends the live turn. Neither path
 accepts a PID or kills a shared runtime; the provider owns process verification.
 The normal turn lifecycle records completion/cancellation, preserving queued
 messages and history. A kill failure leaves an explicit recovery error.

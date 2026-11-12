@@ -1500,6 +1500,10 @@ describe("useCodeController", () => {
     });
     await waitFor(() => expect(result.current.turnStatus).toBe("running"));
 
+    // Stop names the turn this window started, not just the thread.
+    const startedTurn = () =>
+      executeOperation.mock.calls.find(([command]) => command.kind === "start-provider-turn")?.[0]
+        .operationId;
     let cancelled = false;
     await act(async () => {
       cancelled = await result.current.cancelTurn();
@@ -1511,6 +1515,7 @@ describe("useCodeController", () => {
         operationId: expect.any(String),
         threadId: ids.thread,
         checkoutId: ids.checkout,
+        turnOperationId: startedTurn(),
       }),
     );
 
