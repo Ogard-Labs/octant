@@ -804,10 +804,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           // Whether the host may continue a turn by itself after a restart is
-          // a choice about this computer's unattended work, made at it.
+          // the person's choice about this computer's unattended work, at a
+          // window on it or on a device they paired.
           if (
             command !== undefined &&
-            callerKind !== "local-window" &&
+            callerAuthority !== "local-window" &&
             (command.kind === "set-code-thread-restart-continuation" ||
               (command.kind === "update-code-settings" &&
                 command.restartContinuation !== undefined))
