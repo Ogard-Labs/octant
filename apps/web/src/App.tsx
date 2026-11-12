@@ -458,7 +458,11 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
-import { setCodeThreadCoordinator } from "./code/codeThreadCommands";
+import {
+  setCodeThreadCoordinator,
+  setCodeThreadCoordinatorBounds,
+} from "./code/codeThreadCommands";
+import type { CoordinatorDraftChoices } from "./shell/DraftThreadWorkspace";
 import {
   createPlannerProposalTask,
   type PlannerProposalReview,
@@ -992,6 +996,7 @@ function LaunchedShell(
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
       setPendingDraftCoordinator(undefined);
+      setPendingDraftCoordinatorChoices({});
     }
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
@@ -1034,6 +1039,10 @@ function LaunchedShell(
   // creates becomes a coordinator before its first message is sent. It holds
   // only for that Project, so choosing another one in the draft drops it.
   const [pendingDraftCoordinator, setPendingDraftCoordinator] = useState<ProjectId>();
+  // What the person chose for that coordinator in the draft: a fixed level
+  // for its workers and its own bounds. Nothing chosen leaves the defaults.
+  const [pendingDraftCoordinatorChoices, setPendingDraftCoordinatorChoices] =
+    useState<CoordinatorDraftChoices>({});
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -4992,7 +5001,11 @@ function LaunchedShell(
       openDraftInActiveProject,
       openDraftInProject,
       openCoordinatorDraftInProject,
-      cancelCoordinatorDraft: () => setPendingDraftCoordinator(undefined),
+      cancelCoordinatorDraft: () => {
+        setPendingDraftCoordinator(undefined);
+        setPendingDraftCoordinatorChoices({});
+      },
+      setCoordinatorDraftChoices: setPendingDraftCoordinatorChoices,
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
       openImageLibrary,
@@ -5818,6 +5831,7 @@ function LaunchedShell(
   async function openCoordinatorDraftInProject(projectId: ProjectId) {
     await openDraftInProject(projectId);
     setPendingDraftCoordinator(projectId);
+    setPendingDraftCoordinatorChoices({});
   }
 
   async function openDraftInProject(projectId: ProjectId) {
@@ -6441,11 +6455,23 @@ function LaunchedShell(
         plannerReview === undefined
       ) {
         setPendingDraftCoordinator(undefined);
-        const made = await codeController.execute(setCodeThreadCoordinator(created.thread, true));
-        if (made?.kind !== "thread-updated") {
-          const refusal = `The thread was created, but it could not become a coordinator: ${
-            codeController.lastExecuteError.current?.message ?? "the host refused the change."
-          }`;
+        setPendingDraftCoordinatorChoices({});
+        const { workerLevel, bounds } = pendingDraftCoordinatorChoices;
+        const made = await codeController.execute(
+          setCodeThreadCoordinator(created.thread, true, workerLevel),
+        );
+        // The bounds are a second journaled change on the coordinator; a
+        // refusal leaves it coordinating under the defaults, prompt unsent.
+        const bounded =
+          made?.kind !== "thread-updated" || bounds === undefined
+            ? made
+            : await codeController.execute(setCodeThreadCoordinatorBounds(made.thread, bounds));
+        if (made?.kind !== "thread-updated" || bounded?.kind !== "thread-updated") {
+          const refusal = `${
+            made?.kind === "thread-updated"
+              ? "The coordinator was created with the default bounds"
+              : "The thread was created, but it could not become a coordinator"
+          }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
           await controller.openCodeThread(
             created.thread.id,
             created.thread.title,
@@ -7587,6 +7613,7 @@ function LaunchedShell(
                     navigation={navigationModel}
                     {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
                     {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
+                    pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                     {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
                     {...(pendingIssue === undefined ? {} : { pendingIssue })}
                     presentedLayout={controller.presentedLayout}

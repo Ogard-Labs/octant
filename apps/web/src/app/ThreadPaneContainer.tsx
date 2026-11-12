@@ -135,6 +135,7 @@ export interface ThreadPaneContainerProps {
     | "setGithubIssuesOpen"
     | "setPendingDraftBranch"
     | "cancelCoordinatorDraft"
+    | "setCoordinatorDraftChoices"
     | "setPendingDraftPrompt"
     | "setPendingIssue"
     | "setPendingUsageFilter"
@@ -224,6 +225,8 @@ export interface ThreadPaneContainerProps {
   readonly pendingDraftBranch?: string;
   /** The Project whose draft New coordinator opened. */
   readonly pendingDraftCoordinator?: ProjectId;
+  /** The workers' level and bounds the person chose in that draft. */
+  readonly pendingDraftCoordinatorChoices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices;
   readonly pendingDraftPrompt?: string;
   readonly pendingIssue?: RepositoryIssueRow;
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
@@ -318,6 +321,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     navigation,
     pendingDraftBranch,
     pendingDraftCoordinator,
+    pendingDraftCoordinatorChoices,
     pendingDraftPrompt,
     pendingIssue,
     presentedLayout,
@@ -404,6 +408,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setGithubIssuesOpen,
     setPendingDraftBranch,
     cancelCoordinatorDraft,
+    setCoordinatorDraftChoices,
     setPendingDraftPrompt,
     setPendingIssue,
     setPendingUsageFilter,
@@ -876,6 +881,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                         draftCoordinator: {
                           projectId: pendingDraftCoordinator,
                           onCancel: cancelCoordinatorDraft,
+                          choices: pendingDraftCoordinatorChoices,
+                          onChoicesChange: setCoordinatorDraftChoices,
                         },
                       })}
                   {...(effectiveDraftProviderInstanceId === undefined

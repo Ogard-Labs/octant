@@ -9,9 +9,11 @@ import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import {
+  CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerLevel,
 } from "./coordinator";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
@@ -342,6 +344,17 @@ export const CodeThread = Schema.Struct({
    * Absent on every thread written before coordinators existed.
    */
   coordinator: Schema.optional(Schema.Literal(true)),
+  /**
+   * A coordinator's wake, round and start bounds as a person set them. Absent
+   * is the defaults, which is also how a coordinator journaled before the
+   * bounds were settable reads.
+   */
+  coordinatorBounds: Schema.optional(CoordinatorBounds),
+  /**
+   * The level a person fixed for this coordinator's workers when making it.
+   * Absent, a worker starts at the level named, never above the coordinator's.
+   */
+  coordinatorWorkerLevel: Schema.optional(CoordinatorWorkerLevel),
   /**
    * The coordinator that started this worker thread, recorded by the host at
    * creation and never changed. No wire command can set it.
@@ -789,6 +802,18 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("set-code-thread-coordinator"),
     ...CodeThreadCommandFields,
     coordinator: Schema.Boolean,
+    /** Fixes every worker's level; accepted only while making the coordinator. */
+    workerLevel: Schema.optional(CoordinatorWorkerLevel),
+  }).annotations(strict),
+  /**
+   * A coordinator's wake, round and start bounds; only a person at a local
+   * window. The bounds replace the stored ones, so a field left out returns
+   * to its default.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-coordinator-bounds"),
+    ...CodeThreadCommandFields,
+    bounds: CoordinatorBounds,
   }).annotations(strict),
   /** The Wake when a message arrives switch; only a person at a local window. */
   Schema.Struct({

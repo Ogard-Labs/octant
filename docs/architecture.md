@@ -3179,8 +3179,7 @@ are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
 coordinator at a local window, Full access included; a mark on the coordinator
 does not lower a fixed level, and the coordinator itself stays read-only
-(maintainer request, 2026-11-12; not built yet: today the bounds are the
-constants 6, 3 and 12 and no level can be fixed). The planner below is now a
+(maintainer request, 2026-11-12). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
 take the coordinator's read-only gate and roster, its `start` proposes through
 the planner's proposal path whatever the start setting, and designation also
@@ -3990,8 +3989,8 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12; not built yet: today they are the
-    constants six wakes an hour and three rounds). The host
+    (maintainer request, 2026-11-12); any other thread takes the defaults.
+    The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
     ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
