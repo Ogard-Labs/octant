@@ -12,6 +12,62 @@ import {
 
 const projectId = "40000000-0000-4000-8000-000000000001" as never;
 
+describe("BrowserProfileControl in the Browser toolbar", () => {
+  it("shows the name of a signed-in profile beside its icon and leaves Private as an icon", () => {
+    const view = render(
+      <BrowserProfileControl
+        iconOnly
+        onChange={vi.fn()}
+        profile="private"
+        projectProfileAvailable
+        signedInPagesAvailable
+      />,
+    );
+    expect(screen.queryByText("Private")).toBeNull();
+    expect(screen.getByRole("button", { name: "Browser profile: Private" })).toBeVisible();
+
+    view.rerender(
+      <BrowserProfileControl
+        iconOnly
+        onChange={vi.fn()}
+        profile="personal"
+        projectProfileAvailable
+        signedInPagesAvailable
+      />,
+    );
+    expect(screen.getByText("Personal")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Browser profile: Personal" })).toBeVisible();
+  });
+
+  it("asks for the sign-out confirmation when the toolbar's more menu requests it, not on mount", async () => {
+    const view = render(
+      <BrowserProfileControl
+        folded
+        onChange={vi.fn()}
+        onSignOut={vi.fn()}
+        profile="personal"
+        projectProfileAvailable
+        signOutRequest={1}
+        signedInPagesAvailable
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Browser profile/ })).toBeNull();
+    expect(screen.queryByText("Sign out of the Personal profile?")).toBeNull();
+    view.rerender(
+      <BrowserProfileControl
+        folded
+        onChange={vi.fn()}
+        onSignOut={vi.fn()}
+        profile="personal"
+        projectProfileAvailable
+        signOutRequest={2}
+        signedInPagesAvailable
+      />,
+    );
+    expect(await screen.findByText("Sign out of the Personal profile?")).toBeVisible();
+  });
+});
+
 describe("BrowserProfileControl", () => {
   it("names the profile the page is in and offers the three choices", async () => {
     const user = userEvent.setup();

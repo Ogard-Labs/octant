@@ -2706,7 +2706,8 @@ Status: Built. Since: —. Detail: [Browser captures: What is kept](browser-capt
 
 ### Browser for agents
 
-- Idle Browser panes and thread docks report the same server availability decision as tool composition, with a specific omission/remedy or Unknown. Plan reads as read-only; the 720px layout keeps an accessible icon. This does not grant a site approval or change Take over/Hand back.
+- The Browser toolbar is one row under the tile bar: plain icon buttons for back, forward and reload, then the address field in the control corner (never a pill) holding at most the connection mark of a loaded page, then trailing icon-only buttons in this order: status (only when it has something to say), Take over or Hand back, extensions, profile, and a More menu for everything else. No more than three trail the field besides More; the left-most fold into More first, and again to keep the address at least 120px. A signed-in profile names itself beside its icon; Reclaim locally replaces Take over while a remote owner holds the page. The row takes the tile bar's insets and gaps and never wraps. Owner: [Design system](../../DESIGN.md) and [Workspace](workspace.md).
+- Idle Browser panes and thread docks report the same server availability decision as tool composition, with a specific omission/remedy or Unknown. Plan reads as read-only; the status is a mark whose name and tooltip carry the sentence, and its recovery action is a More menu item. This does not grant a site approval or change Take over/Hand back.
 
 The agent's Browser tool reads a page as an outline with element refs and acts by ref, with every operation admitted on the server and the same tool for every provider.
 

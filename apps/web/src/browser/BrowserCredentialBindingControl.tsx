@@ -1,6 +1,6 @@
 import { browserProfileChoiceOf } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import {
   decodeBrowserCredentialCommand,
@@ -26,6 +26,12 @@ export interface BrowserCredentialBindingControlProps {
   readonly context: Pick<BrowserCredentialTarget, "contextId" | "threadId" | "mode">;
   readonly profile: BrowserCredentialTarget["profile"];
   readonly held: boolean;
+  /**
+   * The toolbar's more menu opens the review: each new number asks for it, and
+   * the control then draws no button of its own. Focus returns to `restoreFocus`.
+   */
+  readonly openRequest?: number;
+  readonly restoreFocus?: RefObject<HTMLElement | null>;
 }
 
 /** The person's selected-item permission, separate from Continue and from store unlock. */
@@ -68,6 +74,18 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
     },
     [],
   );
+
+  const openReview = useRef<() => void>(() => undefined);
+  const { openRequest } = props;
+  // A request made before this control mounted (the person asked once, then the
+  // page's context changed and the control remounted) is not a new ask: only a
+  // number that arrives while it is mounted opens the review.
+  const handledRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === undefined || openRequest === handledRequest.current) return;
+    handledRequest.current = openRequest;
+    openReview.current();
+  }, [openRequest]);
 
   const manage = props.client.manageCredentialUse;
   if (manage === undefined) return null;
@@ -228,26 +246,24 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
       }
     }
   };
+  const openDialog = () => {
+    setOpen(true);
+    setLoading(true);
+    void send("list");
+  };
+  openReview.current = openDialog;
   return (
     <>
-      <OctantButton
-        ref={trigger}
-        type="button"
-        size="sm"
-        variant="ghost"
-        onClick={() => {
-          setOpen(true);
-          setLoading(true);
-          void send("list");
-        }}
-      >
-        Login permission
-      </OctantButton>
+      {props.openRequest === undefined ? (
+        <OctantButton ref={trigger} type="button" size="sm" variant="ghost" onClick={openDialog}>
+          Login permission
+        </OctantButton>
+      ) : null}
       <OctantDialogPresence>
         {open ? (
           <OctantConfirmDialog
             title="Browser login permission"
-            restoreFocus={trigger}
+            restoreFocus={props.restoreFocus ?? trigger}
             confirmLabel={
               fillReview !== undefined
                 ? fillState === "review"

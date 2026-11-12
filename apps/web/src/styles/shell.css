@@ -3392,81 +3392,61 @@ form > .work-composer-adapter__attachments {
 }
 
 /*
- * The toolbar is two groups that share a row when there is room and stack when
- * there is not: navigation and the address first, the tools and the page's
- * status second. Nothing is clipped at any dock width; the status labels
- * shorten with an ellipsis before a control would have to wrap.
+ * The toolbar is one row under the tile bar: back, forward and reload as plain
+ * icon buttons, the address field taking the rest of the width, then icon-only
+ * buttons for what else the page offers. The row never wraps; at a narrow pane
+ * the hold button moves into the more menu before the field gets narrower than
+ * 120px.
  */
 .browser-workspace__chrome {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-1) 8px;
+  gap: var(--oct-space-1);
   min-width: 0;
-  min-height: 40px;
+  min-height: var(--oct-title-rail-h);
   box-sizing: border-box;
-  padding: var(--oct-space-1) 8px;
+  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1) var(--browser-row-inset);
+  --browser-row-inset: calc(
+    var(--oct-space-3) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2
+  );
   border-bottom: 1px solid var(--oct-border-soft);
   background: var(--oct-surface);
 }
 
-.browser-workspace__nav,
-.browser-workspace__tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-1) 8px;
-  min-width: 0;
-}
-
-.browser-workspace__nav {
-  flex: 1 1 360px;
-}
-
-.browser-workspace__tools {
-  flex: 1 1 280px;
-  justify-content: flex-end;
-  column-gap: var(--oct-space-1);
-}
-
-.browser-workspace__tools > .browser-workspace__close,
-.browser-workspace__tools > .browser-workspace__take-over {
+.browser-workspace__chrome > .shell-icon-button,
+.browser-workspace__chrome > .browser-workspace__status,
+.browser-workspace__chrome > .browser-extensions-button,
+.browser-workspace__chrome > .browser-workspace__more {
   flex: 0 0 auto;
+}
+
+/* A signed-in profile (anything but Private) names itself beside its icon, in
+   the meta ink and size the dock's cards use for the same fact. The button
+   gives up its words before the address gives up width: they shorten with an
+   ellipsis and the icon stays. */
+.browser-workspace__chrome > .browser-workspace__profile--named {
+  display: inline-flex;
+  width: auto;
+  flex: 0 1 auto;
+  gap: var(--oct-space-1);
+  align-items: center;
+  padding: 0 var(--oct-space-2);
+  overflow: hidden;
+}
+
+.browser-workspace__profile-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .browser-workspace h2,
 .browser-workspace h3,
 .browser-workspace p {
   margin: 0;
-}
-
-/* Back, forward, and reload sit in one rounded capsule and the address in a
-   chip beside it, the way a browser's own toolbar groups them; as loose icons
-   beside a boxed field the row read as a form. */
-.browser-workspace__history {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 2px;
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
-}
-
-.browser-workspace__history button {
-  border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
-}
-
-.browser-workspace__history button,
-.browser-workspace__close {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  place-items: center;
-}
-
-.browser-workspace__history button:disabled {
-  opacity: 0.32;
 }
 
 /* Where the page keeps its sign-in, in the same capsule as the history buttons
@@ -3499,36 +3479,60 @@ form > .work-composer-adapter__attachments {
   flex: 0 0 auto;
 }
 
-.browser-workspace__control-glyph {
-  display: none;
+/* The address field is the system's text field: the control corner, the field
+   border, the hover edge and the keyboard-focus fill that every input shares,
+   drawn on the frame because the status marks sit inside it beside the input. */
+.browser-workspace__field {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 120px;
+  height: var(--oct-rail-button-h);
+  box-sizing: border-box;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-fg);
+  border: 1px solid var(--input);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+}
+
+.browser-workspace__field:hover {
+  border-color: var(--muted-foreground);
+}
+
+.browser-workspace__field:focus-within {
+  background: var(--accent);
+}
+
+.browser-workspace__mark svg,
+.browser-workspace__status svg {
+  color: var(--oct-muted);
+}
+
+/* The status icon after the address: drawn only while it has something to say. */
+.browser-workspace__status {
+  display: grid;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.browser-workspace__mark {
+  display: grid;
+  width: var(--oct-icon-lg);
+  height: var(--oct-icon-lg);
+  flex: 0 0 auto;
+  place-items: center;
 }
 
 .browser-workspace__omnibox {
   display: flex;
-  flex: 1 1 160px;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-width: 120px;
-  height: 30px;
-  padding: 0 var(--oct-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
-}
-
-.browser-workspace__omnibox:focus-within {
-  border-color: var(--octant-border-strong);
-}
-
-.browser-workspace__omnibox svg {
-  color: var(--oct-muted);
-}
-
-.browser-workspace__security {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
 }
 
 .middle-truncated-text {
@@ -3596,25 +3600,6 @@ form > .work-composer-adapter__attachments {
   background: transparent;
   box-shadow: none;
   font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-}
-
-.browser-workspace__control-state {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: var(--oct-space-1);
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.browser-workspace__control-state > span {
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
 }
 
@@ -3854,22 +3839,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   }
 }
 
-.browser-workspace__take-over {
-  flex: 0 0 auto;
-}
-
-@media (max-width: 720px) {
-  .browser-workspace__control-state {
-    display: none;
-  }
-
-  /* The button keeps its name for assistive technology; the address field
-     keeps the width a phone has. */
-  .browser-workspace__take-over-label {
-    display: none;
-  }
-}
-
 /* ── Code home ─────────────────────────────────────────────────────────
    Under the Code composer: suggested prompts as a row of chips, then the
    sections that say what is waiting (Up next), what nobody has picked up
@@ -4055,6 +4024,23 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   font-weight: 400;
   text-align: left;
   white-space: normal;
+}
+
+/* A live agent Browser the dock would show as a card while the dock is closed:
+   one quiet dot on the dock toggle, the same mark the dock's cards use. */
+.window-chrome__button[data-activity="browser"] {
+  position: relative;
+}
+
+.window-chrome__button[data-activity="browser"]::after {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  content: "";
 }
 
 .code-home__card:hover:not(:disabled) {
@@ -4747,244 +4733,4 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
-}
-
-.browser-workspace__agent-availability,
-.browser-workspace__agent-availability > span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-.browser-workspace__agent-availability {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-/* Each link of the chain has to be allowed to shrink for the label's ellipsis
-   to work; with only the label allowed, it drew past a 3px box over the next
-   control's words. */
-.browser-workspace__agent-availability > span,
-.browser-workspace__agent-availability > button {
-  min-width: 0;
-}
-.browser-workspace__availability-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-@media (max-width: 720px) {
-  .browser-workspace__availability-label {
-    display: none;
-  }
-}
-
-/* A live agent Browser the dock would show as a card while the dock is closed:
-   one quiet dot on the dock toggle, the same mark the dock's cards use. */
-.window-chrome__button[data-activity="browser"] {
-  position: relative;
-}
-
-.window-chrome__button[data-activity="browser"]::after {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg);
-  content: "";
-}
-
-/* The Browser's toolbar at narrow widths. These are container-width rules, so
-   they apply wherever the Browser is that narrow, in a dock tile or in a full
-   pane, and the same control at the same width looks the same.
-
-   Widths measured at 1x: history 88 (76 at the smallest), profile 30 bare and
-   157 with words ("Task default: Private") or 81 ("Private") when there is no
-   page, availability 12 bare and 173 with its sentence, the holder 24 as a
-   glyph and 97 with words ("Preview · 5m idle") or 44 ("Preview") when there is
-   no page, Take over 25 and 86 with words, and four 28px icon buttons
-   (Screenshot, Draw on page, Stop, and the desktop app's "Open in default
-   browser", which the web render lacks; the budget includes it). Gaps are 8px,
-   4px under 460px; side padding 12px, 4px under 347px. The dock sets the
-   rail's gap and padding on a rule of its own, so the rules that change them
-   name `.browser-workspace` as well.
-
-   The toolbar holds two groups, navigation and tools. From 992px they share
-   one row, which takes 1100px. Below it their controls are items of the one toolbar row (the
-   groups are `display: contents`), so the rules below place each control
-   separately and the address takes a row of its own. */
-
-@container browser-workspace (max-width: 1099px) {
-  .browser-workspace__nav,
-  .browser-workspace__tools {
-    display: contents;
-  }
-}
-
-/* No page open. The row is the history capsule, the profile, the address, who
-   may use the page, and who holds it: 442px without the address, which keeps
-   160px. */
-
-/* The availability sentence is 173px: its words go below 602px instead of
-   being cut to "Agent can use t…". */
-@container browser-workspace (max-width: 601px) {
-  .browser-workspace__availability-label {
-    display: none;
-  }
-  .browser-workspace__agent-availability {
-    flex: none;
-  }
-  /* With its words gone the recovery action is a bare glyph: keep it a target. */
-  .browser-workspace__agent-availability > button {
-    min-width: 24px;
-    min-height: 24px;
-  }
-}
-
-/* The profile's words (51px) go below 441px, and the holder ends in an
-   ellipsis rather than running over its neighbour. */
-@container browser-workspace (max-width: 440px) {
-  .browser-profile-control {
-    padding: 0 var(--oct-space-2);
-  }
-  .browser-profile-control span {
-    display: none;
-  }
-}
-
-@container browser-workspace (max-width: 519px) {
-  .browser-workspace__control-state {
-    flex: none;
-    max-width: 40cqw;
-    min-width: 0;
-    overflow: hidden;
-  }
-}
-
-/* Below 390px the address would be a sliver beside the controls, so it takes a
-   second row at the full width. */
-@container browser-workspace (max-width: 389px) {
-  .browser-workspace .browser-workspace__chrome {
-    flex-wrap: wrap;
-    row-gap: var(--oct-space-1);
-  }
-  .browser-workspace__omnibox {
-    order: 1;
-    flex-basis: 100%;
-  }
-  .browser-workspace__control-state {
-    max-width: 32cqw;
-  }
-}
-
-/* A page open (data-page="open"). The row also holds Take over, Screenshot,
-   Draw on page and Stop. Words go in this order as the width falls: the
-   availability sentence, the profile's words, Reclaim's, Take over's, the
-   holder's. Each threshold is the width at which the row with those words
-   (and the words before them already gone) no longer fits on one line, with
-   the budget for the desktop app's extra button. Each control keeps its name
-   and tooltip when its words are hidden. */
-
-/* The address fits beside every control and every word from 1100px: the
-   address keeps 267px there, and 1094px, the widest measured width at which
-   the groups still wrapped to three rows, is not enough. Below it the address
-   takes its own row. */
-@container browser-workspace (max-width: 1099px) {
-  .browser-workspace .browser-workspace__chrome[data-page="open"] {
-    flex-wrap: wrap;
-    row-gap: var(--oct-space-1);
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__omnibox {
-    order: 1;
-    flex-basis: 100%;
-  }
-}
-
-/* With every word shown, row one is 801px: the availability sentence (161px
-   more than its glyph) goes first, below 801px. */
-@container browser-workspace (max-width: 800px) {
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__availability-label {
-    display: none;
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability {
-    flex: none;
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__agent-availability > button {
-    min-width: 24px;
-    min-height: 24px;
-  }
-}
-
-/* The profile's words (127px more than its glyph) go next, below 640px. */
-@container browser-workspace (max-width: 639px) {
-  .browser-workspace__chrome[data-page="open"] .browser-profile-control span {
-    display: none;
-  }
-}
-
-/* "Reclaim locally" is the longest button label (86px more than its glyph);
-   with Take over beside it, its words go below 610px (Take over's own
-   threshold and the 89px that Reclaim's words and gap add). */
-@container browser-workspace (max-width: 609px) {
-  .browser-workspace__reclaim-label {
-    display: none;
-  }
-}
-
-/* Take over's and Hand back's words (61px more) go below 521px, and the bare
-   button stays a 24px target. */
-@container browser-workspace (max-width: 520px) {
-  .browser-workspace__take-over {
-    min-width: 24px;
-    min-height: 24px;
-  }
-  .browser-workspace__take-over-label {
-    display: none;
-  }
-}
-
-/* Under 460px the gaps tighten to 4px: at 8px the row is 460px, 40px more than
-   the 420px it takes at 4px. */
-@container browser-workspace (max-width: 459px) {
-  .browser-workspace .browser-workspace__chrome[data-page="open"] {
-    column-gap: var(--oct-space-1);
-  }
-}
-
-/* The holder's words (73px more than its glyph) go last, below 420px. It keeps
-   a 24px glyph; its words stay for assistive technology and in its title. */
-@container browser-workspace (max-width: 419px) {
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state {
-    justify-content: center;
-    min-width: 24px;
-    min-height: 24px;
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-state > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__control-glyph {
-    display: block;
-    flex: none;
-  }
-}
-
-/* With the holder a glyph the row is 347px. The history and icon buttons shrink
-   to 24px (the smallest target) and the side padding to 4px, which makes it
-   302px: it fits from 302px. */
-@container browser-workspace (max-width: 346px) {
-  .browser-workspace .browser-workspace__chrome[data-page="open"] {
-    padding-inline: var(--oct-space-1);
-  }
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__history button,
-  .browser-workspace__chrome[data-page="open"] .browser-workspace__close {
-    width: 24px;
-    height: 24px;
-  }
 }
