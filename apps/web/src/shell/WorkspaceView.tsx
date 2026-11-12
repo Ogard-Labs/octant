@@ -1215,7 +1215,7 @@ function CrossContextBanner(props: {
       )}
     </>
   );
-  // Beside a composer the offer is one of its notice cards, above the pill;
+  // Beside a composer the offer is one of its notice cards, above the box;
   // with no composer to stand beside it keeps the banner at the window's top.
   if (props.inline)
     return (

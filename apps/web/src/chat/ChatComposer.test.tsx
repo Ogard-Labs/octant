@@ -69,7 +69,7 @@ describe("ChatComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("offers dictation in the composer's pill only when transcription is ready, and appends the words to the draft", async () => {
+  it("offers dictation in the composer's box only when transcription is ready, and appends the words to the draft", async () => {
     const user = userEvent.setup();
     renderComposer({ draft: "Please" });
     expect(screen.queryByRole("button", { name: "Dictate message" })).toBeNull();
@@ -108,12 +108,12 @@ describe("ChatComposer", () => {
       const toolbar = screen.getAllByRole("toolbar", { name: "Composer controls" })[1]!;
       const composer = toolbar.closest<HTMLElement>(".composer");
       expect(composer).not.toBeNull();
-      // Attach and the microphone ride the pill beside the prompt, with send;
+      // Attach and the microphone ride the box beside the prompt, with send;
       // the row under it holds neither.
-      const pill = (composer as HTMLElement).querySelector<HTMLElement>(".composer-field");
-      expect(pill).not.toBeNull();
-      const attach = within(pill as HTMLElement).getByRole("button", { name: "Add attachment" });
-      const mic = within(pill as HTMLElement).getByRole("button", { name: "Dictate message" });
+      const box = (composer as HTMLElement).querySelector<HTMLElement>(".composer-field");
+      expect(box).not.toBeNull();
+      const attach = within(box as HTMLElement).getByRole("button", { name: "Add attachment" });
+      const mic = within(box as HTMLElement).getByRole("button", { name: "Dictate message" });
       expect(attach).toBeVisible();
       expect(toolbar).not.toContainElement(attach);
       expect(toolbar).not.toContainElement(mic);
@@ -122,7 +122,7 @@ describe("ChatComposer", () => {
       ).toHaveLength(1);
       await user.click(mic);
       await user.click(
-        await within(pill as HTMLElement).findByRole("button", { name: "Stop dictating" }),
+        await within(box as HTMLElement).findByRole("button", { name: "Stop dictating" }),
       );
       await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith("Please fix the flaky test"));
       expect(props.onSend).not.toHaveBeenCalled();
@@ -184,7 +184,7 @@ describe("ChatComposer", () => {
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    // A refusal is an alert in a card above the pill, never a line inside it.
+    // A refusal is an alert in a card above the box, never a line inside it.
     const refusal = await screen.findByRole("alert");
     expect(refusal).toHaveTextContent(
       "Message could not be sent. Your draft is still here; try again.",
@@ -309,7 +309,7 @@ describe("ChatComposer", () => {
 
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
-    // The refusal is an alert card above the pill.
+    // The refusal is an alert card above the box.
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The selected model cannot accept attachments.",
     );

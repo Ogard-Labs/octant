@@ -42,18 +42,55 @@ export interface DockTileLayout {
   readonly columns: ReadonlyArray<DockTileColumn>;
 }
 
+/**
+ * A tile's place: its column from the left and its row from the top, and
+ * whether it stood alone in its column, which is then a column of its own again.
+ */
+export interface DockToolPlace {
+  readonly surface: RightUtilityDockSurfaceId;
+  readonly column: number;
+  readonly row: number;
+  readonly alone: boolean;
+}
+
 export interface ThreadUtilityDockState {
   readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
-  /** With a layout, always the tab of the focused tile. */
+  /**
+   * With a layout, always the tab of the focused tile. Absent while no tool is
+   * shown, which is how the dock's overview comes back.
+   */
   readonly active?: string;
   readonly layout?: DockTileLayout;
   /**
+   * Open tabs whose tool stands as a small live card at the foot of the dock
+   * instead of in a tile. A minimised tab is never in a tile and never the
+   * active tab, and a tool is minimised whole: every Browser page is one
+   * Browser and every dock Terminal views the thread's one shell, so one card
+   * stands for all of a tool's tabs. Never present on the bottom panel's state.
+   */
+  readonly minimised?: ReadonlyArray<string>;
+  /**
+   * Where each minimised tool stood in the layout when it was minimised, so
+   * restoring it can put it back there while that place still exists. A tool
+   * that was the one shown, with no layout around it, leaves none.
+   */
+  readonly minimisedPlaces?: ReadonlyArray<DockToolPlace>;
+  /**
    * The Browser page that was last shown. The Browser is one tool with pages,
-   * so showing "the Browser" again (from its strip entry, a menu or a drag)
-   * returns to this page rather than to whichever page is first.
+   * so showing "the Browser" again (from its button, a menu, a drag or its
+   * card) returns to this page rather than to whichever page is first.
    */
   readonly lastBrowser?: string;
 }
+
+/**
+ * The tools that can stand as a card: the two whose output is worth watching
+ * while another tool, or only the overview, is in front.
+ */
+export const MINIMISABLE_DOCK_SURFACES: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
+  "browser",
+  "terminal",
+]);
 
 /**
  * Past two columns each tile gets too little width for a tool that needs a
@@ -184,12 +221,20 @@ export function closeUtilityTabState(
   const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
   if (closedIndex < 0) return state;
   const tabs = state.tabs.filter((candidate) => candidate.id !== tabId);
+  const minimised = state.minimised;
   if (state.layout !== undefined) {
-    return settle(tabs, state.layout, state.active, neighbourTile(state, tabId), state.lastBrowser);
+    return settle(tabs, state.layout, state.active, {
+      ...carried(state),
+      preferred: neighbourTile(state, tabId),
+    });
   }
-  const active =
-    state.active === tabId ? tabs[Math.min(closedIndex, tabs.length - 1)]?.id : state.active;
-  return settle(tabs, undefined, active, undefined, state.lastBrowser);
+  if (state.active !== tabId)
+    return settle(tabs, undefined, state.active, { ...carried(state), minimised });
+  // The shown tool went: the next one that is not a card takes its place.
+  const cards = new Set(minimised);
+  const before = state.tabs.slice(0, closedIndex).filter((tab) => !cards.has(tab.id)).length;
+  const visible = tabs.filter((tab) => !cards.has(tab.id));
+  return settle(tabs, undefined, visible[Math.min(before, visible.length - 1)]?.id, carried(state));
 }
 
 /**
@@ -203,7 +248,9 @@ export function removeUtilityTabs(
 ): ThreadUtilityDockState {
   const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
-  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
+  return settle(tabs, state.layout, state.active, {
+    ...carried(state),
+  });
 }
 
 export function retainAvailableUtilityTabs(
@@ -214,7 +261,9 @@ export function retainAvailableUtilityTabs(
   if (tabs.length === state.tabs.length) {
     if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
-  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
+  return settle(tabs, state.layout, state.active, {
+    ...carried(state),
+  });
 }
 
 /** The tabs the dock body shows, in layout order, or just the active tab. */
@@ -245,19 +294,23 @@ export function showUtilityTabBelow(
   return place(state, tabId, "below");
 }
 
-/** Shows one tool again, leaving every other tool open in the strip. */
+/** Shows one tool again, leaving every other tool open. */
 export function showUtilityTabAlone(
   state: ThreadUtilityDockState,
   tabId: string,
 ): ThreadUtilityDockState {
-  if (!state.tabs.some((tab) => tab.id === tabId)) return state;
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return state;
   if (state.layout === undefined && state.active === tabId) return state;
-  return settle(state.tabs, undefined, tabId, undefined, state.lastBrowser);
+  return settle(state.tabs, undefined, tabId, {
+    ...carried(state),
+    minimised: withoutMinimisedTool(state, tab.surface),
+  });
 }
 
 /**
- * Takes a tile out of view without closing its tool: the tab stays in the
- * strip, so the tool can be shown again and keeps its place.
+ * Takes a tile out of view without closing its tool: the tab stays open, its button in the row,
+ * so the tool can be shown again and keeps its place.
  */
 export function hideUtilityTile(
   state: ThreadUtilityDockState,
@@ -269,9 +322,206 @@ export function hideUtilityTile(
     state.tabs,
     withoutTile(layout, tabId),
     state.active === tabId ? neighbourTile(state, tabId) : state.active,
-    undefined,
-    state.lastBrowser,
+    carried(state),
   );
+}
+
+/** The tabs whose tool stands as a card at the foot of the dock. */
+export function minimisedUtilityTabIds(state: ThreadUtilityDockState): ReadonlyArray<string> {
+  return state.minimised ?? [];
+}
+
+/**
+ * Takes a tool out of its tile, or out of the single view, and leaves it as a
+ * small live card at the foot of the dock. Only the tool's tabs change: with
+ * no other tool shown the overview returns, with tiles the focus moves as it
+ * does when a tile is hidden. The Browser's pages and a thread's Terminals go
+ * together, since each of them is one tool.
+ */
+export function minimiseUtilityTool(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined || !MINIMISABLE_DOCK_SURFACES.has(tab.surface)) return state;
+  const toolIds = new Set(
+    state.tabs.filter((candidate) => candidate.surface === tab.surface).map((item) => item.id),
+  );
+  const held = new Set(state.minimised);
+  if ([...toolIds].every((id) => held.has(id))) return state;
+  const minimised = state.tabs.filter((item) => held.has(item.id) || toolIds.has(item.id));
+  const cards = minimised.map((item) => item.id);
+  const layout = state.layout;
+  if (layout === undefined) {
+    const active =
+      state.active !== undefined && toolIds.has(state.active) ? undefined : state.active;
+    const { active: _shown, layout: _none, ...rest } = withoutCards(state);
+    return pruned(
+      withLastBrowser({
+        ...rest,
+        ...(active === undefined ? {} : { active }),
+        minimised: cards,
+      }),
+      tab.surface,
+    );
+  }
+  const order = layoutTabIds(layout);
+  const remaining = order.filter((id) => !toolIds.has(id));
+  if (remaining.length === 0) {
+    const { active: _shown, layout: _gone, ...rest } = withoutCards(state);
+    return pruned(withLastBrowser({ ...rest, minimised: cards }), tab.surface);
+  }
+  let focus = state.active;
+  if (state.active !== undefined && toolIds.has(state.active)) {
+    const before = order
+      .slice(0, order.indexOf(state.active))
+      .filter((id) => !toolIds.has(id)).length;
+    focus = remaining[Math.min(before, remaining.length - 1)];
+  }
+  let kept = layout;
+  for (const id of toolIds) kept = withoutTile(kept, id);
+  const from = layout.columns.flatMap((column, columnIndex) =>
+    column.tiles.flatMap((tile, row) =>
+      toolIds.has(tile.tabId)
+        ? [{ surface: tab.surface, column: columnIndex, row, alone: column.tiles.length === 1 }]
+        : [],
+    ),
+  )[0];
+  return settle(state.tabs, kept, focus, {
+    ...carried(state),
+    minimised: cards,
+    places: [
+      ...(state.minimisedPlaces ?? []).filter((place) => place.surface !== tab.surface),
+      ...(from === undefined ? [] : [from]),
+    ],
+  });
+}
+
+/**
+ * Whether an agent's new Browser session leaves a minimised Browser as it is:
+ * only where the shelf is drawn, since its card or the dock toggle's dot is the
+ * sign that the session is live. The modal dock draws neither, so there the
+ * session opens the Browser like any other tab (which also clears the
+ * minimised flag, as choosing any tab of a minimised tool does).
+ */
+export function offeredBrowserStaysMinimised(
+  state: ThreadUtilityDockState,
+  options: { readonly offered: boolean; readonly shelfDrawn: boolean },
+): boolean {
+  return options.offered && options.shelfDrawn && isUtilityToolMinimised(state, "browser");
+}
+
+/** Whether the person has this tool minimised. */
+export function isUtilityToolMinimised(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+): boolean {
+  const cards = new Set(state.minimised);
+  return state.tabs.some((tab) => tab.surface === surface && cards.has(tab.id));
+}
+
+/**
+ * Takes a minimised tool's card away and nothing else: the tool goes back to
+ * being an ordinary open tab in the row, not shown, and nothing is closed or
+ * stopped. What was shown stays shown.
+ */
+export function hideUtilityCard(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined || state.minimised?.includes(tabId) !== true) return state;
+  return withMinimised(state, withoutMinimisedTool(state, tab.surface));
+}
+
+/**
+ * Brings a tool back from its card as a tile of its own and focuses it. It
+ * returns to the place it was minimised from while that place still exists (its
+ * column is there with room, or it was the column after the last and there is
+ * room for one), else it becomes the last tile. It never takes over a shown
+ * tool's tile, so nothing shown remounts; only when the caps leave no room does
+ * it take the focused tile's, as selecting its tab would. With nothing shown
+ * it is the one tool shown. A Browser already shown is only focused: it is one
+ * tool, and a second Browser tile would show it twice.
+ */
+export function restoreUtilityTool(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return state;
+  const remembered = state.minimisedPlaces?.find((place) => place.surface === tab.surface);
+  const base = withMinimised(state, withoutMinimisedTool(state, tab.surface));
+  if (base.active === undefined) return focusTab(base, tabId);
+  if (shownUtilityTabIds(base).includes(tabId)) return focusTab(base, tabId);
+  if (tab.surface === "browser" && browserShownIn(base)) return focusTab(base, tabId);
+  const columns = base.layout?.columns ?? [{ share: 1, tiles: [{ tabId: base.active, share: 1 }] }];
+  const roomIn = (index: number) =>
+    (columns[index]?.tiles.length ?? MAX_DOCK_TILES_PER_COLUMN) < MAX_DOCK_TILES_PER_COLUMN;
+  const newColumnFits = columns.length < MAX_DOCK_TILE_COLUMNS;
+  let target:
+    | { readonly column: number; readonly row: number; readonly alone: boolean }
+    | undefined;
+  if (remembered?.alone === true && newColumnFits && remembered.column <= columns.length) {
+    target = { column: remembered.column, row: 0, alone: true };
+  } else if (
+    remembered !== undefined &&
+    !remembered.alone &&
+    remembered.column < columns.length &&
+    roomIn(remembered.column)
+  ) {
+    target = { column: remembered.column, row: remembered.row, alone: false };
+  } else if (newColumnFits) {
+    target = { column: columns.length, row: 0, alone: true };
+  } else {
+    // The end of the last column with room, the last column first.
+    const column = [...columns.keys()].reverse().find(roomIn);
+    if (column !== undefined) {
+      target = { column, row: columns[column]?.tiles.length ?? 0, alone: false };
+    }
+  }
+  if (target === undefined) return focusTab(base, tabId);
+  return settle(base.tabs, insertTile(columns, tabId, target), tabId, carried(base));
+}
+
+function browserShownIn(state: ThreadUtilityDockState): boolean {
+  return shownUtilityTabIds(state).some(
+    (id) => state.tabs.find((tab) => tab.id === id)?.surface === "browser",
+  );
+}
+
+/** Adds a tile at a place, giving it an even share and scaling its neighbours to make room. */
+function insertTile(
+  columns: ReadonlyArray<DockTileColumn>,
+  tabId: string,
+  spot: { readonly column: number; readonly row: number; readonly alone: boolean },
+): DockTileLayout {
+  if (spot.alone) {
+    const count = columns.length;
+    const added: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+    const scaled = columns.map((column) => ({
+      ...column,
+      share: (column.share * count) / (count + 1),
+    }));
+    return { columns: [...scaled.slice(0, spot.column), added, ...scaled.slice(spot.column)] };
+  }
+  return {
+    columns: columns.map((column, index) => {
+      if (index !== spot.column) return column;
+      const count = column.tiles.length;
+      const row = Math.min(spot.row, count);
+      const scaled = column.tiles.map((tile) => ({
+        ...tile,
+        share: (tile.share * count) / (count + 1),
+      }));
+      const tiles = [
+        ...scaled.slice(0, row),
+        { tabId, share: 1 / (count + 1) },
+        ...scaled.slice(row),
+      ];
+      return { ...column, tiles };
+    }),
+  };
 }
 
 export type DockTileMove = "left" | "right" | "up" | "down";
@@ -300,7 +550,9 @@ export function moveUtilityTile(
   const tile = column.tiles[row];
   if (tile === undefined) return state;
   const rebuilt = (columns: ReadonlyArray<DockTileColumn>) =>
-    settle(state.tabs, { columns }, state.active, undefined, state.lastBrowser);
+    settle(state.tabs, { columns }, state.active, {
+      ...carried(state),
+    });
 
   if (direction === "up" || direction === "down") {
     const other = row + (direction === "up" ? -1 : 1);
@@ -413,8 +665,14 @@ export function openUtilityTabBesideState(
   const tab: ThreadUtilityDockTab =
     existing ?? (repeatable ? { id: instanceId, surface } : singletonUtilityTab(surface));
   const tabs = existing === undefined ? [...state.tabs, tab] : state.tabs;
-  // A cap refusing the tile leaves the tool open in the strip, not shown.
-  return place({ ...state, tabs }, tab.id, "beside");
+  // A new Browser page or Terminal joins its tool, which a card would otherwise
+  // keep half minimised. A cap refusing the tile leaves the tool open, its button in the
+  // row, not shown.
+  const base = withMinimised(
+    { ...state, tabs },
+    repeatable ? withoutMinimisedTool({ ...state, tabs }, surface) : state.minimised,
+  );
+  return place(base, tab.id, "beside");
 }
 
 /** Columns of tiles a state shows: one for the single-tool view. */
@@ -439,18 +697,34 @@ export function changeDisplayedUtilityState(
   const kept = new Set(next.tabs.map((tab) => tab.id));
   const gone = new Set(displayed.tabs.filter((tab) => !kept.has(tab.id)).map((tab) => tab.id));
   const known = new Set(stored.tabs.map((tab) => tab.id));
+  const shown = new Set(displayed.tabs.map((tab) => tab.id));
+  // A card the displayed dock left out (its tool is in the bottom panel) stays
+  // a card, or the tab would come back as an ordinary hidden one.
+  const unshownCards = (stored.minimised ?? []).filter((id) => !shown.has(id) && !gone.has(id));
+  const minimised = [...(next.minimised ?? []), ...unshownCards];
+  const keptPlaces = (stored.minimisedPlaces ?? []).filter(
+    (place) =>
+      !(next.minimisedPlaces ?? []).some((candidate) => candidate.surface === place.surface) &&
+      stored.tabs.some((tab) => tab.surface === place.surface && unshownCards.includes(tab.id)),
+  );
+  const places = [...(next.minimisedPlaces ?? []), ...keptPlaces];
   return {
     ...next,
     tabs: [
       ...stored.tabs.filter((tab) => !gone.has(tab.id)),
       ...next.tabs.filter((tab) => !known.has(tab.id)),
     ],
+    ...(minimised.length === 0 ? {} : { minimised }),
+    ...(minimised.length === 0 || places.length === 0 ? {} : { minimisedPlaces: places }),
   };
 }
 
-/** The bottom panel shows one tool at a time, so a layout never belongs to it. */
+/**
+ * The bottom panel shows one tool at a time, so neither a layout nor a card
+ * belongs to it.
+ */
 export function withoutTileLayout(state: ThreadUtilityDockState): ThreadUtilityDockState {
-  if (state.layout === undefined) return state;
+  if (state.layout === undefined && state.minimised === undefined) return state;
   return { tabs: state.tabs, ...(state.active === undefined ? {} : { active: state.active }) };
 }
 
@@ -499,13 +773,18 @@ function neighbourTile(state: ThreadUtilityDockState, tabId: string): string | u
  * one Browser tool and a second Browser tile would show the same tool twice;
  * any other hidden tab replaces the focused tile's tool.
  */
-function focusTab(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
-  return withLastBrowser(focusTabUnrecorded(state, tabId));
+function focusTab(original: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  return withLastBrowser(focusTabUnrecorded(original, tabId));
 }
 
-function focusTabUnrecorded(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
-  const tab = state.tabs.find((candidate) => candidate.id === tabId);
-  if (tab === undefined) return state;
+function focusTabUnrecorded(
+  original: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = original.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return original;
+  // Showing any tab of a minimised tool brings the whole tool back.
+  const state = withMinimised(original, withoutMinimisedTool(original, tab.surface));
   const layout = state.layout;
   if (layout === undefined) {
     return state.active === tabId ? state : { ...state, active: tabId };
@@ -514,6 +793,54 @@ function focusTabUnrecorded(state: ThreadUtilityDockState, tabId: string): Threa
   if (shown.includes(tabId)) return state.active === tabId ? state : { ...state, active: tabId };
   const replaced = tab.surface === "browser" ? browserTileTabId(state) : undefined;
   return { ...state, active: tabId, layout: replaceTile(layout, replaced ?? state.active, tabId) };
+}
+
+/** The cards that remain once a tool's tabs are no longer minimised. */
+function withoutMinimisedTool(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+): ReadonlyArray<string> | undefined {
+  const minimised = state.minimised;
+  if (minimised === undefined) return undefined;
+  const toolIds = new Set(state.tabs.filter((tab) => tab.surface === surface).map((tab) => tab.id));
+  if (!minimised.some((id) => toolIds.has(id))) return minimised;
+  const rest = minimised.filter((id) => !toolIds.has(id));
+  return rest.length === 0 ? undefined : rest;
+}
+
+function withMinimised(
+  state: ThreadUtilityDockState,
+  minimised: ReadonlyArray<string> | undefined,
+): ThreadUtilityDockState {
+  if (minimised === state.minimised) return state;
+  return pruned({
+    ...withoutCards(state),
+    ...(minimised === undefined ? {} : { minimised }),
+  });
+}
+
+/**
+ * Keeps a remembered place only for a tool that is still a card, and forgets
+ * `except`'s place besides: a tool minimised from the single view has none.
+ */
+function pruned(
+  state: ThreadUtilityDockState,
+  except?: RightUtilityDockSurfaceId,
+): ThreadUtilityDockState {
+  const { minimisedPlaces, ...rest } = state;
+  if (minimisedPlaces === undefined) return state;
+  const cards = new Set(state.minimised);
+  const surfaces = new Set(state.tabs.filter((tab) => cards.has(tab.id)).map((tab) => tab.surface));
+  const places = minimisedPlaces.filter(
+    (place) => surfaces.has(place.surface) && place.surface !== except,
+  );
+  return places.length === 0 ? rest : { ...rest, minimisedPlaces: places };
+}
+
+/** A state without its cards: what is shown and which Browser page was last. */
+function withoutCards(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const { minimised: _cards, ...rest } = state;
+  return rest;
 }
 
 function browserTileTabId(state: ThreadUtilityDockState): string | undefined {
@@ -554,13 +881,26 @@ function settle(
   tabs: ReadonlyArray<ThreadUtilityDockTab>,
   layout: DockTileLayout | undefined,
   active: string | undefined,
-  preferred?: string,
-  lastBrowser?: string,
+  options: {
+    readonly preferred?: string | undefined;
+    readonly minimised?: ReadonlyArray<string> | undefined;
+    readonly places?: ReadonlyArray<DockToolPlace> | undefined;
+    readonly lastBrowser?: string | undefined;
+  } = {},
 ): ThreadUtilityDockState {
   return withLastBrowser({
-    ...settleUnrecorded(tabs, layout, active, preferred),
-    ...(lastBrowser === undefined ? {} : { lastBrowser }),
+    ...settleUnrecorded(tabs, layout, active, options),
+    ...(options.lastBrowser === undefined ? {} : { lastBrowser: options.lastBrowser }),
   });
+}
+
+/** What a change to the tiles keeps of the cards and of the Browser's last page. */
+function carried(state: ThreadUtilityDockState) {
+  return {
+    minimised: state.minimised,
+    places: state.minimisedPlaces,
+    lastBrowser: state.lastBrowser,
+  };
 }
 
 /**
@@ -581,20 +921,36 @@ function settleUnrecorded(
   tabs: ReadonlyArray<ThreadUtilityDockTab>,
   layout: DockTileLayout | undefined,
   active: string | undefined,
-  preferred?: string,
+  options: {
+    readonly preferred?: string | undefined;
+    readonly minimised?: ReadonlyArray<string> | undefined;
+    readonly places?: ReadonlyArray<DockToolPlace> | undefined;
+  },
 ): ThreadUtilityDockState {
   const open = new Set(tabs.map((tab) => tab.id));
+  const minimised = (options.minimised ?? []).filter((id) => open.has(id));
+  const cards = new Set(minimised);
+  const cardSurfaces = new Set(tabs.filter((tab) => cards.has(tab.id)).map((tab) => tab.surface));
+  const places = (options.places ?? []).filter((place) => cardSurfaces.has(place.surface));
   const columns = (layout?.columns ?? []).flatMap((column) => {
-    const tiles = column.tiles.filter((tile) => open.has(tile.tabId));
+    const tiles = column.tiles.filter((tile) => open.has(tile.tabId) && !cards.has(tile.tabId));
     return tiles.length === 0 ? [] : [{ ...column, tiles: rescaleTiles(tiles) }];
   });
   const shown = columns.flatMap((column) => column.tiles.map((tile) => tile.tabId));
-  const candidates = [active, preferred];
+  const candidates = [active, options.preferred];
+  // No active tab stays none (the overview is showing); one that went is
+  // replaced by the last tab that is not a card.
   const focused =
     shown.length > 0
       ? (candidates.find((id) => id !== undefined && shown.includes(id)) ?? shown[0])
-      : (candidates.find((id) => id !== undefined && open.has(id)) ?? tabs.at(-1)?.id);
-  const next: ThreadUtilityDockState = focused === undefined ? { tabs } : { tabs, active: focused };
+      : (candidates.find((id) => id !== undefined && open.has(id) && !cards.has(id)) ??
+        (active === undefined ? undefined : tabs.findLast((tab) => !cards.has(tab.id))?.id));
+  const next: ThreadUtilityDockState = {
+    tabs,
+    ...(focused === undefined ? {} : { active: focused }),
+    ...(minimised.length === 0 ? {} : { minimised }),
+    ...(places.length === 0 ? {} : { minimisedPlaces: places }),
+  };
   return shown.length < 2 ? next : { ...next, layout: { columns: rescaleColumns(columns) } };
 }
 
@@ -614,14 +970,16 @@ function rescaleColumns(columns: ReadonlyArray<DockTileColumn>): ReadonlyArray<D
  * returns the state unchanged.
  */
 function place(
-  state: ThreadUtilityDockState,
+  original: ThreadUtilityDockState,
   tabId: string,
   direction: "beside" | "below",
 ): ThreadUtilityDockState {
-  const tab = state.tabs.find((candidate) => candidate.id === tabId);
-  if (tab === undefined) return state;
+  const tab = original.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return original;
+  // A tool placed from a card leaves it; a refusal leaves the card as it was.
+  const state = withMinimised(original, withoutMinimisedTool(original, tab.surface));
   if (state.active === undefined) return { ...state, active: tabId };
-  if (state.active === tabId) return state;
+  if (state.active === tabId) return original;
   // The Browser rule is read from what is on screen, which is the active tab
   // alone while no layout exists: two Browser tiles would show one tool twice.
   const browserShown =
@@ -638,7 +996,7 @@ function place(
   );
   const focusedColumnTiles = columns[focusedColumn]?.tiles ?? [];
   const focusedRow = focusedColumnTiles.findIndex((tile) => tile.tabId === state.active);
-  if (focusedColumn < 0) return state;
+  if (focusedColumn < 0) return original;
 
   const toNewColumn = direction === "beside" && columns.length < MAX_DOCK_TILE_COLUMNS;
   if (toNewColumn) {
@@ -653,14 +1011,13 @@ function place(
         columns: [...scaled.slice(0, focusedColumn + 1), added, ...scaled.slice(focusedColumn + 1)],
       },
       tabId,
-      undefined,
-      state.lastBrowser,
+      carried(state),
     );
   }
   // "Beside" with both columns present falls back to below in the last column.
   const targetColumn = direction === "beside" ? columns.length - 1 : focusedColumn;
   const target = columns[targetColumn];
-  if (target === undefined || target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;
+  if (target === undefined || target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return original;
   const row = targetColumn === focusedColumn ? focusedRow + 1 : target.tiles.length;
   const count = target.tiles.length;
   const scaled = target.tiles.map((tile) => ({
@@ -676,8 +1033,7 @@ function place(
       ),
     },
     tabId,
-    undefined,
-    state.lastBrowser,
+    carried(state),
   );
 }
 
@@ -859,6 +1215,8 @@ interface StoredDockState {
   readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
   readonly active?: string;
   readonly layout?: DockTileLayout;
+  readonly minimised?: ReadonlyArray<string>;
+  readonly minimisedPlaces?: ReadonlyArray<DockToolPlace>;
   readonly lastBrowser?: string;
 }
 
@@ -873,6 +1231,12 @@ function encodeDockStates(
       tabs: [...state.tabs],
       ...(state.active === undefined ? {} : { active: state.active }),
       ...(tiled && state.layout !== undefined ? { layout: state.layout } : {}),
+      ...(tiled && state.minimised !== undefined && state.minimised.length > 0
+        ? { minimised: [...state.minimised] }
+        : {}),
+      ...(tiled && state.minimisedPlaces !== undefined && state.minimisedPlaces.length > 0
+        ? { minimisedPlaces: [...state.minimisedPlaces] }
+        : {}),
       ...(tiled && state.lastBrowser !== undefined ? { lastBrowser: state.lastBrowser } : {}),
     };
   }
@@ -900,28 +1264,81 @@ function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState
     const tab = decodeDockTab(item);
     if (tab !== undefined && !tabs.some((candidate) => candidate.id === tab.id)) tabs.push(tab);
   }
-  const fallback = tabs[tabs.length - 1]?.id;
-  if (fallback === undefined) return undefined;
-  const activeCandidate = typeof candidate.active === "string" ? candidate.active : undefined;
-  const active =
-    activeCandidate !== undefined && tabs.some((tab) => tab.id === activeCandidate)
-      ? activeCandidate
-      : fallback;
-  const layout = tiled ? decodeDockLayout(candidate.layout, tabs) : undefined;
+  if (tabs.length === 0) return undefined;
+  const minimised = tiled ? decodeMinimised(candidate.minimised, tabs) : [];
+  const cards = new Set(minimised);
+  const visible = tabs.filter((tab) => !cards.has(tab.id));
   const remembered =
     tiled &&
     typeof candidate.lastBrowser === "string" &&
     tabs.some((tab) => tab.id === candidate.lastBrowser && tab.surface === "browser")
       ? { lastBrowser: candidate.lastBrowser }
       : {};
-  if (layout === undefined) return { tabs, active, ...remembered };
-  const shown = layoutTabIds(layout);
-  return {
-    tabs,
-    active: shown.includes(active) ? active : (shown[0] ?? active),
-    layout,
+  const places = decodePlaces(candidate.minimisedPlaces, tabs, cards);
+  const withCards = {
+    ...(minimised.length === 0 ? {} : { minimised }),
+    ...(places.length === 0 ? {} : { minimisedPlaces: places }),
     ...remembered,
   };
+  const fallback = visible.at(-1)?.id;
+  const activeCandidate = typeof candidate.active === "string" ? candidate.active : undefined;
+  // A record that holds cards and names no active tab was showing the overview.
+  const active =
+    activeCandidate !== undefined && visible.some((tab) => tab.id === activeCandidate)
+      ? activeCandidate
+      : minimised.length > 0 && candidate.active === undefined
+        ? undefined
+        : fallback;
+  const layout = tiled ? decodeDockLayout(candidate.layout, visible) : undefined;
+  if (layout === undefined) {
+    return { tabs, ...(active === undefined ? {} : { active }), ...withCards };
+  }
+  const shown = layoutTabIds(layout);
+  const focused = active !== undefined && shown.includes(active) ? active : shown[0];
+  return { tabs, ...(focused === undefined ? {} : { active: focused }), layout, ...withCards };
+}
+
+/** A remembered place is read as untrusted: a known tool that is a card, with a place inside the caps. */
+function decodePlaces(
+  value: unknown,
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  cards: ReadonlySet<string>,
+): ReadonlyArray<DockToolPlace> {
+  if (!Array.isArray(value)) return [];
+  const places: DockToolPlace[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const surface = decodeDockSurfaceId(item.surface);
+    const { column, row, alone } = item;
+    if (surface === undefined || !MINIMISABLE_DOCK_SURFACES.has(surface)) continue;
+    if (!tabs.some((tab) => tab.surface === surface && cards.has(tab.id))) continue;
+    if (typeof column !== "number" || typeof row !== "number") continue;
+    if (typeof alone !== "boolean") continue;
+    if (!Number.isInteger(column) || !Number.isInteger(row)) continue;
+    if (column < 0 || column >= MAX_DOCK_TILE_COLUMNS) continue;
+    if (row < 0 || row >= MAX_DOCK_TILES_PER_COLUMN) continue;
+    if (places.some((place) => place.surface === surface)) continue;
+    places.push({ surface, column, row, alone });
+  }
+  return places;
+}
+
+/**
+ * Cards are read as untrusted too: only open Browser and Terminal tabs count,
+ * and a tool is a card whole, so one stored page of a minimised Browser is
+ * enough to minimise all of its pages.
+ */
+function decodeMinimised(
+  value: unknown,
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+): ReadonlyArray<string> {
+  if (!Array.isArray(value)) return [];
+  const surfaces = new Set<RightUtilityDockSurfaceId>();
+  for (const id of value) {
+    const tab = typeof id === "string" ? tabs.find((candidate) => candidate.id === id) : undefined;
+    if (tab !== undefined && MINIMISABLE_DOCK_SURFACES.has(tab.surface)) surfaces.add(tab.surface);
+  }
+  return tabs.filter((tab) => surfaces.has(tab.surface)).map((tab) => tab.id);
 }
 
 /**

@@ -14,7 +14,7 @@ import { cn } from "./utils";
  *
  * An outline button rests on the page colour, unless the shell names another
  * rest fill: under Glass the page colour is opaque while the page around the
- * button is not, and every outline button drew a black pill on the grey
+ * button is not, and every outline button drew a black chip on the grey
  * glass of an OLED preset.
  */
 const buttonVariants = cva(
@@ -23,10 +23,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // A filled button is a raised tile: the control shadow puts light on
-        // its top edge and a short shadow under it, and pressing sinks it.
+        // its top edge and a short shadow under it, and pressing sinks it. The
+        // primary one is the accent as a gradient with a soft glow under it.
         // Ghost, link, bare and chip draw no tile, so they stay flat.
         default:
-          "bg-primary text-primary-foreground shadow-(--octant-shadow-control) hover:bg-primary/80 active:bg-primary/70 active:shadow-(--octant-shadow-control-pressed)",
+          "bg-primary bg-(image:--octant-accent-sheen) text-primary-foreground shadow-(--octant-shadow-primary) hover:bg-primary/90 active:bg-primary/80 active:shadow-(--octant-shadow-control-pressed)",
         // The primary text colour as a fill, with the page colour on it: the
         // one action a surface is for, where the accent would compete with
         // the content beside it (a composer's send, next to the prompt).
@@ -46,10 +47,10 @@ const buttonVariants = cva(
         // focus handling, and disabled state and draws nothing of its own, so
         // the feature never fights a ghost hover fill or a fixed height.
         bare: "h-auto rounded-none p-0 text-inherit",
-        // A small outlined pill that suggests something to type or pick: a
+        // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
-        chip: "rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground",
+        chip: "border-border bg-transparent text-muted-foreground hover:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between

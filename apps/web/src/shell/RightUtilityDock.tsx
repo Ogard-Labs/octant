@@ -1,8 +1,12 @@
 import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import {
+  RightUtilityDockSurface,
+  type DockTileControls,
+  type RightUtilityDockSurfaceProps,
+} from "./RightUtilityDockSurface";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { RightUtilityDockSurface, type DockTileControls } from "./RightUtilityDockSurface";
 import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import {
@@ -40,6 +44,7 @@ export interface RightUtilityDockProps {
   readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  readonly shelf?: RightUtilityDockSurfaceProps["shelf"];
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly sideChat?: ReactNode;
@@ -114,6 +119,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.plan === undefined ? {} : { plan: props.plan })}
       resolution={props.resolution}
       {...(props.renderTab === undefined ? {} : { renderTab: props.renderTab })}
+      {...(props.shelf === undefined ? {} : { shelf: props.shelf })}
       {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
