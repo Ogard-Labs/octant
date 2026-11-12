@@ -122,6 +122,7 @@ import {
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
+  setCodeThreadRestartContinuation,
   snoozeCodeThread,
   wakeCodeThread,
 } from "./codeThreadCommands";
@@ -210,6 +211,8 @@ export interface CodeThreadNavigationItem {
   readonly messageWake?: true;
   /** A person turned off this worker's Wake for coordinator. */
   readonly coordinatorWakeOff?: true;
+  /** A person turned off Continue after restart for this thread. */
+  readonly restartContinuationOff?: true;
 }
 
 /**
@@ -2086,6 +2089,9 @@ export function useCodeController(options: CodeControllerOptions) {
               : { coordinatorThreadId: thread.coordinatorThreadId }),
             ...(thread.messageWake === true ? { messageWake: true as const } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true as const } : {}),
+            ...(thread.restartContinuationOff === true
+              ? { restartContinuationOff: true as const }
+              : {}),
             updatedAt: thread.updatedAt,
           };
         })
@@ -2560,6 +2566,13 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => setCodeThreadCoordinatorWake(thread, wake)),
     [restCommand],
   );
+  const setThreadRestartContinuation = useCallback(
+    (threadId: CodeThreadId, continueAfterRestart: boolean) =>
+      restCommand(threadId, (thread) =>
+        setCodeThreadRestartContinuation(thread, continueAfterRestart),
+      ),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -2670,6 +2683,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly restartContinuation?: boolean;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -3285,6 +3299,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setThreadCoordinator,
     setThreadCoordinatorWake,
     setThreadMessageWake,
+    setThreadRestartContinuation,
     rebindThreadCheckout,
     renameThread,
     providerRequests,

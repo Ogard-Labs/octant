@@ -257,6 +257,7 @@ describe("octantSettingsRegistry", () => {
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
       "code-default-diff-layout",
+      "code-restart-continuation",
       "code-language-services",
       "code-coordinator-starting",
       "code-coordinator-open-workers",
