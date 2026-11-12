@@ -579,6 +579,25 @@
   }
 }
 
+/* The working-tree view's lines and cards were children of a list with no
+   padding of their own, while its segmented control and findings head were
+   inset, so half the lines sat on the tile's edge. The list owns one gutter
+   and the delivery pane inside it stops adding its own. */
+.right-utility-dock__tool .git-history__list--changes {
+  padding-inline: var(--oct-space-3);
+}
+
+.right-utility-dock__tool
+  .git-history__list--changes
+  :is(
+    .code-delivery-pane__toolbar,
+    .code-delivery-pane__notice,
+    .code-delivery-pane > [role="alert"],
+    .code-delivery-pane > [role="status"]
+  ) {
+  padding-inline: 0;
+}
+
 /* Review's three views are one segmented control. At a tile's narrowest its
    segments share the width instead of running past the tile's edge. */
 .right-utility-dock__tool .git-history {
