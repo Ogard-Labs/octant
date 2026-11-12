@@ -176,17 +176,62 @@ describe("durable ordinary thread queue", () => {
     expect(after.p.admit).toHaveBeenCalledTimes(1);
   });
 
-  it("does not unpause unrelated queued work when resuming an interrupted turn", async () => {
+  it("queues a continuation ahead of the messages already waiting, keeps them, and sends it first", async () => {
+    const f = fixture();
+    f.p.setInspection({ status: "busy", binding: "authorized-target" });
+    const earlier = enqueue();
+    const later = enqueue(1);
+    await f.service.execute(windowId, earlier);
+    await f.service.execute(windowId, later);
+    expect(await queueRestartContinuation(f.service, recovery)).toEqual({ kind: "queued" });
+    const queued = await snapshot(f.service);
+    expect(queued.items.map((item) => item.payload?.prompt)).toEqual([
+      expect.stringContaining("Octant restarted before your previous turn finished"),
+      "private prompt",
+      "private prompt",
+    ]);
+    expect(queued.items.slice(1).map((item) => item.messageId)).toEqual([
+      earlier.messageId,
+      later.messageId,
+    ]);
+    // A repeated click queues nothing more and moves nothing.
+    expect(await queueRestartContinuation(f.service, recovery)).toEqual({ kind: "queued" });
+    expect((await snapshot(f.service)).items).toHaveLength(3);
+    f.p.setInspection({ status: "ready", binding: "authorized-target" });
+    await f.service.tick(scope);
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(queued.items[0]?.messageId);
+  });
+
+  it("lifts a restart hold for the continuation without a review of the messages behind it", async () => {
+    const before = fixture();
+    await before.service.execute(windowId, enqueue());
+    before.close();
+    const p = port();
+    p.setInspection({ status: "held", reason: "authority-revoked" });
+    const after = fixture(p, before.database);
+    await after.service.recover();
+    p.setInspection({ status: "ready", binding: "authorized-target" });
+    expect((await snapshot(after.service)).holdReason).toBe("host-restart");
+    expect(await queueRestartContinuation(after.service, recovery)).toEqual({ kind: "queued" });
+    const lifted = await snapshot(after.service);
+    expect(lifted.holdReason).toBeUndefined();
+    expect(lifted.items).toHaveLength(2);
+  });
+
+  it("keeps a queue the person paused paused, with the continuation waiting ahead", async () => {
     const f = fixture();
     await f.service.execute(windowId, enqueue());
     const state = await snapshot(f.service);
     await f.service.execute(windowId, command("pause", state.version));
     expect(await queueRestartContinuation(f.service, recovery)).toMatchObject({
       kind: "refused",
-      message: expect.stringContaining("Review and remove them from the queue"),
+      message: expect.stringContaining("Resume the queue"),
     });
-    expect((await snapshot(f.service)).paused).toBe(true);
-    expect((await snapshot(f.service)).items).toHaveLength(1);
+    const paused = await snapshot(f.service);
+    expect(paused.paused).toBe(true);
+    expect(paused.items).toHaveLength(2);
+    expect(paused.items[0]?.payload?.prompt).toContain("Octant restarted");
     await f.service.tick(scope);
     expect(f.p.admit).not.toHaveBeenCalled();
   });

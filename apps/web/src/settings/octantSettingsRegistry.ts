@@ -720,6 +720,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
         },
         {
+          id: settingId("resume-interrupted-turns"),
+          label: "Resume interrupted turns after a restart",
+          scope: "host",
+          keywords:
+            "resume interrupted turns after a restart host restarted crash continue by itself automatically unattended waiting answer cut off recovery",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",

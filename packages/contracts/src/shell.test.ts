@@ -110,6 +110,7 @@ const settings = {
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
   persistentBrowserOwner: false,
+  resumeInterruptedTurns: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
@@ -259,6 +260,13 @@ describe("shell bootstrap contracts", () => {
       false,
     );
     expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
+  });
+
+  it("reads a store from before the restart resume setting as off, and keeps it once turned on", () => {
+    expect(decodeShellSettings(settings).resumeInterruptedTurns).toBe(false);
+    expect(
+      decodeShellSettings({ ...settings, resumeInterruptedTurns: true }).resumeInterruptedTurns,
+    ).toBe(true);
   });
 
   it("reads a store from before the stalled-turn limit at thirty minutes, and keeps Off and a bounded choice", () => {

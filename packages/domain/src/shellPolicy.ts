@@ -202,6 +202,7 @@ export function defaultShellSettings(): ShellSettings {
     rememberedBrowserProfileSites: [],
     agentBrowserDownloads: false,
     persistentBrowserOwner: false,
+    resumeInterruptedTurns: false,
   };
 }
 

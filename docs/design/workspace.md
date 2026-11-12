@@ -42,8 +42,17 @@ connection alone do not show it. By default no interrupted turn continues by
 itself. One setting, "Resume interrupted turns after a restart", off by
 default, changes that: when it is on, a turn with no uncertain side effect
 resumes by itself, and a turn whose last effect is uncertain still waits for
-the person (maintainer request, 2026-11-12). Not built yet: today the setting
-does not exist and every interrupted turn waits for Resume.
+the person (maintainer request, 2026-11-12). Built: the setting, in Settings
+under Providers & Models, set at a local window and journaled with the other
+shell settings; and the resume of a thread the restart found with no turn
+open, holding only an approval or a question nobody can answer any more. It
+takes the steps Resume takes, under a local window that reaches the thread
+once one is live, and is journaled as unattended: a restart that finds that
+work unfinished waits for the person rather than resuming again. Not built
+yet: a turn the restart cut off always waits for Resume, in Chat, Work and
+Code and on every runtime. A turn's tool calls are journaled with the turn
+when it ends, so no record written before an effect exists to prove that a
+cut-off turn's last effect settled.
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.
@@ -64,8 +73,9 @@ it. A paired device may queue (maintainer request, 2026-11-12;
 [Architecture: persistence](../architecture.md#persistence) owns the queue).
 Built: the queue passes one turn its mode recorded as failed and lifts the hold
 of one restart that cut nothing of it, and a paired device queues on a thread
-it may already send to. Not built yet: today queued messages must be reviewed
-and removed before Resume can queue the continuation. A refused recovery leaves the notice
+it may already send to; Resume queues the continuation ahead of the messages
+already waiting, with no review of them. A queue the person paused stays
+paused, with the continuation waiting first. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the
 ordinary message queue, including any later admission refusal. A tool may have
 taken effect before the crash without recording its result; Resume is not an

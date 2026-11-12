@@ -241,6 +241,7 @@ describe("octantSettingsRegistry", () => {
       "automatic-model-memory",
       "automatic-model-decision-review",
       "stalled-turn-limit",
+      "resume-interrupted-turns",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

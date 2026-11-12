@@ -1114,7 +1114,7 @@ Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.m
 
 A restart recovers what the journal can prove and never guesses that an ambiguous outcome succeeded.
 
-- Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. One setting, "Resume interrupted turns after a restart", off by default, lets a turn with no uncertain side effect resume by itself; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today no interrupted turn resumes by itself.
+- Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. One setting, "Resume interrupted turns after a restart", off by default, lets a turn with no uncertain side effect resume by itself; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Built: the setting, and the resume of a session the restart found with no turn open, only an answer nobody can give any more. Not built yet: a turn the restart cut off always waits, on every runtime, because no record written before a tool call's effect can prove its last effect settled.
 - Outstanding approvals are recovered, but a parked provider question settles the attempt interrupted because the session that would consume the answer died.
 - Clients catch up from the authoritative snapshot, keep retrying while the host is unreachable, and renew a remote session from the device key rather than re-pairing.
 - Removing a host on the phone sends nothing to the host, so it does not revoke the device.
@@ -1462,7 +1462,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 
 One journaled session per thread is the only state, and every surface reads and changes it through one route. A person redirects running work only through ordered steering notes and version-checked goal revisions.
 
-- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the setting "Resume interrupted turns after a restart" is on (off by default) and the turn has no uncertain side effect, when it resumes by itself (maintainer request, 2026-11-12); not built yet: today a person always resumes it. Lost turns and dead approvals are journaled.
+- After a restart, a session with an open turn or pending approval is recovery-required and admits nothing until a person resumes it, unless the setting "Resume interrupted turns after a restart" is on (off by default) and the turn has no uncertain side effect, when it resumes by itself (maintainer request, 2026-11-12). Built for a session with only a pending approval or question and no open turn: it resumes once, journaled as unattended, and waits for a person if a restart finds that work unfinished. Not built yet: a session with an open turn always waits for a person. Lost turns and dead approvals are journaled.
 - The lead's approvals and questions block until any surface answers, do not expire, and are capped at 32 waiting (maintainer request, 2026-11-12). Built: a wait ends only with an answer, its turn stopping, or its thread's archive or deletion. A pending one marks the thread as needing the person.
 - Built: the provider-neutral app-owned `ask-user` tool can collect up to four related single-choice or multiple-choice questions inline in Chat, Work and Code, with selection limits, unselected recommendations, written alternatives and an optional comment. It creates no Canvas and grants no permissions.
 - Unsent questionnaire choices and comments remain in memory on their source screen across navigation and deferral. They do not transfer to another window, survive a screen reload, or carry into a changed, settled, cancelled or recovered request; restoring them sends nothing.
@@ -2375,9 +2375,9 @@ Status: Built. Since: —. Detail: [Workspace: Sidebar thread status](workspace.
 
 ### Resuming after a host restart
 
-A turn cut off by a host restart shows a notice with an explicit Resume. Nothing continues automatically unless the person turned on "Resume interrupted turns after a restart" (off by default): then a turn with no uncertain side effect resumes by itself, and a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Not built yet: today nothing continues automatically.
+A turn cut off by a host restart shows a notice with an explicit Resume. Nothing continues automatically unless the person turned on "Resume interrupted turns after a restart" (off by default): then a turn with no uncertain side effect resumes by itself, and a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Built: the setting, and the resume of a thread the restart found with no turn open. Not built yet: a turn the restart cut off always waits for Resume, on every runtime.
 
-- Resume queues one host-written continuation in the same thread, after re-checking window, provider and Project authority.
+- Resume queues one host-written continuation in the same thread, ahead of the messages already queued and with no review of them, after re-checking window, provider and Project authority.
 - A second window, repeated click or lost response cannot queue a second continuation.
 - Resume is not an exact replay: a tool may have taken effect before the crash, and Octant promises neither undo nor deduplication.
 

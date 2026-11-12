@@ -8575,9 +8575,16 @@ the model at another size.
   unless the setting "Resume interrupted turns after a restart" is on (off by
   default): then a turn with no uncertain side effect resumes by itself, and
   a turn whose last effect is uncertain still waits for the person
-  (maintainer request, 2026-11-12; not built yet: today every recovered
-  session waits for a person);
-  recording lifecycle facts does not enable harness tools, routing, or advisor
+  (maintainer request, 2026-11-12). Built: the journal tells a session with a
+  turn left open from one that only held a pending approval or question. The
+  second resumes by itself, under a live local window that reaches the
+  thread, by the steps a person's resume takes; its resume is journaled as
+  unattended, and until a turn completes or a person resumes, the next
+  restart waits. Not built yet: a session with a turn left open always waits
+  for a person, on every runtime. Tool calls are journaled with their turn
+  when it ends, so nothing written before an effect can prove a cut-off
+  turn's last effect settled.
+  Recording lifecycle facts does not enable harness tools, routing, or advisor
   calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
   result, dropped at the turn's end — so a restart keeps an undelivered one).

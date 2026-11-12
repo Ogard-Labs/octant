@@ -216,6 +216,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "runtimeForgeChanges"
     | "followUpCreation"
     | "restartContinuation"
+    | "unattendedRestartResume"
     | "nativeHarnessComposition"
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
@@ -275,6 +276,7 @@ export function wireWork(deps: WorkDependencies) {
     externalContentIngestionStore,
     followUpCreation,
     restartContinuation,
+    unattendedRestartResume,
     githubIssueContextService,
     goalService,
     imageGenerationOffers,
@@ -1540,6 +1542,11 @@ export function wireWork(deps: WorkDependencies) {
     yield* Effect.promise(() => workAttachments.recover());
     yield* Effect.promise(() => conversationInputTransfer.recover());
     const advanceMessageQueue = () => {
+      // Before the queue's own pass, so a continuation it queues is dispatched
+      // by this pass. It does nothing once every thread a restart cut is judged.
+      void unattendedRestartResume
+        .pass()
+        .catch(() => console.error("An interrupted thread could not be resumed."));
       void threadMessageQueue
         .tick()
         .catch(() => console.error("The message queue could not advance."));

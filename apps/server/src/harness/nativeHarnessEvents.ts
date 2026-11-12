@@ -94,6 +94,12 @@ export const NativeHarnessSessionPaused = Schema.Struct({
 
 export const NativeHarnessSessionResumed = Schema.Struct({
   sessionId: NativeHarnessSessionId,
+  /**
+   * The host lifted a restart recovery with nobody there, under the setting
+   * that allows it. Journaled so the next restart can tell that the work it
+   * started never finished, and wait for a person instead of resuming again.
+   */
+  unattended: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 
 /**

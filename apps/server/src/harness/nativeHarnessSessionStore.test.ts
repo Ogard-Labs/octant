@@ -316,3 +316,71 @@ describe("native harness task list", () => {
     expect(storeOn(openConnection()).replaceTasks(threadId, items)).toBe("no-session");
   });
 });
+
+describe("what a restart left of a session", () => {
+  const question = (id: string) => ({
+    id: id as never,
+    prompt: "Which report should I update?",
+    options: ["Q3", "Q4"],
+    status: "pending" as const,
+    askedAt: now as never,
+  });
+
+  it("tells a turn it cut off from an answer nobody can give any more", () => {
+    const connection = openConnection();
+    try {
+      const live = storeOn(connection);
+      live.ensure({ threadId, mode: "work", leadSlotId: "default" as never, lead });
+      expect(live.recoveryStanding(threadId)).toBeUndefined();
+      live.askQuestion(threadId, question(uuid()));
+      // No turn is open: the session only waits for the answer.
+      const waiting = storeOn(connection);
+      expect(waiting.read(threadId)?.session.status).toBe("recovery-required");
+      expect(waiting.recoveryStanding(threadId)).toBe("answer-dropped");
+
+      waiting.resume(threadId);
+      expect(waiting.recoveryStanding(threadId)).toBeUndefined();
+      waiting.markRunning(threadId);
+      waiting.askQuestion(threadId, question(uuid()));
+      // The same pending answer, but a turn was running when the host stopped.
+      expect(storeOn(connection).recoveryStanding(threadId)).toBe("turn-cut-off");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("remembers that its last resume was unattended until a turn completes or a person resumes", () => {
+    const connection = openConnection();
+    try {
+      const live = storeOn(connection);
+      const session = live.ensure({
+        threadId,
+        mode: "work",
+        leadSlotId: "default" as never,
+        lead,
+      });
+      live.askQuestion(threadId, question(uuid()));
+      const first = storeOn(connection);
+      expect(first.resumedUnattended(threadId)).toBe(false);
+      expect(first.resume(threadId, { unattended: true })).toBe(true);
+      expect(first.resumedUnattended(threadId)).toBe(true);
+      first.askQuestion(threadId, question(uuid()));
+
+      const second = storeOn(connection);
+      expect(second.recoveryStanding(threadId)).toBe("answer-dropped");
+      expect(second.resumedUnattended(threadId)).toBe(true);
+      // A person's own resume clears it.
+      second.resume(threadId);
+      expect(storeOn(connection).resumedUnattended(threadId)).toBe(false);
+
+      second.askQuestion(threadId, question(uuid()));
+      const third = storeOn(connection);
+      third.resume(threadId, { unattended: true });
+      third.recordTurn(threadId, turn(session.id, 1, {}));
+      // So does a turn that ran to its end afterwards.
+      expect(storeOn(connection).resumedUnattended(threadId)).toBe(false);
+    } finally {
+      connection.close();
+    }
+  });
+});
