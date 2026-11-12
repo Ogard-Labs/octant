@@ -20,7 +20,7 @@ describe("CodeFileExplorer", () => {
     const onRefresh = vi.fn();
     const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
     render(
-      <DockBarContext.Provider value={{ set: (items) => handed.push(items) }}>
+      <DockBarContext.Provider value={{ placement: "tiled", set: (items) => handed.push(items) }}>
         <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={onRefresh} />
       </DockBarContext.Provider>,
     );
@@ -49,6 +49,17 @@ describe("CodeFileExplorer", () => {
     await userEvent.setup().type(selected, "{enter}");
     expect(onOpenFile).toHaveBeenCalledWith(expect.objectContaining({ path: "src/index.ts" }));
     expect(tree).not.toHaveTextContent("/Users/");
+  });
+
+  it("keeps Refresh beside the filter in the one row when the tool stands alone", () => {
+    const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
+    render(
+      <DockBarContext.Provider value={{ placement: "alone", set: (items) => handed.push(items) }}>
+        <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={vi.fn()} />
+      </DockBarContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "Refresh files" })).toBeInTheDocument();
+    expect(handed.at(-1)).toEqual([]);
   });
 
   it("filters the bounded projection and labels binary, oversized, and unavailable files honestly", async () => {

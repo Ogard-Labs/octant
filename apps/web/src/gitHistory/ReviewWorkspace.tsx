@@ -4,7 +4,6 @@ import type { DockReviewToolProps } from "../shell/DockReviewTool";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { LocalCommitsPanel } from "./LocalCommitsPanel";
 import { SavedAgentReview, type AgentResultReviewRequest } from "./SavedAgentReview";
-import { GitCommitHorizontal, FileDiff, History as HistoryIcon } from "lucide-react";
 import { useDockBarControls } from "../shell/dockBarControls";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
@@ -75,9 +74,9 @@ function BoundReview(props: DockReviewToolProps) {
       id: "view",
       label: "Review view",
       options: [
-        { id: "changes", label: "Working tree", icon: FileDiff },
-        { id: "local", label: "Local commits", icon: GitCommitHorizontal },
-        { id: "history", label: "History", icon: HistoryIcon },
+        { id: "changes", label: "Working tree" },
+        { id: "local", label: "Local commits" },
+        { id: "history", label: "History" },
       ],
       value: view,
       onChange: select,
@@ -85,7 +84,7 @@ function BoundReview(props: DockReviewToolProps) {
   ]);
   return (
     <div className="git-history">
-      {hosted ? null : (
+      {hosted !== undefined ? null : (
         <div className="git-history__toolbar">
           <OctantToggleGroup
             aria-label="Review view"

@@ -1,3 +1,4 @@
+import { useDockBarControls } from "../shell/dockBarControls";
 import type {
   PreviewHostId,
   PreviewOpaqueRef,
@@ -159,26 +160,42 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   // holding one control; with no group to join (loading, empty, failed) it keeps
   // its own row.
   const hasGroups = authored.length > 0 || rest.length > 0;
-  const refreshButton = (
-    <OctantIconButton
-      disabled={status === "loading"}
-      label="Refresh files"
-      onClick={refresh}
-      type="button"
-    >
-      <RefreshCw aria-hidden="true" size={14} />
-    </OctantIconButton>
-  );
+  // Refresh is an action: a bar or the single row hosts it beside the tool's
+  // name, and the headings and the lone toolbar keep their own only where
+  // nothing does.
+  const hosted = useDockBarControls([
+    {
+      kind: "button",
+      id: "refresh",
+      label: "Refresh files",
+      icon: RefreshCw,
+      onSelect: refresh,
+      disabled: status === "loading",
+    },
+  ]);
+  const refreshButton =
+    hosted !== undefined ? null : (
+      <OctantIconButton
+        disabled={status === "loading"}
+        label="Refresh files"
+        onClick={refresh}
+        type="button"
+      >
+        <RefreshCw aria-hidden="true" size={14} />
+      </OctantIconButton>
+    );
 
   return (
-    <div className="work-files-panel">
+    <div className="work-files-panel" data-bar-hosted={hosted !== undefined ? "true" : undefined}>
       {props.serverLocation === undefined ? null : (
         <p className="work-files-panel__status">
           Files on {props.serverLocation}. Names and sizes only; opening files is unavailable here.
           Use Refresh to check for changes.
         </p>
       )}
-      {hasGroups ? null : <div className="work-files-panel__toolbar">{refreshButton}</div>}
+      {hasGroups || hosted !== undefined ? null : (
+        <div className="work-files-panel__toolbar">{refreshButton}</div>
+      )}
 
       {status === "loading" ? (
         <p className="work-files-panel__status" role="status">

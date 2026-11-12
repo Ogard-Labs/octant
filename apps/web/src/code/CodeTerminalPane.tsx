@@ -1,3 +1,4 @@
+import { useDockBarControls } from "../shell/dockBarControls";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { CodeClientFailure } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
@@ -603,9 +604,26 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     else if (value.startsWith("folder:")) setConfirmingFolder(value.slice("folder:".length));
   };
 
+  // The actions menu stands in the bar or the single row where one hosts it,
+  // clear of the output; it floats over the output only where nothing does.
+  const hosted = useDockBarControls(
+    actions.length === 0
+      ? []
+      : [
+          {
+            kind: "menu",
+            id: "actions",
+            label: "More terminal actions",
+            icon: MoreHorizontal,
+            items: actions.map((action) => ({ id: action.value, label: action.label })),
+            onSelect: selectAction,
+          },
+        ],
+  );
+
   const pane = (
     <section aria-label="Terminal pane" className="code-delivery-pane code-terminal-pane">
-      {actions.length === 0 ? null : (
+      {actions.length === 0 || hosted !== undefined ? null : (
         <div className="code-terminal-pane__actions-menu">
           <OctantMenu
             items={actions}

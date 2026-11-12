@@ -14,6 +14,7 @@ import {
   type AgentRunGraphRow,
 } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
+import { useDockBarControls } from "../shell/dockBarControls";
 import "./agent-hierarchy.css";
 
 /**
@@ -98,31 +99,53 @@ export function AgentHierarchyPanel(props: {
   // reason to offer the graph even when it delegated nothing itself.
   const anythingToArrange = graphRows.length > 0 || workers.some((w) => w.runs.length > 0);
 
+  // The view switch is navigation, so where a bar or the single row hosts it
+  // it stands there in words; the tool's name is the bar's, so the heading goes.
+  const switchable = onViewChange !== undefined && anythingToArrange;
+  const hosted = useDockBarControls(
+    switchable
+      ? [
+          {
+            kind: "choice",
+            id: "view",
+            label: "View",
+            options: VIEWS.map((view) => ({ id: view.value, label: view.label })),
+            value: props.view ?? "list",
+            onChange: (value) => {
+              const selected = VIEWS.find((view) => view.value === value);
+              if (selected !== undefined) onViewChange(selected.value);
+            },
+          },
+        ]
+      : [],
+  );
   return (
     <section
       aria-label="Subagents"
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
-      <header className="agent-hierarchy__header">
-        <h2>Subagents</h2>
-        {onViewChange === undefined || !anythingToArrange ? null : (
-          <OctantToggleGroup<AgentHierarchyView>
-            aria-label="View"
-            className="segmented"
-            onValueChange={(value) => {
-              const selected = value[0];
-              if (selected !== undefined) onViewChange(selected);
-            }}
-            value={[props.view ?? "list"]}
-          >
-            {VIEWS.map((view) => (
-              <OctantToggleGroupItem className="segment" key={view.value} value={view.value}>
-                {view.label}
-              </OctantToggleGroupItem>
-            ))}
-          </OctantToggleGroup>
-        )}
-      </header>
+      {hosted !== undefined ? null : (
+        <header className="agent-hierarchy__header">
+          <h2>Subagents</h2>
+          {onViewChange === undefined || !anythingToArrange ? null : (
+            <OctantToggleGroup<AgentHierarchyView>
+              aria-label="View"
+              className="segmented"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) onViewChange(selected);
+              }}
+              value={[props.view ?? "list"]}
+            >
+              {VIEWS.map((view) => (
+                <OctantToggleGroupItem className="segment" key={view.value} value={view.value}>
+                  {view.label}
+                </OctantToggleGroupItem>
+              ))}
+            </OctantToggleGroup>
+          )}
+        </header>
+      )}
 
       {props.reconnecting ? (
         <p className="agent-hierarchy__banner" role="status">

@@ -1926,6 +1926,10 @@ rule:
   controls with one 14px glyph, centred on a whole pixel: the bar's hairline is
   drawn inside its 32px, not as a border that takes one off the controls'
   centreline. The Browser's row follows the bar's insets.
+  The tool's own controls stand in the same bar on the same terms (24px
+  controls, 14px glyphs, 4px gaps, a 28px word-switch tray of 24px segments),
+  and a tool's secondary row and its first content text sit on the bar's 12px
+  edge.
 - _The icon rail's_ face is its button (32px in the column, 2px
   apart), and the first face is centred on the title rail's centreline, so it
   stands level with the band's controls beside it (6px down in the 44px rail).
@@ -2651,7 +2655,7 @@ holds the tile's controls: an **Arrange <tool>** menu button and a **Close
 <tool>** button that closes the tool as pressing its button again does (every
 page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
-times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no bar of its own. The Arrange menu holds **Move
+times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no tile bar and keeps the one slim row below. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when
 that move is possible within the caps (a one-column layout moved sideways makes the
 second column, and a column left empty goes), then **Show alone**, **Hide
@@ -2690,6 +2694,53 @@ single-tool view is the same tile area with one bar-less tile, and tiles are
 positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
+
+**One bar holds the tool's controls.** A tool used to draw its own 40 to 44px
+header under the tile's bar, with insets of 8, 12 or 16, so a tiled tool showed
+two bars that disagreed. The tool now hands its header controls up to the bar and
+draws no header of its own, so a tiled tool has exactly one 32px bar: the tool's
+name, then the tool's controls, then Arrange and Close, on the bar's insets (12
+leading, 8 trailing) with 4px between controls.
+
+- _Navigation keeps its words._ A choice between a tool's views or places
+  (Review's Working tree, Local commits and History, Agents' List and Graph, the
+  Desktop's leases) is drawn as a word switch: a 28px tray of 24px segments,
+  centred in the bar (2px above and below), the pressed segment marked. Words
+  are never replaced by icons.
+- _Actions are icons._ An action everyone knows (Refresh, Back, Home, Screenshot,
+  Release) is a 24px icon button with a 14px glyph, a tooltip and an accessible
+  name. An action that opens a list of actions (a terminal's, a device's More) is
+  one such button with a menu. Status the tool says about itself (a test run's
+  state, a pull-request count, a device's state) is quiet text after the name.
+- _The bar folds in a fixed order._ When the controls do not fit beside the
+  name at the tile's width, each word switch first becomes one control showing
+  the current view's name with a menu of the views, so the current place is
+  always readable in words; then the actions fold into one **More <tool> actions**
+  menu; the tool's name is cut last. A menu returns focus to its control after an
+  action. The steps are decided from the bar's width, the name's natural width
+  and the words' natural width, never from the folded controls, so the bar
+  cannot flip between two states. At the 280px dock minimum Review's switch is
+  already the named control.
+- _A secondary row is for content, and there is at most one._ A field or path the
+  tool shows to be read or typed into (Files' filter, Pull requests' search,
+  Document's path, Side Chat's "About" line) is content, not chrome: it keeps one
+  row under the bar, 32px, on the bar's insets and hairline, and the tool's
+  first content text stands on the bar's 12px text edge. Anything that is a
+  control goes in the bar. Canvas draws its own versions popover and menu, which
+  go up as one control that does not fold.
+- _A tool alone keeps no tile bar_, as before: the title band's tool row names
+  it. Its controls stand in one row of the bar's height, insets and hairline,
+  holding only them, and a tool without controls has no row. Where the tool has
+  a content field as well (Files' filter and Refresh, Pull requests' search and
+  count), the field and the action share that one row.
+- _The same tool in the bottom panel follows the same rules._ Its controls stand
+  in the panel's bar between the tool tabs and Hide, as 24px controls with 14px
+  glyphs, 4px apart, ending on the 8px end inset, and fold the same way. The
+  panel's bar stays the 44px band the tabs stand in; only the controls and
+  insets are the tile bar's.
+- _A control is never a drag handle._ Each carries `window-no-drag`, and a
+  tool's controls come after its name in the keyboard order, before Arrange and
+  Close.
 
 A tool's button carries the placement a tab menu once did. Its context
 menu (right click, the menu key or Shift+F10) offers **Show below** for an open

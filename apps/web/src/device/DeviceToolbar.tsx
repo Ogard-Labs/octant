@@ -20,6 +20,7 @@ import {
 import type { KeyboardEvent, ReactNode } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import type { DeviceChoice } from "./deviceModel";
 
 export type DeviceDot = "running" | "busy" | "lost" | "idle";
@@ -68,6 +69,94 @@ export function DeviceToolbar(props: {
 }) {
   const { controls } = props;
   const menu = deviceMenuItems(props);
+  // A tile's bar, the single row or the bottom panel's bar hosts the controls
+  // when there is one; the toolbar below is for a pane that stands on its own.
+  const switchable =
+    props.onSelectDevice !== undefined &&
+    props.devices.filter((device) => device.state !== "unavailable").length >= 2;
+  const items: DockBarItem[] = [
+    switchable
+      ? {
+          kind: "choice",
+          id: "device",
+          label: "Device",
+          compact: true,
+          options: props.devices
+            .filter((device) => device.state !== "unavailable")
+            .map((device) => ({ id: device.id, label: device.name })),
+          value: props.currentId ?? "",
+          onChange: (id) => props.onSelectDevice?.(id),
+        }
+      : { kind: "text", id: "device", text: props.title },
+    {
+      kind: "text",
+      id: "state",
+      text: props.os === undefined ? props.state : `${props.os} · ${props.state}`,
+      live: true,
+    },
+  ];
+  if (props.viewOnly !== undefined) {
+    const showApproval = props.viewOnly.onShowApproval;
+    items.push({
+      kind: "button",
+      id: "view-only",
+      label: "View only",
+      title: "Show the input approval again",
+      icon: EyeOff,
+      onSelect: showApproval,
+    });
+  }
+  if (controls.back)
+    items.push({
+      kind: "button",
+      id: "back",
+      label: "Back",
+      icon: ChevronLeft,
+      disabled: !controls.hardware,
+      onSelect: () => props.onKey("back"),
+    });
+  items.push(
+    {
+      kind: "button",
+      id: "home",
+      label: "Home",
+      icon: House,
+      disabled: !controls.hardware,
+      onSelect: () => props.onKey("home"),
+    },
+    {
+      kind: "button",
+      id: "screenshot",
+      label: "Screenshot",
+      title: "Screenshot (saved to evidence)",
+      icon: Camera,
+      disabled: !controls.screenshot,
+      onSelect: props.onScreenshot,
+    },
+  );
+  if (props.wide)
+    items.push({
+      kind: "button",
+      id: "lock",
+      label: "Lock",
+      icon: Lock,
+      disabled: !controls.hardware,
+      onSelect: () => props.onKey("lock"),
+    });
+  if (menu.length > 0)
+    items.push({
+      kind: "menu",
+      id: "more",
+      label: "More",
+      icon: Ellipsis,
+      items: menu.map((entry) => ({ id: entry.value, label: entry.label })),
+      onSelect: (id) => {
+        const item = menu.find((one) => one.value === id);
+        if (item !== undefined) props.onMenu(item.value);
+      },
+    });
+  const hosted = useDockBarControls(items);
+  if (hosted !== undefined) return null;
   return (
     <div
       aria-label={`${props.label} controls`}

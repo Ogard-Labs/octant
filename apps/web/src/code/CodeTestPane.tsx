@@ -8,6 +8,7 @@ import type {
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
+import { useDockBarControls } from "../shell/dockBarControls";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -183,14 +184,22 @@ export function CodeTestPane(props: CodeTestPaneProps) {
     }
   };
 
+  const statusLabel = activeRunLabel(activeRun) ?? resultLabel(result);
+  // Where a bar or the single row hosts it, the state of the run stands there
+  // beside the tool's name instead of in a header of its own.
+  const hosted = useDockBarControls([
+    { kind: "text", id: "status", text: statusLabel, live: true },
+  ]);
   return (
     <section aria-label="Repository tests" className="code-delivery-pane code-test-pane">
-      <header className="code-delivery-pane__toolbar">
-        <div>
-          <h1>Repository tests</h1>
-        </div>
-        <p>{activeRunLabel(activeRun) ?? resultLabel(result)}</p>
-      </header>
+      {hosted !== undefined ? null : (
+        <header className="code-delivery-pane__toolbar">
+          <div>
+            <h1>Repository tests</h1>
+          </div>
+          <p>{statusLabel}</p>
+        </header>
+      )}
       {props.definitions.length === 0 ? (
         <p role="status">No structured tests are available.</p>
       ) : null}

@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
-import { useDockBarControls } from "../shell/dockBarControls";
+import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
@@ -193,10 +193,13 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     event.preventDefault();
   };
 
-  // Refresh is the tool's own control, so it stands in the tile's bar beside
-  // the name; the filter is content and keeps the one row under it.
-  const hosted = useDockBarControls(
-    props.onRefresh === undefined
+  // Refresh is an action, so in a tile's bar or the bottom panel's it stands in
+  // the bar beside the name and the filter, which is content, keeps the one row
+  // under it. Shown alone there is no bar: filter and Refresh share the one row.
+  const placement = useDockBarPlacement();
+  const refreshInBar = placement === "tiled" || placement === "bottom";
+  useDockBarControls(
+    props.onRefresh === undefined || !refreshInBar
       ? []
       : [
           {
@@ -209,6 +212,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           },
         ],
   );
+  const hosted = placement !== undefined;
 
   return (
     <section
@@ -245,7 +249,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           )}
         </label>
 
-        {props.onRefresh === undefined || hosted ? null : (
+        {props.onRefresh === undefined || refreshInBar ? null : (
           <OctantIconButton
             disabled={props.refreshing === true}
             label="Refresh files"
