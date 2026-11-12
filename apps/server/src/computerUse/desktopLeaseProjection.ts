@@ -5,7 +5,9 @@ import {
   DESKTOP_SPEND_EVENT_NAMES,
   DesktopArtifactSent,
   DesktopBilledLeaseRefused,
+  DesktopLeaseSettingsChanged,
   DesktopSpendCapChanged,
+  decodeDesktopLeaseSettingsChanged,
   decodeDesktopSpendCapChanged,
   DesktopLeaseExtended,
   DesktopLeaseLeftoverCleared,
@@ -23,6 +25,7 @@ import {
   type DesktopHostTag,
   type DesktopLease,
   type DesktopLeaseId,
+  type DesktopLeaseSettings,
   type EventEnvelope,
 } from "@octant/contracts";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -40,13 +43,18 @@ export function registerDesktopLeaseEvents(registry: EventRegistry): EventRegist
     .register(DESKTOP_LEASE_EVENT_NAMES.operated, 1, DesktopLeaseOperated)
     .register(DESKTOP_LEASE_EVENT_NAMES.leftoverCleared, 1, DesktopLeaseLeftoverCleared)
     .register(DESKTOP_SPEND_EVENT_NAMES.capChanged, 1, DesktopSpendCapChanged)
-    .register(DESKTOP_SPEND_EVENT_NAMES.billedLeaseRefused, 1, DesktopBilledLeaseRefused);
+    .register(DESKTOP_SPEND_EVENT_NAMES.billedLeaseRefused, 1, DesktopBilledLeaseRefused)
+    .register(DESKTOP_SPEND_EVENT_NAMES.leaseSettingsChanged, 1, DesktopLeaseSettingsChanged);
 }
 
-/** The host's spend record: the cap a person set, if any, and the aggregate's version. */
+/**
+ * The host's spend record: the cap a person set, if any, the lease settings
+ * they changed, if they did, and the aggregate's version.
+ */
 export interface DesktopSpendRecord {
   readonly version: number;
   readonly monthlyCapUsdCents?: number;
+  readonly leaseSettings?: DesktopLeaseSettings;
 }
 
 export interface DesktopLeaseRecord {
@@ -86,12 +94,19 @@ export class DesktopLeaseProjection implements Projection {
       if (this.#spend.version >= version) return;
       if (event.eventName === DESKTOP_SPEND_EVENT_NAMES.capChanged) {
         const changed = decodeDesktopSpendCapChanged(event.payload);
+        const { leaseSettings } = this.#spend;
         this.#spend = {
           version,
           ...(changed.monthlyCapUsdCents === undefined
             ? {}
             : { monthlyCapUsdCents: changed.monthlyCapUsdCents }),
+          ...(leaseSettings === undefined ? {} : { leaseSettings }),
         };
+        return;
+      }
+      if (event.eventName === DESKTOP_SPEND_EVENT_NAMES.leaseSettingsChanged) {
+        const changed = decodeDesktopLeaseSettingsChanged(event.payload);
+        this.#spend = { ...this.#spend, version, leaseSettings: changed.settings };
         return;
       }
       // A refusal changes no cap; only the aggregate's version moves.

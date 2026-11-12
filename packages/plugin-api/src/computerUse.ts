@@ -19,10 +19,12 @@ export interface ComputerUseHostPort {
   /**
    * Present only when the send bound the task to one of its thread's
    * disposable desktops. The host reads, hashes, asks for, and journals the
-   * file before the desktop receives it.
+   * file before the desktop receives it, and decides whether the task may
+   * keep the desktop running longer.
    */
   readonly disposableDesktop?: {
     readonly sendFile: (path: string, signal?: AbortSignal) => Promise<ComputerControlResult>;
+    readonly extend: (minutes: number, signal?: AbortSignal) => Promise<ComputerControlResult>;
   };
 }
 

@@ -192,7 +192,7 @@ describe("Desktop pane", () => {
       billed: true,
     } as const;
     const { client, requests } = fakeClient({
-      overview: overviewOf([], { status: "available", provider: billed }),
+      overview: overviewOf([], { status: "available", provider: billed, asks: "billed" }),
     });
     render(<DesktopPane client={client} threadId={threadId} />);
     fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
@@ -213,6 +213,22 @@ describe("Desktop pane", () => {
     );
   });
 
+  it("starts a billed desktop without asking once the host says the person turned the confirmation off", async () => {
+    const billed = {
+      providerId: decodeDesktopProviderId("e2b"),
+      displayName: "E2B",
+      locality: "cloud",
+      billed: true,
+    } as const;
+    const { client, requests } = fakeClient({
+      overview: overviewOf([], { status: "available", provider: billed }),
+    });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
+    await waitFor(() => expect(requests).toContainEqual({ kind: "acquire", threadId }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("tells the person what a cloud desktop could cost, how long it bills if this computer stops, and what the month has counted", async () => {
     const aws = {
       ...spaces,
@@ -230,6 +246,7 @@ describe("Desktop pane", () => {
       overview: overviewOf([], {
         status: "available",
         provider: { ...aws, billed: true },
+        asks: "billed",
         placementId: decodeDesktopPlacementId("aws"),
         spend: {
           estimateUsdCents: 320,
@@ -275,6 +292,7 @@ describe("Desktop pane", () => {
       overview: overviewOf([], {
         status: "available",
         provider: spaces,
+        asks: "off-machine",
         placementId: decodeDesktopPlacementId("other-machine"),
         machine: spareMini,
       }),

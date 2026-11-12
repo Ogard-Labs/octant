@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeComputerControlCommand,
+  decodeComputerControlResult,
+  decodeComputerExtendDesktopCommand,
   decodeComputerSendFileCommand,
   decodeComputerUseOwner,
   decodeComputerUseSettings,
@@ -78,6 +80,23 @@ describe("Computer use plugin commands", () => {
       decodeComputerSendFileCommand({ operation: "send-file", path: "dist/app", leaseId: "x" }),
     ).toThrow();
     expect(() => decodeComputerControlCommand({ operation: "send-file", path: "a" })).toThrow();
+  });
+
+  it("carries an agent's extension of its bound desktop as minutes, never as a driver command", () => {
+    expect(decodeComputerExtendDesktopCommand({ operation: "extend", minutes: 30 })).toEqual({
+      operation: "extend",
+      minutes: 30,
+    });
+    for (const minutes of [0, 241, 1.5]) {
+      expect(() => decodeComputerExtendDesktopCommand({ operation: "extend", minutes })).toThrow();
+    }
+    expect(() =>
+      decodeComputerExtendDesktopCommand({ operation: "extend", minutes: 30, leaseId: "x" }),
+    ).toThrow();
+    expect(() => decodeComputerControlCommand({ operation: "extend", minutes: 30 })).toThrow();
+    expect(
+      decodeComputerControlResult({ kind: "extended", expiresAt: "2026-10-26T13:00:00.000Z" }),
+    ).toEqual({ kind: "extended", expiresAt: "2026-10-26T13:00:00.000Z" });
   });
 });
 

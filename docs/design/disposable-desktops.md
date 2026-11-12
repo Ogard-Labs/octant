@@ -203,7 +203,8 @@ lease anyway.
   `plan-mode`, `declined` (a confirmation was refused, or authority changed
   while a person decided), `provider-unavailable` (the driver's `status` is not
   ready), `release-pending` (see verified release), and for extension
-  `agent-cannot-extend`, `beyond-maximum`, and `extension-unconfirmed`. A lease
+  `agent-cannot-extend` (an agent's extension of a lease that bills or runs
+  off this machine), `beyond-maximum`, and `extension-unconfirmed`. A lease
   id the host does not know answers `lease-ended`.
 - An operating command (extend, screen, control, deliver) re-resolves the
   driver through the plugin host on every call and requires it effective; it
@@ -237,17 +238,20 @@ lease anyway.
   the cap follows the thread's level as a host-local one does
   ([decision 2](#maintainer-decisions); exception 6 of
   [the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Not built yet: today every billed lease is
-  confirmed and there is no setting. A lease whose desktop runs off this machine (a placement whose locality is
+  maintainer request, 2026-11-12). A lease whose desktop runs off this machine (a placement whose locality is
   not host-local) follows the same setting, their own Start included: it runs
   where they should know of before it starts, and it can outlive this host
-  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). Not built yet:
-  today a person confirms every off-machine lease in every posture. A person who
+  ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). A person who
   acquires a host-local desktop has already decided and is not asked again;
-  Plan still refuses them, and a billed or off-machine lease still asks. The
+  Plan still refuses them, and a billed or off-machine lease still asks while
+  the setting is on. The
   host re-checks authority after the answer, and an answer given for one
   provider, placement, machine, posture, or spend estimate never covers
-  another.
+  another; a start that asked nobody is declined if the person turns the
+  setting back on before it is journaled. The setting, with the per-thread
+  and per-host lease counts, is journaled as
+  `desktop.lease-settings-changed@1` on the host's spend aggregate with the
+  person as actor ([Built: lease settings](#built-lease-settings)).
 - **Spending** on a billed desktop is capped per month
   ([C5](#expiry-and-teardown-when-the-daemons-host-may-die)). Billed desktops
   are off until a person sets a monthly cap in Settings › Computer use. Before
@@ -316,8 +320,8 @@ lease anyway.
   "Confirm each billed desktop" off, which covers off-machine leases and
   transfers alike (exception 6 of
   [the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Not built yet: today it always asks, in
-  every posture.
+  maintainer request, 2026-11-12). With it off, the transfer follows the
+  thread's level as one to a host-local desktop does.
 
 ### Lifecycle and teardown
 
@@ -327,9 +331,10 @@ lease anyway.
   when computer use is turned off. Ending always destroys the desktop.
 - Every lease has a hard expiry. A person may extend it up to the recipe
   maximum. An agent may extend a host-local lease of its own thread up to that
-  maximum, under the rules acquiring one follows; an agent cannot extend a
-  billed lease (maintainer request, 2026-11-12). Not built yet: today an agent
-  cannot extend any lease. The host asks the driver to move the
+  maximum, under the rules acquiring one follows (Plan refuses, Full access
+  proceeds, and anything below asks in the thread); an agent cannot extend a
+  billed lease, nor one that runs off this machine (maintainer request,
+  2026-11-12). The host asks the driver to move the
   provider-side expiry first and accepts the extension only when the driver
   confirms the new expiry; otherwise the extension is refused, the original
   expiry stands, and the lease ends on time. Idle release applies when no tab
@@ -522,7 +527,7 @@ host-process Unix fixture is integration evidence, not namespace evidence.
 | The app under test or an injected agent reads secrets    | No checkout, home, keyring, session bus, SSH agent, or `OCTANT_*` in the desktop; cloud key never leaves the host                                                                                                                               |
 | The desktop reaches the host                             | Own network namespace with no host loopback; standard streams and an explicitly approved lease-bound preview socket only; bounded parsing of everything returned                                                                                |
 | Kernel escape from a host-local desktop                  | Same Bubblewrap boundary Code tool launches already rely on; a VM-backed provider is the stronger boundary                                                                                                                                      |
-| Transfer used to exfiltrate                              | One named file, refused outside the root or under `.git`, hash journaled, the person sees it; cloud transfers always ask                                                                                                                        |
+| Transfer used to exfiltrate                              | One named file, refused outside the root or under `.git`, hash journaled, the person sees it; cloud transfers ask while "Confirm each billed desktop" is on                                                                                     |
 | Desktop content steers the agent                         | Results taint the thread; standing approvals stop; sensitive-field protection and per-app approval unchanged                                                                                                                                    |
 | Another thread or a stale tab takes over a screen        | Leases are thread-bound; a restored tab shows unavailable and never rebinds                                                                                                                                                                     |
 | A stream token or provider URL leaks to a client         | The host terminates the provider stream; renderers get only the host's authorized channel                                                                                                                                                       |
@@ -555,8 +560,8 @@ alternatives considered and the reason for the choice follow it.
    a person confirms each billed lease in every posture while the setting
    "Confirm each billed desktop" is on, which is the default (exception 6 of
    [the Full access rule](../architecture.md#security-and-authority);
-   maintainer request, 2026-11-12). Not built yet: today every billed lease is
-   confirmed and there is no setting. Rejected: ordinary posture rules, as for any effect. Spending
+   maintainer request, 2026-11-12). Rejected: ordinary posture rules with no
+   cap and no setting, as for any effect. Spending
    the person's money is not a code effect Full access covers.
 3. **Paired devices.** Any client that may open the thread may view and operate
    its desktop. Rejected: view only from paired devices, and local windows
@@ -568,10 +573,10 @@ alternatives considered and the reason for the choice follow it.
    15 minutes; a thread holds at most two leases; a host runs at most two live
    host-local leases. These are defaults a person can change: lease length,
    maximum, and idle release in the recipe, and the per-thread and per-host
-   counts in Settings (Unattended work, beside
+   counts in Settings › Computer use, each from one to eight (Unattended
+   work, beside
    [the Full access rule](../architecture.md#security-and-authority);
    maintainer request, 2026-11-12). A billed lease always keeps a hard expiry.
-   Not built yet: today the two counts are constants.
 5. **Host-local network.** A desktop retains its isolated network namespace.
    A host-local desktop gets network through a filtered egress proxy that
    refuses loopback, private, and host addresses, never by sharing the host's
@@ -639,6 +644,59 @@ container with no account or hardware.
 Later, each with its own design note here: a forwarded Local server port,
 accessibility element trees for host-local desktops, `drag` and `move-cursor`,
 and Work-mode leasing if it is not delivered with Code.
+
+### Built: lease settings
+
+- **Contract.** `DesktopLeaseSettings` in
+  `packages/contracts/src/desktopLease.ts`: `confirmBilledDesktops`,
+  `leasesPerThread`, and `hostLocalLeasesPerHost` (each count from 1 to
+  `DESKTOP_LEASE_COUNT_MAXIMUM`, eight). `desktop.lease-settings-changed@1`
+  on the `desktop-spend` aggregate carries the settings before and after.
+  The pane requests `lease-settings` and `set-lease-settings` read and change
+  them; a start the person must confirm carries `asks` in the tab's overview.
+  `ComputerExtendDesktopCommand` (`extend` with `minutes`) and the `extended`
+  result carry an agent's extension.
+- **Policy.** `DESKTOP_LEASE_SETTINGS_DEFAULTS` (confirmation on, two leases
+  per thread, two host-local per host), `desktopLeaseSettingsChangeAllowed`,
+  and the setting's part in `decideDesktopLeaseAcquire`,
+  `decideDesktopArtifactTransfer`, `desktopLeaseFits`, and
+  `decideDesktopLeaseExtension` in
+  `packages/domain/src/desktopLeasePolicy.ts`.
+- **Seam.** `ComputerUseHostPort.disposableDesktop.extend` in
+  `packages/plugin-api/src/computerUse.ts`; the desktop form of
+  `octant_computer` offers `extend`.
+- **Host.** `leaseSettings` and `setLeaseSettings` on the lease service
+  answer only a person at a local window (`not-permitted` otherwise) before
+  anything is journaled. `extend` takes an agent's own confirmation.
+- **Settings.** Settings › Computer use › Disposable desktops
+  (`apps/web/src/settings/DesktopLeaseSettings.tsx`).
+
+Rules this resolved:
+
+- **The cap is checked first.** A billed lease is estimated and refused over
+  or without the cap before the setting is read, so turning the confirmation
+  off never starts what the cap would refuse.
+- **Lowering a count ends nothing.** A count below what already runs only
+  refuses the next lease.
+- **An agent's extension is asked outside the lease's order.** A person may
+  take as long as they like to answer, and a release must not wait behind
+  them. The answer covers only the end time they were shown: if the lease's
+  expiry moved meanwhile, the extension refuses `declined`.
+- **An off-machine lease that does not bill is not the agent's to extend
+  either.** More time there is more time somewhere this host may not be able
+  to end.
+- **An agent has no tool that acquires a lease.** The gate for an agent's
+  acquire is policy the lease service applies; a turn reaches leases a person
+  started.
+
+Evidence: `desktopLeasePolicy.test.ts`, `desktopLeaseService.test.ts`
+(counts across a restart; an agent's extension under Full access, asked below
+it, refused in Plan, refused on a billed or off-machine lease; a billed and
+an off-machine start and a cloud transfer that do not ask with the setting
+off; the cap still refusing; an agent, a paired device, and the host refused
+the setting), `desktopPaneRoutes.test.ts`, `computerUseToolService.test.ts`,
+`DesktopLeaseSettings.test.tsx`, and `DesktopPane.test.tsx`. A billed
+provider's live run with the setting off is the maintainer's to make.
 
 ### Built in slice 1
 
@@ -811,7 +869,8 @@ Rules this slice resolved:
   desktop unless the agent's thread has read outside content
   ([slice 4](#built-in-slice-4)), and a person sending a file to one is not
   asked again. A transfer
-  to a cloud desktop asks a person every time (`off-machine`).
+  to a cloud desktop asks a person every time (`off-machine`) while "Confirm
+  each billed desktop" is on ([lease settings](#built-lease-settings)).
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
   name, so the desktop never sees a partial file and a later transfer under

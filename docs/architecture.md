@@ -10364,10 +10364,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every desktop off this machine, and every billed desktop while the setting
+  every desktop that bills or runs off this machine while the setting
   "Confirm each billed desktop" is on, which it is by default (maintainer
-  request, 2026-11-12; not built yet: today every billed desktop is confirmed
-  and no setting exists). Billed desktops
+  request, 2026-11-12). Billed desktops
   are off until a person at a local window sets a monthly spend cap; each
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap

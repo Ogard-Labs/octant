@@ -46,6 +46,8 @@ import {
   type DesktopProviderSetupReason,
   type DesktopProviderLocality,
   type DesktopRecipe,
+  type DesktopLeaseSettings,
+  type DesktopLeaseSettingsChanged,
   type DesktopLeaseSpend,
   type DesktopSpendCapChanged,
   type DesktopSpendSummary,
@@ -63,6 +65,8 @@ import {
   decideDesktopBilledSpend,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
+  DESKTOP_LEASE_SETTINGS_DEFAULTS,
+  desktopLeaseSettingsChangeAllowed,
   desktopInputOperation,
   desktopLeaseClockEnds,
   desktopLeaseFits,
@@ -144,6 +148,16 @@ export interface DesktopLeaseConfirmation {
    */
   readonly asks: "in-thread" | "billed" | "off-machine";
   readonly leaseMinutes: number;
+}
+
+/** What a person sees before an agent's extension below Full access: the lease and its new end. */
+export interface DesktopExtensionConfirmation {
+  readonly owner: DesktopLeaseOwner;
+  readonly leaseId: DesktopLeaseId;
+  readonly provider: LeasableDesktopProvider;
+  readonly byMinutes: number;
+  /** When the lease would then end, as an ISO timestamp. */
+  readonly expiresAt: string;
 }
 
 /** What a person sees before a file is sent: the file, its hash, and where it goes. */
@@ -327,8 +341,21 @@ export interface DesktopLeaseService {
     readonly leaseId: DesktopLeaseId;
     readonly actor: EventActor;
   }) => Promise<DesktopLeaseReleaseResult>;
+  /**
+   * A person's extension of any of the thread's leases, or the owning
+   * agent's extension of a host-local one. An agent's below Full access asks
+   * through `confirm`; with none it is declined.
+   */
   readonly extend: (
-    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId; readonly byMinutes: number },
+    caller: DesktopLeaseCaller & {
+      readonly leaseId: DesktopLeaseId;
+      readonly byMinutes: number;
+      readonly confirm?: (
+        request: DesktopExtensionConfirmation,
+      ) => Promise<"approved" | "declined">;
+      /** An agent's turn as it runs now, which may sit below its thread's posture. */
+      readonly turn?: { readonly executionPolicy: ProviderExecutionPolicy };
+    },
   ) => Promise<DesktopLeaseExtendResult>;
   /**
    * Sends one `octant_computer` command. Approvals, sensitive-field
@@ -404,6 +431,30 @@ export interface DesktopLeaseService {
     readonly actor: EventActor;
     readonly monthlyCapUsdCents: number | undefined;
   }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
+  /**
+   * The host-wide lease settings. Only a person at a local window reads
+   * them, as only they change them.
+   */
+  readonly leaseSettings: (input: {
+    readonly actor: EventActor;
+  }) =>
+    | { readonly status: "lease-settings"; readonly settings: DesktopLeaseSettings }
+    | DesktopLeaseRefusal;
+  /**
+   * A person at a local window changing the lease settings; a field left out
+   * stays as it is. Every other actor is refused before anything is
+   * journaled, an agent in any posture included.
+   */
+  readonly setLeaseSettings: (input: {
+    readonly actor: EventActor;
+    readonly change: {
+      readonly confirmBilledDesktops?: boolean | undefined;
+      readonly leasesPerThread?: number | undefined;
+      readonly hostLocalLeasesPerHost?: number | undefined;
+    };
+  }) =>
+    | { readonly status: "lease-settings"; readonly settings: DesktopLeaseSettings }
+    | DesktopLeaseRefusal;
   /**
    * Whether teardown may still need the key this reference names: a lease
    * that recorded it may still hold a desktop, or a desktop made on that
@@ -1186,6 +1237,10 @@ export function createDesktopLeaseService(
     readonly record: DesktopBilledLeaseRefused;
   };
 
+  /** The lease settings a person set, or the defaults until they change one. */
+  const currentLeaseSettings = (): DesktopLeaseSettings =>
+    projection.spend().leaseSettings ?? DESKTOP_LEASE_SETTINGS_DEFAULTS;
+
   /**
    * This month's billed spend as the journal shows it. Each billed lease
    * journaled its own estimate, so a restart rebuilds the same figure; a
@@ -1334,6 +1389,7 @@ export function createDesktopLeaseService(
       holdings: projection.list().map((record) => record.lease),
       owner,
       locality: terms.locality,
+      caps: currentLeaseSettings(),
     });
     if (!fits) return refused("lease-limit");
     const spend = admitSpend(owner, recipe, terms, loaded.provider.id);
@@ -1370,11 +1426,13 @@ export function createDesktopLeaseService(
       status: "not-connected" as const,
     }));
     if (status.status !== "ready") return refused("provider-unavailable");
+    const confirmBilledDesktops = currentLeaseSettings().confirmBilledDesktops;
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: first.thread.executionPolicy,
       billed: first.terms.billed,
       locality: first.terms.locality,
       initiator: caller.actor.kind,
+      confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     if (gate.kind === "ask") {
@@ -1406,7 +1464,9 @@ export function createDesktopLeaseService(
     }
     // Authority may have changed while a person was deciding, and an answer
     // given for one provider, placement, or machine never covers another, nor
-    // one estimate another. Between this check and the journaled request
+    // one estimate another; a start that asked nobody because the person had
+    // turned the confirmation off does not stand once they turn it back on.
+    // Between this check and the journaled request
     // nothing awaits, so two acquires cannot both fit under the cap's last
     // room.
     const second = admitted(caller, true);
@@ -1419,7 +1479,8 @@ export function createDesktopLeaseService(
       second.terms.billed !== first.terms.billed ||
       second.terms.locality !== first.terms.locality ||
       second.thread.executionPolicy !== first.thread.executionPolicy ||
-      second.spend?.lease.estimateUsdCents !== first.spend?.lease.estimateUsdCents
+      second.spend?.lease.estimateUsdCents !== first.spend?.lease.estimateUsdCents ||
+      currentLeaseSettings().confirmBilledDesktops !== confirmBilledDesktops
     ) {
       return refused("declined");
     }
@@ -1610,25 +1671,67 @@ export function createDesktopLeaseService(
       return { status: "answered", result };
     });
 
+  type ExtendCaller = Parameters<DesktopLeaseService["extend"]>[0];
+
+  function decideExtension(caller: ExtendCaller, admitted: Operating) {
+    const { lease } = admitted.record;
+    return decideDesktopLeaseExtension({
+      actor: caller.actor.kind,
+      // The lease recorded where its desktop runs and whether it bills.
+      billed: lease.billed,
+      locality: lease.locality,
+      executionPolicy: clampTurnAccessPosture({
+        ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
+        thread: admitted.thread.executionPolicy,
+      }),
+      expiresAt: Date.parse(lease.expiresAt),
+      maximumExpiresAt: Date.parse(lease.maximumExpiresAt),
+      byMinutes: caller.byMinutes,
+    });
+  }
+
   /**
    * Extensions run in the lease's order, provider call included. Two people
    * extending at once could otherwise have the provider apply one expiry and
    * the journal record the other, leaving a billed desktop that dies before
    * its lease says. The provider call is bounded like teardown so a provider
-   * that never answers cannot hold a release behind it.
+   * that never answers cannot hold a release behind it. An agent's extension
+   * that asks is asked before it takes its place in that order, because a
+   * person may take as long as they like and a release must not wait behind
+   * them; the answer then covers only the end time they were shown.
    */
-  const extend: DesktopLeaseService["extend"] = (caller) =>
-    inOrder(caller.leaseId, async (): Promise<DesktopLeaseExtendResult> => {
+  const extend: DesktopLeaseService["extend"] = async (caller) => {
+    let approvedExpiresAt: number | undefined;
+    const first = admitOperating(caller);
+    if (first.status === "refused") return first;
+    const asked = decideExtension(caller, first);
+    if (asked.kind === "refused") return refused(asked.reason);
+    if (asked.kind === "ask") {
+      const { confirm } = caller;
+      const answer =
+        confirm === undefined
+          ? "declined"
+          : await driverCall(() =>
+              confirm({
+                owner: first.record.lease.owner,
+                leaseId: caller.leaseId,
+                provider: listing(first.provider, first.record.lease),
+                byMinutes: caller.byMinutes,
+                expiresAt: iso(asked.expiresAt),
+              }),
+            ).catch(() => "declined" as const);
+      if (answer !== "approved") return refused("declined");
+      approvedExpiresAt = asked.expiresAt;
+    }
+    return inOrder(caller.leaseId, async (): Promise<DesktopLeaseExtendResult> => {
       const admitted = admitOperating(caller);
       if (admitted.status === "refused") return admitted;
       const { record, provider, handle } = admitted;
-      const decision = decideDesktopLeaseExtension({
-        actor: caller.actor.kind,
-        expiresAt: Date.parse(record.lease.expiresAt),
-        maximumExpiresAt: Date.parse(record.lease.maximumExpiresAt),
-        byMinutes: caller.byMinutes,
-      });
+      const decision = decideExtension(caller, admitted);
       if (decision.kind === "refused") return refused(decision.reason);
+      if (decision.kind === "ask" && decision.expiresAt !== approvedExpiresAt) {
+        return refused("declined");
+      }
       const reported = await bounded(() => provider.extend(handle, iso(decision.expiresAt)), {
         status: "failed" as const,
         reason: "timed-out",
@@ -1655,6 +1758,7 @@ export function createDesktopLeaseService(
       if (entry !== undefined) entry.lastActivityAt = options.now();
       return { status: "extended", lease: read(caller.leaseId).lease };
     });
+  };
 
   /**
    * The file is read and hashed once, before anyone is asked, and those bytes
@@ -1683,6 +1787,7 @@ export function createDesktopLeaseService(
   ): Promise<DesktopLeaseTransferResult> {
     const first = admitOperating(caller);
     if (first.status === "refused") return first;
+    const confirmBilledDesktops = currentLeaseSettings().confirmBilledDesktops;
     const gate = decideDesktopArtifactTransfer({
       executionPolicy: clampTurnAccessPosture({
         ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
@@ -1693,6 +1798,7 @@ export function createDesktopLeaseService(
       locality: first.record.lease.locality,
       initiator: caller.actor.kind,
       externalContentIngested: caller.turn?.externalContentIngested === true,
+      confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     const owner = first.record.lease.owner;
@@ -1722,8 +1828,11 @@ export function createDesktopLeaseService(
       const rootNow = await options.threadRoot(owner).catch(() => undefined);
       const admitted = admitOperating(caller);
       if (admitted.status === "refused") return admitted;
-      // An answer given for one provider, posture, or checkout never covers another.
+      // An answer given for one provider, posture, or checkout never covers
+      // another, and a send nobody was asked about does not stand once the
+      // person turns the confirmation back on.
       if (
+        currentLeaseSettings().confirmBilledDesktops !== confirmBilledDesktops ||
         String(admitted.provider.id) !== String(first.provider.id) ||
         admitted.provider.locality !== first.provider.locality ||
         admitted.thread.executionPolicy !== first.thread.executionPolicy ||
@@ -1844,11 +1953,13 @@ export function createDesktopLeaseService(
       billed: admission.terms.billed,
       locality: admission.terms.locality,
       initiator: caller.actor.kind,
+      confirmBilledDesktops: currentLeaseSettings().confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     return {
       status: "available",
       provider: listing(admission.provider, admission.terms),
+      ...(gate.kind === "ask" && gate.asks !== "in-thread" ? { asks: gate.asks } : {}),
       ...(admission.terms.placementId === undefined
         ? {}
         : { placementId: admission.terms.placementId }),
@@ -2180,6 +2291,32 @@ export function createDesktopLeaseService(
     return { status: "spend", summary: spendSummary() };
   };
 
+  const leaseSettings: DesktopLeaseService["leaseSettings"] = ({ actor }) =>
+    desktopLeaseSettingsChangeAllowed(actor.kind)
+      ? { status: "lease-settings", settings: currentLeaseSettings() }
+      : refused("not-permitted");
+
+  const setLeaseSettings: DesktopLeaseService["setLeaseSettings"] = ({ actor, change }) => {
+    // Checked before anything is journaled: no agent, device, or system
+    // actor stops a billed desktop asking or raises how many leases run.
+    if (!desktopLeaseSettingsChangeAllowed(actor.kind)) return refused("not-permitted");
+    const previous = currentLeaseSettings();
+    const settings: DesktopLeaseSettings = {
+      confirmBilledDesktops: change.confirmBilledDesktops ?? previous.confirmBilledDesktops,
+      leasesPerThread: change.leasesPerThread ?? previous.leasesPerThread,
+      hostLocalLeasesPerHost: change.hostLocalLeasesPerHost ?? previous.hostLocalLeasesPerHost,
+    };
+    if (
+      settings.confirmBilledDesktops !== previous.confirmBilledDesktops ||
+      settings.leasesPerThread !== previous.leasesPerThread ||
+      settings.hostLocalLeasesPerHost !== previous.hostLocalLeasesPerHost
+    ) {
+      const changed: DesktopLeaseSettingsChanged = { previous, settings };
+      appendSpend(DESKTOP_SPEND_EVENT_NAMES.leaseSettingsChanged, changed, actor);
+    }
+    return { status: "lease-settings", settings: currentLeaseSettings() };
+  };
+
   return {
     start,
     previewTarget: (caller) => {
@@ -2202,6 +2339,8 @@ export function createDesktopLeaseService(
     acquire,
     spend,
     setSpendCap,
+    leaseSettings,
+    setLeaseSettings,
     recipeMachines,
     release,
     retryRelease,
@@ -2238,6 +2377,11 @@ export interface LeasedComputerUsePort {
     /** Whether the owner's thread has read outside content, which stops Full access carrying the send. */
     externalContentIngested: boolean,
   ) => Promise<ComputerControlResult>;
+  readonly extend: (
+    owner: ComputerUseOwner,
+    byMinutes: number,
+    confirm: (request: DesktopExtensionConfirmation) => Promise<"approved" | "declined">,
+  ) => Promise<ComputerControlResult>;
 }
 
 const LEASE_REFUSAL_MESSAGE =
@@ -2249,7 +2393,7 @@ const LEASE_REFUSAL_MESSAGE =
  * journaled as `agent`.
  */
 export function createLeasedComputerUsePort(
-  service: Pick<DesktopLeaseService, "control" | "transfer">,
+  service: Pick<DesktopLeaseService, "control" | "transfer" | "extend">,
   projection: Pick<DesktopLeaseProjection, "get">,
 ): LeasedComputerUsePort {
   const callerOf = (owner: ComputerUseOwner) => {
@@ -2315,6 +2459,19 @@ export function createLeasedComputerUsePort(
         case "refused":
           return { kind: "refused", reason: sent.reason, message: LEASE_REFUSAL_MESSAGE };
       }
+    },
+    extend: async (owner, byMinutes, confirm) => {
+      const caller = callerOf(owner);
+      if (caller === undefined) return unbound;
+      const extended = await service.extend({
+        ...caller,
+        byMinutes,
+        confirm,
+        turn: { executionPolicy: owner.executionPolicy },
+      });
+      return extended.status === "extended"
+        ? { kind: "extended", expiresAt: extended.lease.expiresAt }
+        : { kind: "refused", reason: extended.reason, message: LEASE_REFUSAL_MESSAGE };
     },
   };
 }
