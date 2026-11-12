@@ -95,6 +95,19 @@
   text-overflow: ellipsis;
 }
 
+/* In a narrow tile the tile's own bar already names the tool, so the name
+   gives way and the state keeps its words ("Not set up" read as "N…"). */
+@container (max-width: 479px) {
+  .device-toolbar__device {
+    max-width: none;
+    flex: 1 1 auto;
+  }
+
+  .device-toolbar__meta {
+    flex: 0 0 auto;
+  }
+}
+
 .device-toolbar__os {
   display: none;
 }
