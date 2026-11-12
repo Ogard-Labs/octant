@@ -157,7 +157,7 @@ import {
   createCodeOperationRuntime,
   threadWithActiveTurnPosture,
 } from "./codeOperationRuntime";
-import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
+import { CODE_RUNTIME_WORK_UPDATED, pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
@@ -6256,6 +6256,107 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it.each([
+    [
+      "a connection that broke mid-push",
+      "ambiguous",
+      { status: "failed", detail: "fatal: the remote end hung up unexpectedly", unconfirmed: true },
+    ],
+    [
+      "a rejection Git reported",
+      "failed",
+      { status: "failed", detail: "! [rejected] (non-fast-forward)" },
+    ],
+  ] as const)("records a push that ended in %s as %s", async (_case, recorded, outcome) => {
+    const fixture = runtimeFixture({
+      gitObservation: readyGitObservation([
+        { name: "origin", fetchUrl: "/remote.git", pushUrl: "/remote.git" },
+      ]),
+      gitPush: async () => outcome,
+    });
+    const gitOperationId = operationId(92);
+    try {
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "push-git",
+          operationId: operationId(93),
+          threadId,
+          checkoutId,
+          gitOperationId,
+          remote: "origin",
+          localRef: "refs/heads/feature/runtime",
+          remoteRef: "refs/heads/feature/runtime",
+          expectedHeadOid: "a".repeat(40),
+          expectedStateToken: "b".repeat(64),
+          confirmation: {
+            remote: "origin",
+            refspec: "refs/heads/feature/runtime:refs/heads/feature/runtime",
+          },
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "git-mutation-state", mutation: "push", state: "failed" });
+      expect(fixture.runtimeWorks()).toEqual([
+        { id: String(gitOperationId), kind: "git", state: "running" },
+        { id: String(gitOperationId), kind: "git", state: recorded },
+      ]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("pushes once when the same push is submitted twice at the same time", async () => {
+    let answerRemote: (() => void) | undefined;
+    const remoteAnswered = new Promise<void>((resolve) => {
+      answerRemote = resolve;
+    });
+    const gitPush = vi.fn(async () => {
+      await remoteAnswered;
+      return { status: "applied" as const };
+    });
+    const fixture = runtimeFixture({
+      gitObservation: readyGitObservation([
+        { name: "origin", fetchUrl: "/remote.git", pushUrl: "/remote.git" },
+      ]),
+      gitPush,
+    });
+    const push = {
+      kind: "push-git" as const,
+      operationId: operationId(94),
+      threadId,
+      checkoutId,
+      gitOperationId: operationId(95),
+      remote: "origin",
+      localRef: "refs/heads/feature/runtime",
+      remoteRef: "refs/heads/feature/runtime",
+      expectedHeadOid: "a".repeat(40),
+      expectedStateToken: "b".repeat(64),
+      confirmation: {
+        remote: "origin",
+        refspec: "refs/heads/feature/runtime:refs/heads/feature/runtime",
+      },
+      authorization: { kind: "full-access" as const },
+    };
+    try {
+      const first = fixture.runtime.execute(windowId, push);
+      const second = fixture.runtime.execute(windowId, push);
+      await vi.waitFor(() => expect(gitPush).toHaveBeenCalled());
+      // Give a second push the chance to start before the remote answers.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      answerRemote?.();
+      const results = await Promise.allSettled([first, second]);
+      expect(gitPush).toHaveBeenCalledOnce();
+      expect(results[0]).toMatchObject({
+        status: "fulfilled",
+        value: { kind: "git-mutation-state", state: "completed" },
+      });
+      expect(results[1]).toEqual(results[0]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("leaves a pull request GitHub never confirmed waiting rather than ready", async () => {
     const fixture = runtimeFixture({
       pullRequestTarget: true,
@@ -6634,6 +6735,9 @@ describe("CodeOperationRuntime", () => {
         editLabels: vi.fn(overrides.editLabels ?? (async () => done)),
         comment: vi.fn(overrides.comment ?? (async () => done)),
         replyToReviewThread: vi.fn(overrides.replyToReviewThread ?? (async () => done)),
+        ownComments: vi.fn(
+          overrides.ownComments ?? (async () => ({ status: "read" as const, bodies: [] })),
+        ),
         retarget: vi.fn(overrides.retarget ?? (async () => done)),
         setState: vi.fn(overrides.setState ?? (async () => done)),
         summary: vi.fn(
@@ -6810,6 +6914,120 @@ describe("CodeOperationRuntime", () => {
       );
       fixture.close();
     });
+
+    it.each([
+      ["is already on the pull request", ["Looks right."], 1, "completed"],
+      ["never reached the pull request", ["Something else."], 2, "failed"],
+    ] as const)(
+      "looks for an unconfirmed comment before posting it again, and it %s",
+      async (_case, bodies, posts, earlierSettled) => {
+        let attempts = 0;
+        const { fixture, actions } = actionFixture({
+          // The first post loses its answer; GitHub may or may not have it.
+          comment: async () =>
+            ++attempts === 1
+              ? { status: "unavailable" as const, reason: "unavailable" as const }
+              : { status: "done" as const },
+          ownComments: async () => ({ status: "read" as const, bodies: [...bodies] }),
+        });
+        try {
+          const comment = {
+            kind: "comment-pull-request" as const,
+            body: "Looks right.",
+            authorization: approved(156),
+          };
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(155) });
+          expect(
+            fixture
+              .runtimeWorks()
+              .filter((work) => work.id === String(operationId(155)))
+              .at(-1)?.state,
+          ).toBe("ambiguous");
+
+          const retried = await fixture.runtime.execute(windowId, { ...comment, ...scope(157) });
+
+          expect(retried).toMatchObject({ kind: "pull-request-state", state: "existing" });
+          expect(actions.ownComments).toHaveBeenCalledWith(
+            { owner: "octant", name: "octant", number: 7 },
+            expect.any(AbortSignal),
+          );
+          expect(actions.comment).toHaveBeenCalledTimes(posts);
+          const latest = (id: number) =>
+            fixture
+              .runtimeWorks()
+              .filter((work) => work.id === String(operationId(id)))
+              .at(-1)?.state;
+          expect(latest(155)).toBe(earlierSettled);
+          expect(latest(157)).toBe("completed");
+        } finally {
+          fixture.close();
+        }
+      },
+    );
+
+    it("refuses to post again when an unconfirmed comment cannot be looked for", async () => {
+      const { fixture, actions } = actionFixture({
+        comment: async () => ({ status: "unavailable" as const, reason: "unavailable" as const }),
+        ownComments: async () => ({ status: "unavailable" as const }),
+      });
+      try {
+        const comment = {
+          kind: "comment-pull-request" as const,
+          body: "Looks right.",
+          authorization: approved(159),
+        };
+        await fixture.runtime.execute(windowId, { ...comment, ...scope(158) });
+        expect(
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(160) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "failed" } });
+        expect(actions.comment).toHaveBeenCalledOnce();
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it.each([
+      ["is among the person's own comments", ["Fixed in the next commit."], "completed"],
+      ["is not among them", ["Unrelated."], "failed"],
+    ] as const)(
+      "settles a review reply the host lost when its text %s, on the next look at the pull request",
+      async (_case, bodies, settled) => {
+        const { fixture, actions } = actionFixture({
+          ownComments: async () => ({ status: "read" as const, bodies: [...bodies] }),
+        });
+        try {
+          const replyId = "90000000-0000-4000-8000-0000000000e3";
+          fixture.appendRuntimeWork({
+            id: replyId,
+            kind: "delivery",
+            state: "ambiguous",
+            remoteStep: {
+              kind: "pull-request",
+              action: "comment",
+              commentDigest: pullRequestCommentDigest("Fixed in the next commit.\r\n"),
+              reviewThreadId: "PRRT_abc",
+            },
+          });
+          await fixture.runtime.execute(windowId, {
+            kind: "observe-pull-request",
+            ...scope(161),
+            maxDiffBytes: 1_024,
+          });
+          expect(actions.ownComments).toHaveBeenCalledWith(
+            { owner: "octant", name: "octant", number: 7, threadNodeId: "PRRT_abc" },
+            expect.any(AbortSignal),
+          );
+          expect(
+            fixture
+              .runtimeWorks()
+              .filter((work) => work.id === replyId)
+              .at(-1)?.state,
+          ).toBe(settled);
+        } finally {
+          fixture.close();
+        }
+      },
+    );
 
     it("merges on the person's approval only when the head and required checks match", async () => {
       const refusedFixture = actionFixture({});
@@ -9561,6 +9779,10 @@ function runtimeFixture(options: {
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
   >;
+  /** What the remote answers a push; left out, every push fails. */
+  gitPush?: NonNullable<
+    Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]
+  >["push"];
   /** Where a remote branch points, for settling a push the host lost. */
   remoteHead?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["remoteHead"]
@@ -10105,7 +10327,7 @@ function runtimeFixture(options: {
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
-      push: async () => ({ status: "failed" as const }),
+      push: options.gitPush ?? (async () => ({ status: "failed" as const })),
       discard: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
       snapshotWorkingTree: async (input: { readonly executionPolicy?: string }) => {

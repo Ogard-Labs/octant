@@ -112,8 +112,10 @@ import {
 import type {
   GhPullRequestActionResult,
   GhPullRequestIdentityRequest,
+  GhPullRequestOwnCommentsResult,
   GhPullRequestSummaryResult,
 } from "./ghPullRequestActionPort";
+import { pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import type { GhPullRequestMergeResult } from "./ghPullRequestPort";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
@@ -205,6 +207,26 @@ const SERVER_PULL_REQUEST_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> 
   "merge-pull-request",
   "observe-pull-request",
 ]);
+/**
+ * Steps that change something on a remote and cannot be taken back: one run
+ * per operation id, however many times it is submitted at once.
+ */
+const REMOTE_STEP_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "push-git",
+  "create-pull-request",
+  "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
+]);
+/** The repository and number a forge call names a located pull request by. */
+function pullRequestTargetOf(
+  pullRequest: CodeOperationPullRequestIdentity,
+): GhPullRequestIdentityRequest | undefined {
+  const [owner, name] = pullRequest.baseRepository.split("/");
+  return owner === undefined || name === undefined
+    ? undefined
+    : { owner, name, number: pullRequest.number };
+}
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
 const SERVER_CONNECTORS_UNAVAILABLE =
@@ -771,7 +793,7 @@ type GitMutationOutcome =
         | "read-only";
     }
   | { readonly status: "unavailable" }
-  | { readonly status: "failed"; readonly detail?: string };
+  | { readonly status: "failed"; readonly detail?: string; readonly unconfirmed?: true };
 
 interface CodeOperationPullRequestIdentity {
   readonly number: number;
@@ -852,6 +874,15 @@ export interface CodeOperationPullRequestActions {
     input: GhPullRequestIdentityRequest & { readonly threadNodeId: string; readonly body: string },
     signal: AbortSignal,
   ) => Promise<GhPullRequestActionResult>;
+  /**
+   * The signed-in person's own comments, read before a comment whose earlier
+   * posting was never confirmed is posted again. Optional: without it such a
+   * comment stays unconfirmed and a retry is refused rather than doubled.
+   */
+  readonly ownComments?: (
+    input: GhPullRequestIdentityRequest & { readonly threadNodeId?: string },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestOwnCommentsResult>;
   readonly retarget: (
     input: GhPullRequestIdentityRequest & { readonly baseBranch: string },
     signal: AbortSignal,
@@ -1393,6 +1424,8 @@ export class CodeOperationService {
    * so a turn starting in the other Project would not wait for the overwrite;
    * nor would a recovered start, which captures no checkpoint.
    */
+  /** Push and pull request steps still running, by thread and operation id. */
+  readonly #remoteStepsInFlight = new Map<string, Promise<CodeOperationResult>>();
   readonly #overwritesInFlight = new Set<{
     readonly checkoutRoot: string;
     readonly settled: Promise<unknown>;
@@ -1417,6 +1450,35 @@ export class CodeOperationService {
     options: CodeOperationExecuteOptions = {},
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    if (!REMOTE_STEP_OPERATIONS.has(command.kind))
+      return this.#executeDecoded(windowId, command, options);
+    // The result that answers a retry is journaled only once the step has
+    // run, so a second submission arriving while the first is still talking
+    // to the remote would find nothing and push or post again. It waits for
+    // the first instead, then answers from the journal like any retry.
+    const key = `${String(command.threadId)}:${String(command.operationId)}`;
+    for (
+      let earlier = this.#remoteStepsInFlight.get(key);
+      earlier !== undefined;
+      earlier = this.#remoteStepsInFlight.get(key)
+    )
+      await earlier.catch(() => undefined);
+    const running = (async () => {
+      try {
+        return await this.#executeDecoded(windowId, command, options);
+      } finally {
+        this.#remoteStepsInFlight.delete(key);
+      }
+    })();
+    this.#remoteStepsInFlight.set(key, running);
+    return running;
+  }
+
+  async #executeDecoded(
+    windowId: WindowId,
+    command: CodeOperationCommand,
+    options: CodeOperationExecuteOptions,
+  ): Promise<CodeOperationResult> {
     const hunkCommand = isSelectedHunkCommand(command);
     let hunkAdmissionCurrent: (() => boolean) | undefined;
     if (hunkCommand && options.admissionCurrent?.() !== true)
@@ -3961,7 +4023,7 @@ export class CodeOperationService {
       case "merge-pull-request":
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
-        await this.#settleLostPullRequestCreations(thread);
+        await this.#settleLostPullRequestSteps(thread);
         return this.#pullRequestReview(command, root.checkoutRoot, git);
       case "observe-turn-review": {
         const preview = await this.#options.turns.reviewPreview?.({
@@ -4602,27 +4664,59 @@ export class CodeOperationService {
   /**
    * A pull request the host lost while creating it is settled by looking for
    * the thread's pull request: one found, open or already closed, means it was
-   * created. Updates, comments and merges cannot be told apart from an earlier
-   * one this way, so they stay unconfirmed.
+   * created. A lost comment is settled by looking for its text among the
+   * person's own comments on that pull request. Updates and merges cannot be
+   * told apart from an earlier one this way, so they stay unconfirmed.
    */
-  async #settleLostPullRequestCreations(thread: CodeThread): Promise<void> {
+  async #settleLostPullRequestSteps(thread: CodeThread): Promise<void> {
     const steps = this.#options.unconfirmedSteps;
     const locate = this.#options.pullRequests.locate;
     if (steps === undefined || locate === undefined) return;
     for (const work of steps.list(thread.id)) {
       const step = work.remoteStep;
-      if (work.state !== "ambiguous" || step?.kind !== "pull-request" || step.action !== "create")
-        continue;
+      if (work.state !== "ambiguous" || step?.kind !== "pull-request") continue;
+      if (step.action !== "create" && step.action !== "comment") continue;
       const signal = new AbortController().signal;
       const open = await locate(thread.id, "open", signal);
-      if (open.status === "found") {
-        steps.settle(work, "completed");
+      const found = open.status === "none" ? await locate(thread.id, "closed", signal) : open;
+      if (step.action === "create") {
+        if (found.status === "found") steps.settle(work, "completed");
+        else if (found.status === "none") steps.settle(work, "failed");
         continue;
       }
-      const closed = open.status === "none" ? await locate(thread.id, "closed", signal) : open;
-      if (closed.status === "found") steps.settle(work, "completed");
-      else if (closed.status === "none") steps.settle(work, "failed");
+      if (step.commentDigest === undefined) continue;
+      // No pull request at all means there was nothing to comment on.
+      if (found.status === "none") {
+        steps.settle(work, "failed");
+        continue;
+      }
+      if (found.status !== "found") continue;
+      const target = pullRequestTargetOf(found.pullRequest);
+      if (target === undefined) continue;
+      const posted = await this.#commentPosted(target, step.commentDigest, step.reviewThreadId);
+      if (posted !== "unknown") steps.settle(work, posted === "posted" ? "completed" : "failed");
     }
+  }
+
+  /**
+   * Whether a comment with this text is among the signed-in person's own
+   * comments on the pull request (or in the review thread it answered).
+   */
+  async #commentPosted(
+    target: GhPullRequestIdentityRequest,
+    commentDigest: string,
+    reviewThreadId: string | undefined,
+  ): Promise<"posted" | "absent" | "unknown"> {
+    const read = this.#options.pullRequests.actions?.ownComments;
+    if (read === undefined) return "unknown";
+    const comments = await read(
+      { ...target, ...(reviewThreadId === undefined ? {} : { threadNodeId: reviewThreadId }) },
+      new AbortController().signal,
+    );
+    if (comments.status !== "read") return "unknown";
+    return comments.bodies.some((body) => pullRequestCommentDigest(body) === commentDigest)
+      ? "posted"
+      : "absent";
   }
 
   async #gitObservation(
@@ -4907,6 +5001,7 @@ export class CodeOperationService {
       ...(result.status === "failed" && result.detail !== undefined
         ? { detail: result.detail }
         : {}),
+      ...(result.status === "failed" && result.unconfirmed === true ? { unconfirmed: true } : {}),
       ...(result.status === "rejected" && result.reason !== undefined
         ? { reason: result.reason }
         : {}),
@@ -5369,6 +5464,15 @@ export class CodeOperationService {
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const located = await this.#locatePullRequest(command.threadId, "open");
     if (located.status !== "found") return located.result(command.operationId);
+    const already = await this.#settleEarlierComment(command, located.target);
+    if (already === "posted")
+      return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
+    if (already === "unknown")
+      return this.#failed(
+        command.operationId,
+        "failed",
+        "An earlier attempt at this comment may already be on GitHub, and Octant could not check. It was not posted again. Try again when GitHub can be reached.",
+      );
     const signal = new AbortController().signal;
     const done =
       command.reviewThreadId === undefined
@@ -5382,6 +5486,37 @@ export class CodeOperationService {
           );
     if (done === undefined) return this.#pullRequestUnavailable(command.operationId);
     return this.#actionResult(command.operationId, done, located.pullRequest, undefined);
+  }
+
+  /**
+   * An earlier attempt at the same comment whose outcome the host never
+   * learned may already be on GitHub, so it is looked for before posting
+   * again: posting blind would leave the person's comment there twice.
+   * `none-earlier` means there was no such attempt, or it did not land.
+   */
+  async #settleEarlierComment(
+    command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
+    target: GhPullRequestIdentityRequest,
+  ): Promise<"posted" | "none-earlier" | "unknown"> {
+    const steps = this.#options.unconfirmedSteps;
+    if (steps === undefined) return "none-earlier";
+    const digest = pullRequestCommentDigest(command.body);
+    const earlier = steps.list(command.threadId).filter((work) => {
+      const step = work.remoteStep;
+      return (
+        work.state === "ambiguous" &&
+        String(work.id) !== String(command.operationId) &&
+        step?.kind === "pull-request" &&
+        step.action === "comment" &&
+        step.commentDigest === digest &&
+        step.reviewThreadId === command.reviewThreadId
+      );
+    });
+    if (earlier.length === 0) return "none-earlier";
+    const posted = await this.#commentPosted(target, digest, command.reviewThreadId);
+    if (posted === "unknown") return "unknown";
+    for (const work of earlier) steps.settle(work, posted === "posted" ? "completed" : "failed");
+    return posted === "posted" ? "posted" : "none-earlier";
   }
 
   async #mergePullRequest(
@@ -5503,14 +5638,9 @@ export class CodeOperationService {
     const pullRequests = this.#options.pullRequests;
     const located = await pullRequests.locate?.(threadId, state, new AbortController().signal);
     if (located?.status === "found") {
-      const [owner, name] = located.pullRequest.baseRepository.split("/");
-      if (owner !== undefined && name !== undefined) {
-        return {
-          status: "found",
-          pullRequest: located.pullRequest,
-          target: { owner, name, number: located.pullRequest.number },
-        };
-      }
+      const target = pullRequestTargetOf(located.pullRequest);
+      if (target !== undefined)
+        return { status: "found", pullRequest: located.pullRequest, target };
     }
     return {
       status: "missing",

@@ -5117,10 +5117,28 @@ or .zip>` write the same files, built by one host command
   reading the remote branch: pointing at the pushed commit it is `completed`,
   anywhere else or absent it is `failed` and pushing again is safe, and an
   unreadable remote leaves it unconfirmed. Observing the pull request settles an
-  unconfirmed creation by looking for the thread's pull request, open or closed.
-  An unconfirmed update, comment or merge stays unconfirmed. File, terminal,
-  test, review, and local Git work, whose result is in the checkout, becomes
-  `interrupted`.
+  unconfirmed creation by looking for the thread's pull request, open or closed,
+  and an unconfirmed comment or review reply by looking for its text among the
+  signed-in person's own comments there (the record keeps a SHA-256 of the
+  text, never the text). An unconfirmed update or merge stays unconfirmed.
+  File, terminal, test, review, and local Git work, whose result is in the
+  checkout, becomes `interrupted`.
+
+  The same uncertainty can arise without a restart. A push that fails without
+  Git reporting the remote's answer (a dropped connection, a `[remote failure]`
+  the remote never confirmed, a timeout) carries `unconfirmed` on its result
+  and is recorded `ambiguous`, to be settled from the remote branch like a lost
+  push; only a refusal Git did report (a `[rejected]` or `[remote rejected]`
+  ref such as a non-fast-forward or stale lease, refused credentials, a missing
+  repository) is `failed`. A comment posted again while an earlier attempt at
+  the same text is unconfirmed is looked for first: found, the earlier attempt
+  is settled `completed` and nothing is posted; absent, it is settled `failed`
+  and the comment is posted; unreadable, the comment is refused rather than
+  risked twice. Submissions of one push or pull request step under the same
+  operation id run once: a second arriving while the first still runs waits
+  for it and is answered from the journal. A pull request creation is made
+  safe to repeat by its operation id and by locating the thread's pull request
+  first; the older `idempotencyKey` field is accepted and ignored.
 
   A Work turn the journal still reads as accepted, running, or waiting after a
   restart has no runtime left to finish it. The projection settles it as failed

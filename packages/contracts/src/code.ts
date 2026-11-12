@@ -1107,6 +1107,14 @@ export const CodeRuntimeRemoteStep = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("pull-request"),
     action: Schema.Literal("create", "update", "comment", "merge"),
+    /**
+     * For a comment: the SHA-256 of its body, so a comment the host lost can
+     * be recognised among the person's own comments without keeping its text
+     * on the board record.
+     */
+    commentDigest: Schema.optional(CodeDigest),
+    /** For a review reply: the review thread it answers. */
+    reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
   }).annotations(strict),
 );
 export type CodeRuntimeRemoteStep = typeof CodeRuntimeRemoteStep.Type;

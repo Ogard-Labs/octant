@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   decodeCodeRuntimeWork,
   decodeCodeRuntimeWorkId,
@@ -335,21 +336,38 @@ export function codeRuntimeWorkPlan(
         kind: "delivery",
         starts: true,
         reachesNetwork: true,
-        remoteStep: {
-          kind: "pull-request",
-          action:
-            command.kind === "create-pull-request"
-              ? "create"
-              : command.kind === "update-pull-request"
-                ? "update"
-                : command.kind === "comment-pull-request"
-                  ? "comment"
-                  : "merge",
-        },
+        remoteStep:
+          command.kind === "comment-pull-request"
+            ? {
+                kind: "pull-request",
+                action: "comment",
+                commentDigest: pullRequestCommentDigest(command.body),
+                ...(command.reviewThreadId === undefined
+                  ? {}
+                  : { reviewThreadId: command.reviewThreadId }),
+              }
+            : {
+                kind: "pull-request",
+                action:
+                  command.kind === "create-pull-request"
+                    ? "create"
+                    : command.kind === "update-pull-request"
+                      ? "update"
+                      : "merge",
+              },
       };
     default:
       return undefined;
   }
+}
+
+/**
+ * What identifies a comment's text on GitHub. GitHub keeps a posted body with
+ * its line endings normalised and its surrounding whitespace dropped, so the
+ * digest is taken over the same form or a posted comment would never match.
+ */
+export function pullRequestCommentDigest(body: string): string {
+  return createHash("sha256").update(body.replace(/\r\n?/g, "\n").trim(), "utf8").digest("hex");
 }
 
 /**
@@ -395,8 +413,11 @@ export function codeRuntimeWorkStateFrom(
       }
     case "git-mutation-state":
       // A rejection is Git declining to move: the checkout is untouched and the
-      // caller was told exactly why, so nothing is left unresolved.
-      return result.state === "completed" ? "completed" : "failed";
+      // caller was told exactly why, so nothing is left unresolved. A push
+      // whose connection broke is different: Git never said whether the
+      // remote took it, so it is owed the same remote check a lost push gets.
+      if (result.state === "completed") return "completed";
+      return result.unconfirmed === true ? "ambiguous" : "failed";
     case "pull-request-state":
       switch (result.state) {
         case "unavailable":
