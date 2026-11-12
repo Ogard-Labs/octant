@@ -39,7 +39,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 12      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **162** | **80**       | **5**               |
+| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
 
 ## Principles and hard lines
 
@@ -931,11 +931,11 @@ Status: Partly built. Since: 2026-11-10. Detail: [Coordinator threads](coordinat
 Threads form one real hierarchy, and Work and Code have server-derived boards; Chat has none. An agent can never mark any thread Done.
 
 - The boards are the bundled Board plugin. Switching it off hides the Work and Code board views and every way to open them in the renderer; the host-owned status policy and the server board projections and routes stay, because thread rows, the dock overview, the planner board read, sibling-thread tools and side tasks read them. Nothing is deleted. Owner: [Workspace](workspace.md#boards-and-integrations).
-- A Code thread is Done when its user-confirmed delivery target is objectively satisfied, or when a person marks it Done whatever its delivery target says, recorded as the person's override (maintainer request, 2026-11-12). Not built yet: today no person's mark overrides ambiguous state.
-- A Work thread is Done when a person marks it; the mark needs no confirmation and no evidence text, and Reopen undoes it in one click (maintainer request, 2026-11-12). Not built yet: today the mark is final.
-- The Work mark locks the thread on the host until it is reopened (today, until it is archived and reactivated): queued messages hold, child results wait, and a due resume ends as invalidated.
+- A Code thread is Done when its user-confirmed delivery target is objectively satisfied, or when a person marks it Done whatever its delivery target says, recorded as the person's override (maintainer request, 2026-11-12). The override is journaled on the thread apart from its delivery target, and Reopen clears it.
+- A Work thread is Done when a person marks it; the mark needs no confirmation and no evidence text, and Reopen undoes it in one click (maintainer request, 2026-11-12).
+- The Work mark locks the thread on the host until it is reopened: queued messages hold, child results wait, and a due resume ends as invalidated.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Pull requests from a Code thread
 
@@ -2465,7 +2465,7 @@ Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) 
 
 Work and Code have server-authoritative boards. Chat has none, and an agent cannot mark any thread Done.
 
-- Cards cannot be dragged between columns. A person marks a Work thread Done with no confirmation, and Reopen undoes it in one click; a Code thread reaches Done when its delivery target is satisfied or a person marks it Done as their own override (maintainer request, 2026-11-12). Not built yet: today marking Work Done asks for a confirmation, and a Code thread reaches Done only when its delivery target is satisfied.
+- Cards cannot be dragged between columns. A person marks a Work thread Done with no confirmation, and Reopen undoes it in one click; a Code thread reaches Done when its delivery target is satisfied or a person marks it Done as their own override (maintainer request, 2026-11-12).
 - A Code card may show one plan-progress count computed at read time. It is absent with no live plan and never shown on Work cards. _Here only._
 - The pull request list is a cached host-local snapshot, and board queries never call the forge. A card's summary says fresh, stale or unavailable. The forge is reached only by explicit refresh or a per-Project opt-in cadence (off by default, floored at 30 seconds).
 - The Pull requests page lists pull requests as a flat, sortable list that can be grouped by repository: two-line rows with one attention word, a 720px measure, and sort, grouping and filters remembered in the window. The Auto-refresh and Agents may merge switches keep their labels, setters and server enforcement and move into the repository group's menu, or the page's Repository settings menu when the list is not grouped. The list offers Newest, Oldest and a "mine" filter (maintainer request, 2026-11-12); not built yet: today they are not offered, because the snapshot has no creation time and no signed-in login. Where agents may merge is on, the group header shows a quiet chip and the Repository settings button a dot. The Issues place shares the row, group head and Sort menu.

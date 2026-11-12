@@ -61,6 +61,15 @@ export function reopenCodeThread(thread: CodeThread): CodeCommand {
   };
 }
 
+/** The person's override: Done whatever the delivery target says. */
+export function markCodeThreadDone(thread: CodeThread): CodeCommand {
+  return {
+    kind: "mark-code-thread-done",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+  };
+}
+
 export function snoozeCodeThread(thread: CodeThread, until: UtcTimestamp): CodeCommand {
   return {
     kind: "snooze-code-thread",

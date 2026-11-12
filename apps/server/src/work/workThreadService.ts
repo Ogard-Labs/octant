@@ -758,6 +758,15 @@ export class WorkThreadService {
       if (current === undefined || current.lifecycle === "deleted") {
         throw this.#failure("invalid", "Work thread was not found.");
       }
+      // The mark holds queued messages, child results and resumes; a host
+      // scope lifting it would let an agent start the turns the person closed.
+      if (
+        command.kind === "reopen-work-thread" &&
+        current.completionConfirmed === true &&
+        isRoutineHostScope(authenticatedWindowId)
+      ) {
+        throw this.#failure("unauthorized", "Only a person can reopen a Work thread marked Done.");
+      }
       // A server thread's binding is the one its Project derives, which
       // `holdsThread` has just matched; it has no local Project to read.
       const onServer = this.#serverProjects?.holdsThread(current) === true;
@@ -823,21 +832,18 @@ export class WorkThreadService {
         });
         return { kind: "thread-completion-confirmed", thread: confirmed };
       }
-      // A person's Done mark locks what the thread would run next. Archiving,
-      // reactivating (which clears the mark), renaming, putting away and
+      // A person's Done mark locks what the thread would run next. Reopening
+      // (which clears the mark), archiving, renaming, putting away and
       // cancelling a scheduled resume stay open.
       if (current.completionConfirmed === true) {
         if (command.kind === "change-work-thread-provider") {
           throw this.#failure(
             "invalid",
-            "This task is marked Done. Archive and reactivate it before changing its provider.",
+            "This task is marked Done. Reopen it before changing its provider.",
           );
         }
         if (command.kind === "schedule-work-usage-resume") {
-          throw this.#failure(
-            "invalid",
-            "This task is marked Done. Archive and reactivate it before resuming it.",
-          );
+          throw this.#failure("invalid", "This task is marked Done. Reopen it before resuming it.");
         }
       }
       if (command.kind === "move-work-thread") {
@@ -1114,7 +1120,11 @@ export class WorkThreadService {
                 }
               : command.kind === "reopen-work-thread" || command.kind === "wake-work-thread"
                 ? {
-                    ...withoutThreadRest(current),
+                    // Reopen undoes both ways a person closed the thread: put
+                    // away, and marked Done. A wake leaves the mark alone.
+                    ...withoutThreadRest(
+                      command.kind === "reopen-work-thread" ? withoutDoneMark(current) : current,
+                    ),
                     version: command.expectedVersion + 1,
                     updatedAt,
                   }
@@ -2019,12 +2029,17 @@ function lifecycleUpdate(
   >["lifecycle"],
 ): WorkThread {
   if (current.lifecycle !== "archived" || lifecycle !== "active") return current;
+  return withoutDoneMark(current);
+}
+
+/** The thread as it was before a person marked it Done, note included. */
+function withoutDoneMark(current: WorkThread): WorkThread {
   const {
     completionConfirmed: _completionConfirmed,
     completionEvidence: _completionEvidence,
-    ...reactivated
+    ...unmarked
   } = current;
-  return reactivated as WorkThread;
+  return unmarked as WorkThread;
 }
 
 /** The picker's word for a Work thread's stored level. */

@@ -91,7 +91,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -833,7 +832,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [creating, setCreating] = useState(false);
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const changeDriven = props.changeRevision !== undefined;
   const transcriptGeneration = useRef(0);
   const initialThread = useRef(props.initialThread);
@@ -2065,12 +2063,34 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
-      setStatus("Marked Done.");
     } catch {
       setErrorMessage("This task could not be marked Done. Try again.");
     } finally {
       setCompleting(false);
-      setCompletionFormOpen(false);
+    }
+  }, [completing, props.threadClient, thread]);
+
+  const reopenCompleted = useCallback(async () => {
+    if (thread === undefined || completing || thread.completionConfirmed !== true) return;
+    setCompleting(true);
+    setErrorMessage(undefined);
+    setStatus(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "reopen-work-thread",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task could not be reopened.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task could not be reopened. Try again.");
+    } finally {
+      setCompleting(false);
     }
   }, [completing, props.threadClient, thread]);
 
@@ -2270,21 +2290,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onConfirm={() => void changeDocumentDelivery("native-artifacts")}
               pending={deliveryChanging}
             />
-          ) : null}
-        </OctantDialogPresence>
-
-        <OctantDialogPresence>
-          {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-            <OctantConfirmDialog
-              confirmLabel="Mark done"
-              onCancel={() => setCompletionFormOpen(false)}
-              onConfirm={() => void confirmCompletion()}
-              pending={completing}
-              title="Mark this task Done?"
-            >
-              {thread.title} moves to Done on the board. Its composer and provider lock until you
-              archive and reactivate it.
-            </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
 
@@ -3010,7 +3015,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     onValueChange={(value) => {
                       if (value === "canvas") void changeDocumentDelivery("canvas");
                       else if (value === "native-artifacts") setConfirmArtifacts(true);
-                      else setCompletionFormOpen(true);
+                      else void confirmCompletion();
                     }}
                     selectionMode="action"
                     trigger={<Ellipsis aria-hidden="true" size={16} />}
@@ -3198,13 +3203,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               ? []
               : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
             // A locked task is a fact the person acts on: it stays until
-            // they reactivate it.
+            // they reopen it, which is one click from here.
             ...(completionLocked
               ? [
                   {
                     key: "locked",
                     tone: "neutral" as const,
-                    text: "Reactivate this task before creating another file or changing its provider.",
+                    text: "This task is marked Done.",
+                    action: (
+                      <OctantButton
+                        disabled={completing}
+                        onClick={() => void reopenCompleted()}
+                        size="sm"
+                        type="button"
+                      >
+                        Reopen
+                      </OctantButton>
+                    ),
                   },
                 ]
               : []),

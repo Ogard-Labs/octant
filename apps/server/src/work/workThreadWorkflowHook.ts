@@ -85,6 +85,9 @@ function isLifecycleCommand(input: unknown): boolean {
   return (
     kind === "create-work-thread" ||
     kind === "fork-work-thread" ||
-    kind === "change-work-thread-lifecycle"
+    kind === "change-work-thread-lifecycle" ||
+    // Reopening a thread a person marked Done brings it back to active; the
+    // workflow service starts a new one only when the last one was completed.
+    kind === "reopen-work-thread"
   );
 }

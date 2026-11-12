@@ -109,6 +109,7 @@ export interface SidebarContainerProps {
     | "pinWorkThreadInPane"
     | "renameCodeThread"
     | "reopenChatThread"
+    | "markCodeThreadDone"
     | "reopenCodeThread"
     | "retryActiveModeThreads"
     | "retryChat"
@@ -420,6 +421,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         void actions.completeCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onReopenThread: (threadId) =>
         void actions.reopenCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+      onMarkThreadDone: (threadId) =>
+        void actions.markCodeThreadDone(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onSnoozeThread: (threadId, until) =>
         void actions.snoozeCodeThread(decodeCodeThreadId(threadId), until).then(noteCodeThreadRest),
       onWakeThread: (threadId) =>

@@ -893,6 +893,14 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
   return rest;
 }
 
+/** The thread without a person's Done mark, as if it had never been marked. */
+function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt">>(
+  thread: T,
+): Omit<T, "markedDoneAt"> {
+  const { markedDoneAt: _markedDoneAt, ...unmarked } = thread;
+  return unmarked;
+}
+
 const CODE_MOVE_REFUSALS = {
   "checkout-unreadable": "That Project's repository folder cannot be read right now.",
   "checkout-would-not-stay-valid":
@@ -2118,11 +2126,32 @@ export class CodeService {
         return { kind: "thread-created", thread };
       }
 
+      // Done by hand is a person's override of the delivery target. A
+      // routine, a planner tool, or a child-run delivery acts as the host,
+      // never as the person.
+      if (command.kind === "mark-code-thread-done" && isRoutineHostScope(authenticatedWindowId)) {
+        throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
+      }
       const current = this.#persistence.readCodeThread(command.threadId);
       if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
       await this.#authorizeThread(authenticatedWindowId, current);
       if (current.version !== command.expectedVersion) {
         throw this.#failure("stale", "Code state changed; reload and retry.");
+      }
+      if (command.kind === "mark-code-thread-done") {
+        if (current.lifecycle === "archived") {
+          throw this.#failure("invalid", "An archived thread cannot be marked Done.");
+        }
+        if (current.markedDoneAt !== undefined) {
+          throw this.#failure("invalid", "This thread is already marked Done.");
+        }
+      }
+      if (
+        command.kind === "reopen-code-thread" &&
+        current.markedDoneAt !== undefined &&
+        isRoutineHostScope(authenticatedWindowId)
+      ) {
+        throw this.#failure("unauthorized", "Only a person can reopen a Code thread marked Done.");
       }
       if (command.kind === "move-code-thread") {
         return await this.#moveThread(authenticatedWindowId, current, command);
@@ -2466,7 +2495,11 @@ export class CodeService {
                   }
                 : command.kind === "reopen-code-thread" || command.kind === "wake-code-thread"
                   ? {
-                      ...withoutRest(current),
+                      // Reopen undoes both ways a person closed the thread:
+                      // put away, and marked Done. A wake leaves the mark.
+                      ...withoutRest(
+                        command.kind === "reopen-code-thread" ? withoutDoneMark(current) : current,
+                      ),
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
@@ -2581,15 +2614,22 @@ export class CodeService {
                                     version: command.expectedVersion + 1,
                                     updatedAt,
                                   }
-                                : {
-                                    ...current,
-                                    ...(command.workingFolderId === undefined
-                                      ? {}
-                                      : { workingFolderId: command.workingFolderId }),
-                                    workingDirectory: command.workingDirectory,
-                                    version: command.expectedVersion + 1,
-                                    updatedAt,
-                                  },
+                                : command.kind === "mark-code-thread-done"
+                                  ? {
+                                      ...current,
+                                      markedDoneAt: updatedAt,
+                                      version: command.expectedVersion + 1,
+                                      updatedAt,
+                                    }
+                                  : {
+                                      ...current,
+                                      ...(command.workingFolderId === undefined
+                                        ? {}
+                                        : { workingFolderId: command.workingFolderId }),
+                                      workingDirectory: command.workingDirectory,
+                                      version: command.expectedVersion + 1,
+                                      updatedAt,
+                                    },
       );
       const next =
         command.kind === "change-code-thread-access"

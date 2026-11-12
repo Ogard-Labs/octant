@@ -2613,22 +2613,27 @@ thread-owned PR status onto Code board cards. A Code thread is Done only when
 its user-confirmed delivery target is objectively satisfied; ambiguous state
 resolves to Waiting. A person may mark a Code thread Done whatever its
 delivery target says, recorded as the person's override (maintainer request,
-2026-11-12; not built yet: today no person's mark overrides it). A Work thread is Done
+2026-11-12): `mark-code-thread-done` journals `markedDoneAt` on the thread and
+leaves the delivery target as it was confirmed, so a satisfied target and a
+person's mark stay apart in the journal. The board reads the mark as Done
+before any delivery evidence; the mark locks nothing on a Code thread, and
+`reopen-code-thread` clears it. A Work thread is Done
 when a person
 marks it Done (`confirm-work-thread-completion`, naming the thread's current
-title). Marking Work Done needs no confirmation, and Reopen undoes it in one
-click (maintainer request, 2026-11-12; not built yet: today the mark is
-undone only by archiving and reactivating the thread, below). The mark is final: it needs no evidence text, and stale supporting
+title). Marking Work Done needs no confirmation, and Reopen
+(`reopen-work-thread`) undoes it in one click (maintainer request,
+2026-11-12). The mark needs no evidence text, and stale supporting
 evidence, a later rename, or an outstanding child run does not return the card
 to Waiting. Requiring fresh, matching evidence filled boards with Waiting cards
-for work the person had already finished. The host refuses the mark from a
-routine or anything else acting as the host, and no provider tool can send it,
-so an agent cannot mark a thread Done. An optional note sent with the mark is
+for work the person had already finished. The host refuses the mark, in Work
+and in Code, from a routine or anything else acting as the host, and no
+provider tool can send it, so an agent cannot mark a thread Done; the same
+callers are refused when they try to reopen a thread a person marked. An optional note sent with the mark is
 kept as the thread's completion evidence; without one the thread carries no
 evidence record.
 
-The mark locks the thread on the host until the thread is archived and
-reactivated, which clears it; a lock only in the window let a queued message,
+The Work mark locks the thread on the host until the person reopens it
+(archiving and reactivating the thread clears it too); a lock only in the window let a queued message,
 a routine, or a child's result start a turn anyway. Work turn admission, the
 one path every Work turn takes, refuses a turn on a marked thread before it
 counts as the person re-engaging, whoever sends it: a window or phone, the
@@ -2641,11 +2646,11 @@ thread is dropped silently:
 
 - The message queue holds. It refuses a new message, keeps the messages it
   already has with the visible `thread-unavailable` hold, and the person
-  resumes or removes them after reactivating.
+  resumes or removes them after reopening.
 - A child run's result waits, readable on the run, and is delivered as a turn
-  once reactivation commits.
+  once the reopen commits.
 - A resume-at-reset that falls due while the mark stands ends as
-  `invalidated` with a note on the thread. Held until reactivation, it would
+  `invalidated` with a note on the thread. Held until the thread is reopened, it would
   run at a time the person never chose.
 
 Work artifacts belong to the Project, not the thread, so the mark does not
