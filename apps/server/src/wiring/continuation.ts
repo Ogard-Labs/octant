@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
+  decodeChatSubmissionId,
+  decodeChatThreadId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
+  decodeUtcTimestamp,
+  decodeWorkThreadId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
+  LOCAL_HOST_ID,
   USAGE_RESUME_SETTLED,
   type HostRestartRecovery,
+  type WorkThread,
+  type WorkThreadId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import {
@@ -16,7 +25,21 @@ import {
   releaseQueueBehindRestartContinuation,
   restartContinuationId,
 } from "../harness/restartContinuation";
+import {
+  continueThreadTurnsCutOffByRestart,
+  mergeRestartRecoveries,
+  type ThreadRestartContinuationPorts,
+} from "../harness/threadRestartContinuation";
+import {
+  ChatServiceError,
+  type ChatAttemptCutOffByRestart,
+  type ChatService,
+} from "../chat/chatService";
+import { WorkTurnServiceError, type WorkTurnService } from "../work/workTurnService";
+import type { WorkTurnCutOffByRestart } from "../work/workTurnProjection";
+import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { consumePersonQuit } from "../personQuit";
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
@@ -47,10 +70,16 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
-  Pick<ChatWiring, "chatService"> &
+  Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
   Pick<WorkWiring, "threadMessageQueue" | "workTurnService"> &
-  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection">;
+  Pick<
+    FoundationsWiring,
+    | "codeBoardEventStore"
+    | "workThreadProjection"
+    | "workTurnProjection"
+    | "workTurnsCutOffByRestart"
+  >;
 
 export function wireContinuation(deps: ContinuationDependencies) {
   const {
@@ -241,20 +270,248 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     agentRunProviderSlotScheduler.start();
-    const restartRecovery = startCodeRestartContinuation(deps);
+    const restartRecovery = startRestartContinuation(deps);
     return { restartRecovery };
   });
 }
 
 /**
- * Continues, as the host, the Code turns the previous host was running when
- * it stopped (docs/architecture.md, Code restart recovery). It runs once per
- * start, after the queues have recovered, and answers the summary the
- * restart notice reads.
+ * Continues, as the host, the turns the previous host was running when it
+ * stopped, in every mode (docs/architecture.md, restart recovery). It runs
+ * once per start, after the queues have recovered, and answers the summary
+ * the restart notice reads.
  */
-function startCodeRestartContinuation(
+function startRestartContinuation(
   deps: ContinuationDependencies,
 ): () => HostRestartRecovery | undefined {
+  // Read and removed on every start, whether or not anything was cut off, so
+  // a quit with nothing running holds nothing after a later crash.
+  const quitByPerson = consumePersonQuit(deps.persistence.dataDirectory);
+  if (
+    deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
+    deps.chatAttemptsCutOffByRestart.length === 0 &&
+    deps.workTurnsCutOffByRestart.length === 0
+  )
+    return () => undefined;
+  let summary: HostRestartRecovery | undefined;
+  const settled = <T>(promise: Promise<T>, mode: string) =>
+    promise.catch((error: unknown) => {
+      console.error(`[restart-continuation] ${mode} recovery did not finish.`, error);
+      return undefined;
+    });
+  void (async () => {
+    const code = await settled(continueCodeTurns(deps, quitByPerson), "Code");
+    const chat = await settled(
+      continueChatTurns({
+        cutOff: deps.chatAttemptsCutOffByRestart,
+        quitByPerson,
+        chat: deps.chatService,
+        enabled: () => deps.persistence.readChatSettings()?.settings.restartContinuation !== false,
+        connection: deps.persistence.connection,
+        liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        releaseQueue: (threadId) =>
+          releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
+            scopeId: ROUTINE_HOST_SCOPE_ID,
+            threadId,
+            mode: "chat",
+          }),
+      }),
+      "Chat",
+    );
+    const work = await settled(
+      continueWorkTurns({
+        cutOff: deps.workTurnsCutOffByRestart,
+        quitByPerson,
+        work: deps.workTurnService,
+        readThread: (threadId) => deps.workThreadProjection.read(threadId),
+        enabled: () => deps.workThreadProjection.settings()?.restartContinuation !== false,
+        modeEnabled: () =>
+          enabledModes(
+            deps.persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work"),
+        connection: deps.persistence.connection,
+        liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        releaseQueue: (threadId) =>
+          releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
+            scopeId: ROUTINE_HOST_SCOPE_ID,
+            threadId,
+            mode: "work",
+          }),
+      }),
+      "Work",
+    );
+    summary = mergeRestartRecoveries(decodeUtcTimestamp(new Date().toISOString()), [
+      code,
+      chat,
+      work,
+    ]);
+  })();
+  return () => summary;
+}
+
+/** What continuing Chat answers after a restart reads and does. */
+export interface ChatRestartContinuationDependencies {
+  readonly cutOff: ReadonlyArray<ChatAttemptCutOffByRestart>;
+  /** The previous host stopped because a person quit it (personQuit.ts). */
+  readonly quitByPerson: boolean;
+  readonly chat: Pick<ChatService, "read" | "execute" | "restartContinuationReadiness">;
+  /** Settings › Chat › Continue after restart. */
+  readonly enabled: () => boolean;
+  /** The store the crash-loop guard counts in. */
+  readonly connection: SqliteConnection;
+  /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
+  readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  readonly releaseQueue: (threadId: string) => Promise<void>;
+}
+
+/** Continues the Chat answers this start interrupted (docs/architecture.md, Chat restart recovery). */
+export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
+  const { chat, cutOff } = deps;
+  const byAttempt = new Map(cutOff.map((cut) => [String(cut.attemptId), cut] as const));
+  return continueThreadTurnsCutOffByRestart({
+    mode: "chat",
+    quitByPerson: deps.quitByPerson,
+    cutOff: cutOff.map((cut) => ({
+      threadId: String(cut.threadId),
+      turnId: String(cut.attemptId),
+    })),
+    readiness: (turn) => {
+      const cut = byAttempt.get(turn.turnId);
+      return cut === undefined ? { kind: "settled" } : chat.restartContinuationReadiness(cut);
+    },
+    enabled: deps.enabled,
+    attempts: createCodeRestartContinuationAttempts(deps.connection),
+    liftHarnessRecovery: deps.liftHarnessRecovery,
+    // A host continuation is an ordinary send under its one submission
+    // identity: a repeated recovery finds the turn the first one made, and
+    // the send's own admission rechecks the thread's authority and spend.
+    dispatch: (turn, continuation, prompt) =>
+      new Promise((resolve) => {
+        const refused = (detail: string) => resolve({ kind: "refused", detail });
+        let thread;
+        try {
+          thread = chat.read(decodeChatThreadId(turn.threadId)).thread;
+        } catch {
+          refused("The thread is unavailable.");
+          return;
+        }
+        chat
+          .execute(
+            {
+              kind: "send-chat-turn",
+              threadId: thread.id,
+              expectedVersion: thread.version,
+              prompt,
+              submissionId: decodeChatSubmissionId(continuation),
+            },
+            { onTurnAccepted: () => resolve({ kind: "dispatched" }) },
+          )
+          .then(
+            () => resolve({ kind: "dispatched" }),
+            (error: unknown) =>
+              refused(
+                error instanceof ChatServiceError
+                  ? error.failure.message
+                  : "The continuation could not start.",
+              ),
+          );
+      }),
+    releaseQueue: deps.releaseQueue,
+  });
+}
+
+/** What continuing Work turns after a restart reads and does. */
+export interface WorkRestartContinuationDependencies {
+  readonly cutOff: ReadonlyArray<WorkTurnCutOffByRestart>;
+  /** The previous host stopped because a person quit it (personQuit.ts). */
+  readonly quitByPerson: boolean;
+  readonly work: Pick<WorkTurnService, "startFirstTurn" | "restartContinuationReadiness">;
+  readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
+  /** Settings › Work › Continue after restart. */
+  readonly enabled: () => boolean;
+  /** Whether Work is on at all; the Work turn path does not read the mode switch. */
+  readonly modeEnabled: () => boolean;
+  /** The store the crash-loop guard counts in. */
+  readonly connection: SqliteConnection;
+  /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
+  readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  readonly releaseQueue: (threadId: string) => Promise<void>;
+}
+
+/** Continues the Work turns this start settled as cut off (docs/architecture.md, Work restart recovery). */
+export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
+  const { cutOff, work } = deps;
+  const byRequest = new Map(cutOff.map((cut) => [String(cut.requestId), cut] as const));
+  return continueThreadTurnsCutOffByRestart({
+    mode: "work",
+    quitByPerson: deps.quitByPerson,
+    cutOff: cutOff.map((cut) => ({
+      threadId: String(cut.threadId),
+      turnId: String(cut.requestId),
+    })),
+    readiness: (turn) => {
+      const cut = byRequest.get(turn.turnId);
+      return cut === undefined
+        ? { kind: "settled" }
+        : work.restartContinuationReadiness(
+            deps.readThread(decodeWorkThreadId(turn.threadId)),
+            cut,
+          );
+    },
+    enabled: deps.enabled,
+    attempts: createCodeRestartContinuationAttempts(deps.connection),
+    liftHarnessRecovery: deps.liftHarnessRecovery,
+    dispatch: async (turn, continuation, prompt) => {
+      if (!deps.modeEnabled())
+        return { kind: "refused", detail: "Work is turned off on this host." };
+      const thread = deps.readThread(decodeWorkThreadId(turn.threadId));
+      if (thread?.bindingRevisionId === undefined)
+        return { kind: "refused", detail: "The thread has no bound project revision." };
+      try {
+        const result = await work.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(continuation),
+          turnId: decodeWorkTurnId(restartContinuationId(`turn:${continuation}`)),
+          threadId: thread.id,
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { kind: "dispatched" }
+          : {
+              kind: "refused",
+              detail: "message" in result ? result.message : "The continuation was not admitted.",
+            };
+      } catch (error) {
+        return {
+          kind: "refused",
+          detail:
+            error instanceof WorkTurnServiceError
+              ? error.failure.message
+              : "The continuation could not start.",
+        };
+      }
+    },
+    releaseQueue: deps.releaseQueue,
+  });
+}
+
+/** Continues the Code turns this start found cut off (docs/architecture.md, Code restart recovery). */
+function continueCodeTurns(
+  deps: ContinuationDependencies,
+  quitByPerson: boolean,
+): Promise<HostRestartRecovery | undefined> {
   const {
     codeBoardEventStore,
     codeOperationRuntime,
@@ -263,11 +520,11 @@ function startCodeRestartContinuation(
     routeCodeService,
     threadMessageQueue,
   } = deps;
-  if (persistence.codeTurnsCutOffByRestart.length === 0) return () => undefined;
-  let summary: HostRestartRecovery | undefined;
+  if (persistence.codeTurnsCutOffByRestart.length === 0) return Promise.resolve(undefined);
   const refused = (detail: string) => ({ kind: "refused" as const, detail });
-  void continueCodeTurnsCutOffByRestart({
+  return continueCodeTurnsCutOffByRestart({
     cutOff: persistence.codeTurnsCutOffByRestart,
+    quitByPerson,
     readThread: (threadId) => persistence.readCodeThread(threadId),
     runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
     enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,
@@ -328,11 +585,5 @@ function startCodeRestartContinuation(
         mode: "code",
       }),
     clock: () => new Date().toISOString(),
-  }).then(
-    (recovered) => {
-      summary = recovered;
-    },
-    (error: unknown) => console.error("[restart-continuation] Recovery did not finish.", error),
-  );
-  return () => summary;
+  });
 }

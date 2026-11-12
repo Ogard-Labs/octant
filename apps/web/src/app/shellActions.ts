@@ -324,6 +324,7 @@ export type ShellActions = {
   readonly setCodeThreadCoordinatorWake: CodeController["setThreadCoordinatorWake"];
   readonly setCodeThreadMessageWake: CodeController["setThreadMessageWake"];
   readonly setCodeThreadRestartContinuation: CodeController["setThreadRestartContinuation"];
+  readonly setChatThreadRestartContinuation: ChatController["setThreadRestartContinuation"];
   readonly snoozeChatThread: ChatController["snoozeThread"];
   readonly snoozeCodeThread: CodeController["snoozeThread"];
   readonly spendRevealChatTurn: () => void;

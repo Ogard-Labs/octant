@@ -710,7 +710,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         onContextMenu={() => setMenuTabId(String(entry.id))}
                       >
                         <OctantTabsTab
-                          className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
+                          className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
                           onClickCapture={(event) => {
                             const source = tabDragSource(entry);
                             // A completed drag ends in a click; it must not
@@ -772,7 +772,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     {localViews.map((view) => (
                       <div className="workspace-content-tabs__entry content-tab" key={view.key}>
                         <OctantTabsTab
-                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
+                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
                           value={view.key}
                         >
                           <span>{view.title}</span>

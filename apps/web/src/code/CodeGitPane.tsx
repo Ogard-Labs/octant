@@ -104,9 +104,11 @@ export function CodeGitPane(props: CodeGitPaneProps) {
         setFailure(
           result.state === "rejected" && result.reason === "identity-missing"
             ? `${label} needs an identity: set your name and email in Settings → Your profile, or add user.name and user.email to the checkout.`
-            : result.state === "failed" && result.detail !== undefined
-              ? `${label} failed. ${result.detail}`
-              : `${label} ${result.state}. Refresh checkout state before retrying.`,
+            : result.state === "failed" && result.unconfirmed === true
+              ? `${label} may have reached the remote: the connection ended before Git confirmed it. Refresh to check the remote branch before pushing again.`
+              : result.state === "failed" && result.detail !== undefined
+                ? `${label} failed. ${result.detail}`
+                : `${label} ${result.state}. Refresh checkout state before retrying.`,
         );
       else setLastResult(`${label} requested. Waiting for authoritative checkout refresh.`);
     } catch {

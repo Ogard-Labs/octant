@@ -828,7 +828,6 @@ async function pullRequestTool(
           body: input.body,
           ...(input.draft === undefined ? {} : { draft: input.draft }),
           ...(input.base === undefined ? {} : { baseBranch: input.base }),
-          idempotencyKey: String(scope.operationId),
           authorization: { kind: "full-access" },
         }
       : input.operation === "comment"

@@ -245,6 +245,7 @@ export function startOctantServer(
       workArtifactProjection,
       workThreadProjection,
       workTurnProjection,
+      workTurnsCutOffByRestart,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -975,6 +976,7 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      chatAttemptsCutOffByRestart,
       chatHiddenThreadIds,
       chatRoutes,
       chatService,
@@ -1149,6 +1151,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       capacityScheduler,
+      chatAttemptsCutOffByRestart,
       chatService,
       codeBoardEventStore,
       codeOperationRuntime,
@@ -1160,6 +1163,7 @@ export function startOctantServer(
       threadMessageQueue,
       workThreadProjection,
       workTurnProjection,
+      workTurnsCutOffByRestart,
       workTurnService,
     });
     const { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService } =
@@ -1790,6 +1794,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      personQuitRoutes,
       supportBundleRoutes,
       delegationAdministrationRoutes,
       threadMoveAdministrationRoutes,
@@ -1974,6 +1979,7 @@ export function startOctantServer(
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
+                (await personQuitRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

@@ -480,8 +480,7 @@
 }
 
 .surface-tabs > [aria-selected="true"],
-.surface-tabs > [aria-current="page"],
-.surface-tabs > [data-active="true"] {
+.surface-tabs > [aria-current="page"] {
   color: var(--oct-fg);
   border-bottom-color: var(--oct-fg);
 }

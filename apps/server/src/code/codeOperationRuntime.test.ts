@@ -101,6 +101,7 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
   readCodeThreadActivity,
+  readCodeThreadsWithUnconfirmedRemoteSteps,
   readCodeReviewFinding,
   readCodeReviewFindings,
   reconcileCodeRestart,
@@ -153,11 +154,12 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "./codeOperationEventStore";
 import {
+  beginUnconfirmedStepSettlement,
   type CodeActiveTurns,
   createCodeOperationRuntime,
   threadWithActiveTurnPosture,
 } from "./codeOperationRuntime";
-import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
+import { CODE_RUNTIME_WORK_UPDATED, pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
@@ -743,6 +745,204 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  describe("settling unconfirmed steps when the host starts", () => {
+    const hostScope = "90000000-0000-4000-8000-0000000000f0" as WindowId;
+    const lostPush = {
+      id: "90000000-0000-4000-8000-0000000000f1",
+      kind: "git",
+      state: "ambiguous",
+      remoteStep: {
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      },
+    } as const;
+    // A restart leaves every checkout waiting until a window looks at it again.
+    const waitingCheckout = () =>
+      decodeCodeCheckoutIdentity({
+        id: checkoutId,
+        repositoryId: thread().repositoryId,
+        kind: "existing-worktree",
+        availability: "waiting",
+        head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+        observedAt: now,
+      });
+    const latest = (fixture: ReturnType<typeof runtimeFixture>, id: string) =>
+      fixture
+        .runtimeWorks()
+        .filter((work) => work.id === id)
+        .at(-1)?.state;
+
+    it.each([
+      ["points at the pushed commit", { status: "found", oid: "a".repeat(40) }, "completed"],
+      ["points elsewhere", { status: "found", oid: "c".repeat(40) }, "failed"],
+      ["cannot be reached", { status: "unavailable" }, "ambiguous"],
+    ] as const)(
+      "settles a push lost in a restart when the remote branch %s, before anyone opens the thread",
+      async (_case, remote, settled) => {
+        const remoteHead = vi.fn(async () => remote);
+        const fixture = runtimeFixture({ remoteHead, checkoutIdentity: waitingCheckout() });
+        try {
+          fixture.appendRuntimeWork(lostPush);
+          await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+            signal: new AbortController().signal,
+          });
+          expect(remoteHead).toHaveBeenCalledWith(
+            expect.objectContaining({ remote: "origin", remoteRef: "refs/heads/feature" }),
+            expect.any(AbortSignal),
+          );
+          expect(fixture.access).toHaveBeenCalledWith(hostScope, thread().projectId);
+          expect(latest(fixture, lostPush.id)).toBe(settled);
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("leaves a lost push unconfirmed on a thread that is no longer active", async () => {
+      const remoteHead = vi.fn(async () => ({ status: "found" as const, oid: "a".repeat(40) }));
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        fixture.setThread(decodeCodeThread({ ...thread(), lifecycle: "archived" }));
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+        });
+        expect(remoteHead).not.toHaveBeenCalled();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("leaves a lost push unconfirmed when its remote does not answer in time", async () => {
+      const remoteHead = vi.fn(
+        (_input: unknown, signal?: AbortSignal) =>
+          new Promise<{ readonly status: "found"; readonly oid: string }>((resolve) => {
+            // Answers only once the step's time is up, as a hung remote that
+            // finally replies would.
+            signal?.addEventListener("abort", () =>
+              resolve({ status: "found", oid: "a".repeat(40) }),
+            );
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(remoteHead).toHaveBeenCalledOnce();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("leaves a lost push unconfirmed when its checkout cannot be resolved in time", async () => {
+      const remoteHead = vi.fn(async () => ({ status: "found" as const, oid: "a".repeat(40) }));
+      // A probe of a stalled mount that never answers and ignores every signal.
+      const fixture = runtimeFixture({
+        remoteHead,
+        resolveCheckoutRoot: () => new Promise(() => {}),
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(remoteHead).not.toHaveBeenCalled();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("stops the checkout probe it abandons when the step's time is up", async () => {
+      let probeSignal: AbortSignal | undefined;
+      const fixture = runtimeFixture({
+        resolveCheckoutRoot: (_windowId, _thread, _checkout, signal) => {
+          probeSignal = signal;
+          return new Promise(() => {});
+        },
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(probeSignal?.aborted).toBe(true);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("returns at once while a remote is still being asked, and lets go when stopped", async () => {
+      let asked = false;
+      const remoteHead = vi.fn(
+        (_input: unknown, signal?: AbortSignal) =>
+          new Promise<{ readonly status: "unavailable" }>((resolve) => {
+            asked = true;
+            signal?.addEventListener("abort", () => resolve({ status: "unavailable" }));
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        const look = beginUnconfirmedStepSettlement(fixture.runtime, hostScope);
+        await vi.waitFor(() => expect(asked).toBe(true));
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+        await look.stop();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("makes a person's look at the checkout wait for the host's, so the remote is read once", async () => {
+      let answer: (() => void) | undefined;
+      const remoteHead = vi.fn(
+        () =>
+          new Promise<{ readonly status: "found"; readonly oid: string }>((resolve) => {
+            answer = () => resolve({ status: "found", oid: "a".repeat(40) });
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        const look = fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(remoteHead).toHaveBeenCalledOnce());
+        const observed = fixture.runtime.execute(windowId, {
+          kind: "observe-git",
+          operationId: operationId(44),
+          threadId,
+          checkoutId,
+          gitOperationId: operationId(45),
+          maxDiffBytes: 1_024,
+        });
+        answer?.();
+        await Promise.all([look, observed]);
+        expect(remoteHead).toHaveBeenCalledOnce();
+        expect(latest(fixture, lostPush.id)).toBe("completed");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+  });
 
   it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
     const runs = 10;
@@ -6256,6 +6456,107 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it.each([
+    [
+      "a connection that broke mid-push",
+      "ambiguous",
+      { status: "failed", detail: "fatal: the remote end hung up unexpectedly", unconfirmed: true },
+    ],
+    [
+      "a rejection Git reported",
+      "failed",
+      { status: "failed", detail: "! [rejected] (non-fast-forward)" },
+    ],
+  ] as const)("records a push that ended in %s as %s", async (_case, recorded, outcome) => {
+    const fixture = runtimeFixture({
+      gitObservation: readyGitObservation([
+        { name: "origin", fetchUrl: "/remote.git", pushUrl: "/remote.git" },
+      ]),
+      gitPush: async () => outcome,
+    });
+    const gitOperationId = operationId(92);
+    try {
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "push-git",
+          operationId: operationId(93),
+          threadId,
+          checkoutId,
+          gitOperationId,
+          remote: "origin",
+          localRef: "refs/heads/feature/runtime",
+          remoteRef: "refs/heads/feature/runtime",
+          expectedHeadOid: "a".repeat(40),
+          expectedStateToken: "b".repeat(64),
+          confirmation: {
+            remote: "origin",
+            refspec: "refs/heads/feature/runtime:refs/heads/feature/runtime",
+          },
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "git-mutation-state", mutation: "push", state: "failed" });
+      expect(fixture.runtimeWorks()).toEqual([
+        { id: String(gitOperationId), kind: "git", state: "running" },
+        { id: String(gitOperationId), kind: "git", state: recorded },
+      ]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("pushes once when the same push is submitted twice at the same time", async () => {
+    let answerRemote: (() => void) | undefined;
+    const remoteAnswered = new Promise<void>((resolve) => {
+      answerRemote = resolve;
+    });
+    const gitPush = vi.fn(async () => {
+      await remoteAnswered;
+      return { status: "applied" as const };
+    });
+    const fixture = runtimeFixture({
+      gitObservation: readyGitObservation([
+        { name: "origin", fetchUrl: "/remote.git", pushUrl: "/remote.git" },
+      ]),
+      gitPush,
+    });
+    const push = {
+      kind: "push-git" as const,
+      operationId: operationId(94),
+      threadId,
+      checkoutId,
+      gitOperationId: operationId(95),
+      remote: "origin",
+      localRef: "refs/heads/feature/runtime",
+      remoteRef: "refs/heads/feature/runtime",
+      expectedHeadOid: "a".repeat(40),
+      expectedStateToken: "b".repeat(64),
+      confirmation: {
+        remote: "origin",
+        refspec: "refs/heads/feature/runtime:refs/heads/feature/runtime",
+      },
+      authorization: { kind: "full-access" as const },
+    };
+    try {
+      const first = fixture.runtime.execute(windowId, push);
+      const second = fixture.runtime.execute(windowId, push);
+      await vi.waitFor(() => expect(gitPush).toHaveBeenCalled());
+      // Give a second push the chance to start before the remote answers.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      answerRemote?.();
+      const results = await Promise.allSettled([first, second]);
+      expect(gitPush).toHaveBeenCalledOnce();
+      expect(results[0]).toMatchObject({
+        status: "fulfilled",
+        value: { kind: "git-mutation-state", state: "completed" },
+      });
+      expect(results[1]).toEqual(results[0]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("leaves a pull request GitHub never confirmed waiting rather than ready", async () => {
     const fixture = runtimeFixture({
       pullRequestTarget: true,
@@ -6634,6 +6935,9 @@ describe("CodeOperationRuntime", () => {
         editLabels: vi.fn(overrides.editLabels ?? (async () => done)),
         comment: vi.fn(overrides.comment ?? (async () => done)),
         replyToReviewThread: vi.fn(overrides.replyToReviewThread ?? (async () => done)),
+        ownComments: vi.fn(
+          overrides.ownComments ?? (async () => ({ status: "read" as const, bodies: [] })),
+        ),
         retarget: vi.fn(overrides.retarget ?? (async () => done)),
         setState: vi.fn(overrides.setState ?? (async () => done)),
         summary: vi.fn(
@@ -6809,6 +7113,277 @@ describe("CodeOperationRuntime", () => {
         expect.any(AbortSignal),
       );
       fixture.close();
+    });
+
+    /**
+     * A pull request whose comments are what GitHub would hold: a post that
+     * loses its answer may still land, and the person's own comments are read
+     * back from the same list.
+     */
+    function commentingFixture(options: {
+      readonly alreadyThere?: ReadonlyArray<string>;
+      readonly firstPostLands: boolean;
+      readonly readable?: (read: number) => boolean;
+    }) {
+      const onPullRequest = [...(options.alreadyThere ?? [])];
+      let posts = 0;
+      let reads = 0;
+      const post = async (input: { readonly body: string }) => {
+        posts += 1;
+        if (posts > 1 || options.firstPostLands) onPullRequest.push(input.body);
+        return posts === 1
+          ? { status: "unavailable" as const, reason: "unavailable" as const }
+          : { status: "done" as const };
+      };
+      return {
+        onPullRequest,
+        ...actionFixture({
+          comment: post,
+          replyToReviewThread: post,
+          ownComments: async () =>
+            (options.readable?.(++reads) ?? true)
+              ? { status: "read" as const, bodies: [...onPullRequest] }
+              : { status: "unavailable" as const },
+        }),
+      };
+    }
+
+    const latestState = (fixture: ReturnType<typeof actionFixture>["fixture"], id: number) =>
+      fixture
+        .runtimeWorks()
+        .filter((work) => work.id === String(operationId(id)))
+        .at(-1)?.state;
+
+    it.each([
+      ["already reached the pull request", true, 1, "completed"],
+      ["never reached the pull request", false, 2, "failed"],
+    ] as const)(
+      "looks for an unconfirmed comment before posting it again when it %s",
+      async (_case, firstPostLands, posts, earlierSettled) => {
+        const { fixture, actions, onPullRequest } = commentingFixture({ firstPostLands });
+        try {
+          const comment = {
+            kind: "comment-pull-request" as const,
+            body: "Looks right.",
+            authorization: approved(156),
+          };
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(155) });
+          expect(latestState(fixture, 155)).toBe("ambiguous");
+
+          const retried = await fixture.runtime.execute(windowId, { ...comment, ...scope(157) });
+
+          expect(retried).toMatchObject({ kind: "pull-request-state", state: "existing" });
+          expect(actions.ownComments).toHaveBeenCalledWith(
+            { owner: "octant", name: "octant", number: 7 },
+            expect.any(AbortSignal),
+          );
+          expect(actions.comment).toHaveBeenCalledTimes(posts);
+          expect(onPullRequest).toEqual(["Looks right."]);
+          expect(latestState(fixture, 155)).toBe(earlierSettled);
+          expect(latestState(fixture, 157)).toBe("completed");
+        } finally {
+          fixture.close();
+        }
+      },
+    );
+
+    it("does not take an older identical comment for an attempt that never landed", async () => {
+      // "Fixed." is the kind of reply a person posts more than once.
+      const { fixture, actions, onPullRequest } = commentingFixture({
+        alreadyThere: ["Fixed."],
+        firstPostLands: false,
+      });
+      try {
+        const comment = {
+          kind: "comment-pull-request" as const,
+          body: "Fixed.",
+          authorization: approved(163),
+        };
+        await fixture.runtime.execute(windowId, { ...comment, ...scope(162) });
+        expect(latestState(fixture, 162)).toBe("ambiguous");
+
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          ...scope(164),
+          maxDiffBytes: 1_024,
+        });
+        expect(latestState(fixture, 162)).toBe("failed");
+
+        expect(
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(165) }),
+        ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+        expect(actions.comment).toHaveBeenCalledTimes(2);
+        expect(onPullRequest).toEqual(["Fixed.", "Fixed."]);
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it("refuses to post again when an unconfirmed comment cannot be looked for", async () => {
+      const { fixture, actions } = commentingFixture({
+        firstPostLands: false,
+        // Readable before the first post, unreachable at the retry.
+        readable: (read) => read === 1,
+      });
+      try {
+        const comment = {
+          kind: "comment-pull-request" as const,
+          body: "Looks right.",
+          authorization: approved(159),
+        };
+        await fixture.runtime.execute(windowId, { ...comment, ...scope(158) });
+        expect(
+          await fixture.runtime.execute(windowId, { ...comment, ...scope(160) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "failed" } });
+        expect(actions.comment).toHaveBeenCalledOnce();
+        expect(latestState(fixture, 158)).toBe("ambiguous");
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it.each([
+      ["has one more of the person's comments with its text", 1, "completed"],
+      ["has no more than before", 0, "failed"],
+    ] as const)(
+      "settles a review reply the host lost when its thread %s, on the next look at the pull request",
+      async (_case, posted, settled) => {
+        const { fixture, actions } = actionFixture({
+          ownComments: async () => ({
+            status: "read" as const,
+            bodies: ["Fixed in the next commit.", "Unrelated."].concat(
+              posted === 1 ? ["Fixed in the next commit."] : [],
+            ),
+          }),
+        });
+        try {
+          const replyId = "90000000-0000-4000-8000-0000000000e3";
+          fixture.appendRuntimeWork({
+            id: replyId,
+            kind: "delivery",
+            state: "ambiguous",
+            remoteStep: {
+              kind: "pull-request",
+              action: "comment",
+              commentDigest: pullRequestCommentDigest("Fixed in the next commit.\r\n"),
+              reviewThreadId: "PRRT_abc",
+              pullRequest: { owner: "octant", name: "octant", number: 7 },
+              priorMatches: 1,
+            },
+          });
+          await fixture.runtime.execute(windowId, {
+            kind: "observe-pull-request",
+            ...scope(161),
+            maxDiffBytes: 1_024,
+          });
+          expect(actions.ownComments).toHaveBeenCalledWith(
+            { owner: "octant", name: "octant", number: 7, threadNodeId: "PRRT_abc" },
+            expect.any(AbortSignal),
+          );
+          expect(
+            fixture
+              .runtimeWorks()
+              .filter((work) => work.id === replyId)
+              .at(-1)?.state,
+          ).toBe(settled);
+        } finally {
+          fixture.close();
+        }
+      },
+    );
+
+    it("settles a lost comment against the pull request it was posted to, not the branch's newer one", async () => {
+      // The fixture's branch now carries pull request 7; the comment went to 5.
+      const { fixture, actions } = actionFixture({
+        ownComments: async (input) => ({
+          status: "read" as const,
+          bodies: input.number === 7 ? ["Looks right."] : [],
+        }),
+      });
+      try {
+        const original = "90000000-0000-4000-8000-0000000000e4";
+        const unrecorded = "90000000-0000-4000-8000-0000000000e5";
+        fixture.appendRuntimeWork({
+          id: original,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+            pullRequest: { owner: "octant", name: "octant", number: 5 },
+            priorMatches: 0,
+          },
+        });
+        // A record that never named its pull request cannot be judged at all.
+        fixture.appendRuntimeWork({
+          id: unrecorded,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+          },
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "observe-pull-request",
+          ...scope(166),
+          maxDiffBytes: 1_024,
+        });
+        expect(actions.ownComments.mock.calls.map(([input]) => input.number)).toEqual([5]);
+        const latest = (id: string) =>
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === id)
+            .at(-1)?.state;
+        expect(latest(original)).toBe("failed");
+        expect(latest(unrecorded)).toBe("ambiguous");
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it("settles a comment lost in a restart against its own pull request when the host starts", async () => {
+      // The branch now carries pull request 7; the comment went to 5 and landed.
+      const { fixture, actions, locate } = actionFixture({
+        ownComments: async (input) => ({
+          status: "read" as const,
+          bodies: input.number === 5 ? ["Looks right."] : [],
+        }),
+      });
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e6";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+            pullRequest: { owner: "octant", name: "octant", number: 5 },
+            priorMatches: 0,
+          },
+        });
+        await fixture.runtime.settleUnconfirmedSteps?.(
+          "90000000-0000-4000-8000-0000000000f0" as WindowId,
+          { signal: new AbortController().signal },
+        );
+        expect(actions.ownComments).toHaveBeenCalledWith(
+          { owner: "octant", name: "octant", number: 5 },
+          expect.any(AbortSignal),
+        );
+        expect(locate).not.toHaveBeenCalled();
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("completed");
+      } finally {
+        fixture.close();
+      }
     });
 
     it("merges on the person's approval only when the head and required checks match", async () => {
@@ -9561,6 +10136,10 @@ function runtimeFixture(options: {
   hunkApply?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["applyHunks"]
   >;
+  /** What the remote answers a push; left out, every push fails. */
+  gitPush?: NonNullable<
+    Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]
+  >["push"];
   /** Where a remote branch points, for settling a push the host lost. */
   remoteHead?: NonNullable<
     NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["gitMutationPort"]>["remoteHead"]
@@ -9857,6 +10436,8 @@ function runtimeFixture(options: {
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeRuntimeWorks: (id) => readCodeRuntimeWorks(connection, id),
+      readCodeThreadsWithUnconfirmedRemoteSteps: () =>
+        readCodeThreadsWithUnconfirmedRemoteSteps(connection),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: (id) => readCodeReviewFinding(connection, id),
@@ -10105,7 +10686,7 @@ function runtimeFixture(options: {
       stage: async () => ({ status: "failed" as const }),
       unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
-      push: async () => ({ status: "failed" as const }),
+      push: options.gitPush ?? (async () => ({ status: "failed" as const })),
       discard: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
       snapshotWorkingTree: async (input: { readonly executionPolicy?: string }) => {
@@ -15040,6 +15621,7 @@ describe("continuing a Code turn a restart cut off", () => {
     const releaseQueue = vi.fn(async (_threadId: CodeThreadId) => {});
     const ports: CodeRestartContinuationPorts = {
       cutOff,
+      quitByPerson: false,
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
@@ -15173,6 +15755,39 @@ describe("continuing a Code turn a restart cut off", () => {
       ).resolves.toMatchObject({ continued: [{ threadId: String(threadId) }], held: [] });
       await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
       expect(next.connection.resume).toHaveBeenCalledOnce();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread a person's quit cut off, with the quit as its reason, and starts nothing", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await first.host.runtime.close();
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, { quitByPerson: true });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toEqual({
+        at: now,
+        continued: [],
+        held: [
+          {
+            mode: "code",
+            threadId: String(threadId),
+            reason: "quit",
+            detail: "Octant was quit while this thread was working, so it waits for you.",
+          },
+        ],
+      });
+      expect(next.connection.resume).not.toHaveBeenCalled();
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      // The hold is not a continuation, so the crash-loop count stays untouched.
+      expect(
+        createCodeRestartContinuationAttempts(next.host.connection).read(String(threadId)),
+      ).toBeUndefined();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
     } finally {
       for (const host of hosts) host.close();
     }

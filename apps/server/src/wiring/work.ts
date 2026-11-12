@@ -1430,13 +1430,14 @@ export function wireWork(deps: WorkDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ).includes(mode),
         // The host's own scope is never a window. It reaches a queue only to
-        // let a Code thread's queued messages follow the continuation it
-        // started after a restart, and only in Code.
+        // let a thread's queued messages follow the continuation it started
+        // after a restart, in a Project of the thread's own mode.
         isWindowLive: (windowId) =>
           isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
         canAccess: (windowId, mode, projectId) => {
-          if (isRoutineHostScope(windowId) && mode !== "code") return false;
+          if (isRoutineHostScope(windowId) && mode === "work")
+            return projectId !== undefined && persistence.readProject(projectId)?.type === "work";
           if (mode === "chat")
             return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
           if (projectId === undefined) return false;

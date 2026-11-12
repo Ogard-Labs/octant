@@ -137,7 +137,7 @@ export interface ThreadRowActions {
   readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
   /** A worker's Wake for coordinator switch, offered only on a worker. */
   readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
-  /** The thread's Continue after restart switch. Absent outside Code. */
+  /** The thread's Continue after restart switch, in every mode. */
   readonly onSetRestartContinuation?: (threadId: string, continueAfterRestart: boolean) => void;
 }
 

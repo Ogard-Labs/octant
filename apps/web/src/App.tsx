@@ -2302,13 +2302,27 @@ function LaunchedShell(
     readCursorStore: codeReadCursorStore,
   });
   const restartNoticeThreads = useMemo(
-    () =>
-      codeController.navigation.map((thread) => ({
+    () => [
+      ...codeController.navigation.map((thread) => ({
+        mode: "code" as const,
         threadId: String(thread.threadId),
         title: thread.title,
         projectId: String(thread.projectId),
       })),
-    [codeController.navigation],
+      ...chatController.navigation.map((thread) => ({
+        mode: "chat" as const,
+        threadId: thread.threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      })),
+      ...workNavigation.navigation.map((thread) => ({
+        mode: "work" as const,
+        threadId: thread.threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      })),
+    ],
+    [chatController.navigation, codeController.navigation, workNavigation.navigation],
   );
   const [hostRestartNotice, dismissHostRestartNotice] = useHostRestartNotice(
     launchedClients.hostControlClient,
@@ -5408,6 +5422,7 @@ function LaunchedShell(
       setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
       setCodeThreadMessageWake: codeController.setThreadMessageWake,
       setCodeThreadRestartContinuation: codeController.setThreadRestartContinuation,
+      setChatThreadRestartContinuation: chatController.setThreadRestartContinuation,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
@@ -8251,7 +8266,7 @@ function LaunchedShell(
                       onSelect: () => {
                         const open = hostRestartNotice.open;
                         if (open === undefined) return;
-                        openCommandThread({ ...open, mode: "code" });
+                        openCommandThread(open);
                       },
                     },
                   })}

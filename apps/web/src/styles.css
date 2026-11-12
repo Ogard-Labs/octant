@@ -845,17 +845,8 @@ body {
   font-size: var(--octant-ui-font-size);
 }
 
-h1,
 strong {
   font-weight: 600;
-}
-
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-weight: var(--oct-weight-display);
 }
 
 /* Unlayered element rules beat every Tailwind utility, so a filled Button
@@ -869,6 +860,19 @@ h6 {
     background: transparent;
     border: 0;
     font: inherit;
+  }
+
+  /* Heading weight is a base default too, so a recipe's own weight utility wins. */
+  h1 {
+    font-weight: 600;
+  }
+
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: var(--oct-weight-display);
   }
 }
 
