@@ -2,6 +2,7 @@ import {
   ActorId,
   CorrelationId,
   EventId,
+  type EventActor,
   UtcTimestamp,
   decodeProviderFailure,
   decodeProviderCatalogSnapshot,
@@ -162,9 +163,15 @@ const unavailableCapabilities = {
 
 export interface ProviderServiceApi {
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<ProviderRegistrySnapshot>;
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal: a paired device's provider change is journaled as that device.
+   * Absent means the person at this host.
+   */
   readonly execute: (
     authenticatedWindowId: WindowId,
     command: unknown,
+    actor?: EventActor,
   ) => Promise<ProviderRegistryCommandResult>;
   readonly probe: (
     authenticatedWindowId: WindowId,
@@ -633,6 +640,7 @@ export class ProviderService implements ProviderServiceApi {
   async execute(
     authenticatedWindowId: WindowId,
     input: unknown,
+    actor?: EventActor,
   ): Promise<ProviderRegistryCommandResult> {
     let command: ReturnType<typeof decodeProviderRegistryCommand>;
     try {
@@ -820,7 +828,7 @@ export class ProviderService implements ProviderServiceApi {
             aggregateId: PROVIDER_DEFAULTS_AGGREGATE_ID,
           },
           expectedVersion: command.expectedVersion,
-          events: [this.#pendingEvent("provider.defaults-updated@1", { defaults })],
+          events: [this.#pendingEvent("provider.defaults-updated@1", { defaults }, actor)],
         });
         const authoritative = this.#persistence.readProviderDefaults();
         if (authoritative.version !== defaults.version) throw this.#unavailable();
@@ -1020,7 +1028,12 @@ export class ProviderService implements ProviderServiceApi {
                 break;
             }
             this.#assertDriverPluginEffective(instance);
-            this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+            this.#appendInstance(
+              command.expectedVersion,
+              "provider.instance-created@1",
+              instance,
+              actor,
+            );
             const authoritative = this.#authoritativeInstance(instance);
             this.#publishSelectedAuthenticationObservation(authoritative);
             return decodeProviderRegistryCommandResult({
@@ -1058,10 +1071,14 @@ export class ProviderService implements ProviderServiceApi {
               aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
               expectedVersion: command.expectedVersion,
               events: [
-                this.#pendingEvent("provider.instance-removed@1", {
-                  instanceId: current.id,
-                  version: removed.version,
-                }),
+                this.#pendingEvent(
+                  "provider.instance-removed@1",
+                  {
+                    instanceId: current.id,
+                    version: removed.version,
+                  },
+                  actor,
+                ),
               ],
             });
             if (this.#persistence.readProviderInstance(current.id) !== undefined) {
@@ -1117,7 +1134,7 @@ export class ProviderService implements ProviderServiceApi {
             this.#persistence.journal.append({
               aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
               expectedVersion: catalog.version,
-              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot }, actor)],
             });
             const authoritative = this.#persistence.readProviderCatalog(current.id);
             if (authoritative?.version !== snapshot.version) throw this.#unavailable();
@@ -1427,7 +1444,7 @@ export class ProviderService implements ProviderServiceApi {
           if (credentialBinding(current) !== credentialBinding(instance)) {
             await this.#forgetCredentialForOldEndpoint(current.id);
           }
-          this.#appendInstance(command.expectedVersion, eventName, instance);
+          this.#appendInstance(command.expectedVersion, eventName, instance, actor);
           const authoritative = this.#authoritativeInstance(instance);
           if (
             command.kind === "set-claude-artifact-delivery" &&
@@ -2330,11 +2347,16 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
-  #appendInstance(expectedVersion: number, eventName: string, instance: ProviderInstance): void {
+  #appendInstance(
+    expectedVersion: number,
+    eventName: string,
+    instance: ProviderInstance,
+    actor?: EventActor,
+  ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType: "provider-instance", aggregateId: instance.id },
       expectedVersion: expectedVersion as never,
-      events: [this.#pendingEvent(eventName, { instance })],
+      events: [this.#pendingEvent(eventName, { instance }, actor)],
     });
   }
 
@@ -2391,13 +2413,18 @@ export class ProviderService implements ProviderServiceApi {
     return authoritative;
   }
 
-  #pendingEvent(eventName: string, payload: unknown) {
+  // A catalog the host observed or invalidated names nobody and keeps the
+  // local user it always recorded; a person's command names who asked.
+  #pendingEvent(eventName: string, payload: unknown, actor?: EventActor) {
     return {
       eventId: decodeEventId(this.#uuid()),
       eventName,
       eventVersion: 1,
       correlationId: decodeCorrelationId(this.#uuid()),
-      actor: { kind: "local-user" as const, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+      actor: actor ?? {
+        kind: "local-user" as const,
+        actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
+      },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };

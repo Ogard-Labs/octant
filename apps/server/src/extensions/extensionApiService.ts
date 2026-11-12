@@ -168,7 +168,10 @@ export class ExtensionApiService {
    * switch, an npm check) is refused before it reaches the installed-package
    * lifecycle, which assumes package files on disk.
    */
-  #bundledPluginCommand(command: ExtensionCommand): ExtensionCommandResult | undefined {
+  #bundledPluginCommand(
+    command: ExtensionCommand,
+    actor: EventActor | undefined,
+  ): ExtensionCommandResult | undefined {
     const bundled = this.#bundledPlugins;
     if (bundled === undefined) return undefined;
     const target =
@@ -181,11 +184,14 @@ export class ExtensionApiService {
     if (command.kind !== "set-plugin-desired") {
       return failure("invalid", "A plugin built into Octant can only be switched on or off.");
     }
-    const result = bundled.setDesired({
-      extensionId: target,
-      expectedStateVersion: command.expectedStateVersion,
-      desired: command.desired,
-    });
+    const result = bundled.setDesired(
+      {
+        extensionId: target,
+        expectedStateVersion: command.expectedStateVersion,
+        desired: command.desired,
+      },
+      actor,
+    );
     if (result.status === "stale") return failure("stale", lifecycleMessage("conflict"));
     if (result.status === "refused") return failure("invalid", lifecycleMessage("invalid"));
     return { kind: "extension-state-updated", snapshot: this.snapshot() };
@@ -231,7 +237,7 @@ export class ExtensionApiService {
     actor?: EventActor,
   ): Promise<ExtensionCommandResult> {
     try {
-      const bundled = this.#bundledPluginCommand(command);
+      const bundled = this.#bundledPluginCommand(command, actor);
       if (bundled !== undefined) return bundled;
       switch (command.kind) {
         case "search-catalog": {

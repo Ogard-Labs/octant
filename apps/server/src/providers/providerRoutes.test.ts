@@ -39,7 +39,10 @@ describe("ProviderRoutes", () => {
       }),
     );
     expect(response?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(windowId, command);
+    expect(execute).toHaveBeenCalledWith(windowId, command, {
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
     expect(JSON.stringify(await response?.json())).not.toMatch(/password|token|serverUrl/i);
 
     const forged = await route(

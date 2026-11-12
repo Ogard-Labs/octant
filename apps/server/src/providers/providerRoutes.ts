@@ -13,8 +13,10 @@ import {
   type ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderModelId,
+  type EventActor,
 } from "@octant/contracts";
 import { boundPrincipalIsRestricted, readPrincipalRouteContext } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateProjectRequest } from "../projectBindingRoutes";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -33,7 +35,10 @@ export interface ProviderRouteDependencies {
   /** A thread's own choice about its key provider's native setup. */
   readonly threadNativeSetup?: {
     get(threadId: string): ThreadNativeSetupChoice;
-    set(request: Extract<ThreadNativeSetupRequest, { kind: "set" }>): "recorded" | "refused";
+    set(
+      request: Extract<ThreadNativeSetupRequest, { kind: "set" }>,
+      actor: EventActor,
+    ): "recorded" | "refused";
   };
 }
 
@@ -181,7 +186,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               origin,
             );
           }
-          if (store.set(threadRequest) === "refused") {
+          if (store.set(threadRequest, eventActorForPrincipal(setter)) === "refused") {
             return response(
               {
                 category: "unsupported",
@@ -249,7 +254,11 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         }
         return response(
           decodeProviderRegistryCommandResult(
-            await dependencies.service.execute(windowId, command),
+            await dependencies.service.execute(
+              windowId,
+              command,
+              eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+            ),
           ),
           200,
           origin,

@@ -1823,12 +1823,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     const providerRoutes = createProviderRouteHandler({
       threadNativeSetup: {
         get: (threadId) => threadNativeSetupStore.get(threadId),
-        set: (request) => {
+        set: (request, actor) => {
           const instance = persistence.readProviderInstance(request.providerInstanceId);
           if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
             return "refused";
           }
-          return threadNativeSetupStore.set(request.threadId, request.choice);
+          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
         },
       },
       service: providerService,
