@@ -41,6 +41,8 @@ import {
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
+import { runProviderOAuthCommand } from "../providers/providerOAuthClient";
+import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
@@ -84,6 +86,21 @@ export function createRemoteExtensionClient(
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
   });
+}
+
+/**
+ * A provider sign-in's start and status over the session, where the local
+ * window's own sender would use the window's fetch and capability.
+ */
+export function createRemoteProviderOAuth(bridge: RemoteSessionBridge) {
+  const fetch = createRemoteProductFetch({ bridge });
+  return (command: ProviderOAuthCommand) =>
+    runProviderOAuthCommand({
+      baseUrl: REMOTE_CLIENT_BASE_URL,
+      windowCapability: NO_WINDOW_CAPABILITY,
+      fetch,
+      command,
+    }).catch(() => undefined);
 }
 
 /**

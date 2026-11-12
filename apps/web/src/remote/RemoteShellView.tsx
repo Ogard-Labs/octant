@@ -21,7 +21,12 @@ import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
 import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
-import { createRemoteExtensionClient, createRemoteProductClients } from "./remoteProductClients";
+import {
+  createRemoteExtensionClient,
+  createRemoteProductClients,
+  createRemoteProviderOAuth,
+} from "./remoteProductClients";
+import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
 
@@ -70,6 +75,16 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
+  );
+  const providerOAuth = useMemo(() => createRemoteProviderOAuth(props.bridge), [props.bridge]);
+  // The matrix names what the host forwards for this session; a restricted
+  // session reaches neither settings surface, so it is shown none.
+  const reachableSettings = useMemo(
+    () =>
+      new Set(
+        listRemoteShellSurfacesByAvailability("remote", standing).map((surface) => surface.id),
+      ),
+    [standing],
   );
   const localHostSurfaces = useMemo(
     () => listRemoteShellSurfacesByAvailability("local-host-only", standing),
@@ -176,6 +191,13 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           mode={activeMode}
         />
       </ContinuityScreenContext.Provider>
+
+      <RemoteHostSettings
+        extensionClient={extensionClient}
+        providerClient={clients.provider}
+        providerOAuth={providerOAuth}
+        reachable={reachableSettings}
+      />
 
       <RemoteDeviceSelfPanel
         bridge={props.bridge}

@@ -811,6 +811,34 @@ describe("RemoteShellView", () => {
     expect(within(code).queryByRole("button", { name: "Start thread" })).toBeNull();
   });
 
+  it("opens the host's Extensions and Providers settings for a browser the host's own person paired, with no key entry", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Providers" }));
+    expect(await within(settings).findByText("Codex local")).toBeInTheDocument();
+    expect(within(settings).queryByLabelText(/api key/i)).toBeNull();
+
+    await user.click(within(settings).getByRole("button", { name: "Extensions" }));
+    await waitFor(() =>
+      expect(seen.map((request) => request.path)).toContain("/api/extensions/snapshot"),
+    );
+    for (const request of seen) {
+      expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+  });
+
+  it("offers a restricted session no host settings", async () => {
+    const { bridge } = await readyBridge([], false, false);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    await screen.findByRole("note", { name: "Local host only surfaces" });
+    expect(screen.queryByRole("region", { name: "Host settings" })).toBeNull();
+  });
+
   it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {
     const { bridge } = await readyBridge();
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
