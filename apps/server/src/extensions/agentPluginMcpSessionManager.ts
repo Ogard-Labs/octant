@@ -1183,10 +1183,17 @@ function supervisedStdioProcessPort(input: {
           "This connector keeps one login for the whole computer and is already running for another thread. It frees up when that thread's connection closes.",
         );
       }
-      const proxy =
-        input.egressHosts === undefined
-          ? undefined
-          : await startHostAllowListProxy({ allowedHosts: input.egressHosts });
+      let proxy: Awaited<ReturnType<typeof startHostAllowListProxy>> | undefined;
+      try {
+        proxy =
+          input.egressHosts === undefined
+            ? undefined
+            : await startHostAllowListProxy({ allowedHosts: input.egressHosts });
+      } catch (error) {
+        // No process started, so the one slot must not stay taken.
+        release?.();
+        throw error;
+      }
       const proxyAddress =
         proxy === undefined ? undefined : `http://127.0.0.1:${String(proxy.port)}`;
       const runtime: ExtensionRuntimeStartInput = {
