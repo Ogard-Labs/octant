@@ -108,19 +108,25 @@ export function PaneSideTasks(props: { readonly children: ReactNode }) {
 /** The next message the thread's latest reply suggested for this composer. */
 export interface ComposerSuggestion {
   readonly prompt: string;
-  /** Marks the suggestion used, so its card leaves the foot of the thread. */
+  /**
+   * Marks the suggestion used, so its card leaves the foot of the thread. A
+   * predicted next message has no card; the host spends it when the person
+   * sends anything.
+   */
   readonly markUsed: () => void;
 }
 
 const noFollowUps = () => () => undefined;
 
 /**
- * The first open "next step here" suggestion of the thread around this
- * composer, which an empty composer shows as its placeholder and takes on Tab,
- * the way a terminal agent offers its next prompt. It reads the same feed the
- * cards do, so it adds no request. Using it records the activation the card's
- * Use prompt would; the composer puts the words in itself, so nothing waits
- * on the host.
+ * What an empty composer shows as its placeholder and takes on Tab, the way a
+ * terminal agent offers its next prompt: the latest reply's predicted next
+ * message, or else the first open "next step here" suggestion. The prediction
+ * comes first because it is written as the person would type it, where a
+ * suggestion's prompt is written to stand alone in a fresh thread. It reads
+ * the same feed the cards do, so it adds no request. Using a suggestion
+ * records the activation the card's Use prompt would; the composer puts the
+ * words in itself, so nothing waits on the host.
  */
 export function useComposerSuggestion(): ComposerSuggestion | undefined {
   const context = useContext(FollowUpSuggestionContext);
@@ -143,6 +149,9 @@ export function useComposerSuggestion(): ComposerSuggestion | undefined {
   if (client === undefined || threadId === undefined || suggestions === null) return undefined;
   const turnId = suggestions.followUps.turnId;
   if (String(turnId) === dismissedTurnId) return undefined;
+  if (suggestions.nextMessage !== undefined) {
+    return { prompt: suggestions.nextMessage, markUsed: () => undefined };
+  }
   const next = suggestions.followUps.suggestions.find(
     (suggestion) =>
       suggestion.target === "same-thread" &&

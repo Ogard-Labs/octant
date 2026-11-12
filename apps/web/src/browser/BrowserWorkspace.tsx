@@ -37,7 +37,9 @@ import {
   Camera,
   Globe2,
   ExternalLink,
+  Eye,
   Hand,
+  Laptop,
   LoaderCircle,
   LockKeyhole,
   PanelRight,
@@ -83,6 +85,8 @@ import {
  */
 export const RENDERER_OVERLAY_SELECTOR = [
   ".code-board-layer",
+  // A divider being dragged across a tile, or a tab being dragged onto the dock.
+  ".dock-tiles__drag-shield",
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
@@ -1147,7 +1151,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>
-      <header className="browser-workspace__chrome">
+      <header
+        className="browser-workspace__chrome"
+        {...(activeContext ? { "data-page": "open" } : {})}
+      >
         <div className="browser-workspace__nav">
           <div className="browser-workspace__history" aria-label="Browser history controls">
             <OctantButton
@@ -1313,8 +1320,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             }
           >
             {nativeState?.loading || nativeState?.control === "agent" ? (
-              <LoaderCircle aria-hidden="true" size={12} />
+              <LoaderCircle
+                aria-hidden="true"
+                className="browser-workspace__control-spinner"
+                size={12}
+              />
             ) : null}
+            {/* Shown only when a narrow tile leaves no room for the words. */}
+            <Eye aria-hidden="true" className="browser-workspace__control-glyph" size={14} />
             <span>{controlLabel}</span>
             {activeContext ? (
               <span
@@ -1356,7 +1369,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               type="button"
               variant="secondary"
             >
-              Reclaim locally
+              <Laptop aria-hidden="true" />
+              <span className="browser-workspace__reclaim-label">Reclaim locally</span>
             </OctantButton>
           ) : null}
           {activeContext &&

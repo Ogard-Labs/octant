@@ -133,6 +133,14 @@ export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["brows
 export const WORKBENCH_DOCK_WIDTH = 640;
 
 /**
+ * Two columns of tools side by side need two usable widths. At 640px each got
+ * about 300px, too narrow for a simulator's device or a page's layout, so a
+ * dock showing two columns widens to this until the person sizes it. Not saved,
+ * for the reason the workbench width is not.
+ */
+export const TILED_DOCK_WIDTH = 840;
+
+/**
  * One width whatever the dock is showing, so a click inside it moves nothing.
  * The empty launcher used to take the 280px minimum while every tool took the
  * stored width, so opening Environment from it threw the dock from 280px to the
@@ -145,13 +153,18 @@ export function resolveDockPresentationWidth(input: {
   /** The person sized the dock since a Browser or Terminal last opened, so it stays as they left it. */
   readonly widthChosen: boolean;
   readonly tabSurfaces: ReadonlyArray<string>;
+  /** How many columns of tool tiles the dock shows; one when it shows a single tool. */
+  readonly tileColumns?: number;
 }): number {
+  if (input.widthChosen) return input.storedWidth;
   const holdsWorkbench = input.tabSurfaces.some(
     (surface) => surface === "browser" || surface === "terminal",
   );
-  return holdsWorkbench && !input.widthChosen
-    ? Math.max(input.storedWidth, WORKBENCH_DOCK_WIDTH)
-    : input.storedWidth;
+  const wanted = Math.max(
+    holdsWorkbench ? WORKBENCH_DOCK_WIDTH : 0,
+    (input.tileColumns ?? 1) >= 2 ? TILED_DOCK_WIDTH : 0,
+  );
+  return Math.max(input.storedWidth, wanted);
 }
 
 /**
@@ -161,13 +174,39 @@ export function resolveDockPresentationWidth(input: {
  * dock. The resize handle stops here too, so a drag never moves a stored width
  * that the screen would not show.
  */
-export function dockWidthCeiling(workspaceWidth: number | undefined): number {
+export function dockWidthCeiling(
+  workspaceWidth: number | undefined,
+  options: {
+    readonly tileColumns?: number;
+    readonly viewportWidth?: number | undefined;
+  } = {},
+): number {
   if (workspaceWidth === undefined) return MAX_CONTEXT_SIDEBAR_WIDTH;
-  return Math.min(
-    MAX_CONTEXT_SIDEBAR_WIDTH,
-    Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(workspaceWidth / 2)),
-  );
+  // Two columns of tools need what the thread's own minimum leaves, not half:
+  // at 1440px with the sidebar open, half gave two columns of 243px, under
+  // what a tool is built for. The primary minimum is the one the stylesheet's
+  // grid uses (560px from 1100px up, 360px below), so the handle stops where
+  // the layout would.
+  const room =
+    (options.tileColumns ?? 1) >= 2
+      ? workspaceWidth -
+        ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+          ? TILED_PRIMARY_MIN
+          : NARROW_PRIMARY_MIN)
+      : workspaceWidth / 2;
+  return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
 }
+
+/**
+ * The thread column's minimum beside two columns of tools, from 1100px up. One
+ * column keeps `--octant-wide-primary-min` (560px); at 560px, two tools could
+ * never stand side by side in a 1440px window with the sidebar open, so a
+ * second column asks the thread for 440px instead. The stylesheet mirrors it
+ * as `--octant-tiled-primary-min`.
+ */
+export const TILED_PRIMARY_MIN = 440;
+const NARROW_PRIMARY_MIN = 360;
+const WIDE_VIEWPORT = 1100;
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {

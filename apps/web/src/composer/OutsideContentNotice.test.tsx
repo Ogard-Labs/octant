@@ -9,7 +9,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
-import { ComposerOutsideContentNotice, OutsideContentContext } from "./OutsideContentNotice";
+import { ComposerOutsideContentChip, OutsideContentContext } from "./OutsideContentNotice";
 
 const threadId = "40000000-0000-4000-8000-000000000001";
 const first = "2026-10-11T08:15:00.000Z";
@@ -70,7 +70,7 @@ function fakeClient(
 function renderNotice(client: ContextClient, busy = false) {
   const view = (turnBusy: boolean) => (
     <OutsideContentContext value={{ client, mode: "code", threadId }}>
-      <ComposerOutsideContentNotice busy={turnBusy} />
+      <ComposerOutsideContentChip busy={turnBusy} />
     </OutsideContentContext>
   );
   const rendered = render(view(busy));
@@ -78,18 +78,28 @@ function renderNotice(client: ContextClient, busy = false) {
 }
 
 async function openReview() {
-  await userEvent.setup().click(await screen.findByRole("button", { name: "Review" }));
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Outside content" }));
+  await user.click(await screen.findByRole("button", { name: "Review" }));
   return screen.findByRole("dialog", { name: "Outside content this thread read" });
 }
 
 describe("outside content notice", () => {
-  it("shows a marked thread a notice with Review, and an unmarked thread nothing", async () => {
+  it("shows a marked thread a chip whose popover holds the sentence and Review, and an unmarked thread nothing", async () => {
     const marked = fakeClient();
     const { unmount } = renderNotice(marked.client);
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    const chip = await screen.findByRole("button", { name: "Outside content" });
+    // The fact is readable at a glance without a click: a globe and its words.
+    expect(chip).toHaveTextContent("Outside content");
+    expect(chip.querySelector("svg")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+    const user = userEvent.setup();
+    await user.click(chip);
+    const popover = await screen.findByRole("dialog", { name: "Outside content" });
+    expect(popover).toHaveTextContent(
       "This thread has read outside content. Below Full access, some actions ask each time.",
     );
-    expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
+    expect(within(popover).getByRole("button", { name: "Review" })).toBeInTheDocument();
     expect(marked.readExternalContent).toHaveBeenCalledWith(
       { mode: "code", threadId },
       expect.any(AbortSignal),
@@ -99,8 +109,7 @@ describe("outside content notice", () => {
     const clean = fakeClient({ read: async () => unmarked() });
     renderNotice(clean.client);
     await waitFor(() => expect(clean.readExternalContent).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
   });
 
   it("lists each source in plain words with how often and when it was read, and says clearing removes nothing the model read", async () => {
@@ -135,7 +144,7 @@ describe("outside content notice", () => {
     await userEvent.setup().click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(clearExternalContent).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Outside content" })).toBeInTheDocument();
   });
 
   it("clears at the version the person was shown and removes the notice", async () => {
@@ -151,7 +160,7 @@ describe("outside content notice", () => {
       threadId,
       expectedVersion: 3,
     });
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -166,7 +175,7 @@ describe("outside content notice", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
   });
 
   it("reloads the list and says so when new outside content arrived, then clears the newer version", async () => {
@@ -249,7 +258,9 @@ describe("outside content notice", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(sentence);
     expect(screen.getByRole("dialog")).toBe(dialog);
     // The page behind a modal dialog is inert, so the notice is found by hidden role.
-    expect(screen.getByRole("button", { name: "Review", hidden: true })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Outside content", hidden: true }),
+    ).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeEnabled();
   });
 
@@ -311,7 +322,7 @@ describe("outside content notice", () => {
         }),
     });
     const { setBusy } = renderNotice(client);
-    await screen.findByRole("button", { name: "Review" });
+    await screen.findByRole("button", { name: "Outside content" });
     // A turn starts and settles; the read that settling begins is still in flight.
     setBusy(true);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
@@ -327,7 +338,7 @@ describe("outside content notice", () => {
       answerLate(stateOf());
       await late;
     });
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -346,12 +357,12 @@ describe("outside content notice", () => {
     renderNotice(client);
     await Promise.resolve();
     expect(readExternalContent).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("draws nothing where the composer has no thread", () => {
-    render(<ComposerOutsideContentNotice busy={false} />);
-    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    render(<ComposerOutsideContentChip busy={false} />);
+    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
   });
 });

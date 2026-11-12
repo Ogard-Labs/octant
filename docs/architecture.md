@@ -4433,6 +4433,22 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Startup check.** Startup decodes journal rows to prove the journal is
+  readable, then records a disposable watermark: the sequence it verified
+  through plus a fingerprint of the exact server build (a hash of every chunk of
+  the bundled server plus the `effect` version beside it, the only external
+  dependency that runs the journal's schemas), the registry's event names and
+  versions, and the schema head. A source run (no bundle) or an unreadable build
+  has no identity: it neither reads nor writes a watermark and scans
+  everything, and a start that migrated computes nothing. The first start of
+  every new build therefore runs one full scan; hashing the bundle costs about
+  10 ms. The next start of the same build decodes only rows after the watermark. A different fingerprint, a
+  migration in the same start, a missing, malformed or too-high watermark, or
+  any rewrite or delete of a journal row (a trigger clears it in the same
+  transaction, so purge, compaction and host-identity rewrites are covered)
+  means a full scan. An incompatible row is quarantined wherever it sits, and a
+  diagnostics call with `fresh` always scans everything. Deleting the watermark
+  only makes the next start slower.
 - **Envelope.** Every event carries schema version, event id, aggregate id and
   version, global sequence, correlation and causation ids, actor, host id, and
   timestamp. Unknown or future events are quarantined rather than dropped.
@@ -5134,9 +5150,10 @@ or .zip>` write the same files, built by one host command
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
   place of a prompt read as noise to someone who already knew the feature and
-  said nothing to someone who did not. When the latest reply suggested a next
-  message for this thread, the empty composer shows it instead and Tab takes
-  it. A start screen's composer asks "Ask anything…" in every mode, because a
+  said nothing to someone who did not. When the latest reply predicted the
+  person's next message, or suggested a next message for this thread, the
+  empty composer shows it instead and Tab takes it; the prediction leads,
+  and it is gone once the person sends anything. A start screen's composer asks "Ask anything…" in every mode, because a
   first-time person has not started a conversation to reply to. Neither
   changes while a response runs, and accessible input labels remain stable.
 
@@ -8755,10 +8772,18 @@ the model at another size.
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
 provider, carries one fixed instructions block that lets the model end a reply
-with up to three suggestions in an `octant-follow-ups` fenced block.
-`ThreadFollowUpSuggestionStore` journals the latest reply's set per thread
-(`thread-follow-up-suggestions`), retires it when a later reply suggests
-nothing, and replays sets a harness session journaled earlier. The shared
+with an `octant-follow-ups` fenced block: up to three suggestions, and `next`,
+its prediction of the message the person will send next, in their words on
+one line (at most 280 characters; a longer or multi-line one is dropped
+whole). Every reply may carry a prediction, where most carry no suggestion, so
+the empty composer usually has something to offer at no extra request; an
+unreadable suggestion list leaves the prediction standing.
+`ThreadFollowUpSuggestionStore` journals the latest reply's set and prediction
+per thread (`thread-follow-up-suggestions`), retires them when a later reply
+suggests nothing, and replays sets a harness session journaled earlier. A turn
+starting on the thread spends the prediction
+(`thread-follow-up-next-message-spent@1`), so no surface offers the message
+just sent again while the next turn runs. The shared
 message parser leaves the block out of the reply a person reads.
 `/api/follow-up-suggestions/:threadId` reads the set, previews what one
 suggestion would create — a new thread in the same mode and Project, or a

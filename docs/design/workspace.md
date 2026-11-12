@@ -852,7 +852,29 @@ working tree. Stale selections require a new comparison; captured run and Git
 History views do not offer mutations. The authority, native preflight and writer
 rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
-Thread utilities live in the Right Utility Dock outside the split tree.
+Thread utilities live in the Right Utility Dock outside the split tree. The dock
+shows one open tool, or several together as tiles (at most two columns of three;
+[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the strip
+menu). One tool at a time meant choosing between a simulator and the page it
+was testing, so a thread keeps, beside its open tools and the selected one, which
+tools are shown. A shown tile is live and stays mounted while it is shown;
+a tool that is open but not shown is not mounted, as a hidden tab never was.
+Each tile resolves its own availability against the active pane, and the dock
+still never shows another pane's content. All Browser tabs are pages of one
+Browser tool and share one tile. The layout is window-local presentation in
+local storage: it grants nothing, starts nothing, and the bottom panel never
+has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
+with an Arrange menu (Move left, right, up and down where the caps allow, Show
+alone, Hide from view) and Close at its trailing edge; the strip lists only the
+tools that are not shown. Stacked, a page showed four bars and named the tool
+three times. A divider is a hairline that shows a quiet strong role while hovered
+or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
+otherwise stack. The thread keeps 440px beside two columns (560px beside one,
+from a 1100px window up), because at 560px two tools could never stand side by
+side in a 1440px window: with the sidebar open a second column widens the dock to
+about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
+that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
+already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
 `apps/web/src/dockModules` receive only declared inputs and contain render
 failures. Review owns local Working tree and Git History views. History reads
@@ -1074,9 +1096,9 @@ session is live and the thread's Browser is out of sight, a small live preview
 of its active page floats over the thread as a small preview (sized by `.browser-pip`), resting in one of
 the four corners of the thread frame (top right by default), draggable between
 them with an arrow-key twin, and remembered per client. Out of sight means no
-pane shows the thread's shared Browser and neither the dock nor the bottom panel
-has it as its active tool (a tab bound to one link or local server is a page of
-its own and does not count); the preview leaves as soon as the Browser appears and returns
+pane shows the thread's shared Browser and neither the dock (as a shown tile, or
+as its one tool) nor the bottom panel has it as its active tool (a tab bound to
+one link or local server is a page of its own and does not count); the preview leaves as soon as the Browser appears and returns
 when it closes. Clicking it shows the Browser (the dock when the thread is the
 dock's subject, else the pane), the close control hides it for that session, and
 the page's title or host shows only under the pointer or focus. A bottom corner
@@ -1566,36 +1588,32 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
-Under the composer of every thread, in Chat, Work, and Code and for every provider, a
-quiet stats line states what the thread used: its turns, input and output tokens,
-thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the row under the box, right of
-the thread's context, one bar per window showing the share left; the stats line's
-switch hides the figures, not those bars
+At the top of the Thread info panel of every thread, in Chat, Work, and Code and for every
+provider, a compact block of figures states what the thread used: its turns, input and output
+tokens, thinking tokens when reported, the cache hit, output speed, time to first token, and
+cost. They are not under the composer. The provider's account limit windows stand in the row
+under the box, right of the thread's context, one bar per window showing the share left
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
 falling back to the Code thread's own report). A provider that reported neither windows
-nor usage shows no line. In a split workspace the line shows in the active pane only: the
-figures and limits come from one shell-wide scope, so an inactive pane shows no line rather
+nor usage shows no block. In a split workspace the block shows in the active pane only: the
+figures and limits come from one shell-wide scope, so an inactive pane shows no figures rather
 than another thread's numbers. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
 (`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
 session card, the terminal footer, and the phone's session panel all call, so
 the rules cannot drift. A figure the provider did not report, or whose denominator is zero, is
-absent; a provider that reported no usage shows no line. A cache hit is never
+absent; a provider that reported no usage shows no figures. A cache hit is never
 rounded up to a whole; an approximate speed carries a tilde and a tooltip that it
 is per turn and includes some tool time; a cost says "est." unless the provider
-reported it and is absent when the model has no price. Clicking the line, or
+reported it and is absent when the model has no price. The block's Turn details link, or
 **Turn details** in the context meter's popover, opens one turn at a time (tokens,
 timing, retries, cost). The usage page's per-thread rows and the turn drill-in
 under each row call this same module, so a thread shows the same cache, speed,
-first-token, and cost figures there as under its composer. Those columns are
+first-token, and cost figures there as in its Thread info panel. Those columns are
 left out when no row can state them. The rows read `turnMetrics` on the existing
 usage query; they do not add a second accounting path. A reading of one thread
 uses that thread's totals. A reading that mixes threads and has scrolled past
-the latest turns says those rows cover only the turns still listed. The line is on by default; `showThreadStats` in the shell
-settings is the one shared preference, set from the eye button on the line, the
-switch in the context meter's popover, and Settings › Appearance › Reading. Off hides
-only the line; the details stay reachable.
+the latest turns says those rows cover only the turns still listed. There is no hide control and no setting: the stored `showThreadStats` value stays in the shell settings schema so saved settings still decode, and nothing reads it.
 
 Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained

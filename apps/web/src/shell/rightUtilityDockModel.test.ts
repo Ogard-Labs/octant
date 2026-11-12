@@ -6,6 +6,7 @@ import {
   dockWidthCeiling,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
+  TILED_DOCK_WIDTH,
   WORKBENCH_DOCK_WIDTH,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
@@ -62,6 +63,19 @@ describe("how wide the right utility dock is", () => {
         tabSurfaces: ["browser"],
       }),
     ).toBe(420);
+  });
+
+  it("widens the dock to fit two columns of tools until the person sizes it", () => {
+    const tiled = { ...narrow, tabSurfaces: ["ios-simulator", "canvas"], tileColumns: 2 };
+    expect(resolveDockPresentationWidth(tiled)).toBe(TILED_DOCK_WIDTH);
+    expect(resolveDockPresentationWidth({ ...tiled, widthChosen: true })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...tiled, storedWidth: 900 })).toBe(900);
+  });
+
+  it("asks for no extra width for one column of tiles", () => {
+    expect(
+      resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["canvas"], tileColumns: 1 }),
+    ).toBe(360);
   });
 });
 
@@ -358,5 +372,30 @@ describe("multi-instance dock surfaces", () => {
     for (const surface of ["environment", "plan", "review", "files", "tests"]) {
       expect(MULTI_INSTANCE_DOCK_SURFACES.has(surface)).toBe(false);
     }
+  });
+});
+
+describe("how wide the dock may get with two columns of tools", () => {
+  // Workspace widths are the window less a 260px sidebar.
+  it("keeps half of the workspace for one column", () => {
+    expect(dockWidthCeiling(840, { tileColumns: 1, viewportWidth: 1100 })).toBe(420);
+    expect(dockWidthCeiling(1180, { tileColumns: 1, viewportWidth: 1440 })).toBe(590);
+    expect(dockWidthCeiling(1468, { tileColumns: 1, viewportWidth: 1728 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 734),
+    );
+    expect(dockWidthCeiling(1180, { viewportWidth: 1440 })).toBe(590);
+  });
+
+  it("leaves a thread 440px beside two columns from 1100px up", () => {
+    // At 560px two tools could never stand side by side in a 1440px window.
+    expect(dockWidthCeiling(840, { tileColumns: 2, viewportWidth: 1100 })).toBe(400);
+    expect(dockWidthCeiling(1180, { tileColumns: 2, viewportWidth: 1440 })).toBe(740);
+    expect(dockWidthCeiling(1468, { tileColumns: 2, viewportWidth: 1728 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 1028),
+    );
+  });
+
+  it("uses the smaller thread minimum below 1100px, as the stylesheet does", () => {
+    expect(dockWidthCeiling(900, { tileColumns: 2, viewportWidth: 1000 })).toBe(540);
   });
 });

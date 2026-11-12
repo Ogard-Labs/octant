@@ -340,16 +340,54 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it("wraps a composer notice so a narrow pane still shows the whole instruction", () => {
+  it("draws a composer's notices as callout cards above the pill, with the callout's corner, not inside it", () => {
     const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const notice = /\.composer-status__notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const strip =
-      /\.thread-composer__feedback > \.composer-status:has\(> \.composer-status__notice\)\s*\{([^}]*)\}/.exec(
-        css,
-      )?.[1] ?? "";
-    expect(notice).toMatch(/white-space:\s*normal/);
-    expect(strip).toMatch(/flex:\s*1 1 auto/);
-    expect(strip).toMatch(/min-width:\s*0/);
+    const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const card = /\.callout\.composer-notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const body = /\.callout\.composer-notice > \.callout__body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const actions =
+      /\.callout\.composer-notice > \.callout__actions\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+
+    // One group of cards, with a gap from the pill on the spacing scale and no
+    // room when there is nothing to say.
+    expect(group).toMatch(/display:\s*grid/);
+    expect(group).toMatch(/margin-bottom:\s*var\(--oct-space-1\)/);
+    expect(css).toMatch(/\.composer-notices:empty\s*\{\s*display:\s*none/);
+    // The words wrap, and the action wraps under them in a narrow composer.
+    expect(card).toMatch(/flex-wrap:\s*wrap/);
+    // The compact form: the 12px meta step and tight padding, so the card is
+    // visibly lighter than the pill.
+    expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
+    expect(body).toMatch(/flex:\s*1 1 200px/);
+    expect(actions).toMatch(/margin-inline-start:\s*auto/);
+    // The corner is the callout's own (12px), not the pill's 22px: no radius is
+    // set on the card here, so a bar with the pill's corner cannot come back.
+    expect(card).not.toMatch(/border-radius/);
+    expect(css).toMatch(/--oct-radius-md:\s*12px/);
+    expect(css).toMatch(/--oct-radius-composer:\s*22px/);
+    expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
+      /border-radius:\s*var\(--oct-radius-md\)/,
+    );
+    // Over a ground or under Window glass the card is the glass the pill is.
+    expect(css).toMatch(
+      /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
+    );
+    // Nothing the pill held for a notice survives: no feedback strip in it.
+    expect(css).not.toMatch(/\.thread-composer__feedback/);
+    expect(css).not.toMatch(/\.composer-status\b/);
+  });
+
+  it("keeps the outside-content chip in the row, and drops its words but not its globe in a narrow row", () => {
+    const css = readFileSync(join(webRoot, "composer/outside-content-notice.css"), "utf8");
+    const trigger =
+      /\.composer-row \.outside-content-chip__trigger\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(trigger).toMatch(/color:\s*var\(--oct-warn-fg\)/);
+    // No fill or edge at rest: the row's quiet treatment supplies none.
+    expect(trigger).not.toMatch(/background|border/);
+    expect(css).toMatch(
+      /@container composer-under \(max-width: 560px\)\s*\{\s*\.outside-content-chip__label\s*\{\s*display:\s*none/,
+    );
   });
 
   it("lets a Project overview's actions drop below the name so a half-width pane never draws the name field over its kind chip", () => {
@@ -514,8 +552,10 @@ describe("the public-block visual language", () => {
     }
     for (const source of composers) {
       expect(source).toContain("thread-composer");
-      // Chat composes its status class with its live/quiet modifiers.
-      expect(source).toMatch(/className=\{?[`"]composer-status\b/);
+      // What the surface says about its thread or about sending goes to the
+      // composer's notice cards, never into a strip inside the pill.
+      expect(source).toMatch(/\bnotices=\{/);
+      expect(source).not.toMatch(/\bfooter=\{/);
     }
   });
 
@@ -1311,6 +1351,57 @@ describe("the public-block visual language", () => {
       expect(system).toMatch(
         /html\[data-octant-reduced-motion="true"\] \.skeleton::after \{\s*display: none;\s*\}/,
       );
+    });
+  });
+
+  describe("dock tool tiles", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const body = (selector: string) => {
+      const start = dock.indexOf(`${selector} {`);
+      expect(start, `${selector} has a rule`).toBeGreaterThanOrEqual(0);
+      return dock.slice(start, dock.indexOf("}", start));
+    };
+
+    it("clips every tile to its box and gives its tool a definite height to scroll within", () => {
+      expect(body(".dock-tile")).toMatch(/overflow:\s*hidden/);
+      const tool = body(".dock-tile > .right-utility-dock__tool");
+      expect(tool).toMatch(/overflow:\s*hidden/);
+      expect(tool).toMatch(/min-height:\s*0/);
+      expect(tool).toMatch(/flex:\s*1 1 0/);
+      expect(
+        body('.dock-tile > .right-utility-dock__tool:not([data-dock-inset="true"]) > *'),
+      ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
+    });
+
+    it("stands the narrow dock sheet at a definite height, so the tool fills it and scrolls inside", () => {
+      const sheet = body(".octant-dialog__popup:has(> .right-utility-dock__surface)");
+      expect(sheet).toMatch(
+        /height:\s*min\(var\(--octant-dialog-height, 640px\), calc\(100vh - 48px\)\)/,
+      );
+    });
+
+    it("draws a divider as a hairline that never keeps an accent line after a click", () => {
+      const rule = (selector: string) => body(selector);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*var\(--oct-border\)/);
+      const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
+      expect(held).toMatch(/--octant-border-strong/);
+      const dividerRules = dock.slice(
+        dock.indexOf(".dock-tiles__divider {"),
+        dock.indexOf(".dock-tiles__drag-shield"),
+      );
+      // Keyboard focus is the app's own outline, not a line of this rule's.
+      expect(dividerRules).not.toMatch(/accent/);
+      expect(dividerRules).not.toMatch(/focus-visible/);
+    });
+
+    it("gives every tile bar one height, so neighbouring tiles line up", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+      expect(dock).not.toContain("dock-tile__caption");
+    });
+
+    it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
+      expect(body(".dock-tile")).not.toMatch(/background/);
+      expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);
     });
   });
 
