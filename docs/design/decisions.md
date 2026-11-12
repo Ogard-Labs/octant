@@ -53,7 +53,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 5       | 4            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 4       | 1            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
-| [Design system](#design-system)                                                       | 10        | 9       | 1            | 0                   |
+| [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
+| **All areas**                                                                         | **248**   | **164** | **79**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2202,7 +2202,7 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below. Names in navigation are the interface size at regular weight, a group label is a quiet 12px caption, and a thread's activity line is the text's size in the muted ink.
-- Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
+- Depth is one material in five levels, each a step lighter than the one under it, and every surface takes a fill, a rim that is brighter along its top edge and a shadow that seats it: the ground (the window frame, with the sidebar's rows on it and no panel), a pane (the thread stage, each dock tool tile, the bottom panel and the dock's overview: square, touching each other and the window's edges, with one 1px line between two neighbours and none of the rim or seat shadow), a card on a pane (a tool card, an approval card, a user bubble, a Settings group), a control (a filled button, a chip, the selected row, a switch's thumb and the composer's box, raised; a well cut in for a switch's track or a command block) and a floating surface (a menu, popover, hover card, toast, dialog and the Settings sheet, frosted over page content). The window is a frame and a grid of panes rather than one sheet or loose panels: panes in a grid that is dragged, aligned and resized share edges, and a corner and a gap on each made the grid read as loose cards. A divider's hit area is 8px, centred on the shared line, and a window of 680px or less keeps its rounded tile panels. Glass tints the panes instead of blurring the desktop, which a packaged window's native material does not allow. Increased contrast drops the gradients and sheens and keeps the rims; ghost buttons and plain rows stay flat until pointed at. What sits on a floating surface takes its fills from that surface (maintainer request, 2026-11-12).
 - Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open is held through its exit with the last content it showed (`OctantDialogPresence`): every confirmation, the command palette, the Code file search, the Navigator, the narrow dock, first run and the other dialogs mounted on demand. A dialog or Settings' sheet that is leaving takes no press and no key, focus returns to the opener as the exit starts, and focus the person has moved since is left alone. A dialog with an `open` of its own keeps that apart from its words; one whose words come from the state closing clears is rendered only while that state exists. A dialog removed together with its owner still leaves at once, and so does one closed in a window nobody can see.
 - A list a person picks from draws one row from shared tokens: 28px for one line, its words 8px in, the rows 4px in from the popup's edge. Menus, context menus, selects, comboboxes, the command palette, typeaheads and picker rows all take it; a described row grows to two lines.
 - There is one scrollbar, declared once: a thin thumb and no painted track, in a pane, a menu, a popup and a sheet alike. A feature may reserve its strip or hide it on a named sideways strip, and never recolours or widens it.
@@ -2226,6 +2226,16 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
 Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+
+### Portable design tokens
+
+The design system can be reused outside the app from one generated token set, never from values copied by hand.
+
+- `packages/theme/tokens/tokens.css` and `tokens.json` are generated from the renderer's stylesheets and checked against the theme package's colour defaults; they keep the app's own names, and are never edited.
+- A repository check fails when the generated files are stale and names the command that regenerates them.
+- The minimum recipes (`recipes.css`) are built from the tokens only: no colour literal, a few tints mixed from exported colour tokens, and a test refuses a raw colour or an undefined token there.
+
+Status: Built. Since: 2026-11-12. Detail: [Design tokens and the app feel](design-tokens.md).
 
 ### Page shell and Settings organisation
 

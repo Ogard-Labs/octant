@@ -152,7 +152,7 @@ nothing essential sits under 12px at the default. The roles live in
 | Reply text             | transcript size | 400    | 1.6     | primary     | A reply's paragraphs, list items and table cells (`--oct-leading-reading`); the size is the person's Appearance setting, and a list is indented 16px                                                          |
 | Activity line          | 13              | 400    | 1.4     | muted       | "Worked for …" and a turn's time in a thread (`oct-activity-line`)                                                                                                                                            |
 | Detail                 | 13              | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                                                                                                                               |
-| Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's pill (`oct-meta`)                                                                                         |
+| Meta                   | 12              | 400    | 1.4     | muted       | Timestamps, counts, hints, the title band's Project and crumb, the status line under the composer's box (`oct-meta`)                                                                                          |
 | Identifier             | 12              | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                                                                                                                       |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
@@ -295,18 +295,11 @@ inside a container takes the container's radius less the gap (`--oct-radius-inse
 A corner that sits within one radius of a rounded parent's corner is concentric
 with it: the parent's radius less the gap between them, or square when the gap
 is at least the radius, never the same token again. Two equal radii one inset
-apart leave a frame that swells at the corner (the sheet's bottom corners, 8px
-in from the window's own, did). So the sheet's bottom corners are the window's
-radius (`--octant-window-radius`, the card radius, as the OS rounds a window
-about that much) less the sheet inset, `--octant-sheet-corner-outer`, written
-once with `calc()` in `shell.css`; the corners where the frame turns, under the
-title band and beside the rail, keep the card radius, since the window's corner
-is far from them; and a sheet edge that meets the window's edge, with no rail
-beside it, is square, as is a corner that meets an inner seam (the bottom
-panel's right corner while the dock is open, where it meets the dock and not the
-window). `--octant-window-radius` is an assumed 12px: nothing in the desktop app
-reads the OS's real corner, so it is to be confirmed there, and one token change
-corrects every corner.
+apart leave a frame that swells at the corner. The rule governs an object
+inside a rounded container (a card in a card, a tile in a round end) and the
+narrow layout. It no longer governs the wide window's frame: from 681px up the
+panes are square and reach the window's right and bottom edges, so no pane has a
+corner to nest in the native window's own (see the frame and its panes below).
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -321,22 +314,87 @@ draws its chrome with the system's own patterns (tab bar, large titles, inset
 grouped lists, segmented controls); `apps/mobile/design-system/README.md`
 holds that projection.
 
-Depth has three levels. Each is one step lighter than the level under it,
-and each has one fill and one shadow token, so a card, a menu and a dialog are
-never told from the page by an outline alone.
+Depth is one material in five levels. Every surface takes a fill one step
+lighter than what it sits on, a rim that is brighter along its top edge (two
+inset shadows: a line along the top, then a ring around), and a shadow that
+seats it, so an object is never told from the surface under it by an outline
+alone. Each level has its tokens in `styles.css`; a surface consumes them and
+never writes its own colour.
 
-| Level    | What it is                                            | Fill                                 | Edge and shadow                                                                                                                                                         |
-| -------- | ----------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Page     | The sheet, lists, headers, empty states               | the workspace                        | none                                                                                                                                                                    |
-| Raised   | A card, a Settings group, a composer, a filled button | `--octant-card`; a button's own fill | `--octant-shadow-xs` to `-md`, `--octant-shadow-control`: light on the top edge, a hairline, a short shadow                                                             |
-| Floating | A menu, popover, hover card, toast, dialog            | `--octant-float`                     | `--octant-shadow-overlay`, `--octant-shadow-pop`: a light rim brighter along the top, a dark line outside it, a short shadow that seats it and a long one that lifts it |
+| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                             |
+| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                       |
+| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow (a narrow window's tile keeps a rounded panel)                       |
+| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                               |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks |
+| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                         |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it          |
 
-- **The light an edge catches is the bevel** (`--octant-bevel`,
-  `--octant-bevel-strong`): an inset line along the top of every raised and
-  floating surface. In dark a shadow cannot be seen on a near-black page, so
-  the fill and the bevel carry the lift and the shadow helps only where the
-  surface crosses something lighter; in light the surfaces are already the
-  lightest thing on the page and the shadow carries it.
+- **The light an edge catches is the rim** (`--octant-rim`,
+  `--octant-rim-top`, `--octant-rim-low`, `--octant-rim-float`, and the
+  control's `--octant-control-top`, `-low`, `-rim`). Glass lets light out along
+  its lower edge too, so a card and a floating surface carry a fainter
+  line inside the bottom (`--octant-rim-low`; none in light, where it cannot
+  show on a white fill). A pane carries none of it: it is flat, and its edge is
+  the one line it shares with its neighbour. A narrow window's tile keeps a bright
+  band as deep as the slab's edge (`--octant-edge-light`, 7px, in
+  `--octant-panel-band`) over the long sheen; the band ends above
+  the first line of anything a panel holds, so a tile's name sits on the
+  sheen alone (meta ink 4.99:1 there in stock dark). In dark a shadow cannot be seen on a
+  near-black page, so the fill and the rim carry the lift (on an OLED preset
+  the panel is a step toward the ink and the sheen lifts its top) and the
+  shadow helps only where the surface crosses something lighter; in light the
+  top line is white and the shadows carry it. A narrow window's panel content paints
+  over an inset shadow on its box, so its rim is drawn by a pseudo-element
+  above the content and the box keeps only the seat shadow. A surface that also drew a
+  border or a second ring on the same edge showed two lines, so the rim is in
+  the shadow token and the border is gone.
+- **A control is a raised tile.** A filled button (default, solid, outline,
+  secondary), a chip, the selected row and a switch's thumb take
+  `--octant-shadow-control`: a lighter top, a light line along it, a dark line
+  under the bottom edge, a ring, and a short drop; pressing inverts it and
+  sinks it (`--octant-shadow-control-pressed`). The gradient is drawn as an
+  inset shadow (`--octant-control-lift`), so a recipe that sets its own fill
+  still gets it. The primary button is the accent as a gradient with a soft
+  accent glow under it (`--octant-accent-sheen`, `--octant-shadow-primary`).
+  The gradient moves the fill away from the label's colour for any accent: the
+  direction is taken from the published `--octant-primary-foreground`
+  (`--octant-accent-away`), not from the mode, so no stop is less legible than
+  the flat accent;
+  the composer's send is the primary once there is something to send. Ghost,
+  link, bare and the suggestion chip stay flat until pointed at, as do the
+  quiet controls of a row (the line under a composer, the microphone). A
+  toggle that is on (the dock and bottom-panel buttons in the title band, a
+  tile's open menu) is a control pressed in: a filled tile with the sunk
+  shadow, told apart from the pointed-at wash and from the deeper press.
+- **A well is cut in**: darker than what it is in, an inner top shadow, and a
+  light line under its bottom edge. What is chosen in a well is a raised control
+  again (the thumb of the Work and Code switch).
+- **Floating surfaces are frosted.** In dark the fill is the float colour at
+  66% over a blur that also lifts saturation and dims what is behind it to
+  under half (`--octant-float-blur`). The dimming is what lets the fill be
+  that clear: over the app's own dark page the meta ink on a menu reads at
+  4.54:1 (4.04:1 with the old 88% fill), and with a white page behind the whole
+  menu at 2.97:1 (2.83:1 before). In light the fill is 78% and the blur draws
+  what is behind toward a pale grey first (lower contrast, then brighter),
+  since a black page behind a white menu cannot be dimmed away: 5.64:1 over
+  the app's own page (5.50:1 before) and 4.11:1 with a black page behind it
+  (4.31:1 before). The blur is not asked to frost the desktop: a packaged
+  window's native material is not re-blurred by a backdrop filter, so Glass
+  tints the panels instead (below). Reduced transparency and increased
+  contrast take the opaque float. The sheen is a strip along the lit top edge
+  only (8px), above the first line of anything a surface holds, so the meta
+  ink on a menu's top row or a dialog's title band sits on the plain fill.
+- **Edges that do not depend on a shadow.** The rim is a shadow, and forced
+  colours drops every shadow, so a popup, a card (user bubble, approval row,
+  provider question) and a chip take a 1px system-colour border there, and a
+  pressed chip the system highlight. Increased contrast takes the strong border
+  and sets every rim to it, so a flat fill keeps a firmer edge than the soft
+  one it had.
+- **A pane has no seat shadow.** Panes share their edges, so a shadow would
+  fall on the neighbour. In a narrow window, where a tile is still a rounded
+  panel, the seat shadow ends within 8px of the panel, so a panel looks the
+  same whatever its neighbour's order.
 - **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
   the raised elevation's white top line drew as a light seam on the dark tooltip
   in light, so it takes the two shadows alone in both modes.
@@ -344,19 +402,18 @@ never told from the page by an outline alone.
   fills, its pointed-at row and its hairlines step up from `--octant-float`
   (`--octant-float-control`, `-hover`, `-pressed`, `-line`); the page's own
   control fills are darker than a lifted menu and showed there as dents.
-- **A filled button is a raised tile** (default, solid, outline, secondary):
-  light on its top edge, a short shadow under it, and pressing sinks it
-  (`--octant-shadow-control-pressed`). Ghost, link, bare and chip buttons draw
-  no tile and stay flat, as do the quiet controls of a row (the line under a
-  composer).
-- **The row a list is showing is a raised tile** (`--octant-shadow-selected`):
-  a light rim, brighter along its top, and a short shadow, on the thread list,
-  the sidebar and the Settings rail. The row under the pointer stays a flat
+- **The row a list is showing is a raised control** (`--octant-shadow-selected`,
+  the control's shadow), on the thread list, the sidebar and the Settings
+  rail. The row under the pointer stays a flat
   wash, so "here" and "pointed at" are two states.
-- **On Window glass** a raised surface takes a light rim and a shadow that
-  can be seen on the desktop behind it (`--octant-shadow-raised-glass`); the
-  opaque border is near black and drew a heavy outline there.
-- A shadow or a bevel never decorates a flat row: plain lists, empty states
+- **On Window glass** the panes are a tint of the theme colour over the
+  window's native material (the sheet colour at 80%; more opaque for the
+  thread, so text stays on a quiet ground), and a card takes a light rim and a shadow that can be seen on
+  the desktop behind it (`--octant-shadow-raised-glass`); the opaque border is
+  near black and drew a heavy outline there.
+- **Where contrast matters the paint stays flat.** Increased contrast drops the
+  lift and the sheen and keeps the rims; Mono keeps the same material.
+- A shadow or a rim never decorates a flat row: plain lists, empty states
   and headers stay on the page.
 
 (Every card and popup drew the theme's one floating colour, a hair off the
@@ -381,30 +438,40 @@ so the three react alike in light and dark. A search or name field a feature
 draws for itself still takes its edge from the same role (`--input`, the strong
 border), not from the hairline or a control fill.
 
-The window is a frame and one sheet. The rail and the title band form one
-L-shaped frame in the window surface (the sidebar colour), with no line where
-they meet. The sidebar, the stage (the primary workspace), the right dock, and
-the bottom panel sit inside it as one sheet: it starts under the title band,
-stops 8px short of the window's right and bottom edges, rounds its corners
-where the frame turns (`--oct-radius-md`) and its bottom corners concentric with
-the window's (see the radius rule above), and
-divides its parts with one soft hairline (`--octant-border-soft`); no
-stronger line doubles it, and none runs on through the band or the inset
-below the sheet. The sidebar's side is the workspace colour,
-a step lighter than the stage's application background, so the turn of the
-frame reads. Pane headers and the tool row stay in the title band. With Glass on,
-the frame and the sheet are the Tint over the window's native material, so
-the desktop frosts behind the whole window rather than a sidebar strip. (The
-frame used to set rounded cards 8px apart on a back of the sidebar's material;
-the glass then showed only in the sidebar and an opaque card covered
-everything a person worked in, so the cards went.) Reader pages inside the
-stage are clear. Behind every page the application ground lies on the stage's
-piece of the sheet, under the content, taking the sheet's corners; with Cover
-the sidebar on it runs under the sidebar's piece too, which then lets a
-little of it through. A pane header and the dock head share the
-title rail (`--oct-title-rail-h`), and the pane draws the one hairline under both, in the sheet's soft hairline so the rule under the band is one shade across the sidebar's edge. At 680px and below the
-workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
-(`--octant-scrim`) dimming the page behind it. The drawer
+The window is a frame and a grid of panes. The title band and the sidebar are
+the frame (level 0): the window surface, painted once, with the sidebar's rows
+sitting on it and no panel behind them. The thread stage, each tool tile in
+the dock, the bottom panel and the dock's overview are square panes (level 1)
+under the title band that touch each other and the window's right and bottom
+edges: no gap, no corner, no shadow. Between two neighbours there is one 1px
+line (`--octant-pane-line`: a tenth of the ink, so it shows on a near-black
+preset and on a glass tint as it does on the stock page; the strong border
+under increased contrast, and a system-colour border in forced colours), and one under the title band along the panes' top. Each pane draws
+only its own top and left edge, so a shared edge is never drawn twice. The
+divider's hit area is 8px wide and centred on that line, for the edge between
+the thread and the dock, between two tiles, and above the bottom panel; the
+line is the strong border under the pointer and the meta ink while it is grabbed, never the accent. A tile is told apart by its name,
+not by a ring that would double a divider. The window's own outer corners are
+the native window's; no pane rounds a corner. Rationale: panes in a grid that
+is dragged, aligned and resized share edges, and a corner and a gap on each
+one made the grid read as loose cards. (The window was once one sheet divided
+by hairlines; before that, cards on a back of the sidebar's material, and most
+recently separate rounded panels on the ground.) Pane headers and the tool row
+stay in the title band. With Glass on, the ground and the panes are the Tint
+over the window's native material: the panes are a lighter tint than the
+ground; every pane (the thread, a tile, the bottom panel, the dock's
+overview) is the same one fill (`--octant-pane-fill`), over a ground that is
+itself a tint, so text reads on a saturated desktop. Reader pages inside the
+stage are clear. Behind every page the application ground lies on the
+thread's pane, under the content, square like the pane. A pane header
+shares the title rail (`--oct-title-rail-h`) with the tool row; the dock's own
+header is an empty spacer under the band, so the first tile's top line is the
+only line there. A native
+Browser page inside a tile is placed by the tile's measured rectangle and is
+square; the corner of the page inside the tile belongs to the web renderer
+only. At 680px and below the workspace sidebar is an overlay drawer and the
+frame stays flat, with no panels, and a scrim (`--octant-scrim`) dims the
+page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
 choosing somewhere to go, and never changes the saved wide-window choice.
 Settings keeps its own narrow layout, a drawer with a flat page, at 960px and below (see [breakpoints](#breakpoints)).
@@ -1192,6 +1259,13 @@ The import order in `apps/web/src/styles.css` is load-bearing:
 variables are consumption aliases. Do not add a new raw colour, radius, shadow,
 or control recipe in a feature stylesheet.
 
+The portable projection of these layers, for a website or another app, is
+generated, not hand-kept: `bun run tokens:export` writes
+`packages/theme/tokens/tokens.css` and `tokens.json` from the stylesheets above,
+and `bun run tokens:check` fails when they are stale. How to load and use them,
+and the app-feel rules a consumer follows, are in
+[Design tokens and the app feel](docs/design/design-tokens.md).
+
 `bun run ui:check` enforces this on every `.css` file under `apps/web/src`
 (`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
 block that must depict one fixed scheme regardless of theme, such as the
@@ -1962,34 +2036,33 @@ Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
 level, shown as the Window section's Glass control (Off, Subtle, Strong) and
 its Tint slider. It takes effect only when the host resolved the material
 translucent, so every accessibility, performance, and host-support gate
-applies; then the frame (the sidebar colour) and the sheet (the workspace
+applies; then the frame (the sidebar colour) and the panels (the workspace
 colour) are each at the Tint's opacity over the native material, and reduced
 transparency or an unsupported host leaves them opaque. A browser is such a
 host: with no native material behind the page, Glass would leave the frame and
-the sheet as the page colour and take the sidebar's own colour away, so a
+the panels as the page colour and take the sidebar's own colour away, so a
 browser window always paints the theme's opaque surfaces. Menus, dialogs, popovers, and other controls drawn
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
 
 Under Glass nothing inside the shell paints the theme's opaque page,
-workspace, or card colour over the sheet; every layer takes one of the
-shell's three surfaces (`--octant-window-surface` for the frame,
-`--octant-sheet-surface` for the sheet, `--octant-stage-surface` for the
-stage), defined once on every shell in `shell.css`:
+workspace, or card colour over a panel; every layer takes one of the shell's
+surfaces (`--octant-window-surface` for the frame and `--octant-panel-surface`
+for every panel, the thread's included), defined once on every shell in
+`shell.css`:
 
-- **Settings** is the same frame and sheet: the navigation and gutters are the
-  frame, the page is the sheet with the sheet's soft hairline, and a section
-  card is the card step below.
+- **Settings** wears the same frame and panels: the navigation and gutters are
+  the frame, the page is a panel, and a section card is the card step below.
 - **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
-  Automations, Artifacts, Image generator) are clear over the sheet, and their
+  Automations, Artifacts, Image generator) are clear over the panel, and their
   cards drawn with the raised step (`--oct-surface`) take the card step. The
   Inbox is the model: a display-size page title (the `oct-title` size) with its one line of state
   on the baseline, then raised cards in a 980px left-aligned column, two
   columns by container query and one when narrow, rows without rules (see
   [Inbox page](docs/design/workspace.md#inbox-page)).
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
-  the sheet: the primary text at 4%.
+  the panel: the primary text at 4%.
 - **An outline button** rests on that card step instead of the page colour
   (`--octant-outline-rest`); its hover and pressed fills stay the control
   fills.
