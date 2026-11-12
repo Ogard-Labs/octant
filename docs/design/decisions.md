@@ -40,7 +40,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 12      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 1       | 3            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 7       | 3            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **247**   | **162** | **80**       | **5**               |
+| **All areas**                                                                         | **247**   | **163** | **79**       | **5**               |
 
 ## Principles and hard lines
 
@@ -1052,12 +1052,12 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 A follow-up is a one-shot routine that sends one scheduled turn into the thread it came from.
 
-- The host re-checks the thread at fire time and refuses with a typed reason rather than adapting; a follow-up due while the thread is busy runs after the running turn (maintainer request, 2026-11-12). Not built yet: today a busy thread is skipped, not waited on.
+- The host re-checks the thread at fire time and refuses with a typed reason rather than adapting; a follow-up due while the thread is busy runs after the running turn (maintainer request, 2026-11-12), and it never runs twice, never runs if the thread was archived or the follow-up cancelled meanwhile, and survives a host restart while it waits.
 - A follow-up missed while the host was asleep runs once on return if at most 24 hours late, and otherwise fails without sending.
 - Its turn runs as the host under the same ceilings as any routine run, and a person widening the thread never widens the follow-up.
 - Chat threads cannot have a follow-up.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Usage limits and stalled turns
 

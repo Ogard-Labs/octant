@@ -24,6 +24,7 @@ import {
   automationThreadIdForOccurrence,
   AutomationDispatchService,
 } from "./automationDispatchService";
+import type { AutomationDispatchOffer } from "./automationDispatchPort";
 import { AutomationEventStore } from "./automationEventStore";
 import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
 import { automationRunIdForOccurrence, automationCodeOperationId } from "./automationRunIdentity";
@@ -1413,7 +1414,6 @@ describe("one-time follow-ups into their own thread", () => {
   it.each([
     ["archived", { ...idleThread, archived: true }, "thread-unavailable"],
     ["marked done", { ...idleThread, done: true }, "thread-done"],
-    ["running a turn", { ...idleThread, busy: true }, "thread-busy"],
     ["on another model", { ...idleThread, modelId: "other-model" }, "execution-profile-mismatch"],
   ] as const)(
     "never runs when its thread is %s, records why, and ends itself",
@@ -1428,6 +1428,188 @@ describe("one-time follow-ups into their own thread", () => {
       session.connection.close();
     },
   );
+
+  function followUpWorkPort(acceptedAt: () => string) {
+    const launch = vi.fn(async (_input: { readonly threadId: string }) => ({
+      kind: "accepted" as const,
+      runtimeReceipt: "work-turn:follow-up",
+      acceptedAt: acceptedAt() as UtcTimestamp,
+    }));
+    return {
+      launch,
+      work: {
+        available: true,
+        unavailableReason: undefined,
+        createThread: vi.fn(),
+        startOrRecoverFirstTurn: launch,
+      },
+    };
+  }
+
+  function waitingFollowUp() {
+    const session = openSession();
+    const definition = followUpDefinition();
+    let now = "2026-08-10T13:00:10.000Z";
+    let thread: AutomationFollowUpThreadFacts = { ...idleThread, busy: true };
+    const run = claim(session, definition, now);
+    const { launch, work } = followUpWorkPort(() => now);
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work,
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      readFollowUpThread: () => thread,
+      now: () => now as UtcTimestamp,
+    });
+    const pass = (): ReadonlyArray<AutomationDispatchOffer> => {
+      const offers: Array<AutomationDispatchOffer> = [];
+      new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: (offer) => offers.push(offer) },
+        now: () => now as UtcTimestamp,
+      }).runPass();
+      return offers;
+    };
+    return {
+      session,
+      definition,
+      run,
+      launch,
+      dispatcher,
+      pass,
+      setThread: (next: AutomationFollowUpThreadFacts) => {
+        thread = next;
+      },
+      setNow: (next: string) => {
+        now = next;
+      },
+    };
+  }
+
+  it("waits while its thread runs a turn, then sends its one turn when the thread is free", async () => {
+    const waiting = waitingFollowUp();
+    const { session, definition, run, launch, dispatcher } = waiting;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)).toMatchObject({ lifecycle: "dispatching" });
+    expect(session.projection.getRun(run.id)?.failure).toBeUndefined();
+    // The routine is not spent while its one turn is still owed.
+    waiting.pass();
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("enabled");
+
+    waiting.setThread(idleThread);
+    waiting.setNow("2026-08-10T13:20:00.000Z");
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({ threadId: ORIGIN });
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+
+    // A later offer of the same run, or a later pass, never sends it again.
+    await dispatcher.dispatchNow(definition.id, run.id);
+    for (const offer of waiting.pass()) {
+      await dispatcher.dispatchNow(offer.definition.id, offer.run.id);
+    }
+    expect(launch).toHaveBeenCalledTimes(1);
+    session.connection.close();
+  });
+
+  it("is offered again on every scheduler pass while it waits, without new journal rows", async () => {
+    const waiting = waitingFollowUp();
+    const { session, definition, run, dispatcher } = waiting;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    const version = session.projection.getRun(run.id)?.version;
+    waiting.setNow("2026-08-10T13:10:00.000Z");
+    expect(waiting.pass().map((offer) => offer.run.id)).toEqual([run.id]);
+    expect(waiting.pass().map((offer) => offer.run.id)).toEqual([run.id]);
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(session.projection.getRun(run.id)?.version).toBe(version);
+    session.connection.close();
+  });
+
+  it("never runs a waiting follow-up whose thread was archived meanwhile", async () => {
+    const waiting = waitingFollowUp();
+    const { session, definition, run, launch, dispatcher } = waiting;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    waiting.setThread({ ...idleThread, archived: true });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)).toMatchObject({
+      lifecycle: "failed",
+      failure: { reason: "thread-unavailable" },
+    });
+    waiting.pass();
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("exhausted");
+    session.connection.close();
+  });
+
+  it("never runs a waiting follow-up that was cancelled meanwhile", async () => {
+    const waiting = waitingFollowUp();
+    const { session, definition, run, launch, dispatcher } = waiting;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    const current = session.projection.getDefinition(definition.id);
+    if (current === undefined) throw new Error("expected the follow-up");
+    const commands = new AutomationCommandService({
+      store: session.store,
+      projection: session.projection,
+      hostId: "local",
+      clock: () => "2026-08-10T13:05:00.000Z",
+    });
+    const archived = commands.execute({
+      kind: "archive-automation",
+      automationId: definition.id,
+      expectedVersion: current.version,
+      principal: automationLocalWindowPrincipal(),
+      origin: { kind: "interactive" },
+    } as never);
+    expect(archived.kind).toBe("automation-archived");
+
+    waiting.setThread(idleThread);
+    for (const offer of waiting.pass()) {
+      await dispatcher.dispatchNow(offer.definition.id, offer.run.id);
+    }
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("cancelled");
+    session.connection.close();
+  });
+
+  it("still runs after a host restart that found it waiting", async () => {
+    const waiting = waitingFollowUp();
+    const { definition, run } = waiting;
+    await waiting.dispatcher.dispatchNow(definition.id, run.id);
+
+    // A restart rebuilds the projection from the journal and loses every
+    // in-process timer and offer; the journaled run is all that remains.
+    waiting.session.connection.close();
+    const reopened = openSession(waiting.session.databasePath);
+    const later = "2026-08-10T13:30:00.000Z";
+    const { launch, work } = followUpWorkPort(() => later);
+    const afterRestart = new AutomationDispatchService({
+      store: reopened.store,
+      projection: reopened.projection,
+      code: createCodePort().port,
+      work,
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      readFollowUpThread: () => idleThread,
+      now: () => later as UtcTimestamp,
+    });
+    const offers: Array<AutomationDispatchOffer> = [];
+    new AutomationSchedulerService({
+      store: reopened.store,
+      projection: reopened.projection,
+      dispatch: { offer: (offer) => offers.push(offer) },
+      now: () => later as UtcTimestamp,
+    }).runPass();
+    expect(offers.map((offer) => offer.run.id)).toEqual([run.id]);
+    for (const offer of offers) await afterRestart.dispatchNow(offer.definition.id, offer.run.id);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(reopened.projection.getRun(run.id)?.lifecycle).toBe("running");
+    reopened.connection.close();
+  });
 
   it("records a follow-up missed by more than a day instead of running it", async () => {
     const { session, definition, run, launch } = await fire({

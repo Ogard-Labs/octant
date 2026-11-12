@@ -3661,9 +3661,16 @@ the thread it came from.
   Complete; `full-access-ineligible` when the Code thread now has Full access;
   `execution-profile-mismatch` when its provider or model changed. A
   follow-up due while a turn is running or being started in the thread runs
-  after that turn instead of being skipped (maintainer request, 2026-11-12;
-  not built yet: today a busy thread refuses as `thread-busy` and the
-  follow-up is skipped, not waited on). A refusal fails the run with its
+  after that turn instead of being skipped (maintainer request, 2026-11-12).
+  Its claimed run waits journaled as `dispatching` with no dispatch intent,
+  so it survives a restart; the scheduler offers it again on every pass,
+  at most 15 seconds apart, and each offer repeats every check above before
+  anything is sent, so a thread archived or marked Done during the wait
+  still refuses. A follow-up archived while it waits ends its run
+  `cancelled`, a paused one keeps waiting, and one still waiting a day past
+  its time fails as `follow-up-missed`. The run's one first-turn request id
+  keeps the turn from being sent twice. (`thread-busy` is no longer
+  recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
