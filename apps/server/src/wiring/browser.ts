@@ -88,7 +88,10 @@ import {
   BrowserDelegatedChildren,
   currentManagedChildBrowserTarget,
 } from "../browser/browserDelegatedChildren";
-import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import {
+  browserSessionGrantJournal,
+  heldBrowserSessionGrants,
+} from "../browser/browserSessionGrantJournal";
 import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
 import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
@@ -486,6 +489,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       }),
+      held: heldBrowserSessionGrants(persistence.journal),
       onRevoked: (grantId) => {
         void delegatedChildren?.revoke(grantId);
         machineChangeFeed.publish(["tool-approvals"]);

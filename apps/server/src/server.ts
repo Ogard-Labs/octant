@@ -1993,6 +1993,10 @@ export function startOctantServer(
           // provider process behind, and it is background work: a provider that
           // refuses to start must not delay or fail startup.
           warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
+          // A grant is restored only for a caller that is eligible now, and a
+          // routine's eligibility reads what its provider was observed to
+          // support. Restoring before warming would lapse every grant.
+          void warmingProviders.then(() => browserSessionGrants.restore()).catch(() => undefined);
           // Startup auto-enable: a launch-time private listener config (the
           // test/smoke seam) or else the listener the host last enabled from
           // its local administration channel is enabled through the controller
