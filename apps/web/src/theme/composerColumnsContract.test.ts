@@ -61,7 +61,8 @@ describe("the composer's columns", () => {
     // column each take the one gutter token, which is 0 there: 20px each side
     // at 390, 430 and 680 as on the start screen, not 40.
     expect(rule(".composer.thread-composer")).toContain("min(100% - var(--oct-thread-gutter)");
-    expect(rule(".thread-column")).toContain("min(100% - var(--oct-thread-gutter)");
+    expect(styles).toMatch(/--oct-thread-column:\s*min\(100% - var\(--oct-thread-gutter\)/);
+    expect(rule(".thread-column")).toContain("var(--oct-thread-column)");
     expect(styles).toMatch(
       /@media \(max-width: 680px\) \{\s*:root \{\s*--oct-thread-gutter:\s*0px;/,
     );

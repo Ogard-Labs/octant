@@ -604,6 +604,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             <OctantContextMenuTrigger
               aria-expanded={menuOpen}
               className="workspace-pane__header"
+              data-header-kind={showTabs ? "tabs" : "title"}
               render={<div />}
             >
               <span

@@ -234,6 +234,8 @@
   /* A segment in a tray: the small control step. A tray is the segment plus
      its 2px of padding on each side, so every tray is 28px tall. */
   --oct-tray-segment-h: 24px;
+  /* The toast's dismiss button, and so its first line: the small control step. */
+  --oct-toast-control-h: 24px;
   /* The bottom edge of a rail head: the 4px step less the hairline, so a 30px
      field between 4px above and this below, centred in the rail's minimum
      height, keeps the head at the rail's height with its 1px border. */
@@ -1056,7 +1058,7 @@ h4 {
    the drift this exists to prevent. A surface positions the
    column (block margins, padding); it never redefines the measure. */
 .thread-column {
-  width: min(100% - var(--oct-thread-gutter), var(--oct-thread-measure));
+  width: var(--oct-thread-column);
   margin-inline: auto;
 }
 
@@ -1070,6 +1072,15 @@ h4 {
 
 .shell[data-transcript-width="wide"] {
   --oct-thread-measure: 1040px;
+}
+
+/* The thread's column: what a conversation surface lays its pieces in, and the
+   one width the title band reads its text edge from (styles.css). Declared on
+   the shell as well, so a measure the shell sets (Appearance › Transcript
+   width) is the one it resolves; the percentage is the container's, at the use. */
+:root,
+.shell {
+  --oct-thread-column: min(100% - var(--oct-thread-gutter), var(--oct-thread-measure));
 }
 
 /* The same 680px the pane's panel takes its own 20px at (styles.css). */
@@ -2334,11 +2345,13 @@ input.switch:checked::after {
    corner the content's last column and first line make. */
 .toast__dismiss {
   flex: none;
+  width: var(--oct-toast-control-h);
+  height: var(--oct-toast-control-h);
   margin: 0;
 }
 .toast .toast-title {
   display: flex;
-  min-height: var(--oct-tray-segment-h);
+  min-height: var(--oct-toast-control-h);
   align-items: center;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);

@@ -1465,15 +1465,22 @@ h6 {
   align-items: center;
   gap: 4px;
   margin-right: var(--octant-window-chrome-reserved-width, 148px);
-  /* The title's text starts on the edge of the thread's text column below,
-     so the eye reads one line down from the title to the transcript. The
-     column is centred at the thread measure with a 20px gutter at least,
-     which makes its edge the larger of the two; the grip's own 4px padding
-     and 1px border are taken off so the text, not the grip's fill, stands on
-     it. The percentage is the pane's width, as the column's is. */
-  --pane-title-edge: max(var(--oct-space-5), calc((100% - var(--oct-thread-measure, 680px)) / 2));
+  padding: 2px 0 2px 4px;
+}
+
+/* A header that shows a title (data-header-kind="title") starts its text on
+   the edge of the thread's text column below, so the eye reads one line down
+   from the title to the transcript. The edge is read from the column's own
+   width (`--oct-thread-column`, one property both rules use): half of what the
+   pane leaves beside it, never under the 20px the panel's gutter holds. The
+   grip's own 4px padding and 1px border are taken off so the text, not the
+   grip's fill, stands on it. The percentage is the pane's width, as the
+   column's is. A header that shows content tabs keeps its own insets: the
+   tabs lead it, and no title is there to line up. */
+.workspace-pane__header[data-header-kind="title"] {
+  --pane-title-edge: max(var(--oct-space-5), calc((100% - var(--oct-thread-column)) / 2));
   --pane-title-start: calc(var(--pane-title-edge) - var(--oct-space-1) - 1px);
-  padding: 2px 0 2px var(--pane-title-start);
+  padding-left: var(--pane-title-start);
 }
 
 /* Only the top-right pane shares its edge with window controls. Reserving
@@ -1508,6 +1515,10 @@ h6 {
    exists. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
+  padding-left: var(--oct-space-3);
+}
+html[data-octant-native-host="true"] .workspace-pane__header[data-header-kind="title"] {
+  padding-left: var(--pane-title-start);
 }
 
 /* Reader rails replace the pane rather than opening beside it. Their opaque
@@ -1535,24 +1546,42 @@ html[data-octant-native-host="true"]
    browser has no traffic-light reserve, but it still needs the Show sidebar
    and New thread cluster kept clear of the pane tab. */
 .shell--sidebar-collapsed .workspace-pane__header {
+  padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+.shell--sidebar-collapsed .workspace-pane__header[data-header-kind="title"] {
   padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
 }
 
 /* Native header padding must not cover the leading controls when navigation
    is collapsed. Only the top-left pane shares that part of the title bar. */
 html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+  padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+html[data-octant-native-host="true"]
+  .shell--sidebar-collapsed
+  .workspace-pane__header[data-header-kind="title"] {
   padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
   > :last-child
   .workspace-pane__header {
-  padding-left: var(--pane-title-start);
+  padding-left: var(--oct-space-3);
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="vertical"]
   > :last-child
   .workspace-pane__header {
+  padding-left: var(--oct-space-3);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="horizontal"]
+  > :last-child
+  .workspace-pane__header[data-header-kind="title"],
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="vertical"]
+  > :last-child
+  .workspace-pane__header[data-header-kind="title"] {
   padding-left: var(--pane-title-start);
 }
 

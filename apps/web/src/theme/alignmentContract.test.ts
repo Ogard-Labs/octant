@@ -175,6 +175,9 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".toast")).toMatch(/padding:\s*var\(--oct-space-3\)/);
     const dismiss = rule(octant, ".toast__dismiss");
     expect(dismiss).toMatch(/margin:\s*0;/);
+    expect(dismiss).toContain("var(--oct-toast-control-h)");
+    expect(rule(octant, ".toast .toast-title")).toContain("min-height: var(--oct-toast-control-h)");
+    expect(octant).toMatch(/--oct-toast-control-h:\s*24px;/);
     expect(dismiss).not.toMatch(/-\d+px/);
     expect(toast).toContain('size="icon-sm"');
     const action = rule(octant, ".toast .toast__action");
@@ -195,30 +198,54 @@ describe("the shell's edges and gaps", () => {
       expect(sheet).not.toMatch(/min\(100% - 40px, var\(--oct-(thread-measure|composer-width)\)\)/);
     }
     expect(rule(octant, ".composer.thread-composer")).toContain("100% - var(--oct-thread-gutter)");
-    expect(rule(octant, ".thread-column")).toContain("100% - var(--oct-thread-gutter)");
+    expect(rule(octant, ".thread-column")).toContain("var(--oct-thread-column)");
   });
 
   it("starts a thread's title text on the edge of the thread's column, with the mark and the request chip after it", () => {
-    const header = rule(root, ".workspace-pane__header");
+    const header = rule(root, '.workspace-pane__header[data-header-kind="title"]');
     expect(header).toMatch(
-      /--pane-title-edge:\s*max\(var\(--oct-space-5\), calc\(\(100% - var\(--oct-thread-measure, 680px\)\) \/ 2\)\);/,
+      /--pane-title-edge:\s*max\(var\(--oct-space-5\), calc\(\(100% - var\(--oct-thread-column\)\) \/ 2\)\);/,
     );
     expect(header).toMatch(
       /--pane-title-start:\s*calc\(var\(--pane-title-edge\) - var\(--oct-space-1\) - 1px\);/,
     );
-    expect(header).toMatch(/padding:\s*2px 0 2px var\(--pane-title-start\);/);
-    // No host or layout puts its own number where the column's edge goes.
-    expect(root).not.toMatch(
-      /html\[data-octant-native-host="true"\] \.workspace-pane__header \{[^}]*padding-left/,
+    expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
+    // A header with content tabs keeps the insets it had: the tabs lead it.
+    expect(rule(root, ".workspace-pane__header")).toMatch(/padding:\s*2px 0 2px 4px;/);
+    expect(splitWorkspace).toContain('data-header-kind={showTabs ? "tabs" : "title"}');
+    expect(root).toMatch(
+      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: max\(var\(--octant-window-chrome-leading-width, 148px\), var\(--pane-title-start\)\);/,
     );
     expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*padding-left: max\(var\(--octant-window-chrome-leading-width, 148px\), var\(--pane-title-start\)\);/,
+      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*padding-left: var\(--octant-window-chrome-leading-width, 148px\);/,
     );
     const title = splitWorkspace.indexOf('className="oct-nav-name workspace-pane__title"');
     const afterTitle = splitWorkspace.indexOf("{gripMark}", title);
     expect(title).toBeGreaterThan(0);
     expect(afterTitle).toBeGreaterThan(title);
     expect(splitWorkspace.indexOf("{pullRequestChip}", title)).toBeGreaterThan(afterTitle);
+  });
+
+  it("reads the column's edge from one property, so the title and the transcript cannot drift", () => {
+    expect(octant).toMatch(
+      /:root,\s*\.shell \{\s*--oct-thread-column:\s*min\(100% - var\(--oct-thread-gutter\), var\(--oct-thread-measure\)\);/,
+    );
+    // The column and every transcript piece take the property as their width...
+    expect(rule(octant, ".thread-column")).toContain("width: var(--oct-thread-column)");
+    expect(rule(chat, ".thread-connection-notice")).toContain("width: var(--oct-thread-column)");
+    expect(rule(shell, ".work-thread-workspace__transcript")).toContain(
+      "width: var(--oct-thread-column)",
+    );
+    expect(rule(shell, ".work-thread-workspace__transcript-trail")).toContain(
+      "width: var(--oct-thread-column)",
+    );
+    // ...and none re-derives it from the measure and the gutter.
+    for (const sheet of [chat, shell, ...everyStylesheet]) {
+      expect(sheet).not.toMatch(
+        /width:\s*min\(100% - var\(--oct-thread-gutter\), var\(--oct-thread-measure\)\)/,
+      );
+    }
+    expect(root).not.toMatch(/--oct-thread-measure/);
   });
 
   it("gives Settings one rhythm: a 32px gutter on the band, 24px between sections, 48px under the last", () => {
