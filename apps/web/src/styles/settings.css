@@ -3114,7 +3114,7 @@ html[data-octant-increased-contrast="true"]
      colours drop every shadow and would leave the card with no edge. */
   border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-xs);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 html[data-octant-increased-contrast="true"]

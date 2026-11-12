@@ -23,10 +23,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // A filled button is a raised tile: the control shadow puts light on
-        // its top edge and a short shadow under it, and pressing sinks it.
+        // its top edge and a short shadow under it, and pressing sinks it. The
+        // primary one is the accent as a gradient with a soft glow under it.
         // Ghost, link, bare and chip draw no tile, so they stay flat.
         default:
-          "bg-primary text-primary-foreground shadow-(--octant-shadow-control) hover:bg-primary/80 active:bg-primary/70 active:shadow-(--octant-shadow-control-pressed)",
+          "bg-primary bg-(image:--octant-accent-sheen) text-primary-foreground shadow-(--octant-shadow-primary) hover:bg-primary/90 active:bg-primary/80 active:shadow-(--octant-shadow-control-pressed)",
         // The primary text colour as a fill, with the page colour on it: the
         // one action a surface is for, where the accent would compete with
         // the content beside it (a composer's send, next to the prompt).
