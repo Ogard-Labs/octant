@@ -1,3 +1,4 @@
+import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -779,6 +780,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
+  // A Work turn keeps the turn id its sender chose, which is how a turn an
+  // outside agent sent is named for that agent.
+  const agentTurnSender = useAgentTurnSenders();
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -2382,8 +2386,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       </article>
                     );
                   }
+                  const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
                   return (
-                    <article aria-label="Your message" className="turn-user">
+                    <article
+                      aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}
+                      className="turn-user"
+                    >
                       <TurnActionMenu
                         actions={turnActionsFor("user", row.turn).actions}
                         onAction={(value) => onTurnAction(value, "user", row.turn)}
@@ -2394,6 +2402,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={row.entry.text} />
                         )}
+                        <AgentTurnSender agentName={sentBy} />
                       </TurnActionMenu>
                     </article>
                   );

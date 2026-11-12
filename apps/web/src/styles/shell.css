@@ -4656,6 +4656,13 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   overflow: auto;
 }
 
+/* The composer adapter paints the app ground for a full pane; inside the
+   dialog that drew a square slab over the popup, clipping the composer's
+   corners and stopping short of the note under it. */
+.code-project-planner__review .code-composer-adapter {
+  background: transparent;
+}
+
 /* The review reuses the start screen's composer, but it is a decision inside a
    dialog: the composer fills the dialog's measure, and the decision heading
    sits at its top edge, aligned with the text under it, instead of floating

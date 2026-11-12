@@ -9282,6 +9282,7 @@ describe("ChatService", () => {
         threadId: created.thread.id,
         expectedVersion: service.read(created.thread.id).thread.version,
         prompt: "Carried question",
+        submissionId: "eeeeeeee-0000-4000-8000-000000000001",
       });
       if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
       await service.execute({
@@ -9323,6 +9324,8 @@ describe("ChatService", () => {
           String(content.contentId) === String(branch.turns[0]!.userMessageRef.contentId),
       );
       expect(carriedUser?.body).toBe("Carried question");
+      // The copy keeps the submission it came from, so who sent it stays readable.
+      expect(branch.turns[0]!.submissionId).toBe("eeeeeeee-0000-4000-8000-000000000001");
       expect(String(branch.turns[0]!.userMessageRef.contentId)).not.toBe(
         String(source.turns[0]!.userMessageRef.contentId),
       );

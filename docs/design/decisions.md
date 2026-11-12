@@ -2045,7 +2045,7 @@ An agent on another machine on the person's own network starts and follows work 
 - A grant names its Projects, modes, highest access level (never Full access), tools, models, spend limits and expiry, inside every paired-device clamp; it is created or widened only from a local window or the loopback CLI, and a paired device may view and revoke it.
 - The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
-- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent.
+- It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
 - Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 

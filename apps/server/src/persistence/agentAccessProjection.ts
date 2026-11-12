@@ -7,10 +7,13 @@ import {
   AgentKeyEnrolledV1,
   AgentKeyRemovedV1,
   AgentThreadStartedV1,
+  AgentTurnSentV1,
+  MAX_AGENT_TURN_ATTRIBUTIONS,
   decodeAgentGrant,
   type AgentGrant,
   type AgentGrantMode,
   type AgentThreadAttribution,
+  type AgentTurnAttribution,
   type EventEnvelope,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -24,6 +27,7 @@ const decodeRemoved = Schema.decodeUnknownSync(AgentKeyRemovedV1);
 const decodeRotated = Schema.decodeUnknownSync(AgentDirectKeyRotatedV1);
 const decodeRevoked = Schema.decodeUnknownSync(AgentGrantRevokedV1);
 const decodeThreadStarted = Schema.decodeUnknownSync(AgentThreadStartedV1);
+const decodeTurnSent = Schema.decodeUnknownSync(AgentTurnSentV1);
 
 /**
  * Agent grants as the journal records them, one whole row per grant, and the
@@ -37,7 +41,8 @@ export class AgentAccessProjection implements Projection {
 
   reset(connection: SqliteConnection): void {
     connection.exec(
-      `DELETE FROM agent_access_grant_projection; DELETE FROM agent_access_thread_projection;`,
+      `DELETE FROM agent_access_grant_projection; DELETE FROM agent_access_thread_projection;
+       DELETE FROM agent_access_turn_projection;`,
     );
   }
 
@@ -57,6 +62,27 @@ export class AgentAccessProjection implements Projection {
         createdAt: created.createdAt,
         expiresAt: created.expiresAt,
       });
+      return;
+    }
+    if (name === AGENT_ACCESS_EVENT_NAMES.turnSent) {
+      const sent = decodeTurnSent(event.payload);
+      connection
+        .prepare(
+          // The first record of a turn stands: a later one for the same turn
+          // cannot rename who sent it.
+          `INSERT OR IGNORE INTO agent_access_turn_projection
+             (thread_id, turn_key, grant_id, mode, sent_at, last_sequence)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          sent.threadId,
+          sent.turnKey,
+          String(sent.grantId),
+          sent.mode,
+          sent.sentAt,
+          event.globalSequence,
+        );
+      bumpVersion(connection, event, String(sent.grantId));
       return;
     }
     if (name === AGENT_ACCESS_EVENT_NAMES.threadStarted) {
@@ -276,4 +302,31 @@ export function readAgentThreadName(
 ): string | undefined {
   const thread = readAgentThread(connection, threadId);
   return thread === undefined ? undefined : readAgentGrant(connection, thread.grantId)?.name;
+}
+
+/**
+ * The newest turns outside agents sent, each named by its grant as the grant
+ * reads now, at most as many as one attribution read carries.
+ */
+export function readAgentTurnAttributions(
+  connection: SqliteConnection,
+): ReadonlyArray<AgentTurnAttribution> {
+  const rows = connection
+    .prepare(
+      `SELECT t.thread_id, t.turn_key, g.grant_json
+       FROM agent_access_turn_projection t
+       JOIN agent_access_grant_projection g ON g.grant_id = t.grant_id
+       ORDER BY t.last_sequence DESC
+       LIMIT ?`,
+    )
+    .all(MAX_AGENT_TURN_ATTRIBUTIONS) as ReadonlyArray<{
+    readonly thread_id: string;
+    readonly turn_key: string;
+    readonly grant_json: string;
+  }>;
+  return rows.map((row) => ({
+    threadId: row.thread_id,
+    turnKey: row.turn_key,
+    agentName: decodeAgentGrant(JSON.parse(row.grant_json)).name,
+  }));
 }
