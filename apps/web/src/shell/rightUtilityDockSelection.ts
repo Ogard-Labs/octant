@@ -18,10 +18,51 @@ export interface ThreadUtilityDockTab {
   readonly browserContextId?: string;
 }
 
+/**
+ * One shown tool. `share` is its fraction of the column it stands in; the
+ * shares of a column's tiles add up to one.
+ */
+export interface DockTile {
+  readonly tabId: string;
+  readonly share: number;
+}
+
+/** Tiles stacked top to bottom. `share` is the column's fraction of the width. */
+export interface DockTileColumn {
+  readonly share: number;
+  readonly tiles: ReadonlyArray<DockTile>;
+}
+
+/**
+ * Which open tools the dock shows together, left column first. A layout exists
+ * only while it holds two or more tiles: one tile is the dock's ordinary
+ * single-tool view, and storing it would make two spellings of the same state.
+ */
+export interface DockTileLayout {
+  readonly columns: ReadonlyArray<DockTileColumn>;
+}
+
 export interface ThreadUtilityDockState {
   readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
+  /** With a layout, always the tab of the focused tile. */
   readonly active?: string;
+  readonly layout?: DockTileLayout;
+  /**
+   * The Browser page that was last shown. The Browser is one tool with pages,
+   * so showing "the Browser" again (from its strip entry, a menu or a drag)
+   * returns to this page rather than to whichever page is first.
+   */
+  readonly lastBrowser?: string;
 }
+
+/**
+ * Past two columns each tile gets too little width for a tool that needs a
+ * page or a shell, and past three tiles a column gets too little height.
+ */
+export const MAX_DOCK_TILE_COLUMNS = 2;
+export const MAX_DOCK_TILES_PER_COLUMN = 3;
+/** The smallest fraction a column or a tile may keep when its divider is moved. */
+export const MIN_DOCK_TILE_SHARE = 0.15;
 
 export type ThreadUtilityDockStates = ReadonlyMap<ThreadUtilityDockKey, ThreadUtilityDockState>;
 
@@ -104,9 +145,9 @@ export function openUtilityTabState(
   // session announced for the thread must land on the shared Browser tab,
   // not on a dedicated context a link open created.
   const existing = state.tabs.find((tab) => tab.id === surface);
-  if (existing !== undefined) return { ...state, active: existing.id };
+  if (existing !== undefined) return focusTab(state, existing.id);
   const tab = singletonUtilityTab(surface);
-  return { tabs: [...state.tabs, tab], active: tab.id };
+  return focusTab({ ...state, tabs: [...state.tabs, tab] }, tab.id);
 }
 
 export function addUtilityTabState(
@@ -123,17 +164,17 @@ export function addUtilityTabState(
     surface,
     ...(surface === "browser" && browserContextId !== undefined ? { browserContextId } : {}),
   };
-  return {
-    tabs: [...state.tabs.filter((candidate) => candidate.id !== instanceId), tab],
-    active: tab.id,
-  };
+  return focusTab(
+    { ...state, tabs: [...state.tabs.filter((candidate) => candidate.id !== instanceId), tab] },
+    tab.id,
+  );
 }
 
 export function selectUtilityTabState(
   state: ThreadUtilityDockState,
   tabId: string,
 ): ThreadUtilityDockState {
-  return state.tabs.some((tab) => tab.id === tabId) ? { ...state, active: tabId } : state;
+  return focusTab(state, tabId);
 }
 
 export function closeUtilityTabState(
@@ -143,9 +184,12 @@ export function closeUtilityTabState(
   const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
   if (closedIndex < 0) return state;
   const tabs = state.tabs.filter((candidate) => candidate.id !== tabId);
+  if (state.layout !== undefined) {
+    return settle(tabs, state.layout, state.active, neighbourTile(state, tabId), state.lastBrowser);
+  }
   const active =
     state.active === tabId ? tabs[Math.min(closedIndex, tabs.length - 1)]?.id : state.active;
-  return { tabs, ...(active === undefined ? {} : { active }) };
+  return settle(tabs, undefined, active, undefined, state.lastBrowser);
 }
 
 /**
@@ -159,11 +203,7 @@ export function removeUtilityTabs(
 ): ThreadUtilityDockState {
   const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
-  const active =
-    state.active !== undefined && tabs.some((tab) => tab.id === state.active)
-      ? state.active
-      : tabs.at(-1)?.id;
-  return { tabs, ...(active === undefined ? {} : { active }) };
+  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
 }
 
 export function retainAvailableUtilityTabs(
@@ -174,11 +214,244 @@ export function retainAvailableUtilityTabs(
   if (tabs.length === state.tabs.length) {
     if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
-  const active =
-    state.active !== undefined && tabs.some((tab) => tab.id === state.active)
-      ? state.active
-      : tabs[tabs.length - 1]?.id;
-  return { tabs, ...(active === undefined ? {} : { active }) };
+  return settle(tabs, state.layout, state.active, undefined, state.lastBrowser);
+}
+
+/** The tabs the dock body shows, in layout order, or just the active tab. */
+export function shownUtilityTabIds(state: ThreadUtilityDockState): ReadonlyArray<string> {
+  if (state.layout !== undefined) return layoutTabIds(state.layout);
+  return state.active === undefined || !state.tabs.some((tab) => tab.id === state.active)
+    ? []
+    : [state.active];
+}
+
+/**
+ * Shows an open tab in its own tile to the right of the focused one and
+ * focuses it. Two columns are the most there are, so with both present the tab
+ * goes below in the last column instead; a full column refuses it.
+ */
+export function showUtilityTabBeside(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  return place(state, tabId, "beside");
+}
+
+/** Shows an open tab in its own tile under the focused one and focuses it. */
+export function showUtilityTabBelow(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  return place(state, tabId, "below");
+}
+
+/** Shows one tool again, leaving every other tool open in the strip. */
+export function showUtilityTabAlone(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  if (!state.tabs.some((tab) => tab.id === tabId)) return state;
+  if (state.layout === undefined && state.active === tabId) return state;
+  return settle(state.tabs, undefined, tabId, undefined, state.lastBrowser);
+}
+
+/**
+ * Takes a tile out of view without closing its tool: the tab stays in the
+ * strip, so the tool can be shown again and keeps its place.
+ */
+export function hideUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined || !layoutTabIds(layout).includes(tabId)) return state;
+  return settle(
+    state.tabs,
+    withoutTile(layout, tabId),
+    state.active === tabId ? neighbourTile(state, tabId) : state.active,
+    undefined,
+    state.lastBrowser,
+  );
+}
+
+export type DockTileMove = "left" | "right" | "up" | "down";
+
+/**
+ * Moves a shown tile one step. Up and down swap it with its neighbour in the
+ * column; left and right take it to the other column, at the same row or the
+ * end of that column. A one-column layout sideways makes the second column,
+ * and a column left empty goes, so the layout can collapse to one column. A
+ * move the caps (two columns of three tiles) or the edges refuse returns the
+ * same state. The tool stays mounted: only its tile's place changes.
+ */
+export function moveUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  direction: DockTileMove,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined) return state;
+  const columnIndex = layout.columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === tabId),
+  );
+  const column = layout.columns[columnIndex];
+  if (column === undefined) return state;
+  const row = column.tiles.findIndex((tile) => tile.tabId === tabId);
+  const tile = column.tiles[row];
+  if (tile === undefined) return state;
+  const rebuilt = (columns: ReadonlyArray<DockTileColumn>) =>
+    settle(state.tabs, { columns }, state.active, undefined, state.lastBrowser);
+
+  if (direction === "up" || direction === "down") {
+    const other = row + (direction === "up" ? -1 : 1);
+    const neighbour = column.tiles[other];
+    if (neighbour === undefined) return state;
+    const tiles = column.tiles.map((candidate, index) =>
+      index === row ? neighbour : index === other ? tile : candidate,
+    );
+    return rebuilt(
+      layout.columns.map((candidate, index) =>
+        index === columnIndex ? { ...candidate, tiles } : candidate,
+      ),
+    );
+  }
+
+  const targetIndex = columnIndex + (direction === "left" ? -1 : 1);
+  const target = layout.columns[targetIndex];
+  if (target === undefined) {
+    // Past the last column: a new one, only from a column with something left.
+    if (layout.columns.length >= MAX_DOCK_TILE_COLUMNS || column.tiles.length < 2) return state;
+    const rest = column.tiles.filter((candidate) => candidate.tabId !== tabId);
+    // An even split, as `place()` makes: the new column takes 1/(n+1) and the
+    // kept ones are scaled by n/(n+1), so their ratio is unchanged.
+    const count = layout.columns.length;
+    const alone: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+    const kept: DockTileColumn = {
+      ...column,
+      tiles: rest,
+      share: (column.share * count) / (count + 1),
+    };
+    return rebuilt(direction === "left" ? [alone, kept] : [kept, alone]);
+  }
+  if (target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;
+  const at = Math.min(row, target.tiles.length);
+  const count = target.tiles.length;
+  const scaled = target.tiles.map((candidate) => ({
+    ...candidate,
+    share: (candidate.share * count) / (count + 1),
+  }));
+  const joined = [...scaled.slice(0, at), { tabId, share: 1 / (count + 1) }, ...scaled.slice(at)];
+  const columns = layout.columns.flatMap((candidate, index) => {
+    if (index === targetIndex) return [{ ...candidate, tiles: joined }];
+    if (index !== columnIndex) return [candidate];
+    const tiles = candidate.tiles.filter((entry) => entry.tabId !== tabId);
+    return tiles.length === 0 ? [] : [{ ...candidate, tiles }];
+  });
+  return rebuilt(columns);
+}
+
+/** Sets the columns' fractions of the width, in column order. */
+export function resizeUtilityTileColumns(
+  state: ThreadUtilityDockState,
+  shares: ReadonlyArray<number>,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined || shares.length !== layout.columns.length) return state;
+  const next = clampShares(shares);
+  if (next === undefined) return state;
+  return {
+    ...state,
+    layout: {
+      columns: layout.columns.map((column, index) => ({ ...column, share: at(next, index) })),
+    },
+  };
+}
+
+/** Sets the fractions of one column's height its tiles take, top to bottom. */
+export function resizeUtilityTileColumn(
+  state: ThreadUtilityDockState,
+  columnIndex: number,
+  shares: ReadonlyArray<number>,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  const column = layout?.columns[columnIndex];
+  if (layout === undefined || column === undefined || shares.length !== column.tiles.length) {
+    return state;
+  }
+  const next = clampShares(shares);
+  if (next === undefined) return state;
+  return {
+    ...state,
+    layout: {
+      columns: layout.columns.map((candidate, index) =>
+        index === columnIndex
+          ? {
+              ...candidate,
+              tiles: candidate.tiles.map((tile, tileIndex) => ({
+                ...tile,
+                share: at(next, tileIndex),
+              })),
+            }
+          : candidate,
+      ),
+    },
+  };
+}
+
+/**
+ * Opens a tool and shows it beside the focused tile in one step, so the tool
+ * never takes the focused tile's place first. A repeatable tool always gets a
+ * new tab; a singleton reuses its tab if one is open.
+ */
+export function openUtilityTabBesideState(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+  instanceId: string,
+): ThreadUtilityDockState {
+  const repeatable = surface === "browser" || surface === "terminal";
+  const existing = repeatable ? undefined : state.tabs.find((tab) => tab.id === surface);
+  const tab: ThreadUtilityDockTab =
+    existing ?? (repeatable ? { id: instanceId, surface } : singletonUtilityTab(surface));
+  const tabs = existing === undefined ? [...state.tabs, tab] : state.tabs;
+  // A cap refusing the tile leaves the tool open in the strip, not shown.
+  return place({ ...state, tabs }, tab.id, "beside");
+}
+
+/** Columns of tiles a state shows: one for the single-tool view. */
+export function shownTileColumns(state: ThreadUtilityDockState): number {
+  return state.layout?.columns.length ?? 1;
+}
+
+/**
+ * Applies a tile change to the layout the person can see and keeps the stored
+ * tabs. A tool the bottom panel holds is dropped from the displayed dock, and
+ * a divider or a cap that counted its hidden tile would disagree with what is
+ * drawn: shares would no longer match the tiles, and a hidden tile would use a
+ * slot.
+ */
+export function changeDisplayedUtilityState(
+  stored: ThreadUtilityDockState,
+  displayed: ThreadUtilityDockState,
+  change: (state: ThreadUtilityDockState) => ThreadUtilityDockState,
+): ThreadUtilityDockState {
+  const next = change(displayed);
+  if (next === displayed) return stored;
+  const kept = new Set(next.tabs.map((tab) => tab.id));
+  const gone = new Set(displayed.tabs.filter((tab) => !kept.has(tab.id)).map((tab) => tab.id));
+  const known = new Set(stored.tabs.map((tab) => tab.id));
+  return {
+    ...next,
+    tabs: [
+      ...stored.tabs.filter((tab) => !gone.has(tab.id)),
+      ...next.tabs.filter((tab) => !known.has(tab.id)),
+    ],
+  };
+}
+
+/** The bottom panel shows one tool at a time, so a layout never belongs to it. */
+export function withoutTileLayout(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  if (state.layout === undefined) return state;
+  return { tabs: state.tabs, ...(state.active === undefined ? {} : { active: state.active }) };
 }
 
 export function updateUtilityTabBrowserContext(
@@ -199,6 +472,244 @@ export function updateUtilityTabBrowserContext(
     return { ...tab, browserContextId };
   });
   return changed ? { ...state, tabs } : state;
+}
+
+function layoutTabIds(layout: DockTileLayout): ReadonlyArray<string> {
+  return layout.columns.flatMap((column) => column.tiles.map((tile) => tile.tabId));
+}
+
+function at(values: ReadonlyArray<number>, index: number): number {
+  return values[index] ?? 0;
+}
+
+/**
+ * The tile that takes focus when `tabId`'s tile leaves: the one that now stands
+ * in its place in layout order, or the last one if it was last.
+ */
+function neighbourTile(state: ThreadUtilityDockState, tabId: string): string | undefined {
+  const order = state.layout === undefined ? [] : layoutTabIds(state.layout);
+  const index = order.indexOf(tabId);
+  const rest = order.filter((candidate) => candidate !== tabId);
+  return rest[Math.min(Math.max(index, 0), rest.length - 1)];
+}
+
+/**
+ * Focuses an open tab. Beside a layout, a tab that is shown takes focus where
+ * it stands; a Browser page goes into the Browser tile, since every page is
+ * one Browser tool and a second Browser tile would show the same tool twice;
+ * any other hidden tab replaces the focused tile's tool.
+ */
+function focusTab(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  return withLastBrowser(focusTabUnrecorded(state, tabId));
+}
+
+function focusTabUnrecorded(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return state;
+  const layout = state.layout;
+  if (layout === undefined) {
+    return state.active === tabId ? state : { ...state, active: tabId };
+  }
+  const shown = layoutTabIds(layout);
+  if (shown.includes(tabId)) return state.active === tabId ? state : { ...state, active: tabId };
+  const replaced = tab.surface === "browser" ? browserTileTabId(state) : undefined;
+  return { ...state, active: tabId, layout: replaceTile(layout, replaced ?? state.active, tabId) };
+}
+
+function browserTileTabId(state: ThreadUtilityDockState): string | undefined {
+  if (state.layout === undefined) return undefined;
+  return layoutTabIds(state.layout).find(
+    (id) => state.tabs.find((tab) => tab.id === id)?.surface === "browser",
+  );
+}
+
+function replaceTile(
+  layout: DockTileLayout,
+  replaced: string | undefined,
+  tabId: string,
+): DockTileLayout {
+  return {
+    columns: layout.columns.map((column) => ({
+      ...column,
+      tiles: column.tiles.map((tile) => (tile.tabId === replaced ? { ...tile, tabId } : tile)),
+    })),
+  };
+}
+
+function withoutTile(layout: DockTileLayout, tabId: string): DockTileLayout {
+  return {
+    columns: layout.columns.map((column) => ({
+      ...column,
+      tiles: column.tiles.filter((tile) => tile.tabId !== tabId),
+    })),
+  };
+}
+
+/**
+ * Brings a layout back to its invariants after tabs or tiles left: tiles of
+ * tabs that are gone are dropped, emptied columns go, shares are rescaled to
+ * add up, fewer than two tiles is no layout, and the active tab is a shown one.
+ */
+function settle(
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  layout: DockTileLayout | undefined,
+  active: string | undefined,
+  preferred?: string,
+  lastBrowser?: string,
+): ThreadUtilityDockState {
+  return withLastBrowser({
+    ...settleUnrecorded(tabs, layout, active, preferred),
+    ...(lastBrowser === undefined ? {} : { lastBrowser }),
+  });
+}
+
+/**
+ * Records the Browser page now on screen as the one to return to, and forgets
+ * a remembered page that is no longer an open Browser page.
+ */
+function withLastBrowser(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const isBrowser = (id: string | undefined) =>
+    id !== undefined && state.tabs.some((tab) => tab.id === id && tab.surface === "browser");
+  const shown = shownUtilityTabIds(state).find(isBrowser);
+  const next = shown ?? (isBrowser(state.lastBrowser) ? state.lastBrowser : undefined);
+  if (next === state.lastBrowser) return state;
+  const { lastBrowser: _dropped, ...rest } = state;
+  return next === undefined ? rest : { ...rest, lastBrowser: next };
+}
+
+function settleUnrecorded(
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+  layout: DockTileLayout | undefined,
+  active: string | undefined,
+  preferred?: string,
+): ThreadUtilityDockState {
+  const open = new Set(tabs.map((tab) => tab.id));
+  const columns = (layout?.columns ?? []).flatMap((column) => {
+    const tiles = column.tiles.filter((tile) => open.has(tile.tabId));
+    return tiles.length === 0 ? [] : [{ ...column, tiles: rescaleTiles(tiles) }];
+  });
+  const shown = columns.flatMap((column) => column.tiles.map((tile) => tile.tabId));
+  const candidates = [active, preferred];
+  const focused =
+    shown.length > 0
+      ? (candidates.find((id) => id !== undefined && shown.includes(id)) ?? shown[0])
+      : (candidates.find((id) => id !== undefined && open.has(id)) ?? tabs.at(-1)?.id);
+  const next: ThreadUtilityDockState = focused === undefined ? { tabs } : { tabs, active: focused };
+  return shown.length < 2 ? next : { ...next, layout: { columns: rescaleColumns(columns) } };
+}
+
+function rescaleTiles(tiles: ReadonlyArray<DockTile>): ReadonlyArray<DockTile> {
+  const total = tiles.reduce((sum, tile) => sum + tile.share, 0);
+  return tiles.map((tile) => ({ ...tile, share: tile.share / total }));
+}
+
+function rescaleColumns(columns: ReadonlyArray<DockTileColumn>): ReadonlyArray<DockTileColumn> {
+  const total = columns.reduce((sum, column) => sum + column.share, 0);
+  return columns.map((column) => ({ ...column, share: column.share / total }));
+}
+
+/**
+ * Adds a tab as a tile next to or under the focused one. A tab already shown is
+ * moved, so the capacity it frees counts. A request the caps cannot take
+ * returns the state unchanged.
+ */
+function place(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  direction: "beside" | "below",
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined) return state;
+  if (state.active === undefined) return { ...state, active: tabId };
+  if (state.active === tabId) return state;
+  // The Browser rule is read from what is on screen, which is the active tab
+  // alone while no layout exists: two Browser tiles would show one tool twice.
+  const browserShown =
+    state.layout === undefined
+      ? state.tabs.find((candidate) => candidate.id === state.active)?.surface === "browser"
+      : browserTileTabId(state) !== undefined;
+  if (tab.surface === "browser" && browserShown) return focusTab(state, tabId);
+  const base: DockTileLayout = state.layout ?? {
+    columns: [{ share: 1, tiles: [{ tabId: state.active, share: 1 }] }],
+  };
+  const columns = withoutTile(base, tabId).columns.filter((column) => column.tiles.length > 0);
+  const focusedColumn = columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === state.active),
+  );
+  const focusedColumnTiles = columns[focusedColumn]?.tiles ?? [];
+  const focusedRow = focusedColumnTiles.findIndex((tile) => tile.tabId === state.active);
+  if (focusedColumn < 0) return state;
+
+  const toNewColumn = direction === "beside" && columns.length < MAX_DOCK_TILE_COLUMNS;
+  if (toNewColumn) {
+    const added: DockTileColumn = { share: 1 / (columns.length + 1), tiles: [{ tabId, share: 1 }] };
+    const scaled = columns.map((column) => ({
+      ...column,
+      share: (column.share * columns.length) / (columns.length + 1),
+    }));
+    return settle(
+      state.tabs,
+      {
+        columns: [...scaled.slice(0, focusedColumn + 1), added, ...scaled.slice(focusedColumn + 1)],
+      },
+      tabId,
+      undefined,
+      state.lastBrowser,
+    );
+  }
+  // "Beside" with both columns present falls back to below in the last column.
+  const targetColumn = direction === "beside" ? columns.length - 1 : focusedColumn;
+  const target = columns[targetColumn];
+  if (target === undefined || target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;
+  const row = targetColumn === focusedColumn ? focusedRow + 1 : target.tiles.length;
+  const count = target.tiles.length;
+  const scaled = target.tiles.map((tile) => ({
+    ...tile,
+    share: (tile.share * count) / (count + 1),
+  }));
+  const tiles = [...scaled.slice(0, row), { tabId, share: 1 / (count + 1) }, ...scaled.slice(row)];
+  return settle(
+    state.tabs,
+    {
+      columns: columns.map((column, index) =>
+        index === targetColumn ? { ...column, tiles } : column,
+      ),
+    },
+    tabId,
+    undefined,
+    state.lastBrowser,
+  );
+}
+
+/**
+ * Normalises fractions to add up to one with none under the floor. Returns
+ * nothing when a value is not a positive finite number.
+ */
+function clampShares(shares: ReadonlyArray<number>): ReadonlyArray<number> | undefined {
+  if (shares.some((share) => !Number.isFinite(share) || share <= 0)) return undefined;
+  const count = shares.length;
+  if (count === 0) return undefined;
+  if (MIN_DOCK_TILE_SHARE * count >= 1) return shares.map(() => 1 / count);
+  const total = shares.reduce((sum, share) => sum + share, 0);
+  const result = shares.map((share) => share / total);
+  const floored = new Set<number>();
+  // Pinning one share to the floor shrinks what the rest may take, which can
+  // push another under it, so the pass repeats until none moves.
+  for (let pass = 0; pass <= count; pass += 1) {
+    const free = result.flatMap((share, index) => (floored.has(index) ? [] : [index]));
+    const freeTotal = free.reduce((sum, index) => sum + at(result, index), 0);
+    const room = 1 - MIN_DOCK_TILE_SHARE * floored.size;
+    const under = free.filter(
+      (index) => (at(result, index) / freeTotal) * room < MIN_DOCK_TILE_SHARE,
+    );
+    if (under.length === 0) {
+      for (const index of free) result[index] = (at(result, index) / freeTotal) * room;
+      break;
+    }
+    for (const index of under) floored.add(index);
+    for (const index of floored) result[index] = MIN_DOCK_TILE_SHARE;
+  }
+  return result;
 }
 
 function singletonUtilityTab(surface: RightUtilityDockSurfaceId): ThreadUtilityDockTab {
@@ -274,7 +785,7 @@ export function writeUtilityDockPresentation(
 ): void {
   writeJson(scope, utilityDockStorageKey(windowId), {
     open: presentation.open === true,
-    threads: encodeDockStates(presentation.threads),
+    threads: encodeDockStates(presentation.threads, true),
   });
 }
 
@@ -282,7 +793,13 @@ export function readBottomPanelToolPresentation(
   scope: { readonly localStorage?: Storage },
   windowId: string,
 ): ThreadUtilityDockStates {
-  return readDockPresentationRecord(scope, bottomPanelToolsStorageKey(windowId), false).threads;
+  return readDockPresentationRecord(
+    scope,
+    bottomPanelToolsStorageKey(windowId),
+    false,
+    false,
+    false,
+  ).threads;
 }
 
 export function writeBottomPanelToolPresentation(
@@ -291,7 +808,7 @@ export function writeBottomPanelToolPresentation(
   threads: ThreadUtilityDockStates,
 ): void {
   writeJson(scope, bottomPanelToolsStorageKey(windowId), {
-    threads: encodeDockStates(threads),
+    threads: encodeDockStates(threads, false),
   });
 }
 
@@ -300,6 +817,7 @@ function readDockPresentationRecord(
   storageKey: string,
   readOpen: boolean,
   defaultOpen = false,
+  tiled = true,
 ): UtilityDockPresentation {
   // A window that has never been told otherwise follows the caller's default.
   // The dock and bottom panel both start closed; a tool selection or an
@@ -318,7 +836,7 @@ function readDockPresentationRecord(
     const candidate = parsed;
     return {
       open: readOpen && (typeof candidate.open === "boolean" ? candidate.open : defaultOpen),
-      threads: decodeDockStates(candidate.threads),
+      threads: decodeDockStates(candidate.threads, tiled),
     };
   } catch {
     return unset;
@@ -337,39 +855,43 @@ function writeJson(
   }
 }
 
+interface StoredDockState {
+  readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
+  readonly active?: string;
+  readonly layout?: DockTileLayout;
+  readonly lastBrowser?: string;
+}
+
 function encodeDockStates(
   states: ThreadUtilityDockStates,
-): Record<
-  string,
-  { readonly tabs: ReadonlyArray<ThreadUtilityDockTab>; readonly active?: string }
-> {
-  const encoded: Record<
-    string,
-    { readonly tabs: ReadonlyArray<ThreadUtilityDockTab>; readonly active?: string }
-  > = {};
+  tiled: boolean,
+): Record<string, StoredDockState> {
+  const encoded: Record<string, StoredDockState> = {};
   for (const [key, state] of states) {
     if (state.tabs.length === 0) continue;
     encoded[key] = {
       tabs: [...state.tabs],
       ...(state.active === undefined ? {} : { active: state.active }),
+      ...(tiled && state.layout !== undefined ? { layout: state.layout } : {}),
+      ...(tiled && state.lastBrowser !== undefined ? { lastBrowser: state.lastBrowser } : {}),
     };
   }
   return encoded;
 }
 
-function decodeDockStates(value: unknown): ThreadUtilityDockStates {
+function decodeDockStates(value: unknown, tiled: boolean): ThreadUtilityDockStates {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return new Map();
   const next = new Map<ThreadUtilityDockKey, ThreadUtilityDockState>();
   for (const [key, state] of Object.entries(value)) {
     if (!isThreadUtilityDockKey(key)) continue;
-    const decoded = decodeDockState(state);
+    const decoded = decodeDockState(state, tiled);
     if (decoded === undefined) continue;
     next.set(key, decoded);
   }
   return next;
 }
 
-function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
+function decodeDockState(value: unknown, tiled: boolean): ThreadUtilityDockState | undefined {
   if (!isRecord(value)) return undefined;
   const candidate = value;
   if (!Array.isArray(candidate.tabs)) return undefined;
@@ -385,7 +907,72 @@ function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
     activeCandidate !== undefined && tabs.some((tab) => tab.id === activeCandidate)
       ? activeCandidate
       : fallback;
-  return { tabs, active };
+  const layout = tiled ? decodeDockLayout(candidate.layout, tabs) : undefined;
+  const remembered =
+    tiled &&
+    typeof candidate.lastBrowser === "string" &&
+    tabs.some((tab) => tab.id === candidate.lastBrowser && tab.surface === "browser")
+      ? { lastBrowser: candidate.lastBrowser }
+      : {};
+  if (layout === undefined) return { tabs, active, ...remembered };
+  const shown = layoutTabIds(layout);
+  return {
+    tabs,
+    active: shown.includes(active) ? active : (shown[0] ?? active),
+    layout,
+    ...remembered,
+  };
+}
+
+/**
+ * A stored layout is read as untrusted: a record from an older build, another
+ * window or a hand edit must still open to a dock that obeys the caps and shows
+ * only open tools, so anything else is dropped rather than repaired in place.
+ */
+function decodeDockLayout(
+  value: unknown,
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+): DockTileLayout | undefined {
+  if (!isRecord(value) || !Array.isArray(value.columns)) return undefined;
+  const taken = new Set<string>();
+  let browserShown = false;
+  const columns: { share: unknown; tiles: ReadonlyArray<DockTile> }[] = [];
+  for (const item of value.columns) {
+    if (columns.length >= MAX_DOCK_TILE_COLUMNS) break;
+    if (!isRecord(item) || !Array.isArray(item.tiles)) continue;
+    const tiles: { tabId: string; share: unknown }[] = [];
+    for (const entry of item.tiles) {
+      if (tiles.length >= MAX_DOCK_TILES_PER_COLUMN) break;
+      if (!isRecord(entry) || typeof entry.tabId !== "string" || taken.has(entry.tabId)) continue;
+      const tab = tabs.find((candidate) => candidate.id === entry.tabId);
+      if (tab === undefined || (tab.surface === "browser" && browserShown)) continue;
+      taken.add(tab.id);
+      if (tab.surface === "browser") browserShown = true;
+      tiles.push({ tabId: tab.id, share: entry.share });
+    }
+    if (tiles.length === 0) continue;
+    const tileShares = decodeShares(tiles.map((tile) => tile.share));
+    columns.push({
+      share: item.share,
+      tiles: tiles.map((tile, index) => ({ tabId: tile.tabId, share: at(tileShares, index) })),
+    });
+  }
+  const columnShares = decodeShares(columns.map((column) => column.share));
+  const shown = columns.reduce((sum, column) => sum + column.tiles.length, 0);
+  if (shown < 2) return undefined;
+  return {
+    columns: columns.map((column, index) => ({ ...column, share: at(columnShares, index) })),
+  };
+}
+
+/** Shares that cannot be trusted become equal ones; the rest are rescaled to add up. */
+function decodeShares(shares: ReadonlyArray<unknown>): ReadonlyArray<number> {
+  const valid = shares.every(
+    (share) => typeof share === "number" && Number.isFinite(share) && share > 0,
+  );
+  if (!valid) return shares.map(() => 1 / shares.length);
+  const numbers = shares.filter((share): share is number => typeof share === "number");
+  return clampShares(numbers) ?? numbers.map(() => 1 / numbers.length);
 }
 
 function decodeDockTab(value: unknown): ThreadUtilityDockTab | undefined {

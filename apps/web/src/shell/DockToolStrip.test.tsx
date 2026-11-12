@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockToolStrip } from "./DockToolStrip";
@@ -208,5 +208,88 @@ describe("the dock tool strip", () => {
     expect(styles).toMatch(/\.dock-tool-strip \{[^}]*position: relative;/);
     expect(styles).not.toMatch(/\.dock-tool-strip__overflow \{[^}]*position: relative;/);
     expect(styles).toMatch(/\.dock-tool-strip__overflow-menu \{[^}]*right: auto;\s*left: 0;/);
+  });
+
+  it("opens a tab's menu from the pointer with the items it was given and reports the choice", async () => {
+    const user = userEvent.setup();
+    const onMenuAction = vi.fn();
+    render(
+      <DockToolStrip
+        active="canvas"
+        capacity={3}
+        menuFor={(tabId) =>
+          tabId === "files"
+            ? [
+                { label: "Show beside", value: "beside" },
+                { label: "Show below", value: "below", disabled: true },
+              ]
+            : []
+        }
+        onClose={vi.fn()}
+        onMenuAction={onMenuAction}
+        onSelect={vi.fn()}
+        tabs={[files, canvas]}
+      />,
+    );
+    await user.pointer({
+      target: screen.getByRole("tab", { name: "Files" }),
+      keys: "[MouseRight]",
+    });
+    const items = await screen.findAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Show beside", "Show below"]);
+    await user.click(screen.getByRole("menuitem", { name: "Show beside" }));
+    expect(onMenuAction).toHaveBeenCalledWith("files", "beside");
+  });
+
+  it("gives a tab with no menu items no menu, and marks shown tabs for assistive technology", () => {
+    render(
+      <DockToolStrip
+        active="canvas"
+        capacity={3}
+        menuFor={() => []}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        shown={new Set(["files", "canvas"])}
+        tabs={[files, canvas, terminal]}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Files" }));
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-description", "Shown");
+    expect(screen.getByRole("tab", { name: "Canvas" })).not.toHaveAttribute("aria-description");
+    expect(screen.getByRole("tab", { name: "Terminal" })).not.toHaveAttribute("aria-description");
+  });
+
+  it("keeps a tab's button when its menu gains items, so focus and a drag in flight survive", () => {
+    const props = {
+      active: "files",
+      capacity: 2,
+      onClose: vi.fn(),
+      onSelect: vi.fn(),
+      tabs: [files, canvas],
+    };
+    const { rerender } = render(<DockToolStrip {...props} menuFor={() => []} />);
+    const before = screen.getByRole("tab", { name: "Canvas" });
+    before.focus();
+    rerender(
+      <DockToolStrip {...props} menuFor={() => [{ label: "Show beside", value: "beside" }]} />,
+    );
+    expect(screen.getByRole("tab", { name: "Canvas" })).toBe(before);
+    expect(before).toHaveFocus();
+  });
+
+  it("opens a tab's menu from Shift+F10 as well as the menu key", async () => {
+    render(
+      <DockToolStrip
+        active="files"
+        capacity={2}
+        menuFor={() => [{ label: "Show beside", value: "beside" }]}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        tabs={[files, canvas]}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Canvas" }), { key: "F10", shiftKey: true });
+    expect(await screen.findByRole("menuitem", { name: "Show beside" })).toBeVisible();
   });
 });

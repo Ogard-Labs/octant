@@ -27,6 +27,25 @@ export function boundsInsideViewport(
   return { x, y, width: right - x, height: bottom - y };
 }
 
+const layoutListeners = new Set<() => void>();
+let layoutSignalFrame: number | undefined;
+
+/**
+ * Says that the layout around native surfaces changed. A native page is placed
+ * by its element's rectangle, and the observers below see a size change, a
+ * threshold crossing or a style edit, but not an element that keeps its size
+ * and moves: a tile that changes places stayed drawn where it had been. Every
+ * mounted surface answers by reading its bounds again, once per frame however
+ * many callers signal.
+ */
+export function signalNativeSurfaceLayoutChange(): void {
+  if (layoutSignalFrame !== undefined) return;
+  layoutSignalFrame = requestAnimationFrame(() => {
+    layoutSignalFrame = undefined;
+    for (const listener of layoutListeners) listener();
+  });
+}
+
 export interface NativeBrowserSurfaceInput {
   readonly hostBridge?: OctantHostBridge;
   /** The context to show, or undefined while there is nothing to attach. */
@@ -127,6 +146,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
         window.innerHeight,
       ),
     });
+    let sentBounds = "";
     const shouldDetach = () =>
       element.getClientRects().length === 0 ||
       document.querySelector(input.overlaySelector) !== null;
@@ -140,6 +160,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
         return;
       }
       try {
+        sentBounds = JSON.stringify(request().bounds);
         if (!attached) {
           const attachedState = await attach(request());
           if (disposed || shouldDetach()) {
@@ -170,9 +191,15 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
       subtree: true,
     });
     window.addEventListener("resize", sync);
+    // A signal costs a bridge call only when this surface's rectangle moved.
+    const onLayoutChange = () => {
+      if (JSON.stringify(request().bounds) !== sentBounds) void sync();
+    };
+    layoutListeners.add(onLayoutChange);
     void sync();
     return () => {
       disposed = true;
+      layoutListeners.delete(onLayoutChange);
       resize.disconnect();
       visibility.disconnect();
       overlays.disconnect();
