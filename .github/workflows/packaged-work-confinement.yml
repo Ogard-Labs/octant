@@ -7,16 +7,14 @@ name: Packaged Work confinement
 # escapes from the selected folder are denied. The folder selection is typed
 # into the open panel through System Events, so the runner must already allow
 # UI scripting; the preflight fails the job rather than skipping it.
+#
+# It runs by hand only, on a runner (or Mac) the maintainer chooses. On the
+# hosted macos-15 runner the broker refuses to establish the gate host's
+# authority (trusted-peer: BootstrapRejected, November 2026), so a push
+# trigger would only report that runner, not the confinement.
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/packaged-work-confinement.yml
-      - apps/desktop/native/work-confinement-gate/**
-      - scripts/build-work-confinement-gate.ts
-      - scripts/package-work-confinement-gate.ts
-      - scripts/smoke-packaged-work-confinement.ts
 
 permissions:
   contents: read

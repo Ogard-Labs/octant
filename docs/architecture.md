@@ -12423,8 +12423,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   runtime's capsule cannot read the person's credentials beside its Project
   or inside a home opened as one. The packaged Work confinement gate (App
   Sandbox, its XPC broker and a security-scoped folder) runs as
-  `bun run smoke:packaged-work-confinement` in its own macOS workflow, which
-  needs a runner that already allows UI scripting. Layer details are in the
+  `bun run smoke:packaged-work-confinement` in its own macOS workflow, run by
+  hand on an arm64 Mac that already allows UI scripting. It is not a push
+  check: on the hosted macOS runner its broker refuses the gate host's
+  authority bootstrap, so a hosted run proves nothing about confinement; a
+  maintainer runs it before a release that touches the gate. Layer details are in the
   escape suite's `README.md` beside its fixtures.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
   provider `--version` read launch through one shared confinement port
