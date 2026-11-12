@@ -2075,6 +2075,7 @@ A self-made listener pairs apps through a single-use, five-minute pairing code (
 - A browser pairs only with a pasted certificate, because it cannot check a self-made one.
 - The one-line server install or start with `--pair` enables the listener and prints the code, polling claims until the ticket ends, using only the loopback administration calls the separate commands use.
 - Approval needs a typed yes on the host after comparing device label, key fingerprint and comparison code.
+- A device the host's own person paired also lists and renames devices, revokes one or all (itself included, as from the host), makes a pairing code, and approves or denies a new device's request, over its session under `/api/remote/`; the journal names it, and the device it approves is the person's. It never approves a request made with its own key. A hub-introduced device and an agent grant do none of this (maintainer decision, 2026-11-12).
 - Key rotation for one-step pairing is planned (not built yet).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Adding a computer in one step](../architecture.md#security-and-authority).

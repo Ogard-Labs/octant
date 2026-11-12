@@ -2499,7 +2499,11 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // Each of these judges the device itself; the private listener forwards
   // only the paths among them that a device may ask for.
-  deps.pairedDeviceRouteSlot.bind([providerCredentialRoutes, externalContentRoutes]);
+  deps.pairedDeviceRouteSlot.bind([
+    providerCredentialRoutes,
+    localDeviceAdministrationRoutes,
+    externalContentRoutes,
+  ]);
   return {
     ownerBrowserControlService,
     composeHostDiagnostics,

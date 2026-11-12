@@ -51,6 +51,7 @@ export type RemoteShellSurfaceKind =
   | "extension-install"
   | "provider-setup"
   | "provider-credentials"
+  | "device-management"
   | "listener-controls"
   | "host-controls";
 
@@ -141,6 +142,13 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     description: "Store, replace, and clear a provider key in the host's credential store.",
     availability: "local-host-only",
     catalogAction: "provider.credentials.write",
+  },
+  {
+    id: "device-management",
+    label: "Paired devices",
+    description: "List, rename, and revoke paired devices, and approve a new device.",
+    availability: "local-host-only",
+    catalogAction: "desktop.approve-device",
   },
   {
     id: "listener-controls",

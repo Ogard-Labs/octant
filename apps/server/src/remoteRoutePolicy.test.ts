@@ -894,6 +894,47 @@ describe("remote route policy", () => {
     });
   });
 
+  it("forwards the paired device and pairing request routes by their own method, and keeps the desktop bridge's on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    for (const path of ["/api/remote/devices", "/api/remote/pairing-requests"]) {
+      expect(inspect(path, "GET")).toMatchObject(forwarded);
+      expect(inspect(path, "POST")).toMatchObject({ kind: "reject" });
+    }
+    for (const path of [
+      "/api/remote/devices/rename",
+      "/api/remote/devices/revoke",
+      "/api/remote/devices/revoke-all",
+      "/api/remote/pairing-requests/approve",
+      "/api/remote/pairing-requests/deny",
+      "/api/remote/pairing-tickets",
+    ]) {
+      expect(inspect(path, "POST")).toMatchObject(forwarded);
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: the product dispatch refuses every session but
+      // a device the host's own person paired.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
+    expect(inspect("/api/desktop/remote/devices", "GET")).toMatchObject({
+      kind: "reject",
+      facts: { surface: "local-only" },
+    });
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>

@@ -35,6 +35,7 @@ describe("remoteSurfaceMatrix", () => {
       "extension-install",
       "provider-setup",
       "provider-credentials",
+      "device-management",
       "listener-controls",
       "host-controls",
     ]);
@@ -49,7 +50,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(12);
+    expect(listRemoteShellSurfaces()).toHaveLength(13);
   });
 });
 
@@ -120,6 +121,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "extension-install",
       "provider-setup",
       "provider-credentials",
+      "device-management",
     ]);
   });
 
@@ -137,6 +139,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "extension-install",
       "provider-setup",
       "provider-credentials",
+      "device-management",
       "listener-controls",
       "host-controls",
     ];
