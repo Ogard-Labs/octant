@@ -3641,7 +3641,9 @@ describe("Code tool families", () => {
     // bounds and the answer are in help.
     // The Simulator's repair-input operation added its name (15 bytes); its
     // usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_570);
+    // The Browser wait's timeoutMs maximum grew from 30000 to 600000 (ten
+    // minutes), one more digit.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_571);
   });
 
   it.each([
