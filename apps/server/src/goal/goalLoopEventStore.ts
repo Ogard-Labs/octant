@@ -5,6 +5,7 @@ import {
   GoalLoop,
   GoalLoopPauseReason,
   GoalLoopRound,
+  UtcTimestamp as UtcTimestampSchema,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -61,6 +62,26 @@ export const GoalLoopCeilingNarrowed = Schema.Struct({
   ceiling: AgentRunAuthority,
 }).annotations(strict);
 
+/**
+ * A round about to run. A started round with no recorded frame after it is
+ * the round a restart cut off.
+ */
+export const GoalLoopRoundStarted = Schema.Struct({
+  loopId: Schema.UUID,
+  roundId: Schema.UUID,
+  sequence: Schema.Int.pipe(Schema.positive()),
+  authority: AgentRunAuthority,
+  checkpointId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  startedAt: UtcTimestampSchema,
+}).annotations(strict);
+
+/** What a running round has charged so far, so a restart can charge it to the goal. */
+export const GoalLoopRoundSpend = Schema.Struct({
+  loopId: Schema.UUID,
+  roundId: Schema.UUID,
+  tokensSpent: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+
 export function registerGoalLoopEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(GOAL_LOOP_EVENT_NAMES.started, 1, GoalLoopStarted)
@@ -68,7 +89,9 @@ export function registerGoalLoopEvents(registry: EventRegistry): EventRegistry {
     .register(GOAL_LOOP_EVENT_NAMES.paused, 1, GoalLoopPaused)
     .register(GOAL_LOOP_EVENT_NAMES.resumed, 1, GoalLoopResumed)
     .register(GOAL_LOOP_EVENT_NAMES.stopped, 1, GoalLoopStopped)
-    .register(GOAL_LOOP_EVENT_NAMES.ceilingNarrowed, 1, GoalLoopCeilingNarrowed);
+    .register(GOAL_LOOP_EVENT_NAMES.ceilingNarrowed, 1, GoalLoopCeilingNarrowed)
+    .register(GOAL_LOOP_EVENT_NAMES.roundStarted, 1, GoalLoopRoundStarted)
+    .register(GOAL_LOOP_EVENT_NAMES.roundSpend, 1, GoalLoopRoundSpend);
 }
 
 /** One journaled goal-loop frame, decoded, in the order it was written. */
@@ -81,6 +104,8 @@ export type GoalLoopFrame = {
   | { readonly kind: "resumed"; readonly payload: typeof GoalLoopResumed.Type }
   | { readonly kind: "stopped"; readonly payload: typeof GoalLoopStopped.Type }
   | { readonly kind: "ceiling-narrowed"; readonly payload: typeof GoalLoopCeilingNarrowed.Type }
+  | { readonly kind: "round-started"; readonly payload: typeof GoalLoopRoundStarted.Type }
+  | { readonly kind: "round-spend"; readonly payload: typeof GoalLoopRoundSpend.Type }
 );
 
 const decodeFrame = {
@@ -107,6 +132,14 @@ const decodeFrame = {
   [GOAL_LOOP_EVENT_NAMES.ceilingNarrowed]: (payload: unknown) => ({
     kind: "ceiling-narrowed" as const,
     payload: Schema.decodeUnknownSync(GoalLoopCeilingNarrowed)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.roundStarted]: (payload: unknown) => ({
+    kind: "round-started" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopRoundStarted)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.roundSpend]: (payload: unknown) => ({
+    kind: "round-spend" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopRoundSpend)(payload),
   }),
 } satisfies Record<string, (payload: unknown) => Omit<GoalLoopFrame, "occurredAt">>;
 

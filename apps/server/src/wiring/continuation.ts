@@ -11,6 +11,7 @@ import {
   LOCAL_HOST_ID,
   USAGE_RESUME_SETTLED,
   type HostRestartRecovery,
+  type HostRestartRecoveryHold,
   type WorkThread,
   type WorkThreadId,
 } from "@octant/contracts";
@@ -25,8 +26,10 @@ import {
   releaseQueueBehindRestartContinuation,
   restartContinuationId,
 } from "../harness/restartContinuation";
+import { QUIT_HOLD_DETAIL } from "../code/codeRestartContinuation";
 import {
   continueThreadTurnsCutOffByRestart,
+  HOLD_DETAIL,
   mergeRestartRecoveries,
   type ThreadRestartContinuationPorts,
 } from "../harness/threadRestartContinuation";
@@ -432,7 +435,11 @@ export interface WorkRestartContinuationDependencies {
   /** The goal loops replayed from the journal; a loop the restart found running follows its thread. */
   readonly goalLoops: Pick<
     GoalLoopService,
-    "runningLoopThreads" | "continueAfterRestart" | "holdAfterRestart"
+    | "runningLoopThreads"
+    | "settleAfterRestart"
+    | "crashLooping"
+    | "continueAfterRestart"
+    | "holdAfterRestart"
   >;
   readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
   /** Settings › Work › Continue after restart. */
@@ -458,28 +465,70 @@ export interface WorkRestartContinuationDependencies {
  * person's quit holds it. A held loop is paused with `held-after-restart`.
  */
 export async function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
-  const recovered = await continueCutOffWorkTurns(deps);
-  const decided = new Set(deps.cutOff.map((cut) => String(cut.threadId)));
-  for (const entry of recovered.held) deps.goalLoops.holdAfterRestart(entry.threadId);
-  for (const threadId of deps.goalLoops.runningLoopThreads()) {
+  const { goalLoops } = deps;
+  // The round a restart cut off is charged and recorded first, so the
+  // crash-loop count below reads it.
+  const crashLooping = new Set<string>();
+  for (const threadId of goalLoops.runningLoopThreads()) {
+    const settled = await goalLoops
+      .settleAfterRestart(threadId)
+      .catch(() => ({ roundsCutOffInARow: 0 }));
+    if (goalLoops.crashLooping(settled.roundsCutOffInARow)) crashLooping.add(threadId);
+  }
+  const holdReason = (threadId: string): HostRestartRecovery["held"][number] | undefined => {
+    const thread = deps.readThread(decodeWorkThreadId(threadId));
+    const held = (reason: HostRestartRecoveryHold, detail: string) => ({
+      mode: "work" as const,
+      threadId,
+      reason,
+      detail,
+    });
+    if (!deps.enabled()) return held("turned-off", HOLD_DETAIL["turned-off"]);
+    if (thread?.restartContinuationOff === true) return held("opted-out", HOLD_DETAIL["opted-out"]);
+    if (deps.quitByPerson) return held("quit", QUIT_HOLD_DETAIL);
+    if (crashLooping.has(threadId)) return held("crash-loop", LOOP_CRASH_LOOP_DETAIL);
+    if (!deps.modeEnabled()) return held("refused", "Work is turned off on this host.");
+    return undefined;
+  };
+  const continued: Array<HostRestartRecovery["continued"][number]> = [];
+  const held: Array<HostRestartRecovery["held"][number]> = [];
+  // A crash-looping loop is held before its cut-off turn is looked at, so the
+  // host neither starts its round nor a continuation turn in its place.
+  const crashHeld = new Set<string>();
+  for (const threadId of crashLooping) {
+    const reason = holdReason(threadId);
+    if (reason?.reason !== "crash-loop") continue;
+    crashHeld.add(threadId);
+    goalLoops.holdAfterRestart(threadId);
+    held.push(reason);
+  }
+  const cutOff = deps.cutOff.filter((cut) => !crashHeld.has(String(cut.threadId)));
+  const recovered = await continueCutOffWorkTurns({ ...deps, cutOff });
+  const decided = new Set(cutOff.map((cut) => String(cut.threadId)));
+  for (const entry of recovered.held) goalLoops.holdAfterRestart(entry.threadId);
+  for (const threadId of goalLoops.runningLoopThreads()) {
     if (decided.has(threadId)) {
       // A cut-off turn that read settled was neither continued nor held:
       // the thread moved on, so the loop takes its next round as usual.
       if (!recovered.continued.some((entry) => entry.threadId === threadId))
-        deps.goalLoops.continueAfterRestart(threadId);
+        goalLoops.continueAfterRestart(threadId);
       continue;
     }
-    const thread = deps.readThread(decodeWorkThreadId(threadId));
-    const holds =
-      deps.quitByPerson ||
-      !deps.enabled() ||
-      !deps.modeEnabled() ||
-      thread?.restartContinuationOff === true;
-    if (holds) deps.goalLoops.holdAfterRestart(threadId);
-    else deps.goalLoops.continueAfterRestart(threadId);
+    // Caught between rounds: nothing was cut off, but the loop is still
+    // continued or held by the same rule, and the notice says which.
+    const reason = holdReason(threadId);
+    if (reason === undefined) {
+      if (goalLoops.continueAfterRestart(threadId)) continued.push({ mode: "work", threadId });
+    } else if (goalLoops.holdAfterRestart(threadId)) held.push(reason);
   }
-  return recovered;
+  return {
+    continued: [...recovered.continued, ...continued],
+    held: [...recovered.held, ...held],
+  };
 }
+
+const LOOP_CRASH_LOOP_DETAIL =
+  "Octant stopped during this thread's goal loop rounds three times in a row. Check it before resuming the loop.";
 
 function continueCutOffWorkTurns(deps: WorkRestartContinuationDependencies) {
   const { cutOff, work } = deps;

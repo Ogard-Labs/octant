@@ -114,7 +114,8 @@ export const GoalLoopRound = Schema.Struct({
   checkpointId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   /** The intersection the round actually ran under, never the declared ceiling. */
   authority: AgentRunAuthority,
-  outcome: Schema.Literal("ran", "paused", "failed"),
+  /** `interrupted`: a host restart cut the round off; it carries the spend journaled before then. */
+  outcome: Schema.Literal("ran", "paused", "failed", "interrupted"),
   detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   tokensSpent: Schema.Int.pipe(Schema.nonNegative()),
   startedAt: UtcTimestamp,
@@ -194,6 +195,8 @@ export const GOAL_LOOP_EVENT_NAMES = {
   resumed: "goal-loop-resumed@1",
   stopped: "goal-loop-stopped@1",
   ceilingNarrowed: "goal-loop-ceiling-narrowed@1",
+  roundStarted: "goal-loop-round-started@1",
+  roundSpend: "goal-loop-round-spend@1",
 } as const;
 
 export const decodeGoalLoopId = Schema.decodeUnknownSync(GoalLoopId);
