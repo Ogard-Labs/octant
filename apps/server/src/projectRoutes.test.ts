@@ -424,6 +424,7 @@ describe("Project routes", () => {
       expect(executeProject).toHaveBeenCalledWith(
         windowId,
         expect.objectContaining({ kind: setting.kind }),
+        localUser,
       );
     },
   );
