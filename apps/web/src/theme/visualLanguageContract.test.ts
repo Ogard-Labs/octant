@@ -626,6 +626,9 @@ describe("the public-block visual language", () => {
       const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
       for (const block of source.matchAll(/([^{}]*):focus-visible[^{}]*\{([^}]*)\}/g)) {
         const where = `${relative(webRoot, file)} on ${block[1]?.trim() ?? ""}`;
+        // A hidden file input has no box to edge, so its tile wears the shared
+        // edge for it; the rule is pinned to that edge colour further down.
+        if (block[1]?.includes(".zen-appearance__upload:has(")) continue;
         expect(block[2], `${where} suppresses the focus edge`).not.toMatch(
           /outline:\s*(?:none|0)\b/,
         );
@@ -886,8 +889,10 @@ describe("the public-block visual language", () => {
       "inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground",
     );
     expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
-    expect(tabs).toContain("data-selected:bg-muted");
-    expect(tabs).not.toContain("data-selected:shadow-sm");
+    // Base UI writes `data-active` on the selected tab, never `data-selected`.
+    expect(tabs).toContain("data-active:bg-muted");
+    expect(tabs).not.toContain("data-selected");
+    expect(tabs).not.toContain("data-active:shadow-sm");
     expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
     // An item inside the padded track takes the control corner less the
     // padding, never below 2px.
@@ -1737,5 +1742,98 @@ describe("the public-block visual language", () => {
       expect(ruleBody(system, ".toast")).toContain("pointer-events: auto;");
       expect(ruleBody(base, ".computer-use-activity")).toContain("z-index: var(--oct-z-toast);");
     });
+  });
+});
+
+describe("shared recipes against the global stylesheets", () => {
+  /** Drops every `@layer` block, so what is left is the unlayered cascade. */
+  function withoutLayers(css: string): string {
+    let rest = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (;;) {
+      const start = rest.search(/@layer\s+[\w-]+\s*\{/);
+      if (start < 0) return rest;
+      let depth = 0;
+      let end = rest.indexOf("{", start);
+      for (; end < rest.length; end += 1) {
+        if (rest[end] === "{") depth += 1;
+        if (rest[end] === "}") depth -= 1;
+        if (depth === 0) break;
+      }
+      rest = rest.slice(0, start) + rest.slice(end + 1);
+    }
+  }
+
+  it("keeps a selected content tab's own button unfilled, since the tab wrapper carries the selected look", () => {
+    // The tab recipe now fills a selected tab (data-active). A content tab is a
+    // wrapper holding the select button and a close button, so its button opts
+    // out of that fill and ink or the selected tab would be filled twice.
+    const source = readFileSync(join(webRoot, "shell/SplitWorkspace.tsx"), "utf8");
+    const selects = source.match(/className="content-tab__select[^"]*"/g) ?? [];
+    expect(selects).toHaveLength(2);
+    for (const select of selects) {
+      expect(select).toContain("data-active:bg-transparent");
+      expect(select).toContain("data-active:text-inherit");
+    }
+  });
+
+  it("lets a recipe's own type role size its heading, because no bare heading rule is unlayered", () => {
+    // An unlayered `h2 { font-size }` beats every Tailwind utility, so a card's
+    // title (text-base) was drawn at 44px. Bare heading defaults live in the base layer.
+    const strays: string[] = [];
+    for (const path of cssFiles(webRoot)) {
+      const css = withoutLayers(readFileSync(path, "utf8"));
+      for (const match of css.matchAll(/([^{}@]+)\{[^{}]*\}/g)) {
+        const selectors = (match[1] ?? "").split(/,(?![^(]*\))/).map((part) => part.trim());
+        if (selectors.some((part) => /^h[1-6]$/.test(part)))
+          strays.push(`${relative(webRoot, path)}: ${selectors.join(", ")}`);
+      }
+    }
+    expect(strays).toEqual([]);
+    const card = readFileSync(join(webRoot, "ui/shadcn/card.tsx"), "utf8");
+    expect(card).toMatch(/<h2[^>]*className=\{cn\("m-0 text-base /);
+  });
+
+  it("marks a combobox's frame with a stronger border under pointer focus, in the field's own rule", () => {
+    // The ring the frame once drew was its only pointer mark, since the global
+    // rule strips the outline there. A field and the combobox share one rule.
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    expect(system).toMatch(
+      /\[data-slot="input"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="textarea"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="combobox-input-group"\]:focus-within\s*\{\s*border-color: var\(--octant-border-strong\);/,
+    );
+  });
+
+  it("gives every alert that announces as an alert a tone, except a plain offer", () => {
+    // Without a tone the mark is neutral ink, so a failure would not read as one.
+    const toneless: string[] = [];
+    for (const path of sourceFiles(webRoot, ".tsx")) {
+      if (/\.test\.tsx$|[\\/](?:gallery|ui)[\\/]/.test(path)) continue;
+      const source = readFileSync(path, "utf8");
+      for (const match of source.matchAll(/<OctantAlert\b[^>]*?role="alert"[^>]*>/g))
+        if (!match[0].includes("tone=")) toneless.push(relative(webRoot, path));
+    }
+    // A cross-context offer states a fact beside the composer.
+    expect(toneless).toEqual(["shell/WorkspaceView.tsx"]);
+  });
+
+  it("draws the one focus edge on every shared recipe, with no ring, halo or second outline", () => {
+    const strays: string[] = [];
+    for (const path of sourceFiles(join(webRoot, "ui"), ".tsx")) {
+      if (path.endsWith(".test.tsx")) continue;
+      const source = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const match of source.matchAll(
+        /(?:focus|focus-visible|focus-within|has-focus-visible):(?:ring|outline|shadow|border)[\w\-/[\]]*/g,
+      ))
+        strays.push(`${relative(webRoot, path)}: ${match[0]}`);
+    }
+    expect(strays).toEqual([]);
+    // A picture's tile has no box to inset into; it takes the same edge, from
+    // the keyboard only, outside the picture.
+    const zen = readFileSync(join(webRoot, "styles/zen.css"), "utf8");
+    expect(zen).toMatch(
+      /\.zen-appearance__upload:has\(:focus-visible\) \.zen-appearance__thumb \{\s*outline: 2px solid var\(--oct-focus-edge\);/,
+    );
+    expect(zen).not.toMatch(/\.zen-appearance__upload:focus-within/);
   });
 });

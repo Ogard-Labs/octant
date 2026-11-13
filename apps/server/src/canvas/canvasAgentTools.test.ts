@@ -6,7 +6,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
 } from "@octant/contracts";
-import { appWindowPrototypeExample } from "@octant/domain";
+import { appWindowPrototypeExample, canvasChoiceQuestionFingerprint } from "@octant/domain";
 import { validateCanvasDefinition } from "@octant/domain/canvas-policy";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
 import {
@@ -1387,6 +1387,101 @@ describe("createCanvasAgentTools", () => {
     const call = revise.mock.calls[0];
     expect(call?.[0]).toMatchObject({ kind: "canvas-revise", expectedSequence: 1 });
     expect(call?.[3]).toHaveLength(1);
+  });
+
+  it("hands the owning thread's agent a person's saved decision answers, and no other thread", async () => {
+    const canvasId = "77777777-7777-4777-8777-777777777777";
+    const question = {
+      id: "who",
+      prompt: "Who may set it?",
+      selection: "single",
+      options: [
+        { id: "any", label: "Any device", recommended: true },
+        { id: "owner", label: "Owner devices" },
+      ],
+    } as const;
+    const reworded = { ...question, id: "reach", prompt: "How far?" } as const;
+    const form = {
+      blockId: "decisions",
+      schemaVersion: 29,
+      kind: "choice",
+      prompt: "Decisions",
+      questions: [question, reworded],
+    };
+    const person = { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+    const saved = [
+      {
+        blockId: "decisions",
+        questionId: "who",
+        questionFingerprint: canvasChoiceQuestionFingerprint(question),
+        selectedOptionIds: ["any"],
+        note: "Matches a local window",
+        acceptedRecommendation: true,
+        author: person,
+        answeredAt: "2026-11-12T10:00:00.000Z",
+      },
+      // Answered before the agent reworded the question.
+      {
+        blockId: "decisions",
+        questionId: "reach",
+        questionFingerprint: "old",
+        selectedOptionIds: ["any"],
+        author: person,
+        answeredAt: "2026-11-12T10:00:00.000Z",
+      },
+    ];
+    const ownedCanvas = (owner: string) => ({
+      create: vi.fn(),
+      revise: vi.fn(),
+      get: vi.fn(() => ({
+        kind: "ready",
+        version: {
+          sequence: 3,
+          definition: {
+            title: "Decisions",
+            blocks: [form],
+            presentation: "sidebar",
+            provenance: { mode: "chat", threadId: owner },
+          },
+        },
+      })),
+    });
+    const read = await tools({
+      canvas: ownedCanvas(threadId),
+      choiceAnswers: vi.fn(() => saved),
+    }).set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+    expect(read.result).toMatchObject({
+      choiceAnswers: [
+        {
+          blockId: "decisions",
+          answered: 1,
+          total: 2,
+          questions: [
+            {
+              questionId: "who",
+              status: "answered",
+              selected: [{ id: "any", label: "Any device" }],
+              note: "Matches a local window",
+              acceptedRecommendation: true,
+            },
+            { questionId: "reach", status: "stale" },
+          ],
+        },
+      ],
+      choiceAnswersGuidance: expect.stringContaining("not as approval"),
+    });
+
+    const other = await tools({
+      canvas: ownedCanvas("99999999-9999-4999-8999-999999999999"),
+      choiceAnswers: vi.fn(() => saved),
+    }).set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+    expect(other.result).not.toHaveProperty("choiceAnswers");
   });
 
   it("hands the owning thread's agent the comments a person sent, even after a person's edit, and warns when a revision touches blocks they did not name", async () => {

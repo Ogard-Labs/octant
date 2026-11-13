@@ -1309,9 +1309,13 @@ repaint it a third time — it is simply not machine-checked.
 The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
 and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
-denser controls, except that recipes paint no focus ring (the global
-`:focus-visible` rule is the only keyboard focus treatment) and the badge and
-the card keep the shape and elevation set in this document. This
+denser controls, except that recipes paint no focus ring, halo or second outline
+(the global `:focus-visible` rule is the only keyboard focus treatment, so a
+combobox's frame draws none of its own) and the badge and
+the card keep the shape and elevation set in this document. A recipe's heading
+(a card's or popover's title) takes the recipe's own type role: the page's bare
+`h1` to `h4` defaults sit in the base layer, below every utility, so they size
+reading content and never a component. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
@@ -3190,7 +3194,9 @@ surface. The mobile app has a separate design system under
 True page tabs, segmented choices, and pane identity are intentionally
 different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
 semantics. `OctantToggleGroup` owns the enclosed track used for mutually
-exclusive values. Each split pane keeps its close action on the trailing edge of its header;
+exclusive values. A recipe styles the state attribute
+the installed Base UI part writes (a selected tab is `data-active`, a pressed
+toggle `data-pressed`, a checked switch `data-checked`), never one it invents. Each split pane keeps its close action on the trailing edge of its header;
 only a pane underneath the window controls reserves space for that cluster.
 The split-pane drag handle alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab
@@ -3273,6 +3279,9 @@ and Tooltip. Composition rules:
   region, message, optional title, and explicit actions. Warning and danger
   announce as `alert`; neutral, accent, and success announce as `status`.
   Placement belongs to the feature; the callout recipe owns its appearance.
+  The mark is in neutral ink for the neutral tone, composer notices included;
+  the warning tone draws it in the warning ink and the danger tone in the
+  danger ink.
   Permission decisions and confirmation side effects stay with the host and
   their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
   feature source fails `bun run ui:check` unless it is a recorded exception:

@@ -59,6 +59,28 @@ describe("hostRestartNotice", () => {
     ).toMatchObject({ detail: "Continued 1 thread; 0 need you.", needsYou: false });
   });
 
+  it("says Octant was quit, not restarted, and opens the first thread waiting after a person's quit", () => {
+    const detail = "Octant was quit while this thread was working, so it waits for you.";
+    const notice = hostRestartNotice(
+      {
+        at,
+        continued: [],
+        held: [
+          { mode: "code", threadId: "held", reason: "quit", detail },
+          { mode: "work", threadId: "brief", reason: "quit", detail },
+        ],
+      },
+      threads,
+    );
+    expect(notice).toEqual({
+      id: `restart:${at}`,
+      title: "Octant was quit while threads were working",
+      detail: `2 threads wait for you. Ship the release: ${detail}`,
+      needsYou: true,
+      open: threads[1],
+    });
+  });
+
   it("counts and opens Chat and Work threads by their own mode", () => {
     const notice = hostRestartNotice(
       {

@@ -34,6 +34,8 @@ const ids = {
   runningPush: "84000000-0000-4000-8000-00000000000b",
   runningPullRequest: "84000000-0000-4000-8000-00000000000c",
   runningCommit: "84000000-0000-4000-8000-00000000000d",
+  otherThread: "84000000-0000-4000-8000-00000000000e",
+  otherAmbiguous: "84000000-0000-4000-8000-00000000000f",
 } as const;
 
 afterEach(() => {
@@ -70,6 +72,10 @@ describe("Code persistence restart", () => {
       remoteStep: { kind: "pull-request", action: "create" },
     });
     appendRuntime(journal, ids.runningCommit, "running", 110, "git");
+    // Unknown, but no remote step: nothing on a remote can settle it.
+    appendRuntime(journal, ids.otherAmbiguous, "ambiguous", 111, "delivery", {
+      threadId: ids.otherThread,
+    });
     appendCheckout(journal, {
       id: ids.checkout,
       kind: "existing-worktree",
@@ -131,6 +137,9 @@ describe("Code persistence restart", () => {
             managedCheckout: persistence.readCodeCheckout(
               decodeCodeCheckoutId(ids.managedCheckout),
             ),
+            unconfirmedRemoteSteps: persistence
+              .readCodeThreadsWithUnconfirmedRemoteSteps()
+              .map(String),
           };
         }).pipe(
           Effect.provide(
@@ -160,6 +169,9 @@ describe("Code persistence restart", () => {
     expect(states.runningPush).toMatchObject({ state: "ambiguous", updatedAt: now });
     expect(states.runningPullRequest).toMatchObject({ state: "ambiguous", updatedAt: now });
     expect(states.runningCommit).toMatchObject({ state: "interrupted", updatedAt: now });
+    // Those two are what the host settles at start by looking at the remote,
+    // listed once for their thread.
+    expect(states.unconfirmedRemoteSteps).toEqual([ids.thread]);
     expect(states.file).toMatchObject({
       state: "interrupted",
       version: 2,
@@ -369,7 +381,7 @@ function appendRuntime(
   state: "running" | "ambiguous",
   eventSuffix: number,
   kind: "provider-turn" | "terminal" | "git" | "delivery" = "provider-turn",
-  reach: { readonly remoteStep?: CodeRuntimeRemoteStep } = {},
+  reach: { readonly remoteStep?: CodeRuntimeRemoteStep; readonly threadId?: string } = {},
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-runtime", aggregateId: runtimeWorkId },

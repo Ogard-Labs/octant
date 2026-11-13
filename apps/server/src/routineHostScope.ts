@@ -9,7 +9,9 @@ import { decodeWindowId, type WindowId } from "@octant/contracts";
  * for Code, its Project binding. The usage-limit resume timer is host-owned
  * the same way and continues a stopped Work or Code turn under this scope. A
  * goal loop runs each of its Work rounds under it, and a finished child run's
- * result is delivered into its parent thread under it.
+ * result is delivered into its parent thread under it. At start, the host
+ * looks under it at the remote of each Code thread whose push or pull request
+ * step a restart left unknown, and settles the steps the remote proves.
  *
  * Minted per process and never registered with window authority, so no route
  * resolves to it and no renderer or paired device can claim it. Reaching this
