@@ -268,7 +268,13 @@ async function main(): Promise<void> {
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
-  const timer = setTimeout(interrupted, 420_000);
+  // One bound for the whole run. A passing hosted run now takes about seven
+  // minutes (about 40 s of cold launch, some 45 observed stages of 5-10 s each,
+  // and the real 61 s listing-retry throttle). The earlier 420 s bound expired
+  // mid-stage on ordinary runs and was reported as a stage that was not
+  // observed. The step's own 25-minute timeout still applies above this.
+  const runBudgetMs = 720_000;
+  const timer = setTimeout(interrupted, runBudgetMs);
   let continuation = false;
   let verified = false;
   let cleanupVerified = false;
@@ -498,8 +504,8 @@ async function main(): Promise<void> {
         String.raw`
 const owner = Number(process.env.OCTANT_SMOKE_OWNER_PID);
 const group = Number(process.env.OCTANT_SMOKE_APP_PID);
-const deadline = Date.now() + 450000;
-if (!Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
+const deadline = Date.now() + Number(process.env.OCTANT_SMOKE_WATCHDOG_MS);
+if (!Number.isFinite(deadline) || !Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; } };
 const signal = value => { try { process.kill(-group, value); } catch {} };
 const timer = setInterval(() => {
@@ -517,6 +523,8 @@ const timer = setInterval(() => {
           ...env,
           OCTANT_SMOKE_OWNER_PID: String(process.pid),
           OCTANT_SMOKE_APP_PID: String(ownPid),
+          // Outlives the run bound so the normal finally block stops the app first.
+          OCTANT_SMOKE_WATCHDOG_MS: String(runBudgetMs + 30_000),
         },
         stdio: "ignore",
       },
@@ -558,8 +566,12 @@ const timer = setInterval(() => {
       const title =
         rows.some((row) => /^["']?title["']\s*:\s*["']Weekly signups brief["'][,.]?$/.test(row)) ||
         (titleKey >= 0 && /^["']Weekly signups brief["'][,.]?$/.test(rows[titleKey + 1] ?? ""));
-      return rows.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row)) && title;
+      return hasPublicShareKind(snapshot) && title;
     };
+    const hasPublicShareKind = (snapshot: typeof Snapshot.Type) =>
+      snapshot.texts.some((row) =>
+        /"kind"\s*:\s*"canvas-public-share-document"/.test(row.text.trim()),
+      );
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
@@ -614,6 +626,9 @@ const timer = setInterval(() => {
       console.error(
         JSON.stringify({
           unobservedNativeStage: stage,
+          // True when the whole-run bound or a signal ended the wait, not the
+          // stage's own 60 s deadline: the window may never have been looked at.
+          runAborted: controller.signal.aborted,
           screenshot: join(artifacts, `${stage}.png`),
           observedRows: lastRows?.length ?? null,
           rows: lastRows?.slice(0, 120).map(bounded),
@@ -1075,7 +1090,7 @@ const timer = setInterval(() => {
       (snapshot) =>
         snapshot.texts.filter((row) => row.text.trim() === "Export to Public link").length === 1 &&
         hasOwnedCardAccount(snapshot) &&
-        hasOwnedStaticPayload(snapshot) &&
+        hasPublicShareKind(snapshot) &&
         hasText(snapshot, "Updates"),
     );
     let renderedUpdateTarget: string | undefined;
@@ -1105,7 +1120,8 @@ const timer = setInterval(() => {
               ? "unverified: native static text unavailable"
               : "verified through already-exposed native static text",
           singleOwnedPublicationInventoried: true,
-          exactOwnedHostAndPayload: true,
+          exactOwnedHostAndPayloadKind: true,
+          payloadTitle: "proven from the stored publication after approval",
           mandatoryPostUpdateSameIDAndURL: true,
         },
         null,
@@ -1127,6 +1143,32 @@ const timer = setInterval(() => {
       !updated.record.passwordProtected
     )
       throw Error("The native password update did not retain the same link.");
+    // The update card's payload title is not read through OCR: on 2026-11-13
+    // (run 43464961284) the card was fully drawn, its kind, account and
+    // "Updates" rows read cleanly, but Vision read the small payload's title
+    // line merged with the wrapped summary line below it ("titron. ueskly
+    // sianups brief\", mpak cunnina meet eeee") on every capture for 60 s, so
+    // the stage never matched. The card's layout is static, so a garbled line
+    // stays garbled; whether it garbles depends on where the extra update rows
+    // place the payload. The approved payload is instead proven exactly here,
+    // from the single publication the owned service stored.
+    const storedUpdate: unknown = JSON.parse(
+      await readFile(
+        join(root, "share", "shares", `${published.record.publicShareId}.json`),
+        "utf8",
+      ),
+    );
+    if (
+      Schema.decodeUnknownSync(
+        Schema.Struct({
+          document: Schema.Struct({
+            kind: Schema.Literal("canvas-public-share-document"),
+            title: Schema.String,
+          }),
+        }),
+      )(storedUpdate).document.title !== "Weekly signups brief"
+    )
+      throw Error("The approved update did not carry the owned Canvas.");
     const locked = await fetch(publishedUrl);
     if (locked.status !== 401 || !(await locked.text()).includes("Password-protected Canvas"))
       throw Error("The updated public link did not require its password.");
