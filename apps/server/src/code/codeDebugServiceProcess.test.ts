@@ -1899,6 +1899,42 @@ describe("the agent's debug tool", () => {
     expect(listed.result).toMatchObject({ truncated: true, omitted: 4 - shown.length });
   });
 
+  it("lists a configuration whose arguments alone exceed the budget with its digest and its arguments marked cut, and the one after it", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    mkdirSync(join(test.checkout, ".vscode"));
+    writeFileSync(
+      join(test.checkout, ".vscode", "launch.json"),
+      JSON.stringify({
+        configurations: [
+          {
+            type: "fixture",
+            request: "launch",
+            name: "Wide",
+            program: `\${workspaceFolder}/src/main.js`,
+            // 64 arguments of 256 three-byte characters: about 49.5 KiB alone.
+            args: Array.from({ length: 64 }, () => "€".repeat(256)),
+          },
+          {
+            type: "fixture",
+            request: "launch",
+            name: "Small",
+            program: `\${workspaceFolder}/src/main.js`,
+          },
+        ],
+      }),
+    );
+    const listed = await agentTools(test).call({ operation: "configurations" });
+    expect(Buffer.byteLength(JSON.stringify(listed.result), "utf8")).toBeLessThan(64 * 1024);
+    expect(listed.result).toMatchObject({
+      configurations: [
+        { name: "Wide", configuration: expect.stringMatching(/\S/), argsCut: true },
+        { name: "Small", configuration: expect.stringMatching(/\S/) },
+      ],
+    });
+  });
+
   it("reads how the thread's last session ended after the program exits, until another starts", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

@@ -1657,8 +1657,11 @@ the addendum left a choice open.
   names (never the values) of its environment entries, and names the running
   session. The listing is redacted as tool output is, so a key typed as an
   argument does not reach the provider. The listing also keeps to the
-  48 KiB list budget: entries past it are left out, with `truncated` and
-  the number `omitted`, so every entry shown still carries its digest.
+  48 KiB list budget: each entry's arguments are kept to a quarter of it
+  (marked `argsCut` when shortened), an entry that still does not fit is
+  skipped and later ones are still listed, and `truncated` with the number
+  `omitted` reports what was left out, so every entry shown carries its
+  digest.
   `start` takes one of those digests and optional breakpoints (at
   most 16 files of 64 lines). At every level outside Plan the list holds
   the configurations an approval covers as they stand and the readable

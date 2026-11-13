@@ -68,6 +68,8 @@ const MAX_RESULT_LIST_BYTES = 48 * 1024;
 const SETTLE_AFTER_CONTROL_MS = 5_000;
 const SETTLE_POLL_MS = 50;
 const MAX_SHOWN_ARGUMENT_LENGTH = 512;
+/** One listed configuration's arguments: a quarter of the list budget. */
+const MAX_LISTED_ARGUMENT_BYTES = MAX_RESULT_LIST_BYTES / 4;
 /** A card is cut at 2 KiB from its end, so what runs comes first and each part is bounded. */
 const MAX_SHOWN_PATH_LENGTH = 256;
 const MAX_SHOWN_ENVIRONMENT_NAMES_LENGTH = 384;
@@ -310,16 +312,22 @@ export function createCodeDebugAgentTools(
       // configurations of 64 long arguments pass every per-configuration
       // limit yet exceed the turn's 64 KiB result limit, which would drop the
       // whole listing and leave no digest to start.
-      const shown = withinBudget(
-        listed.configurations.map((entry) => redactHostSecretsInValue(agentConfiguration(entry))),
-        MAX_CODE_DEBUG_AGENT_CONFIGURATIONS,
-      );
+      // An entry that still does not fit is skipped rather than ending the
+      // walk, so a smaller configuration after it keeps its digest.
+      const shown: Array<ReturnType<typeof agentConfiguration>> = [];
+      let bytes = 0;
+      for (const entry of listed.configurations) {
+        const value = redactHostSecretsInValue(agentConfiguration(entry));
+        const size = Buffer.byteLength(JSON.stringify(value), "utf8") + 1;
+        if (bytes + size > MAX_RESULT_LIST_BYTES) continue;
+        shown.push(value);
+        bytes += size;
+      }
+      const omitted = listed.configurations.length - shown.length;
       return {
         result: {
-          configurations: shown.entries,
-          ...(shown.cut
-            ? { truncated: true, omitted: listed.configurations.length - shown.entries.length }
-            : {}),
+          configurations: shown,
+          ...(omitted > 0 ? { truncated: true, omitted } : {}),
           ...(listed.session === undefined
             ? {}
             : { session: redactHostSecretsInValue({ name: listed.session.name }) }),
@@ -560,13 +568,35 @@ function agentConfiguration(startable: Startable) {
     configuration: startable.configurationDigest,
     name: configuration.name,
     program: configuration.program,
-    args: configuration.args.map((argument) => cut(argument, MAX_SHOWN_ARGUMENT_LENGTH).text),
+    ...listedArguments(configuration.args),
     ...(configuration.cwd === undefined ? {} : { cwd: configuration.cwd }),
     // Names only: a value may be a secret the person typed for the program.
     env: configuration.env.map((entry) => entry.key),
     stopOnEntry: configuration.stopOnEntry,
     source: startable.source,
   };
+}
+
+/**
+ * A configuration's arguments, each redacted and cut, kept while they fit a
+ * quarter of the list budget. Valid input (64 arguments of 256 three-byte
+ * characters, about 49.5 KiB) would otherwise make one entry larger than the
+ * whole list budget, so the listing could show it no digest at all.
+ */
+function listedArguments(args: ReadonlyArray<string>): {
+  readonly args: ReadonlyArray<string>;
+  readonly argsCut?: true;
+} {
+  const kept: Array<string> = [];
+  let bytes = 0;
+  for (const argument of args) {
+    const shown = cut(argument, MAX_SHOWN_ARGUMENT_LENGTH).text;
+    const size = Buffer.byteLength(JSON.stringify(shown), "utf8") + 1;
+    if (bytes + size > MAX_LISTED_ARGUMENT_BYTES) return { args: kept, argsCut: true };
+    kept.push(shown);
+    bytes += size;
+  }
+  return { args: kept };
 }
 
 /**
