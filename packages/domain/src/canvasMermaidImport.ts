@@ -15,14 +15,17 @@ import {
  * read here, statement by statement, into a `diagram`, `sequence`, `state`,
  * `er`, or `mindmap` block, which Octant's own layout then draws, comments
  * anchor to, and a share carries. The subset is closed: a construct this
- * reader does not know — styling, classes, click handlers, links, loops and
- * alternatives, notes it cannot place — refuses the whole import with the
- * line that stopped it, so the caller keeps the source as a code block
- * rather than a picture that silently lost part of what it said.
+ * reader does not know — click handlers, links, loops and alternatives,
+ * notes it cannot place — refuses the whole import with the line that
+ * stopped it, so the caller keeps the source as a code block rather than a
+ * picture that silently lost part of what it said.
  *
  * Layout hints are the exception, and are read past: a direction, a link's
  * length or weight, and `autonumber` say how Mermaid would draw the diagram,
- * not what it holds, and Octant lays the block out itself.
+ * not what it holds, and Octant lays the block out itself. Styling is the
+ * other exception, and is dropped: a directive, a `classDef`, `class`,
+ * `style`, or `linkStyle` statement, and a node's `:::class` suffix say what
+ * colors Mermaid would use, and a Canvas block takes the Canvas theme.
  */
 
 export type CanvasMermaidRefusalReason =
@@ -82,9 +85,26 @@ interface Statement {
  * type but the mind map, where a topic is its whole line: split there,
  * `Scope; risks` became two topics the author never wrote.
  */
+/**
+ * A `%%{init: …}%%` directive configures Mermaid's theme and may span lines.
+ * Its line breaks stay so a refusal still names the author's line.
+ */
+function withoutDirectives(source: string): string {
+  let result = "";
+  let from = 0;
+  for (;;) {
+    const open = source.indexOf("%%{", from);
+    const close = open === -1 ? -1 : source.indexOf("}%%", open + 3);
+    // An unclosed directive is left alone: its line already reads as a comment.
+    if (close === -1) return result + source.slice(from);
+    result += source.slice(from, open) + source.slice(open, close).replace(/[^\n]/g, "");
+    from = close + 3;
+  }
+}
+
 function statements(source: string): ReadonlyArray<Statement> {
   const result: Statement[] = [];
-  const lines = source
+  const lines = withoutDirectives(source)
     .split(/\r?\n/)
     .map((raw) => (raw.trimStart().startsWith("%%") ? "" : raw.replace(/\t/g, "  ")));
   const header = lines.find((line) => line.trim().length > 0)?.trim() ?? "";
@@ -160,7 +180,18 @@ function unsupported(statement: Statement, what = "This statement"): Refusal {
   );
 }
 
-/** Statements no supported diagram type translates: styling, interaction, and layout hints. */
+/**
+ * A styling statement in a flowchart or a state diagram, dropped. `class` is
+ * styling only as `class <ids> <name>`; any other line that starts with the
+ * word is refused like the unknown statement it is.
+ */
+const STYLING_STATEMENT =
+  /^(?:(?:classDef|style|linkStyle)\s+\S.*|class\s+[A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*\s+[A-Za-z0-9_-]+)$/;
+
+/** The `:::class` suffix Mermaid allows after a node or a state, as regex source. */
+const CLASS_SUFFIX = ":::[A-Za-z0-9_][A-Za-z0-9_-]*";
+
+/** Statements no supported diagram type translates: interaction, titles, and malformed styling. */
 const REFUSED_KEYWORDS =
   /^(?:(?:classDef|class|style|linkStyle|click|callback|direction|accTitle|accDescr|title)\b|%%\{)/;
 
@@ -311,7 +342,9 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
   const groupIds = new Ids("Subgraph");
 
   const reference = (text: string, statement: Statement): string => {
-    const match = NODE_REF.exec(text.trim());
+    // Only a suffix is a class: three colons inside a shape's label end in
+    // the shape's closing bracket, not in a class name, and stay the label.
+    const match = NODE_REF.exec(text.trim().replace(new RegExp(`${CLASS_SUFFIX}$`), ""));
     if (match === null) throw unsupported(statement, `The node "${text.trim().slice(0, 40)}"`);
     const nodeId = ids.canvas(match[1] ?? "", statement.line);
     const [terminator, circle, cylinder, process, plain, decision] = match.slice(2, 8);
@@ -356,10 +389,8 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
 
   for (const statement of body) {
     const text = statement.text;
-    if (DIRECTION_HINT.test(text)) continue;
-    if (REFUSED_KEYWORDS.test(text) || text.includes(":::")) {
-      throw unsupported(statement);
-    }
+    if (DIRECTION_HINT.test(text) || STYLING_STATEMENT.test(text)) continue;
+    if (REFUSED_KEYWORDS.test(text)) throw unsupported(statement);
     const subgraph = /^subgraph\s+(.+)$/.exec(text);
     if (subgraph !== null) {
       if (openGroups.length >= CANVAS_MAX_DIAGRAM_GROUP_DEPTH) {
@@ -574,7 +605,11 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
 // ── stateDiagram ────────────────────────────────────────────────────────────
 
 const STATE_REF = "(\\[\\*\\]|[A-Za-z0-9_][A-Za-z0-9_-]*)";
-const TRANSITION = new RegExp(`^${STATE_REF}\\s*-->\\s*${STATE_REF}(?:\\s*:\\s*(.+))?$`);
+const TRANSITION = new RegExp(
+  `^${STATE_REF}(?:${CLASS_SUFFIX})?\\s*-->\\s*${STATE_REF}(?:${CLASS_SUFFIX})?(?:\\s*:\\s*(.+))?$`,
+);
+/** A state named on its own line, with the class it may carry. */
+const BARE_STATE = new RegExp(`^([A-Za-z0-9_][A-Za-z0-9_-]*)(?:${CLASS_SUFFIX})?$`);
 
 function state(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const ids = new Ids("State");
@@ -608,7 +643,7 @@ function state(_header: Statement, body: ReadonlyArray<Statement>, blockId: Canv
   };
   for (const statement of body) {
     const text = statement.text;
-    if (DIRECTION_HINT.test(text)) continue;
+    if (DIRECTION_HINT.test(text) || STYLING_STATEMENT.test(text)) continue;
     const alias = /^state\s+"(.+)"\s+as\s+([A-Za-z0-9_][A-Za-z0-9_-]*)$/.exec(text);
     if (alias !== null) {
       declare(alias[2] ?? "", statement, alias[1]);
@@ -643,8 +678,9 @@ function state(_header: Statement, body: ReadonlyArray<Statement>, blockId: Canv
       });
       continue;
     }
-    if (/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(text)) {
-      declare(text, statement);
+    const bare = BARE_STATE.exec(text);
+    if (bare !== null) {
+      declare(bare[1] ?? "", statement);
       continue;
     }
     const described = /^([A-Za-z0-9_][A-Za-z0-9_-]*)\s*:\s*(.+)$/.exec(text);

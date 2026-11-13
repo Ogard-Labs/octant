@@ -1061,8 +1061,13 @@ a `sequence`; a `stateDiagram`
 `id : description` as the label, composite states) into a `state`; an `erDiagram` (relationships with
 cardinalities, attribute blocks, `PK`) into an `er`; and a
 `mindmap` (tree by indentation; a square, rounded, or circle topic keeps
-its text and drops its id and shape) into a `mindmap`. Anything else — another
-diagram type, styling, classes, `click`, loops and alternatives, other shapes
+its text and drops its id and shape) into a `mindmap`. Styling is dropped and
+the diagram still imports, because a Canvas block takes the Canvas theme: a
+`%%{init: …}%%` or other `%%{…}%%` directive in any diagram type, and, in a
+flowchart and a state diagram, `classDef`, `class <ids> <name>`, `style`, and
+`linkStyle` statements and the `:::class` suffix on a node or state, which
+keeps the node (maintainer decision, 2026-11-13). Anything else — another
+diagram type, a `classDiagram` among them, `click`, loops and alternatives, other shapes
 and links, a subgraph nested deeper than three levels, a note spanning two participants, an `FK` or
 `UK` key, a non-identifying (`..`) relationship, two ids that would collide, a source over 32,768
 characters, or a translation the block catalog refuses — returns a typed

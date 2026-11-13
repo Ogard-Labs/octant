@@ -90,11 +90,63 @@ describe("importing a Mermaid flowchart", () => {
     });
   });
 
-  it("refuses styling, interaction, other shapes, and other links, naming the line", () => {
+  it("drops styling and imports the same nodes and links as the unstyled flowchart", () => {
+    const plain = [
+      "flowchart LR",
+      "  a[Queue] --> b{Ready?}",
+      "  b -->|yes| c([Ship]) & d[(Ledger)]",
+      "  b -. no .-> a",
+    ].join("\n");
+    const styled = [
+      "flowchart LR",
+      "  classDef hot fill:#f96,stroke:#333,stroke-width:2px;",
+      "  classDef cold,quiet fill:#eef",
+      "  a[Queue]:::hot --> b{Ready?}:::cold",
+      "  b -->|yes| c([Ship]):::hot & d[(Ledger)]:::my-class",
+      "  b:::cold -. no .-> a",
+      "  class a,b hot",
+      "  class c cold;",
+      "  style d fill:#bbf,stroke:#f66,stroke-dasharray: 5 5",
+      "  linkStyle 0,1 stroke:#f00,stroke-width:4px",
+      "  linkStyle default stroke:#999",
+    ].join("\n");
+    expect(imported(styled)).toEqual(imported(plain));
+    expect(imported("flowchart TD\n  a:::hot\n  b:::hot --> a")).toEqual(
+      imported("flowchart TD\n  a\n  b --> a"),
+    );
+  });
+
+  it("keeps three colons inside a label and refuses a class marker that is not a node's suffix", () => {
+    expect(
+      imported('flowchart TD\n  a["std:::move"]:::hot --> b[ns:::name]\n  b -->|x:::y| c'),
+    ).toMatchObject({
+      nodes: [
+        { nodeId: "a", label: "std:::move" },
+        { nodeId: "b", label: "ns:::name" },
+        { nodeId: "c", label: "c" },
+      ],
+      edges: [{ source: "a", target: "b" }, { label: "x:::y" }],
+    });
+    expect(refusal("flowchart TD\n  a --> b\n  a:::hot[Label] --> b").line).toBe(3);
+    expect(refusal("flowchart TD\n  a:::").line).toBe(2);
+  });
+
+  it("ignores an init directive, on one line or several, and still names the right line", () => {
+    const plain = imported("flowchart TD\n  a --> b");
+    expect(imported('%%{init: {"theme": "dark"}}%%\nflowchart TD\n  a --> b')).toEqual(plain);
+    expect(
+      imported(
+        '%%{\n  init: {\n    "theme": "base",\n    "themeVariables": { "primaryColor": "#f00" }\n  }\n}%%\nflowchart TD\n  a --> b',
+      ),
+    ).toEqual(plain);
+    expect(imported('%%{init: {"theme": "dark"}}%% flowchart TD\n  a --> b')).toEqual(plain);
+    expect(imported("flowchart TD\n  %%{wrap}%%\n  a --> b")).toEqual(plain);
+    expect(refusal("%%{\n  init: {}\n}%%\nflowchart TD\n  a <--> b").line).toBe(5);
+  });
+
+  it("refuses interaction, other shapes, and other links, naming the line", () => {
     for (const [statement, line] of [
-      ["  classDef hot fill:#f00", 2],
       ['  click a href "https://example.com"', 2],
-      ["  style a fill:#f00", 2],
       ["  a <--> b", 2],
       ["  a -.- b", 2],
       ["  a{{Hexagon}} --> b", 2],
@@ -332,6 +384,34 @@ describe("importing the other Mermaid diagram kinds", () => {
     ]);
   });
 
+  it("drops a state diagram's styling and keeps its states and transitions", () => {
+    const plain =
+      "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Busy: start\n  Busy --> [*]\n  Parked";
+    const styled = [
+      "stateDiagram-v2",
+      "  classDef alert fill:#f00,color:white",
+      "  [*] --> Idle",
+      "  Idle:::calm --> Busy:::alert: start",
+      "  Busy --> [*]",
+      "  Parked:::calm",
+      "  class Idle,Parked calm",
+      "  style Busy fill:#f00",
+    ].join("\n");
+    expect(imported(styled)).toEqual(imported(plain));
+    expect(imported("stateDiagram-v2\n  A --> B: std:::move")).toMatchObject({
+      transitions: [{ label: "std:::move" }],
+    });
+  });
+
+  it("still refuses a class diagram, and a class statement where Mermaid has none", () => {
+    const diagram = refusal("classDiagram\n  class Animal\n  Animal <|-- Duck");
+    expect(diagram.reason).toBe("unsupported-diagram");
+    expect(diagram.line).toBe(1);
+    expect(refusal("sequenceDiagram\n  A->>B: hi\n  class A hot").line).toBe(3);
+    expect(refusal("erDiagram\n  A ||--o{ B : has\n  classDef hot fill:#f00").line).toBe(3);
+    expect(refusal("mindmap\n  Root\n    Topic\n    :::urgent").line).toBe(4);
+  });
+
   it("refuses a note that spans two participants rather than pinning it to one", () => {
     const refused = refusal("sequenceDiagram\n  A->>B: hi\n  Note over A,B: shared");
     expect(refused.reason).toBe("unsupported-construct");
@@ -454,8 +534,8 @@ describe("importing the other Mermaid diagram kinds", () => {
   });
 
   it("reads a node whose id starts with a styling keyword or ends in o or x as a node", () => {
-    // `class`, `style`, `title`, and `click` are refused as statements, not
-    // as the first letters of an id; `o--` and `x--` are refused as links,
+    // `class` and `style` are dropped, and `title` and `click` refused, as
+    // statements, not as the first letters of an id; `o--` and `x--` are refused as links,
     // not as the last letter of an id before an arrow.
     expect(
       imported("flowchart TD\n  classroom --> styles[CSS]\n  titleBar --> clickCount"),
@@ -471,8 +551,10 @@ describe("importing the other Mermaid diagram kinds", () => {
         { source: "box", target: "lid", style: "line" },
       ],
     });
-    // The statements and the links themselves are still refused.
-    expect(refusal("flowchart TD\n  a --> b\n  class a hot").line).toBe(3);
+    // A `class` line that is not `class <ids> <name>` is no styling
+    // statement, and the links themselves are still refused.
+    expect(refusal("flowchart TD\n  a --> b\n  class --> b").line).toBe(3);
+    expect(refusal("flowchart TD\n  a --> b\n  class a").line).toBe(3);
     expect(refusal("flowchart TD\n  a o--o b").reason).toBe("unsupported-construct");
     expect(refusal("flowchart TD\n  a x--x b").reason).toBe("unsupported-construct");
   });
