@@ -12,6 +12,7 @@ import type {
   CodeDebugConfigurationsResult,
 } from "@octant/contracts/code-debug";
 import { Bug, Play, Plus, RotateCw } from "lucide-react";
+import { useDockBarControls } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { codeEditorRevealKey, requestCodeEditorReveal } from "../code/codeEditorReveal";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -288,25 +289,47 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   );
 
   const session = thread.session;
-  return (
-    <section aria-label="Run and debug" className="run-debug">
-      <header className="run-debug__toolbar">
-        <Bug aria-hidden="true" size={16} />
-        <h2 className="run-debug__title">Run and debug</h2>
-        {session === undefined && !localOnly ? (
-          <OctantIconButton
-            disabled={listing.kind === "loading"}
-            label="Refresh configurations"
-            onClick={() => {
+  const refreshable = session === undefined && !localOnly;
+  const hosted = useDockBarControls(
+    refreshable
+      ? [
+          {
+            kind: "button",
+            id: "refresh",
+            label: "Refresh configurations",
+            icon: RotateCw,
+            onSelect: () => {
               void refresh();
               validation.refresh();
-            }}
-            type="button"
-          >
-            <RotateCw aria-hidden="true" size={14} />
-          </OctantIconButton>
-        ) : null}
-      </header>
+            },
+            disabled: listing.kind === "loading",
+          },
+        ]
+      : [],
+  );
+  return (
+    <section aria-label="Run and debug" className="run-debug">
+      {hosted !== undefined ? (
+        <h2 className="visually-hidden">Run and debug</h2>
+      ) : (
+        <header className="run-debug__toolbar">
+          <Bug aria-hidden="true" size={16} />
+          <h2 className="run-debug__title">Run and debug</h2>
+          {session === undefined && !localOnly ? (
+            <OctantIconButton
+              disabled={listing.kind === "loading"}
+              label="Refresh configurations"
+              onClick={() => {
+                void refresh();
+                validation.refresh();
+              }}
+              type="button"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+            </OctantIconButton>
+          ) : null}
+        </header>
+      )}
       <div className="run-debug__content">
         {!localOnly &&
         (listing.kind === "listed" ||

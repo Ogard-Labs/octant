@@ -1142,16 +1142,16 @@ strong {
   margin-top: auto;
 }
 
-/* The account row is the sidebar's 40px foot. Its avatar is two pixels
-   short of the icon boxes above it, so it sits two pixels further in and
-   its centre lands on the icon column: 10px keeps the 20px avatar centred on
-   the 20px column of the 16px navigation icons at the 12px inset, which is
-   why these two values stay off the 4px scale. Only the start is pulled in:
-   the chevron ends on the navigation inset, the edge a thread's status mark
-   ends on above it. */
+/* The account row is the sidebar's 44px foot. Its 20px avatar is centred on
+   the centre line of the 16px navigation icons above it (the 12px inset plus
+   half an icon), not left-aligned with them: the avatar's start is the inset
+   less the two pixels it is wider than an icon on each side, which is why
+   this value stays off the 4px scale. Only the start is pulled in: the
+   chevron ends on the navigation inset, the edge a thread's status mark ends
+   on above it. */
 .sidebar-profile .sidebar-item {
   min-height: var(--oct-nav-head-h);
-  padding-inline: 10px var(--oct-nav-inset);
+  padding-inline: calc(var(--oct-nav-inset) - (20px - var(--oct-icon-md)) / 2) var(--oct-nav-inset);
   gap: 6px;
 }
 
@@ -1472,6 +1472,21 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
+/* A header that shows a title (data-header-kind="title") starts its text on
+   the edge of the thread's text column below, so the eye reads one line down
+   from the title to the transcript. The edge is read from the column's own
+   width (`--oct-thread-column`, one property both rules use): half of what the
+   pane leaves beside it, never under the 20px the panel's gutter holds. The
+   grip's own 4px padding and 1px border are taken off so the text, not the
+   grip's fill, stands on it. The percentage is the pane's width, as the
+   column's is. A header that shows content tabs keeps its own insets: the
+   tabs lead it, and no title is there to line up. */
+.workspace-pane__header[data-header-kind="title"] {
+  --pane-title-edge: max(var(--oct-space-5), calc((100% - var(--oct-thread-column)) / 2));
+  --pane-title-start: calc(var(--pane-title-edge) - var(--oct-space-1) - 1px);
+  padding-left: var(--pane-title-start);
+}
+
 /* Only the top-right pane shares its edge with window controls. Reserving
    their width in every split pulled each close button away from its edge. */
 .workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header {
@@ -1499,13 +1514,15 @@ strong {
   margin-right: var(--oct-space-1);
 }
 
-/* The tab sits in the corner the sidebar and the title band make, so it takes
-   the same inset from both. Keep the native header on the compact 34px
-   centerline with the window controls — a taller 42px band was matching a
-   chrome offset that no longer exists. */
+/* Keep the native header on the compact 34px centerline with the window
+   controls — a taller 42px band was matching a chrome offset that no longer
+   exists. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
   padding-left: var(--oct-space-3);
+}
+html[data-octant-native-host="true"] .workspace-pane__header[data-header-kind="title"] {
+  padding-left: var(--pane-title-start);
 }
 
 /* Reader rails replace the pane rather than opening beside it. Their opaque
@@ -1535,11 +1552,19 @@ html[data-octant-native-host="true"]
 .shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
 }
+.shell--sidebar-collapsed .workspace-pane__header[data-header-kind="title"] {
+  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
+}
 
 /* Native header padding must not cover the leading controls when navigation
    is collapsed. Only the top-left pane shares that part of the title bar. */
 html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+html[data-octant-native-host="true"]
+  .shell--sidebar-collapsed
+  .workspace-pane__header[data-header-kind="title"] {
+  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
@@ -1552,6 +1577,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   > :last-child
   .workspace-pane__header {
   padding-left: var(--oct-space-3);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="horizontal"]
+  > :last-child
+  .workspace-pane__header[data-header-kind="title"],
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="vertical"]
+  > :last-child
+  .workspace-pane__header[data-header-kind="title"] {
+  padding-left: var(--pane-title-start);
 }
 
 /* The grip is the pane's one drag handle: the environment mark, the title,
@@ -1633,7 +1668,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   height: 20px;
   color: var(--oct-muted);
   background: var(--oct-fg-soft);
-  border: 1px solid var(--oct-border-soft);
+  border: 1px solid var(--oct-hairline);
   border-radius: 4px;
 }
 
