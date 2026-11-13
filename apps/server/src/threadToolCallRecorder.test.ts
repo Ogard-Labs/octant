@@ -127,6 +127,31 @@ describe("thread tool-call recorder", () => {
     ]);
   });
 
+  it("keeps no output of a call whose input arrived while the setting was off", () => {
+    const connection = open();
+    let enabled = false;
+    const recorder = recorders(connection, () => enabled)(recorded);
+    recorder.observe(event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }));
+    recorder.observe(
+      event({
+        kind: "tool-call-content",
+        toolCallId: "call-1",
+        part: "input",
+        text: '{"file_path":"/home/person/.ssh/id_ed25519"}',
+      }),
+    );
+    enabled = true;
+    recorder.observe(
+      event({
+        kind: "tool-call-content",
+        toolCallId: "call-1",
+        part: "output",
+        text: "PRIVATE KEY",
+      }),
+    );
+    expect(readThreadToolCallRecords(connection, turn)).toEqual([]);
+  });
+
   it("stores a known key format and a value the credential broker issued only as the redaction mark", () => {
     const connection = open();
     const issued = "broker-issued-value-7d41c0";

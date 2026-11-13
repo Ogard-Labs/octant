@@ -67,6 +67,7 @@ import {
   CLAUDE_SUBAGENT_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
+  claudeToolUseStepId,
   type ClaudeEventContext,
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
@@ -2888,6 +2889,7 @@ function makeConnection(
                       name: string,
                       inputJson: string,
                       signal: AbortSignal,
+                      toolUseId?: string,
                     ): Promise<ManagedToolAnswer> => {
                       const denied = { resultJson: '{"error":"tool-unavailable"}', isError: true };
                       if (
@@ -2902,7 +2904,16 @@ function makeConnection(
                         state.pendingAppTools.size >= MAX_PENDING_APPROVALS
                       )
                         return denied;
-                      const requestId = factories.makeRequestId();
+                      // Asked under the step id of the row the tool use
+                      // opened, so the call's record opens from that row.
+                      const requestId =
+                        (toolUseId === undefined
+                          ? undefined
+                          : claudeToolUseStepId(
+                              state.context,
+                              toolUseId,
+                              `mcp__octant__${name}`,
+                            )) ?? factories.makeRequestId();
                       if (state.pendingAppTools.has(requestId)) return denied;
                       const pending = deferred<ManagedToolAnswer>();
                       state.pendingAppTools.set(requestId, { answer: pending, signal });

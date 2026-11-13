@@ -510,6 +510,22 @@ function toolState(
   return { state, created: true };
 }
 
+/**
+ * The step id of the row a tool use opened. Claude Code runs a tool only after
+ * its transcript block, so the row is already there; `undefined` when it is
+ * not, or when the id belongs to a different tool.
+ */
+export function claudeToolUseStepId(
+  context: ClaudeEventContext,
+  providerToolUseId: string,
+  toolName: string,
+): string | undefined {
+  const state = context.toolStates.get(providerToolUseId);
+  return state !== undefined && state.toolName === normalized(toolName, LABEL_MAX_CHARACTERS)
+    ? state.toolCallId
+    : undefined;
+}
+
 function mapToolUse(
   context: ClaudeEventContext,
   content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,

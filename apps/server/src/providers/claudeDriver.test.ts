@@ -609,6 +609,81 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("asks for an app-owned tool under the step id of the row Claude's tool use opened", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const definition = { name: "octant_browser", inputSchema: { type: "object" } };
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "Read the browser",
+          attachments: [],
+          tools: [definition],
+        }),
+      );
+      const query = f.queries[0];
+      const call = query?.send.mock.calls[0]?.[0].onAppToolCall;
+      if (query === undefined || call === undefined) throw new Error("Expected a tool callback");
+      const subscriptionScope = await Effect.runPromise(Scope.make());
+      try {
+        const stream = await Effect.runPromise(
+          acquired.connection.subscribe.pipe(Effect.provideService(Scope.Scope, subscriptionScope)),
+        );
+        const seen = Effect.runPromise(
+          Stream.runCollect(
+            stream.pipe(
+              Stream.filter(
+                (event) => event.kind === "tool-start" || event.kind === "tool-request",
+              ),
+              Stream.take(2),
+            ),
+          ),
+        );
+        await query.emit({
+          kind: "stream-event",
+          sessionId: "sdk-session-1",
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: {
+              kind: "tool-use",
+              toolUseId: "toolu-browser",
+              toolName: "mcp__octant__octant_browser",
+              input: { operation: "read-page" },
+            },
+          },
+        });
+        const answer = call(
+          "octant_browser",
+          '{"operation":"read-page"}',
+          new AbortController().signal,
+          "toolu-browser",
+        );
+        const [started, requested] = Array.from(await seen);
+        if (started?.kind !== "tool-start" || requested?.kind !== "tool-request")
+          throw new Error("Expected the tool row, then its request");
+        expect(requested.requestId).toBe(started.toolCallId);
+        await Effect.runPromise(
+          acquired.connection.answerTool({
+            sessionId,
+            requestId: requested.requestId,
+            resultJson: "{}",
+            isError: false,
+          }),
+        );
+        await answer;
+      } finally {
+        await Effect.runPromise(Scope.close(subscriptionScope, Exit.void));
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("maps every Octant policy to the exact Claude permission options", () => {
     expect(claudeExecutionOptions("full-access")).toEqual({
       permissionMode: "bypassPermissions",

@@ -1,4 +1,7 @@
 import type { ProviderFailure } from "@octant/contracts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Chunk, Effect, Stream } from "effect";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -246,6 +249,7 @@ describe("Claude Agent SDK port", () => {
   );
 
   test("connects only the app-owned tool server before delivering a tool-enabled prompt", async () => {
+    const calls: Array<ReadonlyArray<unknown>> = [];
     const name = "mcp__octant__octant_browser";
     const harness = makeHarness([
       {
@@ -261,11 +265,34 @@ describe("Claude Agent SDK port", () => {
           yield* query.send({
             text: "Inspect the browser",
             appManagedTools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
-            onAppToolCall: async () => ({ resultJson: "{}", isError: false }),
+            onAppToolCall: async (...call) => {
+              calls.push(call.slice(0, 2).concat(call.slice(3)));
+              return { resultJson: "{}", isError: false };
+            },
           });
           expect(harness.query.setMcpServers).toHaveBeenCalledWith({
             octant: expect.objectContaining({ type: "sdk", name: "octant" }),
           });
+          const connected = harness.query.setMcpServers.mock.calls[0]?.[0]["octant"];
+          const server =
+            typeof connected === "object" && connected !== null && "instance" in connected
+              ? connected.instance
+              : undefined;
+          if (!(server instanceof McpServer)) throw new Error("Expected the tool server");
+          const client = new Client({ name: "runtime", version: "1" });
+          const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+          yield* Effect.promise(() => server.connect(serverTransport));
+          yield* Effect.promise(() => client.connect(clientTransport));
+          yield* Effect.promise(() =>
+            client.callTool({
+              name: "octant_browser",
+              arguments: {},
+              _meta: { "claudecode/toolUseId": "toolu-1" },
+            }),
+          );
+          yield* Effect.promise(() => client.close());
+          // The tool_use id rides along, so the call answers under its row.
+          expect(calls).toEqual([["octant_browser", "{}", "toolu-1"]]);
           const messages = yield* Stream.runCollect(query.messages);
           expect(Chunk.toReadonlyArray(messages)[0]).toMatchObject({ kind: "initialized" });
         }),

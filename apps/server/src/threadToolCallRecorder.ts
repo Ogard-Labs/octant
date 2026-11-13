@@ -147,6 +147,10 @@ export function threadToolCallRecorders(options: {
   return (turn) => {
     // `tool-call-content` names only the call; its start named the tool.
     const toolNames = new Map<string, string>();
+    // A call whose input went unread (recording was off) cannot be judged for
+    // a protected path, so its output is refused even if recording comes back
+    // on before it returns: the store judges paths only on input parts.
+    const unjudged = new Set<string>();
     const write = (call: {
       readonly toolCallId: string;
       readonly part: "input" | "output";
@@ -154,7 +158,11 @@ export function threadToolCallRecorders(options: {
       readonly truncated: boolean;
     }) => {
       try {
-        if (!options.enabled() || call.text === "") return;
+        if (!options.enabled()) {
+          if (call.part === "input") unjudged.add(call.toolCallId);
+          return;
+        }
+        if (call.text === "" || (call.part === "output" && unjudged.has(call.toolCallId))) return;
         const toolName = toolNames.get(call.toolCallId);
         writeThreadToolCallPart(options.connection, {
           mode: turn.mode,
