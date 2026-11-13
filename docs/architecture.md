@@ -667,12 +667,23 @@ ends at once when the thread, its posture, its checkout, the confirmation, or
 the Project goes. An agent starts, controls, reads and stops a debug session
 through one plugin-shaped app-managed tool, `octant_debug` (`code-debug` and
 `code-debug-evaluate` in the closed catalog): unasked at Full access,
-approval-gated below it (a configuration the person confirmed, then one
-answer in the thread per session), and refused in Plan (maintainer decision,
-2026-11-12). The tool starts only a configuration the Project already holds,
-is offered only outside Plan where a debug adapter is effective, and returns
-bounded, redacted results marked as outside content
+approval-gated below it, and refused in Plan (maintainer decision,
+2026-11-12). Below Full access the gate is one answer in the thread per
+session, on a card that shows the configuration (program, arguments, working
+directory, and the names of its environment variables, never their values),
+so no confirmation on record is needed first, and that answer covers every
+expression the agent evaluates in the session, after the thread has read
+outside content too (maintainer decision, 2026-11-13). The tool starts only a
+configuration the Project already holds, is offered only outside Plan where a
+debug adapter is effective, and returns bounded, redacted results marked as
+outside content
 ([Agent debug tool rules](design/language-services.md#agent-debug-tool-rules)).
+The agent may also attach to a process that already runs, by process id or
+by loopback port, at Full access only: an attached process cannot be put in
+the session's capsule, so below Full access attach is refused, not asked
+(maintainer decision, 2026-11-13; not built yet: today the tool offers no
+attach;
+[Attach to a running process](design/language-services.md#attach-to-a-running-process)).
 A paired device drives a session as a local window does (maintainer decision,
 2026-11-12). Not built yet: today the routes under `/api/code/debug/` are
 local-window only with no remote action, so a paired device is refused.

@@ -710,7 +710,7 @@ describe("Code debug sessions", () => {
     }
   });
 
-  it("covers an expression by the session's approval, and asks afresh for each one once the thread read outside content", () => {
+  it("covers an expression by the session's approval, after the thread read outside content too", () => {
     const approved = thread({ approvalSatisfied: true });
     expect(debug(evaluate, { thread: approved }, "code-debug-evaluate")).toMatchObject({
       kind: "allow",
@@ -724,7 +724,10 @@ describe("Code debug sessions", () => {
         { thread: { ...approved, externalContentIngested: true } },
         "code-debug-evaluate",
       ),
-    ).toMatchObject({ kind: "prompt", reason: "taint-requires-fresh-confirmation" });
+    ).toMatchObject({ kind: "allow" });
+    expect(
+      debug(evaluate, { thread: thread({ externalContentIngested: true }) }, "code-debug-evaluate"),
+    ).toMatchObject({ kind: "prompt", approvalClass: "shell-commands" });
   });
 
   it("keeps an expression out of the session entry, refuses Chat and Work, and follows a profile by the tool's name", () => {

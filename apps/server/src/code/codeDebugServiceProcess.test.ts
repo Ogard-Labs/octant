@@ -1519,7 +1519,7 @@ describe("the agent's debug tool", () => {
     expect(test.launches()).toBe(0);
   });
 
-  it("below Full access starts only a configuration the person confirmed, and only once the person allows the session", async () => {
+  it("below Full access starts a configuration nobody confirmed on one answer, whose card shows the program, arguments, folder and environment names", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));
     await test.enable();
@@ -1533,58 +1533,65 @@ describe("the agent's debug tool", () => {
             request: "launch",
             name: "From the repository",
             program: `\${workspaceFolder}/src/main.js`,
+            args: ["--verbose", "--key", "AKIAIOSFODNN7EXAMPLE"],
+            cwd: `\${workspaceFolder}/src`,
+            env: { FIXTURE_MODE: "value-the-card-never-shows", API_TOKEN: "another-value" },
           },
         ],
       }),
     );
-    // What a turn at Full access could start from the repository's file.
-    test.windowGrant.fullAccess = true;
-    const proposed = await listedDigest(agentTools(test), "From the repository");
-    test.windowGrant.fullAccess = false;
-    // Nothing is confirmed, and the repository's proposal is not startable here.
-    const unconfirmed = agentTools(test);
-    expect((await unconfirmed.call({ operation: "configurations" })).result).toEqual({
-      configurations: [],
-    });
-    expect(await unconfirmed.call({ operation: "start", configuration: proposed })).toMatchObject({
-      isError: true,
-      result: { error: "unknown-configuration" },
-    });
-    // A turn narrowed below a Full-access thread starts no proposal either.
-    test.windowGrant.fullAccess = true;
-    expect(
-      await agentTools(test, { turn: "approval-gated" }).call({
-        operation: "start",
-        configuration: proposed,
-      }),
-    ).toMatchObject({ isError: true, result: { error: "unknown-configuration" } });
-    test.windowGrant.fullAccess = false;
-    expect(unconfirmed.asked).toEqual([]);
-    expect(test.launches()).toBe(0);
-
-    const value = test.configuration();
-    expect(await test.approve(value)).toMatchObject({ status: "approved" });
+    // Nothing is confirmed, and the repository's proposal is listed all the same.
     const denied = agentTools(test, { answer: "denied" });
-    const digest = await listedDigest(denied);
-    // The listing names the environment's keys and never its values.
     expect((await denied.call({ operation: "configurations" })).result).toMatchObject({
       configurations: [
         {
-          name: "Run the fixture",
+          name: "From the repository",
           program: "src/main.js",
-          env: ["FIXTURE_MODE"],
-          source: "confirmed",
+          cwd: "src",
+          // The listing names the environment's keys and never its values.
+          env: ["FIXTURE_MODE", "API_TOKEN"],
+          source: "launch-file",
         },
       ],
     });
+    const digest = await listedDigest(denied, "From the repository");
     expect(await denied.call({ operation: "start", configuration: digest })).toMatchObject({
       isError: true,
       result: { error: "approval-denied" },
     });
     expect(denied.asked).toHaveLength(1);
-    expect(denied.asked[0]).toContain("Run the fixture");
-    expect(denied.asked[0]).toContain("src/main.js --verbose");
+    const card = denied.asked[0] ?? "";
+    expect(card).toContain('"From the repository"');
+    expect(card).toContain("Program: src/main.js");
+    expect(card).toContain("Arguments: --verbose --key");
+    expect(card).toContain("Working directory: src");
+    expect(card).toContain("Environment variables (values not shown): FIXTURE_MODE, API_TOKEN");
+    expect(card).toContain("the repository's launch file");
+    expect(card).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(card).not.toContain("value-the-card-never-shows");
+    expect(card).not.toContain("another-value");
     expect(test.launches()).toBe(0);
+    // A turn narrowed below a Full-access thread asks the same way.
+    test.windowGrant.fullAccess = true;
+    const narrowed = agentTools(test, { turn: "approval-gated", answer: "denied" });
+    expect(await narrowed.call({ operation: "start", configuration: digest })).toMatchObject({
+      isError: true,
+      result: { error: "approval-denied" },
+    });
+    expect(narrowed.asked).toHaveLength(1);
+    test.windowGrant.fullAccess = false;
+    expect(test.launches()).toBe(0);
+    // A window's own Start still needs its confirmation.
+    const proposal = await test.configurations();
+    if (proposal.status !== "listed" || proposal.launchFile.status !== "read") {
+      throw new Error(`no launch file read: ${JSON.stringify(proposal)}`);
+    }
+    const [proposed] = proposal.launchFile.proposals;
+    if (proposed?.status !== "proposed") throw new Error("no proposal");
+    expect(await test.start(proposed.configuration)).toEqual({
+      status: "refused",
+      reason: "approval-required",
+    });
 
     const tools = agentTools(test);
     const started = await tools.call({
@@ -1595,11 +1602,12 @@ describe("the agent's debug tool", () => {
     // The breakpoint is hit before the start answers.
     expect(started).toMatchObject({
       isError: false,
-      result: { started: "Run the fixture", session: "stopped", reason: "breakpoint" },
+      result: { started: "From the repository", session: "stopped", reason: "breakpoint" },
     });
     expect(tools.asked).toHaveLength(1);
     expect(test.launches()).toBe(1);
-    // Control and reads of the approved session ask nothing more.
+    // Control and reads of the answered session ask nothing more, and it goes
+    // on with no confirmation on record.
     const stack = await tools.call({ operation: "stack" });
     expect((stack.result.frames as ReadonlyArray<unknown>)[0]).toMatchObject({
       path: "src/main.js",
@@ -1612,6 +1620,9 @@ describe("the agent's debug tool", () => {
       session: "stopped",
       reason: "step",
     });
+    // The reads above marked the thread; the one answer covers an expression too.
+    expect(tools.marks.length).toBeGreaterThan(0);
+    expect((await tools.call({ operation: "evaluate", expression: "count" })).isError).toBe(false);
     expect(tools.asked).toHaveLength(1);
     // A second start is refused while the thread holds a session, unasked.
     expect(await tools.call({ operation: "start", configuration: digest })).toMatchObject({
@@ -1625,7 +1636,7 @@ describe("the agent's debug tool", () => {
     if (listed.status !== "listed" || listed.session === undefined) {
       throw new Error(`no session listed: ${JSON.stringify(listed)}`);
     }
-    expect(listed.session.name).toBe("Run the fixture");
+    expect(listed.session.name).toBe("From the repository");
     expect(await test.ask(listed.session.sessionId, { kind: "stop" })).toEqual({
       status: "ended",
       endReason: "stopped",
@@ -1755,7 +1766,7 @@ describe("the agent's debug tool", () => {
     expect(everything).not.toContain("counted 42");
   });
 
-  it("asks once before touching a session the person started, and again for each expression once the thread read outside content", async () => {
+  it("asks once before touching a session the person started, and that answer covers expressions after the thread read outside content", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));
     await test.enable();
@@ -1771,22 +1782,24 @@ describe("the agent's debug tool", () => {
     const next = agentTools(test, { approvals });
     expect((await next.call({ operation: "threads" })).isError).toBe(false);
     expect(next.asked).toEqual([]);
-    // That read marked the thread, so an expression is confirmed by itself.
+    // That read marked the thread, and the session's answer still covers an expression.
+    expect(next.marks.length).toBeGreaterThan(0);
     for (const expression of ["count", "secret"]) {
       expect((await next.call({ operation: "evaluate", expression })).isError).toBe(false);
     }
-    expect(next.asked).toHaveLength(2);
-    expect(next.asked[1]).toContain("secret");
     expect((await next.call({ operation: "stack" })).isError).toBe(false);
-    expect(next.asked).toHaveLength(2);
+    expect(next.asked).toEqual([]);
 
-    const declined = agentTools(test, { approvals, answer: "denied" });
-    // Marked by its own turn's read first.
-    expect((await declined.call({ operation: "threads" })).isError).toBe(false);
+    // A session nobody answered for asks before an expression, and a refusal runs nothing.
+    const declined = agentTools(test, {
+      approvals: createCodeDebugAgentSessionApprovals(),
+      answer: "denied",
+    });
     expect(await declined.call({ operation: "evaluate", expression: "count" })).toMatchObject({
       isError: true,
       result: { error: "approval-denied" },
     });
+    expect(declined.asked).toHaveLength(1);
   });
 
   it("asks a turn narrowed below Full access before it touches a session a Full access turn started unasked", async () => {

@@ -395,9 +395,12 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeCodeDebugSessionToolArguments(value),
   }),
-  // An expression is code the agent wrote, run inside the program. The
-  // session's approval covers it until the thread has read outside content;
-  // after that each one is confirmed afresh, as each shell command is.
+  // An expression is code the agent wrote, run inside the program, so it
+  // has its own entry and its own argument schema. The person's one answer
+  // for the session covers it, on a marked thread too (maintainer decision,
+  // 2026-11-13): every read of a session marks the thread, so asking afresh
+  // after a mark asked at nearly every expression, and the program the
+  // expression runs in is the one the answer named, in the same capsule.
   entry({
     capabilityId: "code-debug-evaluate",
     version: 1,
@@ -405,7 +408,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     modes: ["code"],
     requiredCapabilityClass: "shell",
     approvalClass: "shell-commands",
-    irreversibleUnderTaint: true,
+    irreversibleUnderTaint: false,
     resultTaintsThread: true,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeCodeDebugEvaluateToolArguments(value),

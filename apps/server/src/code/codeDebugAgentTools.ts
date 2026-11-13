@@ -52,9 +52,10 @@ import { digestOf, type CodeDebugCaller, type CodeDebugService } from "./codeDeb
  * the level the turn runs at, then by the debug service as a window's request
  * is. Plan refuses every operation. At Full access nothing asks. Below it the
  * person is asked once per session, in the thread, before the session starts
- * (or before the agent first touches a session the person started), and that
- * answer covers controlling and reading that session; an expression asks
- * again once the thread has read outside content. What a session shows is the
+ * (or before the agent first touches a session the person started). The card
+ * shows the configuration, so no confirmation on record is needed first, and
+ * the answer covers controlling and reading that session and every
+ * expression in it, on a marked thread too. What a session shows is the
  * program's own data: it is redacted as tool output is, cut to the tool's
  * bounds, journaled as outside content, and passed by Octant Shield's Watcher
  * before the model sees it.
@@ -67,6 +68,9 @@ const MAX_RESULT_LIST_BYTES = 48 * 1024;
 const SETTLE_AFTER_CONTROL_MS = 5_000;
 const SETTLE_POLL_MS = 50;
 const MAX_SHOWN_ARGUMENT_LENGTH = 512;
+/** A card is cut at 2 KiB from its end, so what runs comes first and each part is bounded. */
+const MAX_SHOWN_PATH_LENGTH = 256;
+const MAX_SHOWN_ENVIRONMENT_NAMES_LENGTH = 384;
 const STALE_MESSAGE =
   "This thread no longer holds the authority a debug session needs. Continue without it and say so.";
 const INVALID_INPUT_MESSAGE =
@@ -199,9 +203,7 @@ export function createCodeDebugAgentTools(
     }
   };
 
-  const startable = async (
-    turnPosture: CodeThread["executionPolicy"],
-  ): Promise<
+  const startable = async (): Promise<
     | {
         readonly status: "listed";
         readonly configurations: ReadonlyArray<Startable>;
@@ -219,10 +221,10 @@ export function createCodeDebugAgentTools(
         source: "confirmed",
       });
     }
-    // A repository's proposal runs unconfirmed only where a start needs no
-    // confirmation: a turn at Full access. Below it the person confirms one
-    // in the Run and debug panel first, as for their own Start.
-    if (turnPosture === "full-access" && listing.launchFile.status === "read") {
+    // A repository's proposal needs no confirmation first: at Full access
+    // nothing asks, and below it the start's own card shows the person what
+    // would run.
+    if (listing.launchFile.status === "read") {
       for (const proposal of listing.launchFile.proposals) {
         if (proposal.status !== "proposed") continue;
         const configurationDigest = digestOf(proposal.configuration);
@@ -300,7 +302,7 @@ export function createCodeDebugAgentTools(
     const asks = decision.kind === "prompt";
 
     if (call.operation === "configurations") {
-      const listed = await startable(current.executionPolicy);
+      const listed = await startable();
       if (listed.status === "refused") return serviceRefusal(listed.reason);
       return {
         // A person may have typed a key as an argument. The listing is the
@@ -321,7 +323,7 @@ export function createCodeDebugAgentTools(
           `This thread already runs the debug session "${running.name}". Stop it first.`,
         );
       }
-      const listed = await startable(current.executionPolicy);
+      const listed = await startable();
       if (listed.status === "refused") return serviceRefusal(listed.reason);
       const chosen = listed.configurations.find(
         (candidate) => String(candidate.configurationDigest) === String(call.configuration),
@@ -329,18 +331,24 @@ export function createCodeDebugAgentTools(
       if (chosen === undefined) {
         return refusedCall(
           "unknown-configuration",
-          "No configuration this turn may start has that digest. Call configurations for the list; below Full access the person confirms one in the Run and debug panel first.",
+          "No configuration this turn may start has that digest. Call configurations for the list.",
         );
       }
       if (asks) {
-        const answer = await options.askPerson(startSummary(chosen.configuration), signal);
+        const answer = await options.askPerson(startSummary(chosen), signal);
         if (answer !== "approved") return notApproved(answer);
       }
-      const started = await options.debug.start(caller, {
-        ...scope,
-        configuration: chosen.configuration,
-        breakpoints: (call.breakpoints ?? []).map(fileBreakpoints),
-      });
+      const started = await options.debug.start(
+        caller,
+        {
+          ...scope,
+          configuration: chosen.configuration,
+          breakpoints: (call.breakpoints ?? []).map(fileBreakpoints),
+        },
+        // The card showed exactly this configuration, so the answer stands in
+        // for a confirmation on record, for this session only.
+        { answeredInThread: asks },
+      );
       if (started.status !== "started") return notStarted(started);
       // Only an answer the person gave covers the session. One started
       // unasked at Full access holds none, so a later turn narrowed below
@@ -375,17 +383,11 @@ export function createCodeDebugAgentTools(
     }
     if (asks) {
       const answer = await options.askPerson(
-        call.operation === "evaluate"
-          ? `Let the agent run this expression in the debug session "${running.name}"?\n${call.expression}`
-          : `Let the agent control the debug session "${running.name}"? It may step the program, read its variables and output, evaluate expressions in it, and stop it.`,
+        `Let the agent control the debug session "${running.name}"? It may step the program, read its variables and output, evaluate expressions in it, and stop it.`,
         signal,
       );
       if (answer !== "approved") return notApproved(answer);
-      // An expression asked for under a marked thread is one answer for one
-      // expression; any other answer is for the session.
-      if (decision.reason !== "taint-requires-fresh-confirmation") {
-        options.approvals.remember(options.thread.id, running.sessionId);
-      }
+      options.approvals.remember(options.thread.id, running.sessionId);
     }
     return sessionOperation(running.sessionId, call, signal);
   };
@@ -555,14 +557,37 @@ function agentConfiguration(startable: Startable) {
   };
 }
 
-/** What the person reads before a session starts: the program and how it is run. */
-function startSummary(configuration: CodeDebugConfiguration): string {
-  const args = cut(configuration.args.join(" "), MAX_SHOWN_ARGUMENT_LENGTH).text;
+/**
+ * What the person reads before a session starts, and the only thing they
+ * confirm: the program, its arguments, its folder, and the names of its
+ * environment variables. Values are never shown (one may be a secret the
+ * person typed for the program), and the arguments are redacted as the
+ * listing's are.
+ */
+function startSummary(startable: Startable): string {
+  const { configuration } = startable;
+  const shown = (text: string, maximum: number) => {
+    const bounded = cut(text, maximum);
+    return bounded.cut ? `${bounded.text}… (cut)` : bounded.text;
+  };
+  const args = redactHostSecretsInValue(configuration.args.join(" "));
+  const names = configuration.env.map((entry) => String(entry.key)).join(", ");
   return [
     `Let the agent start the debug session "${configuration.name}"?`,
-    `It runs ${String(configuration.program)}${args.length === 0 ? "" : ` ${args}`}${
-      configuration.cwd === undefined ? "" : ` in ${String(configuration.cwd)}`
-    } under the debugger in this thread's checkout. The agent may then step it, read its variables and output, evaluate expressions in it, and stop it. You can stop it in Run and debug.`,
+    `Program: ${shown(String(configuration.program), MAX_SHOWN_PATH_LENGTH)}`,
+    `Arguments: ${args.length === 0 ? "none" : shown(args, MAX_SHOWN_ARGUMENT_LENGTH)}`,
+    `Working directory: ${
+      configuration.cwd === undefined
+        ? "the checkout's root"
+        : shown(String(configuration.cwd), MAX_SHOWN_PATH_LENGTH)
+    }`,
+    `Environment variables (values not shown): ${
+      names.length === 0 ? "none" : shown(names, MAX_SHOWN_ENVIRONMENT_NAMES_LENGTH)
+    }`,
+    startable.source === "confirmed"
+      ? "From: a configuration confirmed in Run and debug."
+      : "From: the repository's launch file; nobody has confirmed it.",
+    "It runs under the debugger in this thread's checkout, confined as this thread's terminal is. This one answer covers the session: the agent may step it, read its variables and output, evaluate expressions in it, and stop it. You can stop it in Run and debug.",
   ].join("\n");
 }
 
@@ -805,7 +830,7 @@ const REFUSAL_MESSAGES: Readonly<Record<CodeDebugRefusalReason, string>> = {
   "plan-read-only": "Plan is read-only, so it runs and debugs no program.",
   "local-host-required": "Only this host's own windows and this thread's agent debug a program.",
   "approval-required":
-    "The person has not confirmed this configuration as it stands. They confirm it in the Run and debug panel.",
+    "The person has neither confirmed this configuration as it stands nor answered for this session.",
   "configuration-invalid":
     "The configuration's program or folder is no longer a file or folder inside the checkout.",
   "confinement-unavailable": "This host cannot confine a debug session, so none runs.",
