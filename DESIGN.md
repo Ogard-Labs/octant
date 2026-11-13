@@ -6,7 +6,7 @@ public documentation, and marketing material. It holds three things:
 1. [Foundations](#foundations): type, colour, spacing, radii, heights, icons,
    depth and material, motion, focus, and accessibility. Each value is a token,
    defined once.
-2. Components: one specification for each shared adapter in
+2. [Components](#components): one specification for each shared adapter in
    `apps/web/src/ui/base`.
 3. Patterns: arrangements that several screens share.
 
@@ -842,7 +842,7 @@ not fade over what the press opened. Under reduced motion, from the system or fr
 the setting, there is no transition at all: an overlay is there or it is not. A
 recipe carries no arrival or departure classes of its own. A dialog that a
 feature renders only while it is open arrives the same way (`@starting-style`)
-and leaves through `OctantDialogPresence` (see [Dialog presence and the title bar](#dialog-presence-and-the-title-bar)).
+and leaves through [OctantDialogPresence](#octantdialogpresence).
 
 **Press and selection.** A press darkens a control's fill and moves nothing: no
 sink, no scale, on any control. Words in the chrome do not select when the pointer
@@ -963,33 +963,619 @@ title bars, 44px Project rows and always-visible thread row actions). Other widt
 in feature stylesheets are local to that surface. The mobile app has a separate
 design system under `apps/mobile/design-system`.
 
-## Components and patterns
+## Components
 
-The sections below hold the shared component and pattern rules as they stood before the foundations above; they are rewritten next.
+Feature code imports the adapters in `apps/web/src/ui/base`, never
+`ui/shadcn` or `@base-ui/react` directly. The adapters wrap owned recipes in
+`apps/web/src/ui/shadcn`, which follow the Base UI-native shadcn `nova` style and
+its denser controls, except that recipes paint no focus ring, halo or second
+outline (the global `:focus-visible` rule is the only keyboard focus treatment)
+and the badge and the card keep the shape and elevation set here. A recipe's
+heading (a card's or popover's title) takes the recipe's own type role: the
+page's bare `h1` to `h4` defaults sit in the base layer, below every utility, so
+they size reading content and never a component. A recipe styles the state
+attribute the installed Base UI part writes (a selected tab is `data-active`, a
+pressed toggle `data-pressed`, a checked switch `data-checked`), never one it
+invents. Use `cn()` for conditional classes, semantic Tailwind tokens
+(`bg-primary`, `text-muted-foreground`, `border-border`), `size-*` for equal
+dimensions, and `truncate` for clipping. Feature classes position; recipe classes
+paint. Every adapter that renders a control adds `window-no-drag`.
 
-### Cards, buttons, and fields
+Each entry below gives the adapter's purpose, anatomy, sizes and tokens, states,
+keyboard and accessibility, what to do and not do, and where it is in the
+gallery. Values are at the default 13px interface size.
 
-(Every card and popup drew the theme's one floating colour, a hair off the
-page, inside a hairline. On an OLED preset a menu was a black box outlined on
-black, and a pointed-at row could not be seen.) A card is for a discrete object a person acts on
-as a whole: a count tile, a live running-thread card, an action tile, a board
-card, a provider, a Settings group of rows (see "Page shell"). Plain lists, empty states, and
-headers are never cards. A button shaped like a card asks the shared button
-recipe for its `bare` variant, which draws nothing, and the feature stylesheet
-owns its face; every other button keeps the recipe's paint.
-A row of suggestions to type or pick takes the `chip` variant (an outlined chip
-with the control corner, quiet until hovered); a one-off kind beside its recurring siblings takes
-the badge's `dashed` variant; and a field whose frame a feature draws (a search
-box inside a toolbar, a stepper's middle segment) passes `unstyled` to the input
-recipe, as the composer prompt does for the textarea.
-Single-line inputs, text areas, and selects share one field paint, defined once
-in `apps/web/src/ui/shadcn/field-paint.ts`: the strong border and no fill at
-rest, the muted-text border on hover, and the control hover fill on keyboard
-focus; an invalid field keeps its danger border in every state. A feature's
-stylesheet lays a field out (width, height, type size) and never repaints it,
-so the three react alike in light and dark. A search or name field a feature
-draws for itself still takes its edge from the same role (`--input`, the strong
-border), not from the hairline or a control fill.
+### Component gallery
+
+A development-only gallery draws the system in one place: the type roles with
+the size, weight and leading the browser computes for them, the semantic colour
+roles, the spacing and radius tokens, the icon scale, every shared `Octant*`
+adapter in its variants, sizes and states, and a few patterns composed only from
+those pieces (a sidebar slice, a Settings row group, a card, an empty state, the
+title band's buttons). It mounts the real adapters under the real stylesheet
+entry and the real theme provider, with no host, thread or server behind it, so
+what it shows is what the app ships. It has controls for dark and light, the
+glass material, and the interface size. Read it to judge whether controls,
+fields, menus and rows agree before a change to any of them.
+
+The gallery is `apps/web/component-gallery.html` with its source in
+`apps/web/src/gallery/`. Its sections, in order: Type roles, Colour roles,
+Spacing scale, Radii, Icon sizes and stroke, Buttons, Icon button, Fields and
+toggles, Labels, tabs and segments, Menu, select and combobox, Popover, tooltip
+and preview card, Dialog, sheet, notice and toast, and Composed patterns. The
+page is not an input of the production build, so it is served by the Vite dev
+server only (`/component-gallery.html`) and is absent from the packaged app. It
+is not a product surface: it has no entry in navigation, Settings or the command
+palette. A new shared adapter in `apps/web/src/ui/base/` must appear in it, or be
+named in the test's not-shown list with a reason; `Gallery.test.tsx` fails
+otherwise.
+
+### OctantButton and OctantIconButton
+
+**Purpose.** Every button. `octantButtonClassName({ variant, size })` gives the
+same paint to a trigger another adapter renders.
+**Anatomy.** Variants `default` (primary), `solid`, `secondary`, `outline`,
+`ghost`, `destructive`, `link`, `bare`, `rail`, and `chip`; sizes `xs`, `sm`,
+`default`, `lg`, `icon`, `icon-xs`, `icon-sm`. `OctantIconButton` takes a
+required `label` (its accessible name and title) and is the ghost `icon` size.
+**Sizes and tokens.** `xs` 20, `sm` 24, `default` 28, `lg` 32; `icon-xs` 20,
+`icon-sm` 24, `icon` 28 square. Corner `--oct-radius-sm`; 8px inline padding
+(4px on the side of a `data-icon` glyph), 4px gap; label 14/500, 12px on `xs` and
+`sm`; icons 12 on `xs`, 14 on `sm`, 16 otherwise. `default` is the accent with
+`--octant-accent-sheen` and `--octant-shadow-primary`; `solid` is the primary
+text as a fill with the page colour on it, for the one action a surface is for
+where the accent would compete with the content beside it; `secondary` is the
+control fill; `outline` rests on `--octant-outline-rest` (the page colour unless
+the shell names another) with the border; all four take
+`--octant-shadow-control`. `destructive` is a tonal fill (the danger role at
+10%), not a solid one: a red slab reads as the page's subject rather than one
+action on it. `chip` is a 24px outlined chip in the muted ink. `bare` and `rail`
+draw nothing; `rail` also has no border, so the icon rail's button is exactly its
+32px face.
+**States.** Hover lightens or fills (`ghost` and `outline` take the control
+hover fill); a press darkens the fill and sinks the shadow to
+`--octant-shadow-control-pressed`, and moves nothing. `aria-expanded` and keyboard
+focus fill `ghost` and `outline`. Disabled is 0.75 opacity with no pointer events;
+`aria-invalid` takes the danger border.
+**Keyboard and accessibility.** A native button. An icon-only button always has
+an accessible label and a tooltip or title.
+**Do and do not.** A button shaped like a card (a count tile, a rail entry, a live
+card) asks for `bare` and the feature stylesheet owns its face; every other
+button keeps the recipe's paint. A row of suggestions to type or pick takes
+`chip`. A standalone icon-only control has two sizes and nothing between: the
+28px rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
+panel head, or toolbar, and a 24px square for an action inside a row; the
+recipe's `icon` sizes drift with the interface size, so a panel control takes
+`OctantIconButton`. Only a control that floats over content, such as the
+terminal's actions button, keeps a fill and an edge. Do not repaint a button from
+a feature stylesheet; pick a variant.
+**Gallery.** Buttons; Icon button; Composed patterns.
+
+### OctantBadge
+
+**Purpose.** A compact status label.
+**Anatomy.** A `span` with variants `default`, `secondary` (the default),
+`destructive`, `outline`, `dashed`, `success`, and `warning`.
+**Sizes and tokens.** 16px tall, 8px inline padding, 4px gap, 12/500, 12px icons;
+round ends. `success` and `warning` use the status surface and text roles;
+`outline` and `dashed` draw the border.
+**States.** `aria-invalid` takes the danger border.
+**Keyboard and accessibility.** No role; the words carry the state.
+**Do and do not.** A one-off kind beside its recurring siblings takes `dashed`.
+Use Badge for status labels rather than a styled span. Never let its colour stand
+alone.
+**Gallery.** Labels, tabs and segments.
+
+### OctantCard
+
+**Purpose.** A raised section for a discrete object or a grouped form.
+**Anatomy.** `OctantCard`, `OctantCardHeader`, `OctantCardTitle`,
+`OctantCardDescription`, `OctantCardContent`, `OctantCardFooter`; variant
+`default` or `glass` (the glass material is defined in `octant.css`).
+**Sizes and tokens.** Corner `--oct-radius-md`, 12px vertical and inline padding,
+12px between parts; `bg-card` with `--octant-shadow-xs`. Title 15/500, snug;
+description 14px muted.
+**States.** Forced colours draw a 1px outline; increased contrast a ring in the
+strong border.
+**Keyboard and accessibility.** Real `section`, `header`, `h2`, `p`, and `footer`
+elements.
+**Do and do not.** Use the complete composition (Header, Title, Description,
+Content, Footer). Use it only for an object a person acts on as a whole; plain
+lists, empty states, and headers are never cards, and navigation lists use
+compact rows and `OctantSeparator`.
+**Gallery.** Dialog, sheet, notice and toast (default and glass).
+
+### OctantCheckbox
+
+**Purpose.** A checkbox, as a styled native input so a wrapping label names it.
+**Anatomy.** `OctantCheckbox` (all input props but `type`).
+**Sizes and tokens.** 14px square, `--oct-radius-sm`, 1px
+`--octant-divider-strong` edge unchecked; checked fills with the primary and
+draws a tick in `--primary-foreground`.
+**States.** Checked, disabled (0.75), `aria-invalid`. A checked box's focus edge
+is `--oct-focus-edge-on-accent`.
+**Keyboard and accessibility.** Native checkbox semantics; Space toggles.
+**Do and do not.** Put it inside its label or name it with `aria-label`. For two to
+seven exclusive choices use `OctantToggleGroup` instead.
+**Gallery.** Fields and toggles.
+
+### OctantCombobox
+
+**Purpose.** A searchable choice from a bounded list.
+**Anatomy.** Re-exports the recipe's parts: Combobox, InputGroup, Input,
+Trigger, Portal, Positioner, Popup, Empty, List, Item, ItemIndicator.
+**Sizes and tokens.** The input group is 28px with the field paint and
+`--oct-radius-sm`; its trigger is 24px with a 16px glyph. The popup is at most
+320px tall, `--oct-radius-md`, 4px padding, `--octant-shadow-overlay`, at
+`--oct-z-popup`, and as wide as its anchor. Items are the shared
+[menu row](#menus); the indicator is 16px at the row's end.
+**States.** A highlighted item takes the hover fill; disabled is 0.75; the group's
+border brightens on focus in pointer modality, and the keyboard edge shows
+otherwise. The frame draws no focus ring of its own.
+**Keyboard and accessibility.** Base UI's `combobox` and `listbox` roles; arrows
+move, Enter picks, Escape closes.
+**Do and do not.** Use it, or `OctantSelectField`, for searchable or bounded
+choices, never a custom dropdown.
+**Gallery.** Menu, select and combobox.
+
+### OctantConfirmDialog
+
+**Purpose.** An ordinary confirmation: usage reset and retention, Git discard,
+remote administration, Settings connection removal, device-key rotation.
+**Anatomy.** Props `title`, body, `details`, `confirmLabel`, `cancelLabel`
+("Cancel" by default), `destructive`, `pending`, `confirmDisabled`,
+`restoreFocus`, `onCancel`, `onConfirm`; built on `OctantDialog`.
+**Sizes and tokens.** Title 17/600 at 1.35; description 14px muted at 1.5; the
+answers sit in one row at the trailing edge, 8px apart and 16px under the body:
+Cancel as an outline button first, then the confirm answer filled (or
+`destructive`), both at the default 28px.
+**States.** `pending` disables both answers and ignores Escape and backdrop
+dismissal.
+**Keyboard and accessibility.** Labelled by its title and described by its body.
+Initial focus is on Cancel; Escape, Cancel, and backdrop dismissal change no
+data, and closing returns focus to the opener.
+**Do and do not.** Destructive actions opt into the danger treatment explicitly;
+ordinary confirmations use the standard action. Long paths wrap within the
+dialog. The confirmation never replaces the host's approvals, receipts, and
+observed-state checks. Rules for the frame are in
+[Dialogs and sheets](#dialogs-and-sheets).
+**Gallery.** Not shown live (modal and portalled); a button in Dialog, sheet,
+notice and toast opens it.
+
+### OctantContextMenu
+
+**Purpose.** The same items as an action menu, opened from the context-menu
+gesture (right click, the menu key, Shift+F10).
+**Anatomy.** `OctantContextMenu` takes `items` (label, value, description, icon,
+disabled), `onValueChange`, the trigger as children, and `triggerClassName`; the
+compound parts `OctantContextMenuRoot`, `Trigger`, `Content`, `Group`, `Label`,
+`Item`, `CheckboxItem`, `Separator`, `Sub`, `SubTrigger`, and `SubContent` build
+a custom one.
+**Sizes and tokens.** The popup is at least 12rem wide, `--oct-radius-md`, 4px
+padding, the floating fill and `--octant-shadow-overlay`, at `--oct-z-popup`.
+Rows are the shared [menu row](#menus); the check and submenu chevron are 14px.
+**States.** No items opens nothing. A highlighted row takes the hover fill;
+disabled is 0.75.
+**Keyboard and accessibility.** The trigger carries `aria-haspopup="menu"` and the
+adapter sets `aria-expanded`. An item's name is its label alone, with its
+description as `aria-describedby`. In the desktop app the menu is the operating
+system's own ([Native menus](#menus)), at the pointer, and focus returns to the
+trigger before the action runs.
+**Do and do not.** Project and split-workspace context menus use this adapter; do
+not add a direct primitive import. Right click mirrors available actions but is
+never the only route to an essential action.
+**Gallery.** Menu, select and combobox; the compound parts are in the not-shown
+list (they open only at the pointer).
+
+### OctantDialog
+
+**Purpose.** A modal dialog.
+**Anatomy.** Props `open`, `onClose`, `label`, `labelledBy`, `describedBy`,
+`className`, `initialFocus`, `restoreFocus`, `popupId`; classes
+`octant-dialog__backdrop`, `__viewport`, `__popup`, and `octant-dialog__title`.
+**Sizes and tokens.** 420px wide by default (`--octant-dialog-width`), at most
+640px tall (`--octant-dialog-height`), each capped at the viewport less 48px;
+16px content inset; `--oct-radius-md`; the page fill, a 1px strong border, and
+`--octant-shadow-overlay`; a scrim backdrop; viewport padding 24px; at
+`--oct-z-floating`.
+**States.** While it leaves, its backdrop and popup are `inert`.
+**Keyboard and accessibility.** Modal; Escape and an outside press call `onClose`.
+With a visible heading it is labelled through `labelledBy`; without one it renders
+a visually hidden title from `label`. Do not add a second visible header. Focus
+returns to the opener as the exit starts (`useLeavingFocus`).
+**Do and do not.** Use `OctantDialog` with a real label even when the title is
+visually hidden. A dialog wider than the default says so with
+`--octant-dialog-width`, never with a width of its own. A non-modal glass panel
+anchored in its surface (Zen's thread picker, assistant, and add and appearance
+panels) is not a dialog. See [Dialogs and sheets](#dialogs-and-sheets).
+**Gallery.** Not shown live (modal and portalled); a static copy of its classes
+is in Dialog, sheet, notice and toast.
+
+### OctantDialogPresence
+
+**Purpose.** Keeps a dialog a feature renders only while it is open mounted
+through its exit, so it can leave the way every overlay does.
+**Anatomy.** A wrapper with a `DialogPresenceContext` (`open`, `hold()`); it draws
+nothing.
+**Behavior.** A stylesheet cannot hold an element that is gone, so a surface
+leaves only while it stays mounted and is told it has closed. Presence keeps the
+last thing the feature rendered until the exit has finished and tells the dialog
+inside it that it has closed: a confirmation still names what it asked about
+after the feature has cleared that state, and the command palette keeps the rows
+it showed. Settings' sheet and a dialog with an `open` of its own do this
+themselves, and such a dialog keeps `open` apart from what it shows: one whose
+words come from the state closing clears (a review, a comparison, Rewind) is
+rendered only while that state exists. Every confirmation, the command palette,
+the Code file search, the Navigator, the narrow dock, first run and the other
+dialogs a feature mounts on demand leave this way. Two cases leave at once: a
+dialog whose owner goes with it (a row removed by the confirmation it showed),
+and one of two dialogs that share a presence when the other takes its place. In a
+window nobody can see there is no exit to show, so a dialog closed there is
+removed at once.
+**Keyboard and accessibility.** A leaving dialog's scrim and controls take no
+press and no key (`inert`), so the page under it answers at once and a second
+press cannot repeat what the first did. Focus goes back to the opener as the exit
+starts, and when the exit ends focus stays where it is if the person, or a
+command they ran from it, moved it in the meantime.
+**Gallery.** Not shown (it draws nothing).
+
+### OctantEmpty
+
+**Purpose.** An empty, connection, or error state inside a pane or panel.
+**Anatomy.** Props `title`, `message`, `eyebrow`, `icon`, `action`, `role`
+(`alert` or `status`); parts Root, Header, Content, Description, Eyebrow, Media,
+Title.
+**Sizes and tokens.** At most 480px wide, 16px padding, 8px gaps,
+`--oct-radius-md`, the card fill and `--octant-shadow-sm`. The mark is a 24px
+neutral tile; eyebrow 12px muted; title 15/600; message 13px muted.
+**States.** One tone: the mark is neutral whatever went wrong.
+**Keyboard and accessibility.** The title is a level-2 heading; the caller sets
+`role` when the state is a live region.
+**Do and do not.** Use Empty for empty states; do not recreate one with styled
+spans. A page's own empty state follows [Page shell](#page-shell); a state that is
+the whole window is `ShellState` ([Empty, loading, and whole-window states](#empty-loading-and-whole-window-states)).
+**Gallery.** Composed patterns.
+
+### OctantField
+
+**Purpose.** Form layout that keeps labels, descriptions, and errors associated
+with their controls.
+**Anatomy.** `OctantFieldGroup`, `OctantField`, `OctantFieldLabel`,
+`OctantFieldDescription`, `OctantFieldError`.
+**Sizes and tokens.** A group stacks fields 12px apart; a field stacks its parts
+4px apart; label 14/500; description 14px muted; error 14px in the danger ink.
+**States.** Invalid uses `data-invalid` and `aria-invalid`; a disabled field is
+0.75.
+**Keyboard and accessibility.** The error is `role="alert"` and stays by its
+field.
+**Do and do not.** Use these for every form; a warning the person must review
+stays inline, never only in a toast.
+**Gallery.** Composed patterns.
+
+### OctantInput
+
+**Purpose.** A single-line text field.
+**Anatomy.** All input props, plus `unstyled`.
+**Sizes and tokens.** 28px, 8px inline padding, `--oct-radius-sm`, the field paint
+from `ui/shadcn/field-paint.ts`: the strong border (`--input`) and no fill at
+rest. Type is 15px under the `md` breakpoint and 14px from it; placeholder muted.
+**States.** Hover takes the muted-text border; keyboard focus takes the control
+hover fill; pointer focus brightens the border; invalid keeps its danger border
+in every state; disabled is 0.75.
+**Keyboard and accessibility.** A native input; the global focus edge for
+keyboard.
+**Do and do not.** A feature's stylesheet lays a field out (width, height, type
+size) and never repaints it, so inputs, text areas, and selects react alike in
+light and dark. A field whose frame a feature draws (a search box inside a
+toolbar, a stepper's middle segment) passes `unstyled`. A search or name field a
+feature draws for itself still takes its edge from the strong border, not from
+the hairline or a control fill.
+**Gallery.** Fields and toggles; Composed patterns.
+
+### OctantMenu
+
+**Purpose.** A dropdown menu of radio choices (the default) or actions.
+**Anatomy.** Props `items` (label, value, description, icon, disabled), `actions`
+(label, icon, onSelect, disabled), `value`, `onValueChange`, `trigger`,
+`triggerLabel`, `triggerClassName`, `triggerDisabled`, `triggerTitle`,
+`selectionMode` (`radio` or `action`); compound parts `OctantMenuRoot`,
+`Trigger`, `Portal`, `Positioner`, `Popup`, `Group`, `GroupLabel`, `Item`,
+`CheckboxItem`, `RadioGroup`, `RadioItem`, `Separator`, `Sub`, `SubPopup`,
+`SubTrigger`.
+**Sizes and tokens.** The popup is at least 12rem wide, `--oct-radius-md`, 4px
+padding, the frosted float fill and `--octant-shadow-pop`, 4px below its trigger,
+at `--oct-z-popup`. Rows are the shared [menu row](#menus); a group label is 24px
+in the Navigation group label role; a separator is one hairline with 4px above
+and below; the check is 14px.
+**States.** A highlighted row takes the hover fill; a chosen radio carries a
+check, never a fill; disabled is 0.75.
+**Keyboard and accessibility.** Opened from the keyboard it starts on the current
+choice; an item's name is its label, with its description as
+`aria-describedby`; a pick closes the menu and returns focus to the trigger. In
+the desktop app the menu is the operating system's own ([Native menus](#menus)).
+**Do and do not.** A feature stylesheet may colour a menu's icons but gives its
+rows no height, gap, padding, or font size.
+**Gallery.** Menu, select and combobox (radio and action); the radio, submenu and
+sub-trigger parts are in the not-shown list.
+
+### OctantMenuIconSlot
+
+**Purpose.** The empty 16px icon column for a hand-built menu row that has no
+icon, so a menu where any row has an icon keeps one text edge.
+**Anatomy.** An `aria-hidden` span, `--oct-icon-md` square.
+**Gallery.** Menu, select and combobox.
+
+### OctantNumberStepper
+
+**Purpose.** A number with minus and plus.
+**Anatomy.** Props `label`, `value`, `min`, `max`, `step` (1), `suffix`,
+`onChange`.
+**Sizes and tokens.** 28px with the field paint, `--oct-radius-sm`, and
+`--octant-shadow-xs`; 30px ghost buttons at both ends with 14px glyphs; the
+middle input is `unstyled`, 14px, centred, with the value and its suffix (12px
+muted) in one column so steppers with and without a unit are one width.
+**States.** The whole stepper takes the control hover fill while focus is inside
+it; a button is disabled at its bound. Blur commits and clamps; typing commits
+only an in-range value.
+**Keyboard and accessibility.** "Decrease {label}" and "Increase {label}"; the
+input is a native number field named by `label`.
+**Gallery.** Fields and toggles.
+
+### OctantPopover
+
+**Purpose.** A controlled popover opened from a button.
+**Anatomy.** Props `open`, `onOpenChange`, `trigger`, `triggerLabel`,
+`triggerVariant` (`ghost`, `ghost-icon`, `outline`), `triggerTooltip`,
+`triggerAriaPressed`, `triggerDescribedBy`, `triggerDataAttributes`,
+`triggerDisabled`, `triggerClassName`, `title`, `titledBy`, `description`,
+`side`, `align`, `sideOffset` (4), `collisionAvoidance`.
+**Sizes and tokens.** `--oct-radius-md`, 8px padding, 14px type, the floating
+fill and `--octant-shadow-overlay`, at `--oct-z-popup`. The trigger is a button
+variant (`ghost-icon` is the 28px icon button).
+**Keyboard and accessibility.** The trigger carries `aria-expanded` and, when
+given, `aria-pressed`; the popup is labelled by `titledBy` or a visually hidden
+`title`. Escape closes it and returns focus.
+**Do and do not.** Searchable pickers and popovers with embedded controls stay
+renderer surfaces in the desktop app. The composer's popups follow
+[Composer popups](#composer-popups).
+**Gallery.** Popover, tooltip and preview card.
+
+### OctantPreviewCard
+
+**Purpose.** A delayed, non-modal card the pointer can enter and press; not a
+tooltip.
+**Anatomy.** Props: the trigger as children, `content`, `label`, `side`
+(bottom), `align` (centre).
+**Sizes and tokens.** At most 320px wide, 12px padding, `--oct-radius-md`,
+`--octant-float` and `--octant-shadow-overlay`, 8px from its trigger, at
+`--oct-z-popup`. It opens after 350ms and closes 150ms after the pointer leaves.
+**States.** Held closed while a native menu is open.
+**Keyboard and accessibility.** `role="group"` named by `label`; the card itself
+shows no focus edge.
+**Gallery.** Popover, tooltip and preview card.
+
+### OctantSelectField
+
+**Purpose.** A select for forms and filters.
+**Anatomy.** Props `options` (id, label, disabled, disabledReason, group),
+`value` or `defaultValue`, `onValueChange`, `placeholder`, `name`, `id`,
+`aria-label`, `className`, `triggerClassName`; parts `OctantSelectRoot`, `Group`,
+`GroupLabel`, `Item`, `Popup`, `Portal`, `Positioner`, `Trigger`, `Value`. The
+empty value is encoded as `octant-select:empty`.
+**Sizes and tokens.** The trigger is 28px with the field paint, 8px gap, 14px
+type, and a 12px chevron that is not dimmed while the select is enabled. The
+popup is at most 18rem tall, at least its trigger's width, `--oct-radius-md`, 4px
+padding, `--octant-shadow-overlay`, 4px from its trigger, at `--oct-z-popup`.
+Items are the shared [menu row](#menus) with room at the end for a 14px check.
+**States.** The field states of `OctantInput`; a highlighted item; disabled items
+carry their reason.
+**Keyboard and accessibility.** Base UI select semantics; the list opens beside
+its trigger without covering it with the selected item. A form reset restores
+it, and `name` writes a hidden input. In the desktop app it renders an
+`OctantMenu` radio list behind a field-painted trigger, so the list is the
+operating system's own.
+**Do and do not.** Use it for bounded choices and filters; 2 to 7 choices that
+should stay visible take `OctantToggleGroup`. Composer-row selects drop the field
+chrome; feature CSS does not repaint them a third time.
+**Gallery.** Fields and toggles; the open list in Menu, select and combobox; the
+group parts are in the not-shown list.
+
+### OctantSeparator
+
+**Purpose.** A hairline between groups.
+**Anatomy.** `OctantSeparator` (horizontal or vertical) and
+`OctantSeparatorWithLabel`.
+**Sizes and tokens.** 1px in the border role; the labelled form is two rules with
+12px muted text between them, 8px apart.
+**Keyboard and accessibility.** `role="separator"`.
+**Do and do not.** Separate with a hairline or select with a fill, never both.
+**Gallery.** Labels, tabs and segments.
+
+### OctantSheet
+
+**Purpose.** A page-sized floating surface over the window, with the app live
+behind it (Settings).
+**Anatomy.** Props `open`, `onClose`, `label`, `className`, `initialFocus`,
+`restoreFocus`.
+**Sizes and tokens.** At most 1040 by 760px, no padding, `--octant-float`, a 1px
+`--octant-bevel` edge, `--oct-radius-md`, and `--octant-shadow-pop`, over a light
+scrim (the scrim role at 34%) through which the window stays drawn; viewport
+padding 48px above and 32px at the sides and below; at `--oct-z-floating`.
+**States.** It rises 8px as it arrives and leaves; while leaving it is `inert`.
+**Keyboard and accessibility.** Modal, with a visually hidden title from `label`;
+Escape, its close control, and a press on the window behind close it, and focus
+returns to where it was.
+**Do and do not.** Settings' use of it is in [Settings](docs/design/settings.md#settings-sheet).
+**Gallery.** Not shown live (modal and portalled); a button in Dialog, sheet,
+notice and toast opens it.
+
+### OctantSlider
+
+**Purpose.** A range input.
+**Anatomy.** A native range input (`octant-slider`).
+**Sizes and tokens.** A 4px round track in the strong divider role, a theme role
+held to 3:1 against the workspace, so the track is found on a card in dark and in
+light; a 14px round thumb in the primary with a 2px page-colour ring carries the
+value.
+**States.** Disabled is 0.75; the cursor is a grab while dragging.
+**Keyboard and accessibility.** Native range keys.
+**Gallery.** Fields and toggles.
+
+### OctantSwitch
+
+**Purpose.** An on/off setting that saves immediately.
+**Anatomy.** Props `checked`, `onCheckedChange`, `label`, `describedBy`,
+`disabled`, `disabledReason`.
+**Sizes and tokens.** A 38 by 22px round track in the control fill with a 1px
+strong divider edge and a 16px round thumb in the page colour; on, the track and
+its edge take the accent. The thumb travels over `--oct-motion-base`.
+**States.** `data-checked`; an unchecked switch takes the control hover fill under
+keyboard focus, and a checked one the on-accent focus edge; disabled is 0.75 and
+names its reason as its description and title.
+**Keyboard and accessibility.** `role="switch"`, named by `label`; Space toggles.
+**Do and do not.** A switch that sends something off this computer carries the
+fact a person must know as its section's description, above the switch
+([Settings layout](#settings-layout)).
+**Gallery.** Fields and toggles; Composed patterns.
+
+### OctantTabs
+
+**Purpose.** True page tabs: a flat rail with a selected fill and tab semantics.
+**Anatomy.** `OctantTabs`, `OctantTabsList`, `OctantTabsTab`, `OctantTabsPanel`.
+**Sizes and tokens.** The list is 28px with 4px between tabs; a tab is 24px, 8px
+inline padding, `--oct-radius-sm`, 14/500; the panel starts 8px under the list.
+**States.** Hover takes a light fill and the primary ink; `data-active` takes the
+control fill and the primary ink; disabled is 0.75.
+**Keyboard and accessibility.** `tablist`, `tab`, and `tabpanel` roles; the arrow
+keys move between tabs.
+**Do and do not.** See [Tabs and segmented choices](#tabs-and-segmented-choices).
+**Gallery.** Labels, tabs and segments.
+
+### OctantTextarea
+
+**Purpose.** A multi-line text field.
+**Anatomy.** All textarea props, plus `unstyled`.
+**Sizes and tokens.** At least 52px tall, 8px padding, the field paint and type of
+`OctantInput`; it grows with its content and does not resize by hand.
+**States.** As `OctantInput`.
+**Keyboard and accessibility.** A native textarea.
+**Do and do not.** The composer prompt is frameless: given `composer-input` the
+textarea drops the field recipe (border, corner, fill, shadow, ring), and
+`.composer-input` in `octant.css` owns its 12px padding, its one-line 44px
+minimum, its 180px maximum, and its placeholder in the meta ink. Feature CSS does
+not repaint it a third time.
+**Gallery.** Fields and toggles.
+
+### OctantToast
+
+**Purpose.** A product notice: a transient acknowledgement or a failure to
+notice.
+**Anatomy.** Props `title`, `detail`, `tone` (neutral, success, warning,
+danger), `action` (label, onSelect), `onDismiss`.
+**Sizes and tokens.** 12px padding, 8px gap, `--oct-radius-md`, `--octant-float`
+and `--octant-shadow-overlay`; a 16px semantic icon; the title 14/500 on a 24px
+line so the icon, the title and the dismiss glyph share a centre; detail 13px
+muted; Dismiss is a 24px icon button with a 14px glyph whose box ends on the
+toast's 12px padding. An inline action is link text, so its line is as tall as the
+others. The stack (`.toast-stack`) is fixed at the top trailing corner, 12px under
+the 44px title rail and 16px from the edge, at most 380px wide, at
+`--oct-z-toast`.
+**States.** Long filenames and messages wrap in both themes.
+**Keyboard and accessibility.** `role="alert"` for danger, `status` otherwise;
+Dismiss is "Dismiss notification" and reachable by keyboard; an action can open
+the relevant destination without dismissing the notice. The stack takes no press
+outside its notices.
+**Do and do not.** See [Toasts and notices](#toasts-and-notices).
+**Gallery.** Dialog, sheet, notice and toast.
+
+### OctantToggleGroup
+
+**Purpose.** The enclosed track for two to seven mutually exclusive values.
+**Anatomy.** `OctantToggleGroup` and `OctantToggleGroupItem`, typed by value.
+**Sizes and tokens.** A 28px track (2px padding, `--oct-radius-sm`, the muted
+fill) holding 24px items (8px inline padding, the corner less the padding, 2px;
+14/500 in the secondary ink).
+**States.** Hover takes the primary ink; `data-pressed` takes the raised soft fill
+and the primary ink; disabled is 0.75.
+**Keyboard and accessibility.** Each item is a toggle with `aria-pressed`.
+**Do and do not.** Use it for option sets of two to seven choices, not for page
+tabs. See [Tabs and segmented choices](#tabs-and-segmented-choices).
+**Gallery.** Labels, tabs and segments.
+
+### OctantTooltip
+
+**Purpose.** A short label for a control, or a card of content on hover.
+**Anatomy.** Props: the trigger as children, `label`, `side` (bottom), `align`
+(centre), `surface` (`inverted` or `card`).
+**Sizes and tokens.** Inverted: the primary text as a fill with the surface
+colour on it, at most 280px wide, 8 by 12px padding, `--oct-radius-sm`, 14px, no
+bevel. Card: at most 320px, 12px padding, `--oct-radius-md`, the surface fill
+and overlay elevation. 8px from its trigger, after 350ms, at `--oct-z-popup`.
+**States.** It closes on a press of its trigger without fading over what the
+press opened.
+**Keyboard and accessibility.** `role="tooltip"`; it opens on keyboard focus as
+on hover.
+**Do and do not.** Never the only place an essential word appears.
+**Gallery.** Popover, tooltip and preview card.
+
+### OctantAlert
+
+**Purpose.** An app-owned inline notice: the status mark, tone, live region,
+message, optional title, and explicit actions.
+**Anatomy.** Props `children`, `title`, `action`, `tone` (neutral, accent,
+success, warning, danger), `role`, `label`, `id`.
+**Sizes and tokens.** The callout: 20px padding, 16px gap, a 1px border,
+`--oct-radius-md`, the surface fill, 14px type in the secondary ink, the title
+at 500; a 16px mark. A tone is a tinted ground and hairline, never a stripe. The
+mark is neutral ink for the neutral tone, composer notices included; the warning
+tone draws it in the warning ink and the danger tone in the danger ink.
+**Keyboard and accessibility.** Warning and danger announce as `alert`; neutral,
+accent, and success as `status`.
+**Do and do not.** Placement belongs to the feature; the callout recipe owns the
+appearance. Use Alert for callouts, never a raw `role="alert"`
+([Toasts and notices](#toasts-and-notices)).
+**Gallery.** Dialog, sheet, notice and toast (every tone).
+
+### OctantApprovalCard
+
+**Purpose.** An inline provider, extension, or Browser permission request in the
+thread column.
+**Anatomy.** Props `label`, `summary`, `detail`, `context` (before the actions),
+`actions`, `error`.
+**Sizes and tokens.** The neutral card material: a 1px border,
+`--oct-radius-md`, `--octant-card`, 8 by 12px padding, 8 and 12px gaps, 14px at
+1.45; a 14px pending mark in the muted ink; detail 13px muted; actions 4px apart
+at the trailing edge, wrapping.
+**Keyboard and accessibility.** `role="group"` named by `label`; an inline failure
+is `role="alert"`.
+**Do and do not.** The requesting feature supplies the scope, choices, and
+callbacks; the host or server still decides whether an action may proceed. Native
+Code approvals keep their isolated host-owned document
+([Thread view: Native Code approvals](docs/design/thread-view.md#native-code-approvals)).
+**Gallery.** Dialog, sheet, notice and toast.
+
+### Native menus
+
+**Purpose.** `NativeContextMenu` and `NativeDropdownMenu` swap a web menu for the
+operating system's own in the desktop app; the web path is unchanged.
+**Behavior.** They render the menu's items into a hidden element, read their kind
+(item, label, separator, checkbox, radio, submenu), and show the OS menu at the
+pointer or anchored to the trigger (left and bottom, or right and top when the
+menu opens to that side); a selection clicks the original element. The rules
+for native menus are in [Menus](#menus).
+**Gallery.** Not in the gallery: they are wrappers, not `Octant*` adapters.
+
+### Helpers
+
+`radioGroupKeys.ts` (`moveWithinRadioGroup`) gives a `radiogroup` its keys: the
+arrows move to the neighbour and select it, wrapping, Home and End jump to the
+ends, and modified keys and disabled radios are skipped. `useLeavingFocus.ts`
+records focus when a dialog or sheet opens and returns it as the exit starts,
+unless focus has already moved elsewhere. Neither draws anything.
+
+## Patterns
+
+The pattern sections below are rewritten in the next change.
 
 ### Page shell
 
@@ -1752,27 +2338,6 @@ and Tooltip. Composition rules:
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
-
-### Component gallery
-
-A development-only gallery draws the system in one place: the type roles with
-the size, weight and leading the browser computes for them, the semantic colour
-roles, the spacing and radius tokens, the icon scale, every shared `Octant*`
-adapter in its variants, sizes and states, and a few patterns composed only
-from those pieces (a sidebar slice, a Settings row group, a card, an empty
-state, the title band's buttons). It mounts the real adapters under the real
-stylesheet entry and the real theme provider, with no host, thread or server
-behind it, so what it shows is what the app ships. It has controls for dark
-and light, the glass material, and the interface size. Read it to judge
-whether controls, fields, menus and rows agree before a change to any of them.
-
-The gallery is `apps/web/component-gallery.html` with its source in
-`apps/web/src/gallery/`. The page is not an input of the production build, so
-it is served by the Vite dev server only (`/component-gallery.html`) and is
-absent from the packaged app. It is not a product surface: it has no entry in
-navigation, Settings or the command palette. A new shared adapter in
-`apps/web/src/ui/base/` must appear in it, or be named in the test's
-not-shown list with a reason; `Gallery.test.tsx` fails otherwise.
 
 ### Product-owned surfaces
 
