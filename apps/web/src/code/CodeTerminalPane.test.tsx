@@ -1,5 +1,6 @@
 import { DockBarTestHost } from "../shell/dockBarHost.test-support";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -871,6 +872,90 @@ describe("CodeTerminalPane", () => {
 
     await waitFor(() => expect(client.subscribeOperation).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(runtime.setOutput).toHaveBeenLastCalledWith("ready\nTERMINAL_OK\n"));
+    unmount();
+  });
+
+  it("streams live chunks directly to the terminal sink without re-rendering CodeTerminalPane", async () => {
+    const client = codeClient({ evidence: "" });
+    const appendOutput = vi.fn();
+    const replaceOutput = vi.fn();
+    const setOutput = vi.fn();
+    const loadRuntime = vi.fn(
+      async (): Promise<XtermAdapterRuntime> => ({
+        mount: () => ({
+          appendOutput,
+          dispose: vi.fn(),
+          focus: vi.fn(),
+          readSelection: () => "",
+          replaceOutput,
+          setInteractive: vi.fn(),
+          setOutput,
+        }),
+      }),
+    );
+
+    let releaseChunks: (() => void) | undefined;
+    const chunksGate = new Promise<void>((resolve) => {
+      releaseChunks = resolve;
+    });
+    let totalCharacters = 6;
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      _request: unknown,
+      signal: AbortSignal,
+    ) {
+      yield {
+        terminalId: ids.terminal,
+        text: "start\n",
+        replace: true,
+        characters: totalCharacters,
+        state: "running",
+      } as never;
+      await chunksGate;
+      for (let index = 1; index <= 50; index += 1) {
+        const chunk = `chunk-${index}\n`;
+        totalCharacters += chunk.length;
+        yield {
+          terminalId: ids.terminal,
+          text: chunk,
+          replace: false,
+          characters: totalCharacters,
+          state: "running",
+        } as never;
+        await Promise.resolve();
+      }
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    });
+
+    let commits = 0;
+    const { unmount } = render(
+      <Profiler
+        id="terminal-pane"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
+        <CodeTerminalPane
+          client={client}
+          createOperationId={() => ids.operation as never}
+          executionPolicy="full-access"
+          loadRuntime={loadRuntime}
+          result={terminalResult}
+          scope={scope}
+        />
+      </Profiler>,
+    );
+
+    await waitFor(() => expect(replaceOutput).toHaveBeenCalledWith("start\n"));
+    const commitsBeforeStream = commits;
+    releaseChunks?.();
+
+    await waitFor(() => expect(appendOutput).toHaveBeenCalledTimes(50));
+    expect(appendOutput).toHaveBeenNthCalledWith(1, "chunk-1\n");
+    expect(appendOutput).toHaveBeenNthCalledWith(50, "chunk-50\n");
+    expect(setOutput).not.toHaveBeenCalled();
+    expect(commits).toBe(commitsBeforeStream);
     unmount();
   });
 

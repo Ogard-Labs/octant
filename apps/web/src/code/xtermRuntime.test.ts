@@ -387,4 +387,38 @@ describe("Xterm runtime", () => {
     );
     session.dispose();
   });
+
+  it("writes appended output directly without resetting and resets only on replacement", () => {
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    mocks.write.mockClear();
+    mocks.reset.mockClear();
+
+    session.appendOutput?.("");
+    session.appendOutput?.("chunk-1\n");
+    session.appendOutput?.("chunk-2\n");
+    expect(mocks.reset).not.toHaveBeenCalled();
+    expect(mocks.write.mock.calls).toEqual([["chunk-1\n"], ["chunk-2\n"]]);
+
+    session.replaceOutput?.("reset\n");
+    expect(mocks.reset).toHaveBeenCalledTimes(1);
+    expect(mocks.write).toHaveBeenLastCalledWith("reset\n");
+
+    session.replaceOutput?.("");
+    expect(mocks.reset).toHaveBeenCalledTimes(2);
+    expect(mocks.write).toHaveBeenCalledTimes(3);
+
+    // Invalidates legacy prefix tracking when direct chunks were written so a
+    // fallback setOutput resets cleanly instead of slicing against stale text.
+    session.appendOutput?.("live\n");
+    session.setOutput("replacement\n");
+    expect(mocks.reset).toHaveBeenCalledTimes(3);
+    expect(mocks.write).toHaveBeenLastCalledWith("replacement\n");
+
+    session.dispose();
+  });
 });

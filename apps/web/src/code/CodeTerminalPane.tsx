@@ -12,7 +12,11 @@ import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";
-import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
+import {
+  XtermTerminalAdapter,
+  type TerminalOutputSink,
+  type XtermAdapterRuntime,
+} from "./XtermTerminalAdapter";
 import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -71,7 +75,7 @@ export interface CodeTerminalPaneProps {
 
 export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const [result, setResult] = useState(props.result);
-  const [output, setOutput] = useState("");
+  const [initialOutput, setInitialOutput] = useState("");
   const replayKey = terminalReplayKey(result);
   const replayContentId = result.transcript?.contentId;
   const [loadedReplayKey, setLoadedReplayKey] = useState<string | undefined>(() =>
@@ -84,6 +88,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const [browserPending, setBrowserPending] = useState(false);
   const [browserRefusal, setBrowserRefusal] = useState<string>();
   const readSelection = useRef<(() => string) | undefined>(undefined);
+  const outputSink = useRef<TerminalOutputSink | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
   const pendingWrite = useRef<{ terminalId: CodeTerminalId; data: string } | undefined>(undefined);
   const queuedWrites = useRef(0);
@@ -114,7 +119,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
 
   useEffect(() => {
     let active = true;
-    setOutput("");
+    setInitialOutput("");
+    outputSink.current?.replace("");
     replayText.current = "";
     replayOffset.current = replayTruncated ? undefined : 0;
     if (replayContentId === undefined) {
@@ -129,7 +135,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
         replayText.current = text;
         replayOffset.current = replayTruncated ? undefined : text.length;
-        setOutput(text);
+        setInitialOutput(text);
         setLoadedReplayKey(replayKey);
       })
       .catch(() => {
@@ -180,7 +186,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           )) {
             received += 1;
             offset = frame.characters;
-            setOutput((current) => (frame.replace ? frame.text : `${current}${frame.text}`));
+            if (frame.replace) outputSink.current?.replace(frame.text);
+            else outputSink.current?.append(frame.text);
             if (reconnecting) {
               reconnecting = false;
               setFailure(undefined);
@@ -222,7 +229,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         if (controller.signal.aborted) return;
         // Whatever the stream delivered is rebuilt from the journal's own
         // record, so the two paths never both contribute the same bytes.
-        setOutput(replayText.current);
+        outputSink.current?.replace(replayText.current);
         setFailure(undefined);
       }
       let idleDelayMs = 150;
@@ -250,7 +257,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
                 if (controller.signal.aborted) return;
                 text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
               }
-              setOutput((current) => (terminalOutput.replace ? text : `${current}${text}`));
+              if (terminalOutput.replace) outputSink.current?.replace(text);
+              else outputSink.current?.append(text);
               setFailure(undefined);
             }
             if (
@@ -703,11 +711,14 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           interactive={interactive}
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
           onData={(data) => enqueueWrite(data)}
+          onOutputSink={(sink) => {
+            outputSink.current = sink;
+          }}
           onResize={(columns, rows) => enqueueResize(columns, rows)}
           onSelectionReader={(read) => {
             readSelection.current = read;
           }}
-          output={output}
+          output={initialOutput}
         />
       ) : (
         <ShellState state="loading" title="Loading terminal" />
