@@ -93,6 +93,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
 import { SpendCeilingService } from "../spendCeilingService";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { ThreadStandingAnswerStore } from "../context/threadStandingAnswerStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
@@ -710,6 +711,13 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const threadStandingAnswers = new ThreadStandingAnswerStore({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
     externalContentIngestionStore.record(input),
   );
@@ -989,7 +997,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
               workThreadProjection,
               { runningWorkTurnAccess, codeParentActiveTurn },
               String(waiter.parentThreadId),
-            ),
+            ) && !threadStandingAnswers.covers(String(waiter.parentThreadId), "delegation", true),
           parentThread: (waiter) =>
             readAgentRunParentThread(persistence, workThreadProjection, waiter),
           parentLiveAuthority: agentRunParentAuthority,
@@ -1185,6 +1193,13 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     readonly parentThreadId: string;
     readonly mode: OctantMode;
     readonly projectId?: ProjectId;
+    /**
+     * How the calling turn asks its person, in the thread, to allow one thing.
+     * Only a Code turn has one today, so only a Code thread below Full access
+     * asks before a helper once it has read outside content; elsewhere that
+     * delegation is still refused.
+     */
+    readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }): AppManagedToolSet =>
     createAgentsManagedTools({
       admission: agentRunAdmission,
@@ -1227,13 +1242,27 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           status === "recovery-required"
         );
       },
+      // The person's answer for the thread, journaled, lifts the gate for the
+      // rest of the thread; Full access never has one to lift.
       isTainted: () =>
         outsideContentGatesHelpers(
           persistence,
           workThreadProjection,
           { runningWorkTurnAccess, codeParentActiveTurn },
           input.parentThreadId,
-        ),
+        ) && !threadStandingAnswers.covers(input.parentThreadId, "delegation", true),
+      ...(input.ask === undefined
+        ? {}
+        : {
+            askMarkedDelegation: async () => {
+              const answer = await input.ask?.(
+                "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
+              );
+              if (answer !== "approved") return false;
+              threadStandingAnswers.record(input.parentThreadId, "delegation", true);
+              return true;
+            },
+          }),
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,
@@ -1417,6 +1446,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     contributeChildTools,
     coordinatorWorkersHolder,
     externalContentIngestionStore,
+    threadStandingAnswers,
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,

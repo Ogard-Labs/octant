@@ -28,12 +28,14 @@ export interface TerminalBrowserApprovalPromptProps {
  * opens a new site in the thread's Browser.
  *
  * In Code, the host's Browser approval service is asked by a terminal's
- * Browser grant, and by the thread's own agent only to hand the page over for
- * a sign-in: a managed Code turn's site asks go through its own operation
- * approval. A Private site ask listed here came from a terminal, and the card
- * says so, because the person must not mistake it for the thread's own agent.
- * A site ask that names a signed-in profile is the agent's: a terminal's grant
- * cannot reach a profile.
+ * Browser grant, and by the thread's own agent to hand the page over for a
+ * sign-in and before an upload or a download save: a managed Code turn's site
+ * asks go through its own operation approval. A Private site ask listed here
+ * came from a terminal, and the card says so, because the person must not
+ * mistake it for the thread's own agent. A site ask that names a signed-in
+ * profile is the agent's: a terminal's grant cannot reach a profile. An
+ * upload or a save is the agent's too, since a terminal's grant cannot
+ * transfer a file, and its card is the one a Work thread shows.
  */
 export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalPromptProps) {
   const [approvals, setApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
@@ -99,7 +101,11 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
         setEnded(
           pending.signIn !== undefined
             ? `The agent's sign-in request for ${pending.origin} had already ended.`
-            : `The terminal's request to open ${pending.origin} had already ended, so nothing was let through.`,
+            : pending.upload !== undefined
+              ? `The agent's upload to ${pending.origin} had already ended, so nothing was sent.`
+              : pending.download !== undefined
+                ? `The agent's download from ${pending.origin} had already ended, so nothing was saved.`
+                : `The terminal's request to open ${pending.origin} had already ended, so nothing was let through.`,
         );
       } else if (decision === "approved" && remember !== undefined) {
         announceShellSettingsWritten();
@@ -150,6 +156,52 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
         }
         error={message}
         label={pending.script === undefined ? "Browser sign-in" : "Browser script permission"}
+        summary={browserApprovalSummary(pending)}
+      />
+    );
+  }
+
+  // "Always allow" covers this direction, this site and this thread's
+  // checkout, never a whole profile.
+  if (pending.upload !== undefined || pending.download !== undefined) {
+    return (
+      <OctantApprovalCard
+        actions={
+          <>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved")}
+              size="sm"
+              type="button"
+            >
+              {pending.download === undefined ? "Upload once" : "Save once"}
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved", "site")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Always allow
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("denied")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Deny
+            </OctantButton>
+          </>
+        }
+        {...(props.className === undefined ? {} : { className: props.className })}
+        detail={browserApprovalDetail(pending)}
+        error={message}
+        label={
+          pending.download === undefined ? "Browser upload approval" : "Browser download approval"
+        }
         summary={browserApprovalSummary(pending)}
       />
     );

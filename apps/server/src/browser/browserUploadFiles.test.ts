@@ -56,3 +56,24 @@ it("holds an upload to the per-file limit the person set, and to the default wit
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("holds an upload to the file count the person set, and to five without one", async () => {
+  const root = await mkdtemp(join(tmpdir(), "octant-upload-count-"));
+  try {
+    const names = Array.from({ length: 6 }, (_, index) => `file-${String(index)}.txt`);
+    for (const name of names) await writeFile(join(root, name), name);
+    expect(await prepareBrowserUpload({ workspaceRoot: root, files: names })).toMatchObject({
+      status: "refused",
+      reason: "upload-invalid-files",
+    });
+    const widened = await prepareBrowserUpload({ workspaceRoot: root, files: names, maxFiles: 6 });
+    if (widened.status !== "prepared") throw Error(JSON.stringify(widened));
+    expect(widened.paths).toHaveLength(6);
+    await widened.release();
+    expect(
+      await prepareBrowserUpload({ workspaceRoot: root, files: names.slice(0, 2), maxFiles: 1 }),
+    ).toMatchObject({ status: "refused", reason: "upload-invalid-files" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

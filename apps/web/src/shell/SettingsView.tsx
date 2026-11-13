@@ -1593,6 +1593,24 @@ function ActiveSectionContent({
                   value={props.settings.browserHeldDownloadLimit}
                 />
               </SettingRow>
+              <SettingRow
+                description="How many files an agent may send to a page in one upload."
+                focused={focusedSetting === settingId("browser-upload-file-count-limit")}
+                label="Files per upload"
+                scope="host"
+                settingId="browser-upload-file-count-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES}
+                  id="browser-upload-file-count-limit"
+                  label="Files per upload"
+                  onChange={(count) =>
+                    props.onSettingsChange({ browserUploadFileCountLimit: count })
+                  }
+                  optionLabel={(count) => (count === 1 ? "1 file" : `${String(count)} files`)}
+                  value={props.settings.browserUploadFileCountLimit}
+                />
+              </SettingRow>
               {props.settings.rememberedBrowserTransfers.map((transfer) => (
                 <SettingRow
                   description={
@@ -2248,6 +2266,7 @@ const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
   10, 25, 50, 100, 250, 500, 1024,
 ];
 const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 50];
+const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
 
 /** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
 function BrowserTransferLimitSelect(props: {

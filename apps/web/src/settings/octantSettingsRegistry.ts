@@ -1204,6 +1204,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "browser downloads kept waiting held files limit count cap agents page",
         },
         {
+          id: settingId("browser-upload-file-count-limit"),
+          label: "Files per upload",
+          scope: "host",
+          keywords: "browser upload files per upload count limit cap agents send page how many",
+        },
+        {
           id: settingId("tool-approvals"),
           label: "Remembered tool approvals",
           scope: "host",

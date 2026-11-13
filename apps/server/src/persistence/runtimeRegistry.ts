@@ -265,6 +265,8 @@ import {
   ContentClearedPayload,
   ContentIngestedPayload,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  THREAD_STANDING_ANSWER_RECORDED,
+  ThreadStandingAnswerRecorded,
   SIBLING_THREAD_EVENT_NAMES,
   SiblingThreadObserved,
   SPEND_CEILING_EVENT_NAMES,
@@ -822,6 +824,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.cleared, 1, ContentClearedPayload)
+    .register(THREAD_STANDING_ANSWER_RECORDED, 1, ThreadStandingAnswerRecorded)
     .register(SIBLING_THREAD_EVENT_NAMES.observed, 1, SiblingThreadObserved)
     .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
     .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)

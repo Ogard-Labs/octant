@@ -880,6 +880,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             parentThreadId: String(input.thread.id),
             mode: "code",
             projectId: input.thread.projectId,
+            ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
@@ -1089,6 +1090,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           },
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        browserTransferApprovals: browserToolApprovalService,
+        browserUploadFileCountLimit: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .browserUploadFileCountLimit,
         browserUploadFileLimitBytes: () =>
           browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings())
             .maxFileBytes,

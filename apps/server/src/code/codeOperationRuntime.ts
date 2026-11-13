@@ -577,6 +577,11 @@ export interface CodeOperationRuntimeOptions {
   readonly isBrowserOriginRemembered?: (origin: string) => boolean;
   /** The person's per-file Browser upload limit in bytes, read for each upload. */
   readonly browserUploadFileLimitBytes?: () => number;
+  readonly browserUploadFileCountLimit?: () => number;
+  /** The Browser approval card an upload or a download save asks on below Full access. */
+  readonly browserTransferApprovals?: NonNullable<
+    CodeAppManagedToolsOptions["browserUpload"]
+  >["approvals"];
   /** The Browser approvals a sign-in handoff asks through; see the Code tools. */
   readonly browserSignIn?: CodeAppManagedToolsOptions["browserSignIn"];
   /** Who may not be asked to save a download: a paired device. */
@@ -649,6 +654,8 @@ export interface CodeOperationRuntimeOptions {
   readonly agents?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /** Asks the turn's person, in the thread; absent in Plan, which stays refused. */
+    readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   /**
    * The native harness tool set for a direct-endpoint provider: reads, edits,
@@ -5150,18 +5157,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
           // An upload sends files from this thread's checkout only. The tool
-          // asks through `request` below Full access and not at all at it.
+          // asks on the Browser approval card below Full access and not at
+          // all at it.
           browserUpload: {
             root: active.checkoutRoot,
             ...(this.#options.browserUploadFileLimitBytes === undefined
               ? {}
               : { fileLimitBytes: this.#options.browserUploadFileLimitBytes }),
-            request: (summary, signal) => {
-              const bounded = boundProviderSummary(summary);
-              return bounded === undefined
-                ? Promise.resolve("cancelled" as const)
-                : this.#askToolApproval(active, bounded, undefined, signal);
-            },
+            ...(this.#options.browserUploadFileCountLimit === undefined
+              ? {}
+              : { fileCountLimit: this.#options.browserUploadFileCountLimit }),
+            ...(this.#options.browserTransferApprovals === undefined
+              ? {}
+              : { approvals: this.#options.browserTransferApprovals }),
           },
           // A saved download lands in this thread's checkout only, and the
           // person is asked below Full access, as for an upload.
@@ -5170,12 +5178,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ...(this.#options.browserDownloadRefusal === undefined
               ? {}
               : { refusal: this.#options.browserDownloadRefusal }),
-            request: (summary, signal) => {
-              const bounded = boundProviderSummary(summary);
-              return bounded === undefined
-                ? Promise.resolve("cancelled" as const)
-                : this.#askToolApproval(active, bounded, undefined, signal);
-            },
+            ...(this.#options.browserTransferApprovals === undefined
+              ? {}
+              : { approvals: this.#options.browserTransferApprovals }),
           },
           ...(browserProfiles === undefined
             ? {}
@@ -5299,7 +5304,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
-        this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
+        this.#options.agents?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          // The level is the turn's: a Plan turn on a wider thread asks nobody.
+          ...(active.thread.executionPolicy === "plan"
+            ? {}
+            : {
+                ask: (summary: string) => {
+                  const bounded = boundProviderSummary(summary);
+                  return bounded === undefined
+                    ? Promise.resolve("cancelled" as const)
+                    : this.#askToolApproval(active, bounded, undefined);
+                },
+              }),
+        }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,

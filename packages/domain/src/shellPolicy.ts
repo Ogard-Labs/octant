@@ -1,6 +1,7 @@
 import {
   DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
   MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_UPLOAD_FILES,
 } from "@octant/contracts/browser-automation";
 import {
   DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
@@ -206,6 +207,7 @@ export function defaultShellSettings(): ShellSettings {
     agentBrowserDownloads: false,
     browserTransferFileLimitMegabytes: DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
     browserHeldDownloadLimit: MAX_BROWSER_HELD_DOWNLOADS,
+    browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
     rememberedBrowserTransfers: [],
     persistentBrowserOwner: false,
   };

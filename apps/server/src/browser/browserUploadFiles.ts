@@ -38,15 +38,17 @@ export type BrowserUploadResolution =
  * workspace, or refuse. A file leaves this computer through a page, so only a
  * plain file that is really inside the workspace may go: no absolute path, no
  * path that climbs out, no symbolic link at the file or anywhere between it and
- * the workspace, and nothing over the size limit (the person's Settings limit
- * where the caller passes it, the default otherwise).
+ * the workspace, and nothing over the size limit or past the file count (the
+ * person's Settings limits where the caller passes them, the defaults
+ * otherwise).
  */
 export async function resolveBrowserUploadFiles(
   workspaceRoot: string,
   named: ReadonlyArray<string>,
   maxFileBytes: number = MAX_BROWSER_UPLOAD_FILE_BYTES,
+  maxFiles: number = MAX_BROWSER_UPLOAD_FILES,
 ): Promise<BrowserUploadResolution> {
-  if (named.length < 1 || named.length > MAX_BROWSER_UPLOAD_FILES)
+  if (named.length < 1 || named.length > maxFiles)
     return { status: "refused", reason: "upload-invalid-files" };
   let root: string;
   try {
@@ -114,6 +116,8 @@ export async function admitBrowserUpload(input: {
   readonly files: ReadonlyArray<string>;
   /** The person's per-file limit; absent, the default. */
   readonly maxFileBytes?: number;
+  /** The person's files-per-upload count; absent, the default. */
+  readonly maxFiles?: number;
   readonly ask: (
     files: ReadonlyArray<BrowserUploadFile>,
   ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
@@ -145,6 +149,7 @@ export async function prepareBrowserUpload(input: {
   readonly workspaceRoot: string | undefined;
   readonly files: ReadonlyArray<string>;
   readonly maxFileBytes?: number;
+  readonly maxFiles?: number;
 }): Promise<
   | {
       readonly status: "prepared";
@@ -159,6 +164,7 @@ export async function prepareBrowserUpload(input: {
     input.workspaceRoot,
     input.files,
     input.maxFileBytes,
+    input.maxFiles,
   );
   if (resolved.status === "refused") return resolved;
   let staging: string;
@@ -247,19 +253,4 @@ async function copyCheckedFile(
   } finally {
     await handle.close();
   }
-}
-
-/** The sentence a person reads before files leave this computer. */
-export function browserUploadSummary(
-  origin: string,
-  files: ReadonlyArray<BrowserUploadFile>,
-): string {
-  const named = files.map((file) => `${file.name} (${formatBytes(file.sizeBytes)})`).join(", ");
-  return `Let the agent upload ${named} to ${origin}?`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${String(bytes)} B`;
-  if (bytes < 1024 * 1024) return `${String(Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

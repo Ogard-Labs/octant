@@ -16,7 +16,7 @@ import {
   BrowserColorScheme,
   MAX_BROWSER_FLOW_NAME_LENGTH,
   type BrowserAuditKind,
-  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   MAX_BROWSER_WAIT_MS,
   type BrowserDevicePreset,
   type BrowserWaitCondition,
@@ -483,7 +483,8 @@ function parseBrowserToolRecord(
       named === undefined ||
       !Array.isArray(files) ||
       files.length === 0 ||
-      files.length > MAX_BROWSER_UPLOAD_FILES ||
+      // The most a person may choose; the count they chose is checked with the files.
+      files.length > MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT ||
       !files.every((file) => typeof file === "string" && file !== "" && file.length <= 4096)
     )
       return undefined;
@@ -1153,7 +1154,83 @@ export function browserToolCallDidNotRun(answer: BrowserToolAnswer): boolean {
   );
 }
 
-export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+/**
+ * A download an action started at Full access, as its answer reports it: where
+ * it is in the workspace now, or why it is not there.
+ */
+export type BrowserLandedDownload =
+  | {
+      readonly state: "saved";
+      readonly name: string;
+      readonly path: string;
+      readonly sizeBytes: number;
+      readonly mediaType: string;
+    }
+  | { readonly state: "refused"; readonly name: string; readonly reason: string };
+
+/**
+ * At Full access a download is not kept waiting for the agent to ask for it:
+ * each file the action's page started is saved into the workspace as the
+ * action answers, through the same save a `download-save` runs, so the size
+ * cap, the link and destination checks and the journal record all still
+ * apply. Holding below Full access exists so a person can be asked about the
+ * file; at this level nobody is asked, and a second call bought nothing.
+ *
+ * The snapshot comes back without the files that were dealt with, beside what
+ * became of each.
+ */
+export async function landHeldDownloads(
+  snapshot: BrowserAutomationSnapshot,
+  save: (downloadId: string) => Promise<
+    | {
+        readonly status: "saved";
+        readonly path: string;
+        readonly sizeBytes: number;
+        readonly mediaType: string;
+      }
+    | { readonly status: "refused"; readonly error: string }
+  >,
+): Promise<{
+  readonly snapshot: BrowserAutomationSnapshot;
+  readonly landed: ReadonlyArray<BrowserLandedDownload>;
+}> {
+  const reports = snapshot.observation?.downloads;
+  if (snapshot.observation === undefined || reports === undefined) {
+    return { snapshot, landed: [] };
+  }
+  const landed: BrowserLandedDownload[] = [];
+  for (const report of reports) {
+    if (report.state !== "held") continue;
+    const saved = await save(report.downloadId);
+    landed.push(
+      saved.status === "saved"
+        ? {
+            state: "saved",
+            name: report.name,
+            path: saved.path,
+            sizeBytes: saved.sizeBytes,
+            mediaType: saved.mediaType,
+          }
+        : { state: "refused", name: report.name, reason: saved.error },
+    );
+  }
+  if (landed.length === 0) return { snapshot, landed };
+  const { downloads: _held, ...observation } = snapshot.observation;
+  const stopped = reports.filter((report) => report.state !== "held");
+  return {
+    snapshot: {
+      ...snapshot,
+      observation: stopped.length === 0 ? observation : { ...observation, downloads: stopped },
+    },
+    landed,
+  };
+}
+
+export function browserToolResult(
+  snapshot: BrowserAutomationSnapshot,
+  includeScreenshot = false,
+  landed: ReadonlyArray<BrowserLandedDownload> = [],
+) {
   const image = includeScreenshot
     ? browserToolImage(snapshot.observation?.screenshotDataUrl)
     : undefined;
@@ -1185,7 +1262,9 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.emulation === undefined ? {} : { emulation: observation.emulation }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
-              ...(observation.downloads === undefined ? {} : { downloads: observation.downloads }),
+              ...(observation.downloads === undefined && landed.length === 0
+                ? {}
+                : { downloads: [...(observation.downloads ?? []), ...landed] }),
               ...(bounded === undefined
                 ? {}
                 : {

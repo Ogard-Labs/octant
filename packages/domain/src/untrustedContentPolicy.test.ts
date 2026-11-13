@@ -10,6 +10,7 @@ import {
   outsideContentRefusesDelegation,
   projectThreadContentTaint,
   searchQueryRefusalUnderTaint,
+  threadStandingAnswerCovers,
 } from "./untrustedContentPolicy";
 
 describe("originTaintsThread", () => {
@@ -341,5 +342,18 @@ describe("delegation on a thread that read outside content", () => {
     expect(
       outsideContentRefusesDelegation({ externalContentIngested: false, fullAccessThread: false }),
     ).toBe(false);
+  });
+});
+
+describe("a person's standing answer for a thread", () => {
+  it("covers its own subject, and a thread that has read outside content only when it was given after the mark", () => {
+    const beforeMark = [{ subject: "desktop-file-transfer", threadMarked: false }] as const;
+    const afterMark = [{ subject: "delegation", threadMarked: true }] as const;
+    expect(threadStandingAnswerCovers(beforeMark, "desktop-file-transfer", false)).toBe(true);
+    expect(threadStandingAnswerCovers(beforeMark, "desktop-file-transfer", true)).toBe(false);
+    expect(threadStandingAnswerCovers(beforeMark, "delegation", false)).toBe(false);
+    expect(threadStandingAnswerCovers(afterMark, "delegation", true)).toBe(true);
+    expect(threadStandingAnswerCovers(afterMark, "delegation", false)).toBe(true);
+    expect(threadStandingAnswerCovers([], "delegation", true)).toBe(false);
   });
 });
