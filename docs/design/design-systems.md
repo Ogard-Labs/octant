@@ -120,8 +120,9 @@ this sense too.
   Canvas follows the new design system and every design drawn in a brand is
   redrawn in it, while a design in the workspace theme or its own palette is
   left as made. Switching to none leaves brand designs their brand. The switch
-  shows in history, so switching back undoes it. Neither route is admitted for
-  a paired device.
+  shows in history, so switching back undoes it. Both routes answer a paired
+  device as they do a local window (maintainer decision, 2026-11-12; not built
+  yet: today neither is admitted for a paired device).
 - **Precedence.** A design system with tokens takes the place of the
   Project's brand kit: code and documents then share one palette. A Project
   whose design system carries no tokens, that has none, or that turned them
@@ -148,10 +149,11 @@ existing folder, and refuses to replace a file that exists.
 
 ## Constraints
 
-- **Local windows only.** `GET /api/design-systems`, `GET
-/api/design-systems/file`, and `POST /api/design-systems/file` answer only a
-  window on this host. They read and write the person's folder as their own
-  editor would, so a paired device's narrower reach is not widened by them.
+- **A local window or a paired device.** `GET /api/design-systems`, `GET
+/api/design-systems/file`, and `POST /api/design-systems/file` answer a window
+  on this host or a paired device (maintainer decision, 2026-11-12). They read
+  and write the person's folder as their own editor would. Not built yet: today
+  they answer only a window on this host.
   The Project must be one the window's bootstrap lists, and the folder one the
   Project lends.
 - **No link is followed.** The search does not descend into a linked

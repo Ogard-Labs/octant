@@ -85,16 +85,21 @@ describe("pinned Electron CI recovery", () => {
     const fixture = join(root, "installer.cjs");
     await writeFile(
       fixture,
-      `require("node:fs").writeFileSync(${JSON.stringify(ready)}, String(process.pid)); process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 8000);`,
+      `require("node:fs").writeFileSync(${JSON.stringify(ready)}, String(process.pid) + "\\n"); process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 8000);`,
     );
     const owner = new AbortController();
     const running = runElectronInstaller(fixture, owner.signal);
     try {
       const deadline = Date.now() + 6000;
+      // The installer creates the ready file before it writes its pid into it,
+      // so a read can land in between and see an empty or partial file. A
+      // Windows runner read "" there and compared it with the pid. Only the
+      // closing newline says the pid is whole.
       let pid: string | undefined;
       while (pid === undefined && Date.now() < deadline) {
-        pid = await readFile(ready, "utf8").catch(() => undefined);
-        if (pid === undefined) await new Promise((resolve) => setTimeout(resolve, 20));
+        const written = await readFile(ready, "utf8").catch(() => undefined);
+        if (written?.endsWith("\n") === true) pid = written.trimEnd();
+        else await new Promise((resolve) => setTimeout(resolve, 20));
       }
       if (pid === undefined) throw Error("Owned installer did not become ready.");
       const captured = vi.mocked(spawn).mock.results.at(-1);

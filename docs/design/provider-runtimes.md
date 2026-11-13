@@ -289,7 +289,9 @@ hours by default, from 5 minutes to 24 hours, which may be turned off
 request, 2026-11-12).
 
 The limit is a host setting (`stalledTurnLimitMinutes`, `null` for Off),
-journaled with the other shell settings and changed only at a local window.
+journaled with the other shell settings and changed at a local window or a
+paired device (maintainer decision, 2026-11-12; not built yet: today the shell
+route is local-only and a paired device cannot).
 Chat, Work and Code read it when a turn starts: a change applies from the
 next turn, and a running turn keeps the limit it started with. A turn cut off
 by the limit ends as it did under the fixed limit. With the setting Off, only

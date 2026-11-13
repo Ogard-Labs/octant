@@ -27,7 +27,36 @@ export type ConnectorAuth =
       readonly keyPage: string;
     }
   /** The server answers without a credential. */
-  | { readonly kind: "none" };
+  | { readonly kind: "none" }
+  /**
+   * A program Octant runs instead of a hosted address: one npm package pinned
+   * by exact version and registry integrity, started with `node` on a file
+   * inside it. The host rebuilds the command from this entry; a request never
+   * supplies it.
+   */
+  | {
+      readonly kind: "command";
+      readonly package: {
+        readonly name: string;
+        readonly version: string;
+        /** The registry's `dist.integrity` for that version's tarball. */
+        readonly integrity: string;
+        /** The file `node` runs, relative to the package folder. */
+        readonly entry: string;
+      };
+      /** Fixed, non-secret environment. */
+      readonly env: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+      /** The one value the person provides; kept in the credential broker. */
+      readonly secret: {
+        readonly name: string;
+        readonly label: string;
+        readonly keyPage: string;
+      };
+      /** Env var that receives the server's token-store path inside its plugin data. */
+      readonly stateFileEnv?: string;
+      /** Tools that ask on every call; no remembered approval covers them. */
+      readonly askEveryCall: ReadonlyArray<string>;
+    };
 
 export type ConnectorCategory = "popular" | "developer-tools" | "business";
 
@@ -670,6 +699,36 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     url: "https://mcp.klaviyo.com/mcp",
     docs: "https://developers.klaviyo.com/en/docs/connect_to_the_klaviyo_mcp_server",
     auth: { kind: "sign-in" },
+  },
+  {
+    id: "jottacloud",
+    displayName: "Jottacloud",
+    description:
+      "Browse and read your Jottacloud files, read-only. Runs a pinned local program that reaches only Jottacloud.",
+    category: "business",
+    keywords: ["files", "storage", "cloud drive", "backup", "sync"],
+    // The package's registry page; never connected to. Octant downloads the pinned tarball.
+    url: "https://www.npmjs.com/package/@henrikogard/jottacloud-mcp/v/0.1.1",
+    docs: "https://github.com/henrikogaard/jottacloud-mcp#readme",
+    egress: ["*.jottacloud.com"],
+    auth: {
+      kind: "command",
+      package: {
+        name: "@henrikogard/jottacloud-mcp",
+        version: "0.1.1",
+        integrity:
+          "sha512-fBIXwNbPxBm9MkKDpNoxKtxmKd+BkGtp9UwXDiRIcHEctXjTs1rg8VntnxVH3cWA64zUFqZwUR/1jajBuMK12g==",
+        entry: "dist/stdio.bundle.mjs",
+      },
+      env: [{ name: "JOTTACLOUD_READ_ONLY", value: "1" }],
+      secret: {
+        name: "JOTTACLOUD_LOGIN_TOKEN",
+        label: "Login token",
+        keyPage: "https://www.jottacloud.com/web/secure",
+      },
+      stateFileEnv: "JOTTACLOUD_TOKEN_STORE",
+      askEveryCall: ["delete_file", "create_share_link"],
+    },
   },
   {
     id: "mercado-pago",
