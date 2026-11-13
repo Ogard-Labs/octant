@@ -83,6 +83,34 @@ describe("secret guard list", () => {
     expect(covered(`${support}/Google/Chrome/Default/Preferences`)).toBeUndefined();
   });
 
+  it("protects desktop apps' stored session tokens and leaves ordinary app settings readable", () => {
+    const support = `${HOME}/Library/Application Support`;
+    expect(covered(`${support}/Slack/Cookies`)).toBe("browser-cookies-and-logins");
+    expect(covered(`${support}/Slack/Local Storage/leveldb/000003.log`)).toBe(
+      "browser-cookies-and-logins",
+    );
+    expect(covered(`${support}/discord/Local Storage/leveldb/000005.ldb`)).toBe(
+      "browser-cookies-and-logins",
+    );
+    expect(covered(`${support}/Code/User/settings.json`)).toBeUndefined();
+    expect(covered(`${support}/Slack/storage/root-state.json`)).toBeUndefined();
+
+    const linux = resolveProtectedFiles(
+      {
+        platform: "linux" as const,
+        home: "/home/person",
+        dataDirectory: "/home/person/.local/share/octant",
+        runtimeDirectory: "/run/user/1000/octant",
+      },
+      NO_PROTECTED_FILES_CHANGES,
+    );
+    const onLinux = (path: string) => protectedEntryFor([path], linux, [])?.ruleId;
+    expect(onLinux("/home/person/.config/discord/Local Storage/leveldb/000005.ldb")).toBe(
+      "browser-cookies-and-logins",
+    );
+    expect(onLinux("/home/person/.config/Code/User/settings.json")).toBeUndefined();
+  });
+
   it("lets a runtime read its own sign-in and no other tool's", () => {
     const codexHome = `${HOME}/.codex`;
     expect(covered(`${HOME}/.codex/auth.json`)).toBe("provider-sign-ins");
