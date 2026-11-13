@@ -169,7 +169,7 @@ export function ExtensionToolApprovalPrompt(props: {
       }
       detail={
         covers === "server"
-          ? `${server} Octant asks about a server once: allowing lets every tool of this server run ${where} without asking, until its plugin is updated.`
+          ? `${server} Octant asks about a server once: allowing lets every tool of this server run ${where} without asking, until an update comes from a different publisher or source, asks for more, or is rolled back.`
           : covers === "server-on-thread"
             ? `${server} This thread has read outside content, and this server can send what the thread has read over the network. Allowing lets its tools run for the rest of this thread without asking.`
             : server
