@@ -1335,7 +1335,6 @@ input.switch:checked::after {
 }
 .octant-switch[data-slot="switch"]:focus-visible:not([data-checked]) {
   background: var(--octant-control-hover);
-  border-color: var(--octant-text-primary);
 }
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-accent);
@@ -2480,37 +2479,6 @@ input.switch:checked::after {
 .pager-gap {
   color: var(--oct-meta);
   padding-inline: var(--oct-space-1);
-}
-
-/* ─── slider ──────────────────────────────────────────────────────────
-   The two thumb rules cannot be combined: an unknown pseudo-element in a
-   selector list invalidates the whole rule, so each engine gets its own. */
-.range {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg-soft);
-  outline-offset: 6px;
-}
-.range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 0;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent);
-  cursor: default;
-}
-.range::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent);
-  cursor: default;
 }
 
 /* ─── accordion ───────────────────────────────────────────────────────
@@ -7926,7 +7894,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    a tool call, so it gets its own quiet register: italic, muted, and shut
    by default. Opening it must never be required to follow the answer. */
 .thinking {
-  border-left: 1px solid var(--oct-hairline);
+  border-left: 1px solid var(--octant-border-strong);
   padding-left: var(--oct-space-4);
 }
 .thinking > summary {

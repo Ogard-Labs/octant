@@ -365,12 +365,6 @@
   height: 7%;
 }
 
-.device-body:has(.device-screen:focus-visible) {
-  box-shadow:
-    0 0 0 1px var(--oct-muted),
-    var(--device-shadow);
-}
-
 .device-body[data-ghost="true"] {
   background: transparent;
   box-shadow: none;
