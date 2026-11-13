@@ -50,7 +50,21 @@ export type CodeThreadCreatePlan =
 
 export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCreatePlan {
   const workspace: CodeNewThreadWorkspace = input.composer.workspace;
-  const deliveryTarget = { ...input.composer.deliveryTarget, confirmedAt: input.timestamp };
+  // A thread can be sent before the host has listed the repository's refs, and
+  // the composer then carries a stand-in base branch. The host reads the base
+  // afterwards (the source of a managed worktree, a pull-request draft's diff),
+  // so a repository on `main` got a thread based on a branch it does not have.
+  // The prepared checkout is the host's own reading, so it outranks the stand-in.
+  const head = input.prepared.checkout.head;
+  const baseBranch =
+    input.composer.baseBranchAssumed === true && head.kind === "branch"
+      ? String(head.name)
+      : input.composer.deliveryTarget.proposedBaseBranch;
+  const deliveryTarget = {
+    ...input.composer.deliveryTarget,
+    proposedBaseBranch: baseBranch,
+    confirmedAt: input.timestamp,
+  };
   // A remote root is a folder on a server; its managed worktree is made there.
   const remoteRoot = input.prepared.checkout.kind === "remote-root";
 
@@ -73,7 +87,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         permissionPersistence: input.composer.permissionPersistence,
         ...(input.composer.autoApprove === true ? { autoApprove: true } : {}),
         deliveryTarget,
-        sourceBranch: input.composer.deliveryTarget.proposedBaseBranch,
+        sourceBranch: baseBranch,
         startFromOrigin: input.composer.worktreeSource.startFromOrigin,
         ...(input.composer.worktreeSource.remoteName === ""
           ? {}
