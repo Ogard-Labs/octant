@@ -575,6 +575,8 @@ const timer = setInterval(() => {
             8000,
           );
           await writeFile(join(artifacts, `${stage}.json`), raw);
+          if (stage.startsWith("canvas-export") || stage.startsWith("destination"))
+            console.log(`DIAG ${stage} ${Date.now()} ${raw.slice(0, 6000)}`);
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
           lastNativeError = "";
