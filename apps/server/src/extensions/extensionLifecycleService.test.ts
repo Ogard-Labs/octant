@@ -455,6 +455,29 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(service.snapshot().packages[0]?.updated).toMatchObject({ previousVersion: "1.1.0" });
   });
 
+  it("keeps the Updated notice and the update line when the host stops right after an update kept from the trusted source commits", async () => {
+    const context = await setup();
+    const first = inspection("1.0.0", "known good");
+    await context.makeService().install(first, { trust: true, enable: true });
+
+    const second = inspection("1.1.0", "newer");
+    const stopping = context.makeService({
+      fault: (point) => {
+        if (point === "after-commit") throw new Error("simulated crash");
+      },
+    });
+    await expect(stopping.update(second)).rejects.toThrow("simulated crash");
+
+    const restarted = context.makeService({ fault: undefined });
+    await restarted.reconcileStartup();
+    expect(restarted.snapshot().packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true },
+      updated: { previousVersion: "1.0.0", rollbackAvailable: true },
+    });
+    expect(readUpdateLine(context.connection, targetFor(second))).toBeDefined();
+  });
+
   it("still resolves a scope's effective state after an update kept from the trusted source", async () => {
     const context = await setup();
     const service = context.makeService();

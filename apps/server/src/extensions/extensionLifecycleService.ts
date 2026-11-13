@@ -220,19 +220,27 @@ export class ExtensionLifecycleService {
         ),
         capabilitiesWidened,
       });
-    const updated = await this.#promote(inspection, "update");
-    if (keptFromSource && previous !== undefined) {
-      this.#append(inspection.manifest.extensionId, {
-        kind: "update-kept-from-source",
-        packageId: inspection.manifest.packageId,
-        version: inspection.manifest.version,
-        digest: inspection.manifest.digest,
-        previousVersion: previous.version,
-        previousDigest: previous.digest,
-      });
-      return this.snapshot();
-    }
-    if (!keepsTrust) return updated;
+    // The kept-from-source fact rides in the same journal append as
+    // `update-committed`: appended separately, a stop between the two left
+    // the update trusted but without its Updated notice, roll back and
+    // update line, and nothing at startup or on retry could rebuild them.
+    const updated = await this.#promote(
+      inspection,
+      "update",
+      keptFromSource && previous !== undefined
+        ? [
+            {
+              kind: "update-kept-from-source",
+              packageId: inspection.manifest.packageId,
+              version: inspection.manifest.version,
+              digest: inspection.manifest.digest,
+              previousVersion: previous.version,
+              previousDigest: previous.digest,
+            },
+          ]
+        : [],
+    );
+    if (keptFromSource || !keepsTrust) return updated;
     this.#append(inspection.manifest.extensionId, [
       { kind: "source-trust-changed", trusted: true },
       ...(existing.pluginDesired
@@ -645,6 +653,7 @@ export class ExtensionLifecycleService {
   async #promote(
     inspection: InspectedExtensionPackage,
     operation: "install" | "update",
+    committedWith: ReadonlyArray<ExtensionLifecycleEvent["payload"]> = [],
   ): Promise<ExtensionSnapshot> {
     const staged = await this.#store.stage(inspection);
     try {
@@ -673,14 +682,17 @@ export class ExtensionLifecycleService {
       );
     }
     this.#fault?.("after-promotion");
-    this.#append(inspection.manifest.extensionId, {
-      kind: operation === "install" ? "install-committed" : "update-committed",
-      transactionId: staged.transactionId as never,
-      packageId: inspection.manifest.packageId,
-      version: inspection.manifest.version,
-      digest: inspection.manifest.digest,
-      manifest: inspection.manifest,
-    });
+    this.#append(inspection.manifest.extensionId, [
+      {
+        kind: operation === "install" ? "install-committed" : "update-committed",
+        transactionId: staged.transactionId as never,
+        packageId: inspection.manifest.packageId,
+        version: inspection.manifest.version,
+        digest: inspection.manifest.digest,
+        manifest: inspection.manifest,
+      },
+      ...committedWith,
+    ]);
     this.#fault?.("after-commit");
     return this.snapshot();
   }

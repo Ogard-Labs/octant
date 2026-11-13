@@ -11209,7 +11209,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     npm, the registry and the package name; the version and the tarball's
     integrity are not part of it (`sameExtensionSource`). Such an update of a
     trusted package that may do no more than the reviewed version is
-    journaled as `update-kept-from-source` after its commit
+    journaled as `update-kept-from-source` in the same journal append as its
+    commit, so a stop cannot keep the update without its notice
     (`unsignedUpdateKeepsApprovals`), and the versions of one unbroken run of
     such updates share an update line: a whole-server grant, a tool's grant
     (its listing still compared), and a marked thread's answer given to one
