@@ -162,8 +162,13 @@ screen restarts and running apps close) and drops the stream so the next input
 reconnects it. It rides the same Allow input grant as a tap, whoever asks: a live
 grant or a one-shot approval covers it, and without either it is refused as
 approval-required (maintainer decision, 2026-11-12). It never runs
-automatically. Not built yet: `octant_apple` does not offer it, so an agent
-has no way to send it.
+automatically. `octant_apple` offers it as its `repair-input` operation, which
+takes the Simulator's id and goes through the same authority check as the
+pane's (maintainer decision, 2026-11-13): Plan refuses it, a turn running at
+Full access sends it unasked, and below Full access a live grant covers it
+and a thread without one asks the person first, refusing it when nobody can
+answer. Its usage, behind the tool's `help`, tells the agent to send it only
+after an input was refused as `input-disconnected`.
 
 ## Open URL
 

@@ -1296,7 +1296,8 @@ an input whose delivery is unknown is reported `interrupted`, not `failed`, and 
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
 is input like a tap: a live Allow input grant or a one-shot approval covers
-it, whoever asks. **Record screen** starts and stops a time-limited recording a person asked for;
+it, whoever asks, and the agent's `octant_apple` tool offers it as
+`repair-input` (maintainer decision, 2026-11-13). **Record screen** starts and stops a time-limited recording a person asked for;
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
