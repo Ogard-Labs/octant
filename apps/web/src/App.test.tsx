@@ -29,7 +29,12 @@ import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat";
+import {
+  decodeChatCommandResult,
+  decodeChatEventFrame,
+  decodeChatThreadView,
+  type ChatThread,
+} from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
@@ -86,6 +91,7 @@ import { compactionStateFixture, contextFixture } from "./context/contextFixture
 // Observe the real pane boundary without replacing its rendered behavior.
 const paneBoundary = vi.hoisted(() => ({
   observing: false,
+  renders: 0,
   latest: undefined as import("./app/ThreadPaneContainer").ThreadPaneContainerProps | undefined,
 }));
 vi.mock("./app/ThreadPaneContainer", async (original) => {
@@ -94,8 +100,32 @@ vi.mock("./app/ThreadPaneContainer", async (original) => {
   return {
     ...actual,
     ThreadPaneContainer: (props: import("./app/ThreadPaneContainer").ThreadPaneContainerProps) => {
-      if (paneBoundary.observing) paneBoundary.latest = props;
+      if (paneBoundary.observing) {
+        paneBoundary.renders += 1;
+        paneBoundary.latest = props;
+      }
       return createElement(actual.ThreadPaneContainer, props);
+    },
+  };
+});
+
+// Observe streamed Chat workspace renders without altering rendered behavior.
+const chatBoundary = vi.hoisted(() => ({
+  observing: false,
+  renders: 0,
+  latest: undefined as import("./chat/ChatWorkspace").ChatWorkspaceProps | undefined,
+}));
+vi.mock("./chat/ChatWorkspace", async (original) => {
+  const actual = await original<typeof import("./chat/ChatWorkspace")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    ChatWorkspace: (props: import("./chat/ChatWorkspace").ChatWorkspaceProps) => {
+      if (chatBoundary.observing) {
+        chatBoundary.renders += 1;
+        chatBoundary.latest = props;
+      }
+      return createElement(actual.ChatWorkspace, props);
     },
   };
 });
@@ -262,7 +292,192 @@ describe("App", () => {
       }
     } finally {
       paneBoundary.observing = false;
+      paneBoundary.renders = 0;
       paneBoundary.latest = undefined;
+    }
+  });
+
+  it("batches streamed Chat reply deltas so the Chat pane commits once per 50 ms beat", async () => {
+    paneBoundary.observing = true;
+    chatBoundary.observing = true;
+    paneBoundary.renders = 0;
+    try {
+      const now = "2026-07-20T08:00:00.000Z";
+      const turnId = "00000000-0000-4000-8000-000000000951";
+      const attemptId = "00000000-0000-4000-8000-000000000953";
+      const chunk = (index: number, text: string) => ({
+        contentId: `00000000-0000-4000-8000-${String(960 + index).padStart(12, "0")}`,
+        role: "assistant" as const,
+        body: text,
+        digest: "b".repeat(64),
+        byteLength: text.length,
+      });
+      const reference = (item: ReturnType<typeof chunk>) => ({
+        contentId: item.contentId,
+        digest: item.digest,
+        byteLength: item.byteLength,
+      });
+      const prompt = {
+        contentId: "00000000-0000-4000-8000-000000000952",
+        role: "user" as const,
+        body: "?",
+        digest: "a".repeat(64),
+        byteLength: 1,
+      };
+      const initialChunk = chunk(0, "start");
+      const baseChat = chats();
+      const baseBootstrap = await baseChat.bootstrap();
+      const threadRecord = baseBootstrap.threads[0];
+      if (threadRecord === undefined) throw new Error("Missing chat thread fixture.");
+      const snapshot = decodeChatThreadView({
+        thread: threadRecord,
+        turns: [
+          {
+            id: turnId,
+            threadId: oldChatThreadId,
+            sequence: 1,
+            userMessageRef: {
+              contentId: prompt.contentId,
+              digest: prompt.digest,
+              byteLength: prompt.byteLength,
+            },
+            attachmentIds: [],
+            attempts: [
+              {
+                id: attemptId,
+                turnId,
+                threadId: oldChatThreadId,
+                providerInstanceId: threadRecord.providerInstanceId,
+                providerSessionId: "00000000-0000-4000-8000-000000000954",
+                modelId: "model-a",
+                contextManifestId: "00000000-0000-4000-8000-000000000955",
+                outcome: "streaming",
+                responseRefs: [reference(initialChunk)],
+                citationIds: [],
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        lastSequence: 1,
+        contents: [prompt, initialChunk],
+        attachments: [],
+        citations: [],
+        workItems: [],
+        workListVersion: 0,
+        followUpVersion: 0,
+      });
+      const streamReady = deferred<void>();
+      const startBatch = deferred<void>();
+      const batchDone = deferred<void>();
+      const holdOpen = deferred<void>();
+      const chatClient: ChatClient = {
+        ...baseChat,
+        thread: vi.fn(async () => snapshot),
+        subscribe: vi.fn(async function* (_threadId, _cursor, signal: AbortSignal) {
+          signal.addEventListener(
+            "abort",
+            () => {
+              startBatch.resolve();
+              holdOpen.resolve();
+            },
+            { once: true },
+          );
+          streamReady.resolve();
+          await startBatch.promise;
+          for (let index = 1; index <= 20; index += 1) {
+            const delta = chunk(index, `-${index}`);
+            yield decodeChatEventFrame({
+              threadId: oldChatThreadId,
+              sequence: index + 1,
+              event: {
+                kind: "attempt-response-appended",
+                threadId: oldChatThreadId,
+                turnId,
+                attemptId,
+                responseRef: reference(delta),
+                updatedAt: now,
+              },
+              contents: [delta],
+            });
+          }
+          batchDone.resolve();
+          await holdOpen.promise;
+        }),
+      };
+      const baseShell = chatShellBootstrap();
+      const chatLayout = baseShell.workspace.layouts.chat;
+      if (chatLayout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+      const shellBootstrap: ShellBootstrap = {
+        ...baseShell,
+        workspace: applyWorkspaceOperation(
+          baseShell.workspace,
+          decodeWorkspaceOperation({
+            kind: "open-surface",
+            mode: "chat",
+            paneId: String(chatLayout.paneId),
+            surface: {
+              kind: "chat-thread",
+              id: "00000000-0000-4000-8000-000000000831",
+              threadId: oldChatThreadId,
+              mode: "chat",
+              title: "Older chat",
+            },
+          }),
+        ),
+      };
+      const view = render(
+        <App
+          shellClient={client(shellBootstrap)}
+          chatClient={chatClient}
+          codeClient={codes()}
+          contextClient={contextClient()}
+          projectClient={projects()}
+          providerClient={providers()}
+          hostClient={hostClient() as never}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectWindowCapability={projectWindowCapability}
+        />,
+      );
+      await waitFor(() => {
+        expect(paneBoundary.latest?.chatController.status).toBe("ready");
+        expect(paneBoundary.latest?.codeController.status).toBe("ready");
+        expect(paneBoundary.latest?.codeController.followUps.has(String(codeThreadId))).toBe(true);
+        expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1);
+      });
+      await streamReady.promise;
+
+      vi.useFakeTimers();
+      await act(async () => {
+        for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+      });
+      const chatRendersBeforeBatch = chatBoundary.renders;
+      const paneRendersBeforeBatch = paneBoundary.renders;
+      startBatch.resolve();
+      await batchDone.promise;
+      await act(async () => {
+        for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+      });
+      expect(chatBoundary.renders - chatRendersBeforeBatch).toBe(0);
+      expect(paneBoundary.renders - paneRendersBeforeBatch).toBe(0);
+      expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+      expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(21);
+      expect(chatBoundary.renders - chatRendersBeforeBatch).toBe(1);
+      expect(paneBoundary.renders - paneRendersBeforeBatch).toBe(0);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+      paneBoundary.observing = false;
+      paneBoundary.renders = 0;
+      paneBoundary.latest = undefined;
+      chatBoundary.observing = false;
+      chatBoundary.renders = 0;
+      chatBoundary.latest = undefined;
     }
   });
 

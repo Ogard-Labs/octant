@@ -70,6 +70,8 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_RECONNECT_BACKOFF_MS = 100;
+/** Coalesce streamed reply delta commits so rapid token bursts paint on a 50 ms beat. */
+const STREAM_REPLY_BEAT_MS = 50;
 const CHAT_UNAVAILABLE = "Octant Chat service is unavailable.";
 
 /**
@@ -286,6 +288,8 @@ export function useChatController(options: ChatControllerOptions) {
   const bootstrapGeneration = useRef(0);
   const navigationGeneration = useRef(0);
   const threadGeneration = useRef(0);
+  const replyBeatTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const replyBeatPending = useRef(false);
   const streamAbort = useRef<AbortController | undefined>(undefined);
   const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
   const bootstrapped = useRef(false);
@@ -465,8 +469,44 @@ export function useChatController(options: ChatControllerOptions) {
     });
   }, []);
 
+  const cancelReplyBeat = useCallback(() => {
+    if (replyBeatTimer.current !== undefined) {
+      clearTimeout(replyBeatTimer.current);
+      replyBeatTimer.current = undefined;
+    }
+    replyBeatPending.current = false;
+  }, []);
+
+  const flushReplyBeat = useCallback(
+    (request: number) => {
+      if (!replyBeatPending.current) return;
+      cancelReplyBeat();
+      const view = activeViewRef.current;
+      if (!mounted.current || request !== threadGeneration.current || view === undefined) {
+        return;
+      }
+      recordSequence(view.thread.id, view.lastSequence);
+      setActiveView(view);
+      readCursorStore.markDeferred(view.thread.id, view.lastSequence);
+    },
+    [cancelReplyBeat, readCursorStore, recordSequence],
+  );
+
+  const scheduleReplyBeat = useCallback(
+    (request: number) => {
+      replyBeatPending.current = true;
+      if (replyBeatTimer.current !== undefined) return;
+      replyBeatTimer.current = setTimeout(() => {
+        replyBeatTimer.current = undefined;
+        flushReplyBeat(request);
+      }, STREAM_REPLY_BEAT_MS);
+    },
+    [flushReplyBeat],
+  );
+
   const applyAuthoritativeView = useCallback(
     (view: ChatThreadView, markRead: boolean) => {
+      cancelReplyBeat();
       recordSequence(view.thread.id, view.lastSequence);
       recordFollowUp(view.thread.id, view.followUp?.state === "open");
       recordUpdatedAt(view.thread.id, view.thread.updatedAt);
@@ -474,7 +514,7 @@ export function useChatController(options: ChatControllerOptions) {
       setActiveView(view);
       if (markRead) readCursorStore.markDeferred(view.thread.id, view.lastSequence);
     },
-    [readCursorStore, recordFollowUp, recordSequence, recordUpdatedAt],
+    [cancelReplyBeat, readCursorStore, recordFollowUp, recordSequence, recordUpdatedAt],
   );
 
   const applyWindowState = useCallback((next: ChatTranscriptWindowState | undefined) => {
@@ -615,6 +655,7 @@ export function useChatController(options: ChatControllerOptions) {
   const activateThread = useCallback(
     async (threadId: ChatThreadId) => {
       const request = ++threadGeneration.current;
+      cancelReplyBeat();
       streamAbort.current?.abort();
       streamAbort.current = undefined;
       setErrorMessage(undefined);
@@ -700,7 +741,6 @@ export function useChatController(options: ChatControllerOptions) {
                   cursor = frame.sequence;
                   continue;
                 }
-                recordSequence(threadId, frame.sequence);
                 if (frame.event.kind === "follow-up-updated") {
                   recordFollowUp(threadId, frame.event.followUp.state === "open");
                 }
@@ -709,12 +749,16 @@ export function useChatController(options: ChatControllerOptions) {
                 // is what every frame did before frames carried their body.
                 const grown = applyChatAttemptFrame(activeViewRef.current, frame);
                 if (grown !== undefined) {
-                  activeViewRef.current = grown;
-                  setActiveView(grown);
-                  readCursorStore.markDeferred(threadId, frame.sequence);
+                  if (grown !== activeViewRef.current) {
+                    activeViewRef.current = grown;
+                    scheduleReplyBeat(request);
+                  } else {
+                    recordSequence(threadId, frame.sequence);
+                  }
                   cursor = frame.sequence;
                   continue;
                 }
+                recordSequence(threadId, frame.sequence);
                 const refreshed = await refreshTail(threadId, () => isCurrent() && !signal.aborted);
                 if (refreshed === undefined) return;
                 cursor = refreshed.lastSequence;
@@ -722,12 +766,14 @@ export function useChatController(options: ChatControllerOptions) {
             } finally {
               await frames.return?.();
             }
+            flushReplyBeat(request);
             if (!endedCleanly) {
               if ((await resume()) === "stop") return;
               continue;
             }
             await waitForReconnect(signal, reconnectDelayMs);
           } catch {
+            flushReplyBeat(request);
             if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
               return;
             }
@@ -740,7 +786,17 @@ export function useChatController(options: ChatControllerOptions) {
         setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
       }
     },
-    [client, readCursorStore, reconnectDelayMs, recordFollowUp, recordSequence, refreshTail],
+    [
+      cancelReplyBeat,
+      client,
+      flushReplyBeat,
+      readCursorStore,
+      reconnectDelayMs,
+      recordFollowUp,
+      recordSequence,
+      refreshTail,
+      scheduleReplyBeat,
+    ],
   );
 
   useEffect(() => {
@@ -750,9 +806,10 @@ export function useChatController(options: ChatControllerOptions) {
       mounted.current = false;
       bootstrapGeneration.current += 1;
       threadGeneration.current += 1;
+      cancelReplyBeat();
       streamAbort.current?.abort();
     };
-  }, [loadBootstrap]);
+  }, [cancelReplyBeat, loadBootstrap]);
 
   useEffect(() => {
     if (bootstrap === undefined || navigationRefreshMs <= 0) return;
@@ -814,13 +871,14 @@ export function useChatController(options: ChatControllerOptions) {
     // wait for this thread's newest read, not act on the old run.
     applyWindowState(undefined);
     threadGeneration.current += 1;
+    cancelReplyBeat();
     streamAbort.current?.abort();
     streamAbort.current = undefined;
     if (options.activeThreadId === undefined) {
       return;
     }
     void activateThread(options.activeThreadId);
-  }, [activateThread, applyWindowState, options.activeThreadId]);
+  }, [activateThread, applyWindowState, cancelReplyBeat, options.activeThreadId]);
 
   const navigation = useMemo((): ReadonlyArray<ChatThreadNavigationItem> => {
     if (bootstrap === undefined) return [];
