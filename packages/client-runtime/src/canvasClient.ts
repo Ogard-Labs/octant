@@ -12,6 +12,8 @@ import {
   CanvasHtmlImportResult,
   type CanvasExportDecideRequest,
   CanvasExportDecideResult,
+  CanvasExportNoticeDismissResult,
+  type CanvasExportNoticeDismissRequest,
   CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
@@ -159,6 +161,9 @@ export interface CanvasClient {
   exportOffers?(canvasId: CanvasId): Promise<CanvasExportOfferList>;
   prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
   decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
+  dismissExportNotice?(
+    request: CanvasExportNoticeDismissRequest,
+  ): Promise<CanvasExportNoticeDismissResult>;
   /**
    * The Canvas as one self-contained HTML file for this window to save or
    * copy. The host renders it under the read check; it goes to no
@@ -562,6 +567,18 @@ export function createCanvasClient(
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasExportDecideResult),
+      );
+    },
+    dismissExportNotice(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/export-notice-dismiss", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasExportNoticeDismissResult),
       );
     },
     htmlFile(body) {

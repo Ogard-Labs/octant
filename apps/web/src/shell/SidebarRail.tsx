@@ -331,7 +331,7 @@ function RailButton(props: {
         disabled={props.onSelect === undefined}
         onClick={() => props.onSelect?.()}
         type="button"
-        variant="link"
+        variant="rail"
       >
         <span aria-hidden="true" className="sidebar-rail__face">
           {Icon === undefined ? null : <Icon size={20} />}

@@ -19,6 +19,7 @@ export const SupportBundleSectionId = Schema.Literal(
   "system",
   "providers",
   "host-log",
+  "crash-records",
   "journal-events",
   "confinement",
   "process",

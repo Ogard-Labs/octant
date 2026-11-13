@@ -110,7 +110,7 @@ function RailUsageRing(props: {
           } as CSSProperties
         }
         type="button"
-        variant="link"
+        variant="rail"
       >
         <span aria-hidden="true" className="rail-usage__face">
           <svg className="rail-usage__rings" viewBox="0 0 26 26">

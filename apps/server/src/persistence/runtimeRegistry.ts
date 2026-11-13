@@ -422,6 +422,7 @@ import {
 } from "../canvas/canvasEventStore";
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
+import { registerCoordinatorWakeEvents } from "../coordinator/coordinatorWakeJournal";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
@@ -824,6 +825,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasTagEvents(events);
   registerArtifactMirrorEvents(events);
   registerGoalLoopEvents(events);
+  registerCoordinatorWakeEvents(events);
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);

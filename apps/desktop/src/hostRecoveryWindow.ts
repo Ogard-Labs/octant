@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { basename, join } from "node:path";
 import { app, BrowserWindow, dialog } from "electron";
 import {
   decodeHostRecoveryAction,
@@ -10,6 +11,8 @@ import {
   type HostRecoveryScreen,
   type HostStartupRefusal,
 } from "./hostRecovery";
+import { writeOwnerOnlyFile } from "./recoverySupportBundle";
+import { defaultSupportBundleFileName } from "./supportBundleSaver";
 
 const MAINTENANCE_OUTPUT_LIMIT = 16_384;
 
@@ -24,6 +27,10 @@ export async function showHostRecovery(options: {
   readonly root: string;
   readonly execPath: string;
   readonly env: NodeJS.ProcessEnv;
+  readonly supportBundle: {
+    readonly defaultDirectory: string;
+    readonly build: (now: Date) => Promise<Uint8Array>;
+  };
 }): Promise<"retry" | "quit"> {
   let screen: HostRecoveryScreen = hostRecoveryScreenFor(options.refusal);
   const window = new BrowserWindow({
@@ -71,6 +78,15 @@ export async function showHostRecovery(options: {
         finish(action);
         return;
       }
+      if (action === "export") {
+        busy = true;
+        void (async () => {
+          const outcome = await saveSupportBundle(window, options.supportBundle);
+          busy = false;
+          if (outcome !== undefined) await render({ outcome });
+        })();
+        return;
+      }
       if (!screen.actions.includes(action)) return;
       busy = true;
       void (async () => {
@@ -88,6 +104,46 @@ export async function showHostRecovery(options: {
     window.once("ready-to-show", () => window.show());
     void render({});
   });
+}
+
+/**
+ * Saves the support bundle where the person chooses. The host is not running,
+ * so nothing is journaled: the journal is what may have refused to open. The
+ * file is owner-only, and nothing is sent anywhere.
+ */
+async function saveSupportBundle(
+  parent: BrowserWindow,
+  bundle: {
+    readonly defaultDirectory: string;
+    readonly build: (now: Date) => Promise<Uint8Array>;
+  },
+): Promise<HostRecoveryOutcome | undefined> {
+  const now = new Date();
+  const refused: HostRecoveryOutcome = {
+    status: "refused",
+    message: "Octant could not save the support bundle there. Nothing was saved.",
+  };
+  try {
+    const selection = await dialog.showSaveDialog(parent, {
+      title: "Save support bundle",
+      defaultPath: join(bundle.defaultDirectory, defaultSupportBundleFileName(now)),
+      buttonLabel: "Save",
+      filters: [{ name: "Zip archive", extensions: ["zip"] }],
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (selection.canceled || selection.filePath === undefined || selection.filePath === "")
+      return undefined;
+    const path = /\.zip$/i.test(selection.filePath)
+      ? selection.filePath
+      : `${selection.filePath}.zip`;
+    await writeOwnerOnlyFile(path, await bundle.build(now));
+    return {
+      status: "saved",
+      message: `Saved ${basename(path)}. Read it before you share it; Octant sent nothing.`,
+    };
+  } catch {
+    return refused;
+  }
 }
 
 async function confirmRestore(parent: BrowserWindow): Promise<boolean> {

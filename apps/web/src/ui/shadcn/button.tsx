@@ -47,6 +47,10 @@ const buttonVariants = cva(
         // focus handling, and disabled state and draws nothing of its own, so
         // the feature never fights a ghost hover fill or a fixed height.
         bare: "h-auto rounded-none p-0 text-inherit",
+        // An icon rail entry: bare, and without the recipe's transparent 1px
+        // border, so the button is exactly its 32px face and needs no negative
+        // margin to give the border back.
+        rail: "h-auto rounded-none border-0 p-0 text-foreground",
         // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
@@ -60,12 +64,12 @@ const buttonVariants = cva(
       size: {
         default:
           "h-[round(2.154rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
-        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        xs: "h-[round(1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
         sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
         lg: "h-[round(2.462rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
         icon: "size-[round(2.154rem,2px)]",
         "icon-xs":
-          "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+          "size-[round(1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
         "icon-sm":
           "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
