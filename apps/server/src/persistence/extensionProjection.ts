@@ -14,7 +14,10 @@ import {
 } from "@octant/contracts/extensions";
 import { decodeExtensionSnapshot, type ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { AggregateVersion, UtcTimestamp, type EventEnvelope } from "@octant/contracts/events";
-import { outsideDriverPublisherStanding } from "@octant/domain/outside-driver-publisher-policy";
+import {
+  outsideDriverPublisherStanding,
+  updateAwaitsPublisherTrust,
+} from "@octant/domain/outside-driver-publisher-policy";
 import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
@@ -275,13 +278,17 @@ function applyLifecycle(
         next.current !== undefined &&
         hasCapabilityExpansion(next.current, payload.manifest);
       const outsideDriver = holdsProviderDriver(payload.manifest);
-      // A package whose pinned publisher did not sign this version is held
-      // for that publisher below, and loses its trust here as a driver does,
-      // so the person is asked again once they accept the new key.
-      const publisherChanged =
-        outsideDriverPublisherStanding(next.publisherPin, payload.manifest.provenance.publisherKey)
-          .kind === "publisher-changed";
-      const held = expanded || outsideDriver || publisherChanged;
+      // An update whose version the pinned publisher did not sign is held
+      // for that publisher below and loses its trust here, as a driver does.
+      // So does the first signed update of a package trusted unsigned: no
+      // key is pinned, so nothing holds it, and without this it would keep
+      // running with a key nobody accepted and none ever pinned. Trusting
+      // it again is the person's confirmation and pins the key.
+      const awaitsPublisherTrust =
+        payload.kind === "update-committed" &&
+        next.current !== undefined &&
+        updateAwaitsPublisherTrust(next.publisherPin, payload.manifest.provenance.publisherKey);
+      const held = expanded || outsideDriver || awaitsPublisherTrust;
       // An outside driver's review is trusting it, so a widened component is
       // held for that admission rather than for a review nothing else lifts.
       const reviewHeld = expanded && !outsideDriver;
@@ -298,7 +305,9 @@ function applyLifecycle(
         : next.diagnostics;
       return withPublisherStanding({
         ...withoutSourceUpdate(withoutPending(next)),
-        lifecycleState: held ? "quarantined" : "installed",
+        // Lost trust is the whole hold for a publisher's key; the state
+        // says quarantined only where a review or an admission is owed.
+        lifecycleState: expanded || outsideDriver ? "quarantined" : "installed",
         current: payload.manifest,
         versions,
         trusted: held ? false : next.trusted,

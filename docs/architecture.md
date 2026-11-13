@@ -10986,7 +10986,17 @@ that is not yet effective for the thread is refused and never reaches the model.
     source differs (every install path derives a package's identity from
     its source, so a different source is a different package and a new
     install), and wherever a key exists or existed, where the key rule above
-    decides, including an unsigned package whose update is signed. An
+    decides. The first signed update of a package the person trusted
+    unsigned is such a case (`updateAwaitsPublisherTrust`): no key is pinned,
+    so the key on it is one nobody accepted. That version loses the
+    package's trust and its switch and does not run; the installed card
+    shows the key's fingerprint and says that trusting the source pins it,
+    and **Trust source** is the person's one confirmation, journaled with
+    the pin in the same append. From then on a same-key update keeps trust
+    and approvals, and another key or a removed signature is held for its
+    publisher. It is not lighter than a changed key because a first
+    signature proves nothing about who made it; the unsigned version's
+    approvals do not carry to it, so its server asks once more. An
     outside provider driver is left out and keeps its per-digest admission.
     Accepted risk: whoever controls the trusted source, or the path to it,
     can publish an update that runs under approvals already given. What

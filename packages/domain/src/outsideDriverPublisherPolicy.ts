@@ -65,6 +65,25 @@ export function outsideDriverUpdateKeepsTrust(input: {
   );
 }
 
+/**
+ * Whether an update's version must wait for the person's trust because of
+ * who signed it. It must when the pinned key did not sign it (another key,
+ * or none), and when it is signed and no key is pinned: the first signature
+ * to appear on a package the person trusted unsigned is a key nobody has
+ * accepted, and it could be anyone's. The update loses its trust and its
+ * switch; trusting the source again, with the key shown, pins that key, and
+ * from then on the key rule holds. Letting the first signed version run and
+ * pinning nothing would leave the package with a key that is never checked.
+ */
+export function updateAwaitsPublisherTrust(
+  pinned: string | undefined,
+  updated: string | undefined,
+): boolean {
+  return pinned === undefined
+    ? updated !== undefined
+    : outsideDriverPublisherStanding(pinned, updated).kind === "publisher-changed";
+}
+
 /** Where the host recorded a package came from, as its manifest states it. */
 export interface ExtensionSourceIdentity {
   readonly source:

@@ -806,6 +806,18 @@ describe("ExtensionsSettingsView", () => {
     );
   });
 
+  it("shows the key a first signed version carries and says trusting the source pins it", async () => {
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({ snapshot: installedSnapshot({ publisher: { selected } }) });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByText(/Trusting this source pins the key below/)).toBeInTheDocument();
+    const keys = screen.getByLabelText("Publisher keys");
+    expect(within(keys).getByText("Signed by").nextSibling?.textContent).toBe(selected);
+    expect(screen.getByRole("button", { name: "Trust source" })).toBeEnabled();
+  });
+
   it("says an unsigned held version is unsigned and does not offer to trust a new publisher", async () => {
     const pinned = `ed25519:${"a".repeat(64)}`;
     const c = client({

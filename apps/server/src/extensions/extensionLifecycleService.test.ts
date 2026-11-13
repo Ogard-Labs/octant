@@ -539,6 +539,59 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     }
   });
 
+  it("stops a trusted unsigned plugin at its first signed update until the person trusts it, then pins that key", async () => {
+    const signed = (version: string, signedBy: string | undefined) =>
+      inspection(version, `body ${version}`, ["mcp"], undefined, ["code"], signedBy);
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "unsigned"), { trust: true, enable: true });
+
+    // Nobody accepted this key yet, so the version it signed does not run.
+    const first = signed("1.1.0", publisherKey);
+    const stopped = await service.update(first);
+    expect(stopped.packages[0]).toMatchObject({
+      activation: { trusted: false, pluginDesired: false },
+      publisher: { selected: publisherKey },
+    });
+    expect(stopped.packages[0]?.publisher?.pinned).toBeUndefined();
+    expect(stopped.packages[0]?.updated).toBeUndefined();
+    expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBeUndefined();
+    expect(lifecycleKinds(context)).not.toContain("update-kept-from-source");
+
+    // Trusting the source is the person's confirmation, and it pins the key.
+    const record = readExtensionRecord(context.connection, extensionId);
+    await service.setSourceTrust({
+      extensionId: extensionId as never,
+      expectedStateVersion: record?.aggregateVersion as never,
+      trusted: true,
+    });
+    expect(lifecycleKinds(context).slice(-2)).toEqual(["source-trust-changed", "publisher-pinned"]);
+    expect(readExtensionRecord(context.connection, extensionId)?.publisherPin).toBe(publisherKey);
+    expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBe(publisherKey);
+
+    // From here the key rule holds: the same key keeps trust and approvals.
+    const sameKey = signed("1.2.0", publisherKey);
+    const kept = await service.update(sameKey);
+    expect(kept.packages[0]?.activation).toMatchObject({ trusted: true, quarantined: false });
+    expect(readVerifiedPublisherKey(context.connection, targetFor(sameKey))).toBe(publisherKey);
+
+    // Another key is held for its publisher.
+    const otherKey = `ed25519:${"b".repeat(64)}`;
+    const changed = await service.update(signed("1.3.0", otherKey));
+    expect(changed.packages[0]).toMatchObject({
+      activation: { trusted: false, pluginDesired: false, quarantined: true },
+      publisher: { pinned: publisherKey, selected: otherKey, held: "publisher-changed" },
+    });
+
+    // And so is a version whose signature was removed.
+    const removed = await service.update(signed("1.4.0", undefined));
+    expect(removed.packages[0]).toMatchObject({
+      activation: { trusted: false, quarantined: true },
+      publisher: { pinned: publisherKey, held: "publisher-changed" },
+    });
+    expect(removed.packages[0]?.publisher?.selected).toBeUndefined();
+  });
+
   it("journals independent trust and desired state with optimistic replay-safe updates", async () => {
     const context = await setup();
     const service = context.makeService();

@@ -4,6 +4,7 @@ import {
   outsideDriverPublisherPinAtTrust,
   outsideDriverUpdateKeepsTrust,
   outsideDriverPublisherStanding,
+  updateAwaitsPublisherTrust,
   sameExtensionSource,
   unsignedUpdateKeepsApprovals,
 } from "./outsideDriverPublisherPolicy";
@@ -72,6 +73,14 @@ describe("outside driver publisher pinning", () => {
     expect(unsignedUpdateKeepsApprovals({ ...kept, pinned: first })).toBe(false);
     expect(unsignedUpdateKeepsApprovals({ ...kept, previous: first })).toBe(false);
     expect(unsignedUpdateKeepsApprovals({ ...kept, updated: first })).toBe(false);
+  });
+
+  it("stops an update for the person's trust when its version is the first a key signed, or the pinned key did not sign it", () => {
+    expect(updateAwaitsPublisherTrust(undefined, first)).toBe(true);
+    expect(updateAwaitsPublisherTrust(first, second)).toBe(true);
+    expect(updateAwaitsPublisherTrust(first, undefined)).toBe(true);
+    expect(updateAwaitsPublisherTrust(first, first)).toBe(false);
+    expect(updateAwaitsPublisherTrust(undefined, undefined)).toBe(false);
   });
 
   it("reads a source as the same only at the same folder, catalog entry or registry package", () => {

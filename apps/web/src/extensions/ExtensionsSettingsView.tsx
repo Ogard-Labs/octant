@@ -2538,6 +2538,12 @@ function PublisherKeys(props: {
             : "Another publisher signed this version. It stays held until you trust the new publisher or forget the old one."}
         </p>
       ) : null}
+      {pinned === undefined && selected !== undefined ? (
+        <p className="extensions-settings__effective" role="status">
+          No publisher key is pinned yet. Trusting this source pins the key below, and later updates
+          must be signed by it.
+        </p>
+      ) : null}
       <dl className="extensions-settings__compatibility" aria-label="Publisher keys">
         {pinned === undefined ? null : (
           <div>
