@@ -37,7 +37,7 @@ import type {
   CanvasShareSnapshotRevokeRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { ChevronDown, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { ChevronDown, Globe, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -83,6 +83,8 @@ import {
 } from "./blocks/designDocument";
 import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { CanvasNetworkPanel } from "./CanvasNetworkPanel";
+import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 import { canvasChoiceMessage, canvasDecisionFormMessage } from "./canvasChoiceMessage";
@@ -91,7 +93,14 @@ import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
-const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export", "design-system"] as const;
+const CANVAS_TOOL_DIALOGS = [
+  "refine",
+  "refresh",
+  "share",
+  "export",
+  "design-system",
+  "network",
+] as const;
 const CHOICE_MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
@@ -421,6 +430,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     };
   }, [props.client, props.tab.canvasId, selectedVersionId]);
 
+  // A Canvas's "Allow network" switch matters only to a prototype. It is the
+  // same switch in a browser on the host's machine and in the desktop app,
+  // whose main process relays a page's requests to the host's proxy. The host
+  // refuses the read to a client it gives no switch.
+  const network = useCanvasNetworkAccess({
+    client: props.client,
+    canvasId: props.tab.canvasId,
+    offered:
+      definition?.blocks.some((block) => block.kind === "design" && block.runsScript === true) ===
+      true,
+  });
   // The sidebar is where a person goes to use a Canvas, so a prototype here
   // runs as soon as it is shown, for the version on screen.
   const designRunRuntime = useMemo(
@@ -431,8 +451,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             canvasId: props.tab.canvasId,
             versionId: String(selectedVersionId),
             runsOnOpen: true,
+            networkOn: network.allowed === true,
           }),
-    [props.client, props.tab.canvasId, selectedVersionId],
+    [props.client, props.tab.canvasId, selectedVersionId, network.allowed],
   );
 
   // A plan task's status is a version of the selected head only, for the same
@@ -1035,6 +1056,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
+    // Shown only when the host answered that this Canvas has a switch here.
+    ...(network.allowed === undefined ? [] : [{ label: "Allow network…", value: "network" }]),
     // One file of the version on screen, to this device only. A Canvas with
     // mockups also offers their TSX handoff: the same one-file flow, as
     // dependency-free components.
@@ -1185,6 +1208,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           </OctantButton>
         )}
       </OctantPopover>
+      {/* On the Canvas for as long as it holds, and the way back to the switch. */}
+      {network.allowed === true ? (
+        <OctantButton onClick={() => setDialog("network")} size="sm" type="button" variant="ghost">
+          <Globe aria-hidden="true" size={14} />
+          Network on
+        </OctantButton>
+      ) : null}
       <span className="canvas-workspace-tab__spacer" />
       {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
         <CanvasWorkspaceTabActions
@@ -1376,6 +1406,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             onRevise={handleRevise}
           />
         ) : null}
+      </OctantDialog>
+      <OctantDialog
+        label="Canvas network"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "network"}
+      >
+        <CanvasNetworkPanel network={network} />
       </OctantDialog>
       <OctantDialog
         label="Design system"

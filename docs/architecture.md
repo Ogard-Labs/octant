@@ -1234,7 +1234,7 @@ document as a future version. Frames follow the
   use most, with no new dependency and no Mermaid renderer; a diagram still
   outside the translated subset stays a code block showing its raw source
   (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer
-  direction; not built yet: today the subset is the narrower one).
+  direction).
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -1269,11 +1269,28 @@ document as a future version. Frames follow the
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped. A design or prototype also has a per-Canvas "Allow network" switch
-  that only the person sets, off by default. The connection it gives runs
-  through a filtering egress proxy on the host that refuses loopback, private
-  ranges, link-local addresses and the Octant server; the proxy is built
-  first and the switch after it (maintainer decision, 2026-11-12; not built yet:
-  today neither exists and no running frame is given a connection).
+  that only the person sets, off by default and journaled (maintainer
+  decision, 2026-11-12; not built yet: a paired device is not offered the
+  switch, and today only a local window sets it). While it is on, a running page of that Canvas may ask
+  the host to fetch for it through token-bound proxy paths its page policy
+  names: a script's `GET`, a script's `POST` of a JSON body of at most
+  256 KiB, an image, and a font, and no WebSocket, media, or other method
+  (maintainer decision, 2026-11-13). The host fetches only `http` and `https`
+  addresses that resolve to public addresses, never loopback, a private,
+  link-local, or overlay range, or one of its own listeners, pins the resolved
+  address for the connection, judges every redirect again, sets every outgoing
+  header itself so that no cookie, credential, Octant header, or header the
+  page chose leaves, passes on an image or a font only when the response
+  declares that type, and bounds size, time, and rate per Canvas. The page's
+  token lives one hour and is renewed while the page is open, by the window
+  that ran it and by the page's ticket, never by the token (maintainer
+  decision, 2026-11-13). Turning the switch off revokes the token at once, and
+  no share, export, or public link carries it. In
+  the desktop app the prototype host keeps no route and no resolver: the
+  page asks an address of the host's private scheme, and the main process
+  relays that one question to the proxy path under a token the host minted
+  for the desktop bridge secret and the page never holds
+  ([Canvas: Allow network](design/canvas.md#allow-network)).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a
   new Canvas holding one `document`-size `design`. It is a create in every
@@ -1349,9 +1366,9 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-is input: a live Allow input grant covers it like a tap, whoever sends it
-(maintainer decision, 2026-11-12; built: a person or an agent may request
-it), and it never runs on the host's own. **Record screen** starts and stops a time-limited recording a person asked for;
+is input like a tap: a live Allow input grant or a one-shot approval covers
+it, whoever asks, and the agent's `octant_apple` tool offers it as
+`repair-input` (maintainer decision, 2026-11-13). **Record screen** starts and stops a time-limited recording a person asked for;
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per

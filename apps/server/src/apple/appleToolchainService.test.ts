@@ -3262,7 +3262,7 @@ describe("AppleToolchainService Simulator input", () => {
     ]);
   });
 
-  it("sends Repair input to the desktop when a person or an agent asks, under the input grant, and never for the host", async () => {
+  it("sends Repair input to the desktop under the input grant, whoever asks, and refuses it without one", async () => {
     const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => ({
       kind: "delivered" as const,
     }));
@@ -3295,35 +3295,27 @@ describe("AppleToolchainService Simulator input", () => {
       expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
     ]);
 
+    const agentRepair = simulatorRequest({
+      kind: "repair-input",
+      actionId: "30000000-0000-4000-8000-000000000031" as never,
+      bundleIdentifier: undefined,
+      requestedBy: {
+        kind: "agent",
+        actorId: "30000000-0000-4000-8000-000000000098" as never,
+        providerInstanceId: ids.provider as never,
+        threadId: ids.thread as never,
+      },
+      approval: { kind: "not-required" },
+    });
+    const byAgentUngranted = await service.execute(agentRepair, gated);
+    expect(byAgentUngranted.outcome).toBe("unauthorized");
+    expect(deliver).toHaveBeenCalledTimes(1);
+
     const byAgent = await service.execute(
-      simulatorRequest({
-        kind: "repair-input",
-        actionId: "30000000-0000-4000-8000-000000000031" as never,
-        bundleIdentifier: undefined,
-        requestedBy: {
-          kind: "agent",
-          actorId: "30000000-0000-4000-8000-000000000098" as never,
-          providerInstanceId: ids.provider as never,
-          threadId: ids.thread as never,
-        },
-        approval: { kind: "approved", approvalId: ids.approval as never },
-      }),
-      gated,
+      { ...agentRepair, actionId: "30000000-0000-4000-8000-000000000032" as never },
+      { ...gated, inputGranted: true },
     );
     expect(byAgent.outcome).toBe("succeeded");
-    expect(deliver).toHaveBeenCalledTimes(2);
-
-    const byHost = await service.execute(
-      simulatorRequest({
-        kind: "repair-input",
-        actionId: "30000000-0000-4000-8000-000000000032" as never,
-        bundleIdentifier: undefined,
-        requestedBy: { kind: "system", actorId: actor.actorId },
-        approval: { kind: "approved", approvalId: ids.approval as never },
-      }),
-      gated,
-    );
-    expect(byHost.outcome).toBe("unauthorized");
     expect(deliver).toHaveBeenCalledTimes(2);
   });
 

@@ -1,7 +1,11 @@
 import { CANVAS_DESIGN_ASSETS_MAX_BYTES, type CanvasDesignBlock } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_DESIGN_EXPORT_RUNNING_POLICY,
+  CANVAS_DESIGN_PAGE_POLICY,
   CanvasDesignRunTickets,
+  canvasDesignPageHeaders,
+  canvasDesignPageNetworkBase,
   issueSharedDesignRun,
   renderCanvasDesignExportFrames,
   renderCanvasDesignPage,
@@ -63,6 +67,194 @@ describe("a running design's page", () => {
   });
 });
 
+describe("a running design's page with its Canvas's network on", () => {
+  const base = canvasDesignPageNetworkBase("http://127.0.0.1:4455", "t".repeat(43));
+
+  it("names its own proxy paths for a script, an image, and a font, and leaves every other directive alone", () => {
+    expect(base).toBe(`http://127.0.0.1:4455/api/canvas/network/${"t".repeat(43)}/`);
+    const policy = canvasDesignPageHeaders("text/html", base)["content-security-policy"] ?? "";
+    // A script asks anywhere under the page's own path; an image and a font
+    // load from one path each. Media, frames, forms, and the sandbox are as
+    // they were, so there is still no WebSocket, media, or navigation.
+    const changed: Record<string, string> = {
+      "connect-src 'none'": `connect-src ${base}`,
+      "img-src data: blob:": `img-src data: blob: ${base}image`,
+      "font-src data:": `font-src data: ${base}font`,
+    };
+    expect(policy.split("; ")).toEqual(
+      CANVAS_DESIGN_PAGE_POLICY.split("; ").map((directive) => changed[directive] ?? directive),
+    );
+    expect(policy).toContain("media-src data: blob:;");
+    expect(policy).not.toMatch(/wss?:/);
+    // Without a base, the page keeps the policy that names nothing.
+    expect(canvasDesignPageHeaders("text/html")["content-security-policy"]).toBe(
+      CANVAS_DESIGN_PAGE_POLICY,
+    );
+  });
+
+  it("routes a fetch through the proxy path only when the host hands the page one", () => {
+    const block = checkout("<p>Cart</p><script>function pay() {}</script>");
+    expect(renderCanvasDesignPage(block, "cart", [])).not.toContain("/api/canvas/network/");
+    const page = renderCanvasDesignPage(block, "cart", [], base);
+    expect(page).toContain(`var base = ${JSON.stringify(base)};`);
+    expect(page.indexOf(base)).toBeLessThan(page.indexOf("function pay()"));
+  });
+
+  /** The host's script, run as a page would run it, over a stand-in for the page. */
+  function runNetworkScript(images: ReadonlyArray<{ src: string }> = []) {
+    const page = renderCanvasDesignPage(checkout("<p>Cart</p>"), "cart", [], base);
+    const script = page.split("<script>")[2]?.split("</script>")[0] ?? "";
+    const calls: Array<readonly [unknown, unknown]> = [];
+    const pageWindow = {
+      fetch: (input: unknown, init?: unknown): Promise<unknown> => {
+        calls.push([input, init]);
+        return Promise.resolve("answered");
+      },
+    };
+    const elements = images.map((image) => ({
+      tagName: "IMG",
+      getAttribute: () => image.src,
+      setAttribute: (_name: string, value: string) => {
+        image.src = value;
+      },
+    }));
+    // A stand-in for the browser's image element: `src` is an accessor on the
+    // prototype and `setAttribute` is inherited, as in a browser.
+    class FakeElement {
+      loads: string[] = [];
+      setAttribute(name: string, value: string) {
+        if (name === "src") this.loads.push(value);
+      }
+    }
+    class FakeImage extends FakeElement {
+      get src() {
+        return this.loads.at(-1) ?? "";
+      }
+      set src(value: string) {
+        this.loads.push(value);
+      }
+    }
+    let loaded: (() => void) | undefined;
+    new Function("window", "document", "location", "HTMLImageElement", script)(
+      pageWindow,
+      {
+        baseURI: "http://127.0.0.1:4455/api/canvas/design-page?ticket=x",
+        addEventListener: (_name: string, listener: () => void) => {
+          loaded = listener;
+        },
+        querySelectorAll: (selector: string) => (selector === "img[src]" ? elements : []),
+      },
+      { origin: "null" },
+      FakeImage,
+    );
+    loaded?.();
+    return { pageWindow, calls, Image: FakeImage };
+  }
+
+  it("sends a page's fetch of another address to the proxy as a bare GET", async () => {
+    const { pageWindow, calls } = runNetworkScript();
+    await pageWindow.fetch("https://api.example.com/v1?q=a b", {
+      headers: { authorization: "Bearer page-secret" },
+      credentials: "include",
+    });
+    expect(calls[0]?.[0]).toBe(
+      `${base}fetch?url=${encodeURIComponent("https://api.example.com/v1?q=a%20b")}`,
+    );
+    expect(calls[0]?.[1]).toEqual({
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: undefined,
+    });
+
+    // The page's own proxy path is left as asked, not asked for through itself.
+    await pageWindow.fetch(`${base}fetch?url=https%3A%2F%2Fapi.example.com%2F`);
+    expect(calls[1]?.[0]).toBe(`${base}fetch?url=https%3A%2F%2Fapi.example.com%2F`);
+  });
+
+  it("sends a POST's JSON string as JSON and drops every header the page chose", async () => {
+    const { pageWindow, calls } = runNetworkScript();
+    await pageWindow.fetch("https://api.example.com/rpc", {
+      method: "post",
+      headers: { authorization: "Bearer page-secret", "content-type": "text/plain", cookie: "a=1" },
+      credentials: "include",
+      body: '{"ask":1}',
+    });
+    expect(calls[0]?.[0]).toBe(
+      `${base}fetch?url=${encodeURIComponent("https://api.example.com/rpc")}`,
+    );
+    expect(calls[0]?.[1]).toEqual({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"ask":1}',
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: undefined,
+    });
+  });
+
+  it("offers no method but GET and POST, and no body but a JSON string", async () => {
+    const { pageWindow, calls } = runNetworkScript();
+    for (const method of ["PUT", "DELETE", "PATCH", "HEAD"]) {
+      await expect(
+        pageWindow.fetch("https://api.example.com/", { method, body: "{}" }),
+      ).rejects.toThrow(/GET, and POST with a JSON body/);
+    }
+    await expect(
+      pageWindow.fetch("https://api.example.com/", { method: "POST", body: new Uint8Array(2) }),
+    ).rejects.toThrow(/JSON string/);
+    await expect(pageWindow.fetch("https://api.example.com/", { method: "POST" })).rejects.toThrow(
+      /JSON string/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("points an image at another address to the page's image path, and leaves its own alone", () => {
+    const images = [
+      { src: "https://cdn.example.com/logo.png?v=1" },
+      { src: "data:image/png;base64,iVBORw0KGgo=" },
+      { src: `${base}image?url=https%3A%2F%2Fcdn.example.com%2Fa.png` },
+    ];
+    runNetworkScript(images);
+    expect(images.map((image) => image.src)).toEqual([
+      `${base}image?url=${encodeURIComponent("https://cdn.example.com/logo.png?v=1")}`,
+      "data:image/png;base64,iVBORw0KGgo=",
+      `${base}image?url=https%3A%2F%2Fcdn.example.com%2Fa.png`,
+    ]);
+  });
+
+  it("sends an image a script preloads without ever adding it to the page to the image path", () => {
+    const { Image } = runNetworkScript();
+    const proxied = `${base}image?url=${encodeURIComponent("https://cdn.example.com/hero.png")}`;
+    const preloaded = new Image();
+    preloaded.src = "https://cdn.example.com/hero.png";
+    // The browser is asked for the proxied address and never the one as written.
+    expect(preloaded.loads).toEqual([proxied]);
+    // Reading it back gives the address the element really loads.
+    expect(preloaded.src).toBe(proxied);
+
+    const byAttribute = new Image();
+    byAttribute.setAttribute("src", "https://cdn.example.com/hero.png");
+    byAttribute.setAttribute("alt", "https://cdn.example.com/hero.png");
+    expect(byAttribute.loads).toEqual([proxied]);
+
+    // Inline, in-memory, and already proxied addresses are left as written.
+    for (const address of ["data:image/png;base64,iVBORw0KGgo=", "blob:null/1234", proxied]) {
+      const image = new Image();
+      image.src = address;
+      image.setAttribute("src", address);
+      expect(image.loads).toEqual([address, address]);
+    }
+  });
+
+  it("is never the policy an exported file carries", () => {
+    expect(CANVAS_DESIGN_EXPORT_RUNNING_POLICY).toContain("connect-src 'none'");
+    expect(CANVAS_DESIGN_EXPORT_RUNNING_POLICY).not.toContain("/api/canvas/network/");
+  });
+});
+
 describe("a shared prototype's page", () => {
   const canvasId = "11111111-1111-4111-8111-111111111111";
   const versionId = "22222222-2222-4222-8222-222222222222";
@@ -93,6 +285,9 @@ describe("a shared prototype's page", () => {
     // A shared design names no image and so needs no authority to resolve one.
     expect(grant?.provenance).toBeUndefined();
     expect(grant?.block.assets).toBeUndefined();
+    // A share never carries the sharer's "Allow network": a reader's page
+    // can ask this host to fetch nothing.
+    expect(grant?.network).toBeUndefined();
     // The ticket opened once.
     expect(tickets.redeem(page?.split("ticket=")[1] ?? "")).toBeUndefined();
   });
