@@ -79,6 +79,7 @@
     "./canvas-share": "./src/canvasShare.ts",
     "./canvas-export": "./src/canvasExport.ts",
     "./canvas-export-folder": "./src/canvasExportFolder.ts",
+    "./canvas-network": "./src/canvasNetwork.ts",
     "./canvas-public-share": "./src/canvasPublicShare.ts",
     "./guardrail-lowering": "./src/guardrailLowering.ts",
     "./provider-tooling": "./src/providerTooling.ts",

@@ -207,7 +207,21 @@ the Browser pane
 - The strip reads every five seconds while the window is visible and stops
   asking for a thread once the host refuses the window. A transient failure
   retries on the next beat.
-- Visual rules are in [DESIGN.md](../../DESIGN.md#transcript).
+
+### How the strip looks
+
+A thread's Browser captures are a plain list of rows under a sentence-case
+section label (`oct-section-label`, "Browser captures"), not a card group: each
+row is a hairline-ringed object with a 72 x 48 picture, the page title in the
+medium weight, and the origin as mono meta, and the whole row is one `bare`
+button that opens the full picture. It uses the neutral hairline and surface
+tokens only, adds no colour, and draws no fill on hover or when open. A
+recording's picture is its first frame, still, with a play mark in its lower
+left corner: a filled triangle and the length ("2.5 s") in extra-small
+tabular figures on a chip of the card surface with a hairline ring, so it
+reads by shape and word, never by colour. It moves only once opened, where a
+ghost **Stop**/**Play** sits before the caption; reduced motion opens it on
+its first frame.
 
 ## Marking up a capture
 
@@ -315,6 +329,32 @@ The marked-up picture is an attachment of that message, not a capture.
 - **Sharpness.** The still is the bounded capture picture (about 40 KiB, up to
   1280 pixels wide), so it is soft beside the page: small text on it can blur.
   Drawing does not raise its quality.
+
+### Draw on page toolbar
+
+**Draw on page** is an item (a 16px pen-line) beside Screenshot in the Browser
+toolbar's More menu, offered only in a Work or Code thread's Browser. While a
+picture is drawn on, its still fills the page area, fitted and centred on the
+canvas colour, and one floating bar sits at the bottom centre
+(`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
+shadow of a menu, with no outline and no blur. Its controls are 28px icon
+buttons with a 16px glyph and a tooltip, one row down to a 500px dock: Select,
+Pen, Box, Arrow, Text (the chosen one pressed, `aria-pressed`); one ink control
+named for its colour ("Ink colour: Red") that opens a small popover of six named
+swatches (Red, Yellow, Green, Blue, White, Black; arrows move, Enter picks,
+Escape closes and returns focus); one width toggle ("Thick stroke", pressed when
+thick); Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
+button, and **Discard drawing** as the trailing pair, which wrap together on a
+narrower dock. A pressed control is the raised tile a selected row wears
+(`--octant-float-pressed` with `--octant-shadow-selected`), not an accent ring,
+and every swatch has a hairline edge (`--octant-border-strong`) so white shows
+on a light bar and black on a dark one. A notice about adding the picture is
+drawn in a column above the bar, inside the stage, so it never moves the still;
+a refusal is an alert and focus returns to the drawing. The ink colours are drawn into a picture that
+leaves the app, so they are fixed values in code
+(`apps/web/src/theme/markupInk.ts`), the one place the renderer draws a
+colour that no theme changes. A selected mark is outlined with a dashed accent
+line; that outline is never in the exported picture.
 
 ## Proof
 

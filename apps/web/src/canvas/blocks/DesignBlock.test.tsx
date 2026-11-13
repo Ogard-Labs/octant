@@ -10,6 +10,7 @@ import {
   onboardingFlowExampleBlock,
   searchSpecExampleBlock,
 } from "@octant/domain";
+import { CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS } from "@octant/contracts/canvas-network";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
@@ -854,6 +855,117 @@ describe("design block", () => {
 });
 
 describe("running prototype", () => {
+  it("says on a prototype that its Canvas's network is on, before and while it runs", async () => {
+    const { runtime } = runRuntime({ networkOn: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Checkout, Phone prototype" });
+    expect(within(region).getByText(/Network on/)).toBeVisible();
+    fireEvent.click(within(region).getByRole("button", { name: "Run" }));
+    await within(region).findByTitle("Checkout, running prototype");
+    expect(within(region).getByText(/Network on/)).toBeVisible();
+  });
+
+  it("in the desktop app says the network is on, and no longer that the prototype has no connection", async () => {
+    installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    const { runtime } = runRuntime({
+      contained: true,
+      drawnIn: "desktop-surface",
+      networkOn: true,
+    });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Checkout, Phone prototype" });
+    expect(within(region).getByText(/Network on: this prototype can fetch/)).toBeVisible();
+    expect(within(region).queryByText(/no network connection/)).toBeNull();
+    // Still drawn from the prototype host: nothing here warns of a browser's open route.
+    expect(within(region).queryByText(/can still connect to another computer/)).toBeNull();
+  });
+
+  it("keeps a running page's network alive while it is open, and stops when the page does", async () => {
+    vi.useFakeTimers();
+    const keepNetwork = vi.fn(async () => true);
+    const { runtime } = runRuntime({ networkOn: true, keepNetwork, runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    fireEvent.load(frame);
+    const open = (ms: number) => {
+      for (let passed = 0; passed < ms; passed += 2_000) {
+        act(() => {
+          bridge(frame, { type: "heartbeat" });
+          vi.advanceTimersByTime(2_000);
+        });
+      }
+    };
+
+    open(CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS - 2_000);
+    expect(keepNetwork).not.toHaveBeenCalled();
+    open(2_000);
+    expect(keepNetwork).toHaveBeenCalledTimes(1);
+    expect(keepNetwork).toHaveBeenCalledWith(PAGE);
+    open(CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS);
+    expect(keepNetwork).toHaveBeenCalledTimes(2);
+
+    // A page the person stopped is closed: nothing asks for its token again.
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    act(() => vi.advanceTimersByTime(3 * CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS));
+    expect(keepNetwork).toHaveBeenCalledTimes(2);
+  });
+
+  it("names a page to the host by the ticket it was run with when it keeps its network alive", async () => {
+    const renewNetworkPage = vi.fn(async () => ({ kind: "canvas-network-page-renewed" as const }));
+    const input = {
+      canvasId: decodeCanvasId("22222222-2222-4222-8222-222222222222"),
+      versionId: "33333333-3333-4333-8333-333333333333",
+      runsOnOpen: false,
+    };
+    const client = { runDesign: vi.fn(), renewNetworkPage };
+    const on = designRunRuntimeFor(client, { ...input, networkOn: true });
+    await expect(on?.keepNetwork?.(PAGE)).resolves.toBe(true);
+    expect(renewNetworkPage).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      kind: "renew-canvas-network-page",
+      ticket: "a".repeat(43),
+    });
+    renewNetworkPage.mockResolvedValueOnce({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "not-live",
+    } as never);
+    await expect(on?.keepNetwork?.(PAGE)).resolves.toBe(false);
+    // A Canvas with the network off has nothing to keep alive.
+    expect(designRunRuntimeFor(client, input)?.keepNetwork).toBeUndefined();
+  });
+
+  it("says nothing about a network on a prototype whose Canvas has it off", () => {
+    const { runtime } = runRuntime();
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    expect(screen.queryByText(/Network on/)).toBeNull();
+  });
+
   it("starts in the thread only when the person presses Run, and says where it is not network-contained", async () => {
     const { start, runtime } = runRuntime({ contained: false });
     render(

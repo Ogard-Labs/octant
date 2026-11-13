@@ -2575,7 +2575,7 @@ CREATE INDEX validation_evidence_authority_idx
     `,
   },
   {
-    version: 101,
+    version: 103,
     name: "create_thread_tool_call_records",
     // What Chat and Work tool calls were given and returned. A store, not a
     // projection: no event carries the text, so nothing rebuilds it and a

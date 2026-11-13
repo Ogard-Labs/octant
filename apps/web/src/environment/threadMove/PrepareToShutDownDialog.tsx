@@ -92,7 +92,7 @@ type HandoverEnd = "handing-over" | "pushed" | "not-pushed" | "refused";
  * Prepare to shut down: every thread here that matters, each on the choice it
  * starts with, one destination for all of them unless a row names another,
  * and one press with one unlock per destination, asked in turn.
- * Canonical: DESIGN.md "Prepare to shut down" and
+ * Canonical: docs/design/hub-and-spokes.md "Moving a thread: screens" and
  * docs/design/hub-and-spokes.md "Prepare to shut down".
  */
 export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {

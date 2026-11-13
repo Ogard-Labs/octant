@@ -70,7 +70,10 @@ describe("the drawing stage", () => {
 
   it("opens with the layer focused so the keys work at once", async () => {
     const { layer } = await renderStage();
-    expect(layer).toHaveFocus();
+    // The layer is in the document one step before the stage focuses it: the
+    // focus comes from an effect that runs after the commit. A few milliseconds
+    // between the two on a slow runner let this read see the body focused.
+    await waitFor(() => expect(layer).toHaveFocus());
   });
 
   it("redoes on Shift+Cmd+Z without toggling Zen", async () => {

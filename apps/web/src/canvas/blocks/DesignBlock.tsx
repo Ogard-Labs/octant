@@ -27,6 +27,7 @@ import {
   type CanvasDesignDeviceSize,
   type CanvasDesignSize,
 } from "@octant/contracts/canvas";
+import { CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS } from "@octant/contracts/canvas-network";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
@@ -805,6 +806,27 @@ function RunningDesignBlock({
     setErrors((current) => [...current, message].slice(-RUNNING_DESIGN_MAX_ERRORS));
   }, []);
 
+  // A page's network token lives an hour unless this surface, which holds the
+  // page open, keeps it alive; once the page is stopped or gone nothing asks
+  // again and the token ages out. A page that has no live token (the switch
+  // went on after it was run, or the machine slept past the hour) is not
+  // asked about again until it is run again.
+  const runningUrl = state.kind === "running" ? state.url : undefined;
+  const keepNetwork = runtime?.keepNetwork;
+  useEffect(() => {
+    if (runningUrl === undefined || keepNetwork === undefined) return undefined;
+    const timer = window.setInterval(() => {
+      void keepNetwork(runningUrl).then(
+        (alive) => {
+          if (!alive) window.clearInterval(timer);
+        },
+        // The host could not be reached this time; the next turn asks again.
+        () => undefined,
+      );
+    }, CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [runningUrl, keepNetwork]);
+
   // The desktop's reserved shortcut is read before anything reaches the page,
   // and hands the keyboard to Stop.
   const leave = useCallback(() => stopButton.current?.focus(), []);
@@ -883,8 +905,21 @@ function RunningDesignBlock({
           way to stop one, so a prototype there can still connect to another
           computer. The desktop app runs the page in a process with no network
           and no resolver, and the preview browser has no route out either. */}
+      {/* The person's own choice for this Canvas, said on every prototype it
+          covers for as long as it holds, running or not. */}
+      {runtime?.networkOn === true ? (
+        <p className="canvas-design__notice" role="note">
+          Network on: this prototype can fetch public addresses through this computer and send them
+          what this Canvas holds.
+        </p>
+      ) : null}
+      {/* In the desktop app a page with the network on still has no route of
+          its own, but it is not without a connection: the line above says
+          what it can reach, so this one is not said beside it. */}
       {runtime === undefined ? null : contained ? (
-        <p className="canvas-design__notice">A prototype runs with no network connection.</p>
+        runtime.networkOn === true ? null : (
+          <p className="canvas-design__notice">A prototype runs with no network connection.</p>
+        )
       ) : (
         <p className="canvas-design__notice">
           A prototype&apos;s script can still connect to another computer and send what the

@@ -630,7 +630,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* A loading or status line is one quiet sentence on the page ground. Boxed,
    "Loading GitHub status…" read as a finished empty-state card (DESIGN.md
-   "Spacing, shapes, and depth"). Only an error keeps a boundary, because it
+   "Depth and material"). Only an error keeps a boundary, because it
    is the one state a person has to act on. */
 .settings-state {
   margin: 0;
