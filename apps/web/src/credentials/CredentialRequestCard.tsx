@@ -208,7 +208,7 @@ export function CredentialRequestCard(props: {
         </p>
       ) : null}
       {error === undefined ? null : (
-        <OctantAlert role="alert">
+        <OctantAlert role="alert" tone="danger">
           <p id={`${id}-error`}>{error}</p>
         </OctantAlert>
       )}

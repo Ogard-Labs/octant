@@ -614,23 +614,41 @@ function blockBody(block: Block, ctx: RenderContext): string {
       }</figcaption></figure>`;
     case "design":
       return design(block, ctx);
-    case "choice":
+    case "choice": {
       // A public page has no thread to answer to, so it offers no control: the
       // question reads as its options, with a note saying where answers go.
-      return `${paragraphs(block.prompt)}${block.questions
+      // Sections, when the form has them, head the questions they place.
+      const question = (item: (typeof block.questions)[number]) =>
+        `${heading(3, item.prompt)}${list(
+          item.options.map((option) =>
+            option.description === undefined
+              ? e(option.label)
+              : `<strong>${e(option.label)}</strong> ${e(option.description)}`,
+          ),
+        )}`;
+      const groups = block.sections ?? [
+        {
+          id: "all",
+          title: undefined,
+          intro: undefined,
+          questionIds: block.questions.map((q) => q.id),
+        },
+      ];
+      const body = groups
         .map(
-          (question) =>
-            `${heading(3, question.prompt)}${list(
-              question.options.map((option) =>
-                option.description === undefined
-                  ? e(option.label)
-                  : `<strong>${e(option.label)}</strong> ${e(option.description)}`,
-              ),
-            )}`,
+          (group) =>
+            `${group.title === undefined ? "" : heading(2, group.title)}${
+              group.intro === undefined ? "" : paragraphs(group.intro)
+            }${group.questionIds
+              .flatMap((questionId) => {
+                const found = block.questions.find((candidate) => candidate.id === questionId);
+                return found === undefined ? [] : [question(found)];
+              })
+              .join("")}`,
         )
-        .join(
-          "",
-        )}<p class="choice-note">This is a shared copy. Answers are sent from the Canvas in Octant, not from this page.</p>`;
+        .join("");
+      return `${paragraphs(block.prompt)}${body}<p class="choice-note">This is a shared copy. Answers are sent from the Canvas in Octant, not from this page.</p>`;
+    }
     case "dashboard":
     case "tabs":
     case "columns":
