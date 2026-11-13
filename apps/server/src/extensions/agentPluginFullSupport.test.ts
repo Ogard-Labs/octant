@@ -789,6 +789,96 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
+  it("does not publish a stdio session that exits while tool schemas are prepared", async () => {
+    let exitListener: (() => void) | undefined;
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      stdioSupervisor: {
+        startInteractive: async () => {
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          let pending = "";
+          stdin.setEncoding("utf8");
+          stdin.on("data", (chunk) => {
+            pending += String(chunk);
+            for (
+              let newline = pending.indexOf("\n");
+              newline >= 0;
+              newline = pending.indexOf("\n")
+            ) {
+              const line = pending.slice(0, newline);
+              pending = pending.slice(newline + 1);
+              const message = JSON.parse(line) as { id?: number; method?: string };
+              if (message.id === undefined) continue;
+              stdout.write(
+                `${JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: message.id,
+                  result:
+                    message.method === "initialize"
+                      ? {
+                          protocolVersion: "2025-03-26",
+                          capabilities: {},
+                          serverInfo: { name: "closing", version: "1.0.0" },
+                        }
+                      : message.method === "tools/list"
+                        ? {
+                            tools: [
+                              {
+                                name: "lookup",
+                                inputSchema: {
+                                  $schema: "https://json-schema.org/draft/2019-09/schema",
+                                  type: "object",
+                                },
+                              },
+                            ],
+                          }
+                        : {},
+                })}\n`,
+              );
+              if (message.method === "tools/list") setTimeout(() => exitListener?.(), 0);
+            }
+          });
+          return {
+            receipt: { state: "ready" },
+            process: {
+              pid: 9004,
+              ready: Promise.resolve(),
+              wait: new Promise(() => undefined),
+              stop: async () => undefined,
+              cancel: async () => undefined,
+              stdin,
+              stdout,
+              once: (_event: "exit", listener: () => void) => {
+                exitListener = listener;
+              },
+            },
+          } as never;
+        },
+      },
+    });
+
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+
+    expect(manager.sessions()).toHaveLength(0);
+    expect(manager.toolDefinitions()).toHaveLength(0);
+    expect(manager.failedComponents()).toEqual([
+      expect.objectContaining({
+        componentId: "mcp-local",
+        reason: expect.stringContaining("closed before initialization"),
+      }),
+    ]);
+    await manager.drainAll();
+  });
+
   it("omits MCP tools whose names repeat or whose input schemas are invalid or unsafe", async () => {
     const branchingDefinitions: Record<string, unknown> = { leaf: { type: "null" } };
     let branchingReference = "#/$defs/leaf";
@@ -799,6 +889,7 @@ describe("Agent Plugin MCP session manager", () => {
       };
       branchingReference = `#/$defs/${name}`;
     }
+    const quadraticUniqueItems = Array.from({ length: 128 }, () => ({ uniqueItems: true }));
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",
@@ -847,6 +938,15 @@ describe("Agent Plugin MCP session manager", () => {
                                 $async: true,
                                 type: "object",
                                 required: ["target"],
+                              },
+                            },
+                            {
+                              name: "quadratic-unique-items",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  xs: { type: "array", allOf: quadraticUniqueItems },
+                                },
                               },
                             },
                             {

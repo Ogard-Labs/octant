@@ -910,7 +910,6 @@ export class AgentPluginMcpSessionManager {
     } finally {
       clearTimeout(timeout);
     }
-    connectedSession = session;
     const duplicateToolNames = duplicatedMcpToolNames(session.tools);
     const tools: PreparedMcpTool[] = [];
     for (const tool of session.tools) {
@@ -962,6 +961,7 @@ export class AgentPluginMcpSessionManager {
       return;
     }
     this.#sessions.set(key, record);
+    connectedSession = session;
     this.#lastConnected.set(authenticationKey(target), {
       target,
       at: this.#now().toISOString(),
@@ -1090,9 +1090,9 @@ const MAX_MCP_SCHEMA_EVALUATION_NODES = 1_024;
 
 /**
  * MCP schemas are server-controlled and Ajv evaluates them synchronously on
- * the control-plane event loop. Reject asynchronous or regex-bearing schemas,
- * nested reference resources, reference cycles, and graphs that can expand
- * into excessive synchronous work.
+ * the control-plane event loop. Reject asynchronous, regex-bearing, or
+ * quadratic uniqueness schemas, nested reference resources, reference cycles,
+ * and graphs that can expand into excessive synchronous work.
  */
 function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
   const visited = new Set<unknown>();
@@ -1104,7 +1104,8 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
     const record = candidate as Readonly<Record<string, unknown>>;
     if (
       Object.prototype.hasOwnProperty.call(record, "pattern") ||
-      Object.prototype.hasOwnProperty.call(record, "patternProperties")
+      Object.prototype.hasOwnProperty.call(record, "patternProperties") ||
+      record.uniqueItems === true
     ) {
       return true;
     }
