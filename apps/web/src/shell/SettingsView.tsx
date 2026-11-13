@@ -1239,7 +1239,7 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="When a provider sends nothing for this long, Octant cuts the turn off. A tool call the provider reports as running does not count as silence, up to the longest tool-call pause below. A change applies from the next turn. Off leaves a silent turn running until you stop it."
+                  description="Cuts a turn off when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -1253,9 +1253,9 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="A tool call the provider reports as started pauses the stalled-turn limit for at most this long. A call that never reports a finish then stops counting as work, and the limit runs again. A change applies from the next turn. Off pauses the limit for as long as the call is reported as running."
+                  description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
                   focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
-                  label="Longest tool-call pause"
+                  label="Tool-call pause limit"
                   scope="host"
                   settingId="provider-tool-call-pause-limit"
                 >
@@ -2313,7 +2313,7 @@ function StalledTurnLimitSelect(props: {
       id="stalled-turn-limit"
       onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
       options={[
-        ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
         { id: "off", label: "Off" },
       ]}
       value={props.minutes === null ? "off" : String(props.minutes)}
@@ -2365,11 +2365,11 @@ function ProviderToolCallPauseLimitSelect(props: {
         );
   return (
     <OctantSelectField
-      aria-label="Longest tool-call pause"
+      aria-label="Tool-call pause limit"
       id="provider-tool-call-pause-limit"
       onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
       options={[
-        ...choices.map((minutes) => ({ id: String(minutes), label: pauseChoiceLabel(minutes) })),
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
         { id: "off", label: "Off" },
       ]}
       value={props.minutes === null ? "off" : String(props.minutes)}
@@ -2377,7 +2377,8 @@ function ProviderToolCallPauseLimitSelect(props: {
   );
 }
 
-function pauseChoiceLabel(minutes: number): string {
+/** A turn limit's choice, read as the length it allows; both turn limits share it. */
+function durationChoiceLabel(minutes: number): string {
   return minutes < 60
     ? `${String(minutes)} minutes`
     : minutes === 60

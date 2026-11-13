@@ -288,7 +288,7 @@ turn event budget. A session that goes fully silent still times out, at the
 stalled-turn limit: a setting in Settings › Providers & Models, 30 minutes by
 default, from 5 minutes to 8 hours, which may be turned off. A provider tool
 call the runtime reports as running pauses that clock, as an app-managed call
-does, for at most the longest tool-call pause: a second setting there, two
+does, for at most the tool-call pause limit: a second setting there, two
 hours by default, from 5 minutes to 24 hours, which may be turned off
 (maintainer decision, 2026-11-12). Force stop is unchanged (maintainer
 request, 2026-11-12).
@@ -300,7 +300,7 @@ route is local-only and a paired device cannot).
 Chat, Work and Code read it when a turn starts: a change applies from the
 next turn, and a running turn keeps the limit it started with. A turn cut off
 by the limit ends as it did under the fixed limit. With the setting Off, only
-Stop and Force stop end a silent turn. The longest tool-call pause
+Stop and Force stop end a silent turn. The tool-call pause limit
 (`providerToolCallPauseLimitMinutes`, `null` for Off) is stored, changed and
 read the same way.
 
@@ -313,7 +313,7 @@ driver gets the pause when it emits the same events. A tool the model's
 provider runs on its own servers is reported as outside content, not as a
 tool call, so the clock keeps running through it.
 
-One call pauses the clock for no longer than the longest tool-call pause,
+One call pauses the clock for no longer than the tool-call pause limit,
 counted from its start. When that passes the clock runs again from that
 moment, so a turn whose provider stays silent is cut off one stalled-turn
 limit later; an event from the provider, the call's late finish included, is

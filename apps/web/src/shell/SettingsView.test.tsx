@@ -728,9 +728,9 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "providers" },
     });
     const limit = await screen.findByRole("combobox", { name: "Stalled-turn limit" });
-    expect(limit).toHaveTextContent("After 30 minutes");
+    expect(limit).toHaveTextContent("30 minutes");
     await user.click(limit);
-    await user.click(await screen.findByRole("option", { name: "After 2 hours" }));
+    await user.click(await screen.findByRole("option", { name: "2 hours" }));
     expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: 120 });
     await user.click(limit);
     await user.click(await screen.findByRole("option", { name: "Off" }));
@@ -744,7 +744,7 @@ describe("SettingsView", () => {
       discoveryController: discoveryControllerFixture(),
       initialDeepLink: { section: "providers" },
     });
-    const pause = await screen.findByRole("combobox", { name: "Longest tool-call pause" });
+    const pause = await screen.findByRole("combobox", { name: "Tool-call pause limit" });
     expect(pause).toHaveTextContent("2 hours");
     await user.click(pause);
     await user.click(await screen.findByRole("option", { name: "8 hours" }));

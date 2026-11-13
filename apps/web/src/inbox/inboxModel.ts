@@ -2,9 +2,13 @@ import type { GithubAssignedWorkItem } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
-import type { WaitingAsk } from "@octant/contracts/pending-requests";
+import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { PendingRequestRowEntry } from "../pendingRequests/usePendingRequestRows";
-import { pendingRequestKey, waitingAskKey } from "../pendingRequests/pendingRequests";
+import {
+  isFindOnlyPendingRequest,
+  pendingRequestKey,
+  waitingAskKey,
+} from "../pendingRequests/pendingRequests";
 import { visibleModeOf, type VisibleMode } from "../shell/workKind";
 
 /**
@@ -188,7 +192,8 @@ export function inboxWaitingItems(
  * All is what waits on the person today; a finished turn waits for what is
  * next, so only its own filter lists it. Stuck is every wait that is not a
  * decision: approvals, questions, waiting subagents, and the asks a host
- * service holds.
+ * service holds other than a proposal. A memory or routine proposal is a
+ * decision the person makes, so Decide lists it.
  */
 export function matchesInboxFilter(item: InboxWaitingItem, filter: InboxFilter): boolean {
   const finished = item.kind === "attention" && item.item.signal.reason === "turn-finished";
@@ -198,9 +203,10 @@ export function matchesInboxFilter(item: InboxWaitingItem, filter: InboxFilter):
     case "urgent":
       return item.urgent;
     case "decide":
+      if (item.kind === "ask") return isProposalAsk(item.ask);
       return item.kind === "request" && item.entry.request.kind === "decision";
     case "stuck":
-      if (item.kind === "ask") return true;
+      if (item.kind === "ask") return !isProposalAsk(item.ask);
       return item.kind === "request"
         ? item.entry.request.kind !== "decision"
         : item.item.signal.reason === "approval-required" ||
@@ -286,4 +292,24 @@ export function groupInboxByProject(
       oldestFirst(oldest(left), oldest(right)) ||
       left.name.localeCompare(right.name),
   );
+}
+
+function isProposalAsk(ask: WaitingAsk): boolean {
+  return ask.kind === "memory-proposal" || ask.kind === "routine-proposal";
+}
+
+/**
+ * The threads the Inbox badge counts beyond its attention signals: one whose
+ * subagent or lead waits in a find-only request, and one whose agent holds a
+ * waiting ask. An ask raises no attention signal of its own, so without this
+ * the badge read 0 while the Inbox listed the ask.
+ */
+export function inboxWaitingThreadIds(
+  requests: ReadonlyArray<PendingRequest>,
+  asks: ReadonlyArray<WaitingAsk>,
+): ReadonlyArray<string> {
+  return [
+    ...requests.filter(isFindOnlyPendingRequest).map((request) => String(request.threadId)),
+    ...asks.map((ask) => String(ask.threadId)),
+  ];
 }

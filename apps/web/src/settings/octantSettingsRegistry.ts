@@ -755,7 +755,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("provider-tool-call-pause-limit"),
-          label: "Longest tool-call pause",
+          label: "Tool-call pause limit",
           scope: "host",
           keywords:
             "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",

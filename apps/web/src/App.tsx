@@ -247,7 +247,7 @@ import {
 } from "./browser/dedicatedBrowserContext";
 import { MarkdownLinkActionsContext } from "./markdown/Markdown";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
-import { buildInboxAttentionItems } from "./inbox/inboxModel";
+import { buildInboxAttentionItems, inboxWaitingThreadIds } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { nextWaitingThread } from "./notifications/nextWaitingThread";
@@ -542,11 +542,7 @@ import type {
   ApprovalPendingRequest,
   DecisionPendingRequest,
 } from "./palette/needsYouCommands";
-import {
-  answerPendingRequest,
-  isFindOnlyPendingRequest,
-  type ChildPendingRequest,
-} from "./pendingRequests/pendingRequests";
+import { answerPendingRequest, type ChildPendingRequest } from "./pendingRequests/pendingRequests";
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
@@ -2498,11 +2494,14 @@ function LaunchedShell(
   // The row count mirrors the dock badge: distinct threads waiting, minus the
   // one the user is looking at, whose signal the open thread already answers.
   // A thread whose subagent, or whose agent itself, waits on the person counts
-  // too, once. A subagent's ask or settle and the agent's own approval move the
-  // Work and Code topics. Chat navigation moves on every streaming delta, so
+  // too, once, as does a thread holding an ask a host service keeps (a tool
+  // approval, a proposal, a Browser ask). A subagent's ask or settle and the
+  // agent's own approval move the Work and Code topics; an ask moves the
+  // tool-approvals topic. Chat navigation moves on every streaming delta, so
   // following it would re-read pending requests for every token.
   const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
-    feedRevision: machineChanges.workNavigation + machineChanges.codeNavigation,
+    feedRevision:
+      machineChanges.workNavigation + machineChanges.codeNavigation + machineChanges.toolApprovals,
     settings: controller.settings,
     workspace: controller.workspace,
   }).read;
@@ -2529,9 +2528,7 @@ function LaunchedShell(
   const waitingThreadIds = useMemo(
     () =>
       subagentWaitRead.status === "ready"
-        ? subagentWaitRead.requests
-            .filter(isFindOnlyPendingRequest)
-            .map((request) => String(request.threadId))
+        ? inboxWaitingThreadIds(subagentWaitRead.requests, subagentWaitRead.asks)
         : [],
     [subagentWaitRead],
   );

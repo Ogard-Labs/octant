@@ -24,7 +24,11 @@
   color: var(--oct-fg-2);
 }
 
+/* Block, not the button recipe's inline-flex: a flex container wraps its text
+   in an anonymous item that text-overflow never reaches, so a long thread
+   title was cut off mid-letter with no ellipsis. */
 .pending-request__title.pending-request__title {
+  display: block;
   min-width: 0;
   flex: 1 1 10rem;
   justify-content: flex-start;

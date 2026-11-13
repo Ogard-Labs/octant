@@ -6,7 +6,7 @@ import {
   workChildApproval,
   workDecision,
 } from "../palette/pendingRequests.test-fixtures";
-import { decodePendingRequest } from "@octant/contracts/pending-requests";
+import { decodePendingRequest, type WaitingAsk } from "@octant/contracts/pending-requests";
 import {
   assignedWorkSeenKey,
   buildInboxAttentionItems,
@@ -15,6 +15,7 @@ import {
   inboxFilterCounts,
   inboxThreadProjectId,
   inboxWaitingItems,
+  inboxWaitingThreadIds,
   matchesInboxFilter,
   type InboxWaitingItem,
 } from "./inboxModel";
@@ -168,19 +169,23 @@ describe("inbox filters", () => {
     });
   });
 
+  const toolAsk = {
+    kind: "tool-approval",
+    askId: "0a000000-0000-4000-8000-000000000001",
+    mode: "work",
+    projectId: "0a000000-0000-4000-8000-000000000002",
+    threadId: "0a000000-0000-4000-8000-000000000003",
+    threadTitle: "Quarterly notes",
+    requestedAt: "2026-10-06T08:00:00.000Z",
+    text: "Run search_issues from Linear?",
+  } as never as WaitingAsk;
+  const filtersOf = (item: InboxWaitingItem | undefined) =>
+    (["all", "urgent", "decide", "stuck", "finished"] as const).filter(
+      (filter) => item !== undefined && matchesInboxFilter(item, filter),
+    );
+
   it("lists an ask a host service holds under All and Stuck, in its Project, by when it was asked", () => {
-    const [ask] = inboxWaitingItems([], [], NOW, [
-      {
-        kind: "tool-approval",
-        askId: "0a000000-0000-4000-8000-000000000001",
-        mode: "work",
-        projectId: "0a000000-0000-4000-8000-000000000002",
-        threadId: "0a000000-0000-4000-8000-000000000003",
-        threadTitle: "Quarterly notes",
-        requestedAt: "2026-10-06T08:00:00.000Z",
-        text: "Run search_issues from Linear?",
-      } as never,
-    ]);
+    const [ask] = inboxWaitingItems([], [], NOW, [toolAsk]);
     expect(ask).toMatchObject({
       kind: "ask",
       projectKey: "0a000000-0000-4000-8000-000000000002",
@@ -188,10 +193,30 @@ describe("inbox filters", () => {
       deferred: false,
       since: Date.parse("2026-10-06T08:00:00.000Z"),
     });
-    const matching = (["all", "urgent", "decide", "stuck", "finished"] as const).filter(
-      (filter) => ask !== undefined && matchesInboxFilter(ask, filter),
-    );
-    expect(matching).toEqual(["all", "stuck"]);
+    expect(filtersOf(ask)).toEqual(["all", "stuck"]);
+  });
+
+  it("lists a memory or routine proposal under Decide, since the person decides it", () => {
+    const proposals = inboxWaitingItems([], [], NOW, [
+      { ...toolAsk, kind: "memory-proposal" },
+      { ...toolAsk, kind: "routine-proposal", askId: "0a000000-0000-4000-8000-000000000009" },
+    ]);
+    expect(proposals.map(filtersOf)).toEqual([
+      ["all", "decide"],
+      ["all", "decide"],
+    ]);
+  });
+
+  it("counts the thread of every waiting ask toward the Inbox badge, beside find-only requests", () => {
+    // The badge counts threads, so a thread with two asks is one.
+    expect(
+      new Set(
+        inboxWaitingThreadIds(
+          [workChildApproval(), workDecision()],
+          [toolAsk, { ...toolAsk, kind: "image-offer" }],
+        ),
+      ),
+    ).toEqual(new Set([String(workChildApproval().threadId), String(toolAsk.threadId)]));
   });
 
   it("leaves a due follow-up to All only", () => {
