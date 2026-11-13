@@ -151,10 +151,26 @@ export function threadToolCallRecorders(options: {
   return (turn) => {
     // `tool-call-content` names only the call; its start named the tool.
     const toolNames = new Map<string, string>();
-    // A call whose input went unread (recording was off) cannot be judged for
-    // a protected path, so its output is refused even if recording comes back
-    // on before it returns: the store judges paths only on input parts.
-    const unjudged = new Set<string>();
+    // Each call's verdict on its whole input, held here for the life of the
+    // turn because the store may evict the input's row (the thread's byte
+    // total) before the call returns. An output is kept only for a call whose
+    // verdict is "safe": an input that was cut, arrived while recording was
+    // off, named more paths than are judged, or never arrived leaves the
+    // output unjudged, and an unjudged output is withheld like a protected one.
+    const verdicts = new Map<string, "safe" | "withheld">();
+    const judge = (toolCallId: string, text: string, truncated: boolean) => {
+      let safe = false;
+      try {
+        safe =
+          options.enabled() &&
+          !truncated &&
+          verdicts.get(toolCallId) !== "withheld" &&
+          !namesProtectedPath(text);
+      } catch {
+        // A judgement that failed is no verdict, so the output stays withheld.
+      }
+      verdicts.set(toolCallId, safe ? "safe" : "withheld");
+    };
     const write = (call: {
       readonly toolCallId: string;
       readonly part: "input" | "output";
@@ -162,11 +178,7 @@ export function threadToolCallRecorders(options: {
       readonly truncated: boolean;
     }) => {
       try {
-        if (!options.enabled()) {
-          if (call.part === "input") unjudged.add(call.toolCallId);
-          return;
-        }
-        if (call.text === "" || (call.part === "output" && unjudged.has(call.toolCallId))) return;
+        if (!options.enabled() || call.text === "") return;
         const toolName = toolNames.get(call.toolCallId);
         writeThreadToolCallPart(options.connection, {
           mode: turn.mode,
@@ -182,7 +194,9 @@ export function threadToolCallRecorders(options: {
           // The driver boundary already redacted a runtime's events; a tool
           // Octant ran reaches the store only through here.
           redact: redactHostSecrets,
-          namesProtectedPath,
+          ...(call.part === "output"
+            ? { withholdOutput: verdicts.get(call.toolCallId) !== "safe" }
+            : {}),
         });
       } catch {
         // The turn's own result does not depend on its record.
@@ -199,6 +213,7 @@ export function threadToolCallRecorders(options: {
           return;
         }
         if (event.kind !== "tool-call-content") return;
+        if (event.part === "input") judge(event.toolCallId, event.text, event.truncated === true);
         write({
           toolCallId: event.toolCallId,
           part: event.part,
@@ -208,6 +223,8 @@ export function threadToolCallRecorders(options: {
       },
       appTool: (call) => {
         toolNames.set(call.toolCallId, call.toolName);
+        // Judged whole before the cut, so a path past it still counts.
+        judge(call.toolCallId, call.inputJson, false);
         write({ toolCallId: call.toolCallId, part: "input", ...bounded(call.inputJson) });
         write({ toolCallId: call.toolCallId, part: "output", ...bounded(call.resultJson) });
       },

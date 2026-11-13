@@ -4761,8 +4761,15 @@ an agent ran and got back (maintainer request, 2026-11-12).
   whose input names a protected secret file (an absolute or home-rooted path
   on the list in force) keeps its input and not its output, marked
   `outputWithheld`: redaction recognises key shapes, not every credential a
-  file can hold. This changes what is recorded only; the secret guard refuses
-  or allows the call exactly as before.
+  file can hold. Withholding fails closed: an output is kept only when the
+  call's whole input was judged within the life of the call and named no
+  protected file. An input that was cut before it was judged (the Claude
+  adapter cuts each event's text), arrived while recording was off, named
+  more paths than are judged, or never arrived leaves the output withheld.
+  The verdict is held by the turn's recorder, not the stored row, so a row
+  the thread's byte total drops cannot lose it. This changes what is
+  recorded only; the secret guard refuses or allows the call exactly as
+  before.
 - **Data rights.** Deleting a Chat thread and purging any thread remove its
   records, and a tool event that arrives during or after either keeps
   nothing. Retention purges through the same thread purge. A thread export a

@@ -1613,7 +1613,6 @@ function seedToolCallRecord(
       text: marker,
       recordedAt: now,
       redact: (text) => text,
-      namesProtectedPath: () => false,
     });
     if (outcome.status !== "kept") throw new Error("the tool-call record was not seeded");
   }

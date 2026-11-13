@@ -45,8 +45,13 @@ export interface ThreadToolCallPartInput {
   readonly recordedAt: string;
   /** Applied before anything is stored; the store never holds the text it was handed. */
   readonly redact: (text: string) => string;
-  /** Whether a call's input names a protected secret file. */
-  readonly namesProtectedPath: (text: string) => boolean;
+  /**
+   * For an output part: the caller could not show that this call's whole
+   * input was judged free of protected secret files, so the output is not
+   * kept. The store does not judge paths itself; the recorder holds each
+   * call's verdict for the life of the call, which an evicted row cannot.
+   */
+  readonly withholdOutput?: boolean;
   /** Test seam. Production uses the contract's bounds. */
   readonly limits?: {
     readonly inputBytes: number;
@@ -146,11 +151,8 @@ export function writeThreadToolCallPart(
         return { status: "refused", reason: "turn-full" };
       }
     }
-    // Judged on the text as handed over: redaction or the cut must not hide
-    // the path from the rule that withholds the output.
     const withheld =
-      existing?.output_withheld === 1 ||
-      (input.part === "input" && input.namesProtectedPath(input.text));
+      input.part === "output" ? input.withholdOutput === true : existing?.output_withheld === 1;
     const kept =
       input.part === "output" && withheld
         ? undefined

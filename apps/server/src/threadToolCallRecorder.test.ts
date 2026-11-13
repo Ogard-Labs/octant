@@ -149,7 +149,9 @@ describe("thread tool-call recorder", () => {
         text: "PRIVATE KEY",
       }),
     );
-    expect(readThreadToolCallRecords(connection, turn)).toEqual([]);
+    expect(readThreadToolCallRecords(connection, turn)).toEqual([
+      { toolCallId: "call-1", toolName: "Read", outputWithheld: "protected-path", recordedAt: now },
+    ]);
   });
 
   it("stores a known key format and a value the credential broker issued only as the redaction mark", () => {
@@ -188,6 +190,54 @@ describe("thread tool-call recorder", () => {
         recordedAt: now,
       },
     ]);
+  });
+
+  it("keeps no output of a protected call whose input record other calls pushed out of the thread's total", () => {
+    const connection = open();
+    const recorder = recorders(connection)({ ...turn, callLimit: undefined });
+    const content = (toolCallId: string, part: "input" | "output", text: string) =>
+      recorder.observe(event({ kind: "tool-call-content", toolCallId, part, text }));
+    content("protected", "input", '{"file_path":"/home/person/.ssh/id_ed25519"}');
+    for (let index = 0; index < 260; index += 1) {
+      content(`filler-${index}`, "input", '{"query":"a"}');
+      content(`filler-${index}`, "output", "x".repeat(65_536));
+    }
+    content("protected", "output", "PRIVATE KEY");
+    const stored = JSON.stringify(
+      connection
+        .prepare("SELECT * FROM thread_tool_call_record_store WHERE tool_call_id = 'protected'")
+        .all(),
+    );
+    expect(stored).not.toContain("PRIVATE KEY");
+  });
+
+  it("keeps no output of a call whose input reached the record already cut", () => {
+    const connection = open();
+    const recorder = recorders(connection)(recorded);
+    recorder.observe(
+      event({
+        kind: "tool-call-content",
+        toolCallId: "call-1",
+        part: "input",
+        text: `{"command":"echo ${"a".repeat(100)}`,
+        truncated: true,
+      }),
+    );
+    recorder.observe(
+      event({ kind: "tool-call-content", toolCallId: "call-1", part: "output", text: "KEY" }),
+    );
+    const [record] = readThreadToolCallRecords(connection, turn);
+    expect(record?.output).toBeUndefined();
+    expect(record?.outputWithheld).toBe("protected-path");
+  });
+
+  it("keeps no output of a call whose input it never saw", () => {
+    const connection = open();
+    const recorder = recorders(connection)(recorded);
+    recorder.observe(
+      event({ kind: "tool-call-content", toolCallId: "call-1", part: "output", text: "KEY" }),
+    );
+    expect(JSON.stringify(readThreadToolCallRecords(connection, turn))).not.toContain("KEY");
   });
 
   it("never fails the turn when a record cannot be written", () => {

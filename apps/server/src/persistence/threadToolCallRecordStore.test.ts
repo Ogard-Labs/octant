@@ -48,7 +48,6 @@ function part(overrides: Partial<ThreadToolCallPartInput> = {}): ThreadToolCallP
     text: '{"command":"ls"}',
     recordedAt: now,
     redact: (text) => text,
-    namesProtectedPath: () => false,
     ...overrides,
   };
 }
@@ -119,17 +118,13 @@ describe("thread tool-call record store", () => {
     expect(stored).toContain("[redacted]");
   });
 
-  it("does not keep what a call returned when its input named a protected secret file", () => {
+  it("does not keep what a call returned when its output is to be withheld", () => {
     const connection = open();
-    const namesProtectedPath = (text: string) => text.includes(".ssh/id_ed25519");
-    writeThreadToolCallPart(
-      connection,
-      part({ text: "cat ~/.ssh/id_ed25519", namesProtectedPath }),
-    );
+    writeThreadToolCallPart(connection, part({ text: "cat ~/.ssh/id_ed25519" }));
     expect(
       writeThreadToolCallPart(
         connection,
-        part({ part: "output", text: "PRIVATE KEY BODY", namesProtectedPath }),
+        part({ part: "output", text: "PRIVATE KEY BODY", withholdOutput: true }),
       ),
     ).toEqual({ status: "withheld" });
     const stored = JSON.stringify(
