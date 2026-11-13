@@ -11138,6 +11138,52 @@ taint rules and the confined launch apply unchanged. No Composio API key
 entry exists: the sign-in covers personal and organization accounts alike,
 chosen on Composio's side.
 
+**Local command connectors (Jottacloud).** A catalog entry may be a program Octant
+runs instead of a hosted address (`auth.kind: "command"`). It names one npm
+package by exact version and registry integrity, the entry file inside it, fixed
+non-secret environment, one secret value, the hosts it may reach (`egress`, see
+the stdio paragraph under extensions), and tools that ask on every call. The
+person's Connect sends the entry id and the secret only; the host rebuilds the
+command from the catalog and refuses a request whose command, arguments or
+environment differ, so a renderer or paired device cannot make Octant run
+anything the catalog does not name. Connect is still the host window only.
+
+- **Install.** The host downloads that exact tarball from the npm registry,
+  refuses it unless it matches the pinned integrity, unpacks it with the bounded
+  tar reader into the generated `connector-<id>` folder's `node_modules`, and
+  runs `node` on the entry file there. No `npx`, no install scripts, no
+  dependency resolution at run time: the package ships one bundled file, so the
+  pin covers everything that runs. The pin is exact; a new version is a catalog
+  change, reviewed like any other. `bun run connectors:probe` checks the pin
+  still exists on the registry. The host needs `node` on its path; when it is
+  missing the launch fails with the usual component reason.
+- **Secret.** The one-time login token the person pastes goes to the credential
+  broker as `${OCTANT_SECRET:<id>}` like any user-added secret. Jottacloud's
+  server reads it only while its token store is empty, so after the first
+  start it is never used again; Octant leaves it in the broker (removed on
+  uninstall) rather than rewriting the package.
+- **State.** The server's token store is `${PLUGIN_DATA}/tokens.json`: inside
+  the plugin data folder the sandbox already confines writes to. Uninstalling
+  stops the package's processes and then removes that folder
+  (`removePluginData`), so a reinstall starts with no login. A second process on
+  the same store would refresh the same token and revoke the session, and the
+  host starts one process per thread scope, so this connector is `exclusive`:
+  while one thread's process runs, another thread's start is refused with a
+  message that it frees up when that connection closes. Sharing one process
+  across scopes is a later change.
+- **Approvals.** The server starts read-only (`JOTTACLOUD_READ_ONLY=1`); the
+  catalog does not turn write tools on. `delete_file` and `create_share_link`
+  are listed as ask-every-call: they publish or remove data, so no remembered
+  approval covers them even in a Project, and the answer approves one call.
+  Every other tool follows the ordinary `proxied-stdio` rules.
+
+Rationale: a registry-pinned bundle was chosen over `npx` (a launcher the
+sandbox refuses, resolving dependencies at run time) and over a GitHub source
+(no committed build output to pin). Residual risk: the pin trusts the package
+publisher's account at the time of pinning, and the server can read and change
+the roots it is given (`/Sync` by default); the egress list and per-call
+approvals limit where data can go and what is deleted or published.
+
 **Atlassian and Airtable setup.** Both non-featured entries use the existing
 MCP PKCE sign-in, generated-package activation and credential broker. Atlassian
 uses `https://mcp.atlassian.com/v2/mcp`; its path-scoped issuer, published DCR and

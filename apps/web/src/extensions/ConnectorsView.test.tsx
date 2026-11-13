@@ -144,6 +144,57 @@ describe("Connectors", () => {
     );
   });
 
+  it("shows the pinned package before asking for the login token, and sends only the entry and the token", async () => {
+    const user = userEvent.setup();
+    const addUserMcpServer = vi.fn(async () => ({
+      kind: "extension-state-updated",
+      snapshot: snapshotWith(),
+    })) as never;
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{ addUserMcpServer, mcpServerSignIn: vi.fn() as never }}
+        disabled={false}
+        localHost
+        onConnected={vi.fn()}
+        snapshot={snapshotWith()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Connect Jottacloud" }));
+    const form = screen.getByRole("form", { name: "Jottacloud key" });
+    expect(form).toHaveTextContent("@henrikogard/jottacloud-mcp@0.1.1");
+    expect(form).toHaveTextContent("sha512-fBIXwNbPxBm9…");
+    expect(form).toHaveTextContent("*.jottacloud.com");
+    await user.type(within(form).getByLabelText("Login token"), "one-time-token");
+    await user.click(within(form).getByRole("button", { name: "Connect" }));
+    await waitFor(() =>
+      expect(addUserMcpServer).toHaveBeenCalledWith({
+        name: "Jottacloud",
+        connectorId: "jottacloud",
+        server: {
+          type: "stdio",
+          command: "node",
+          args: [],
+          env: [{ name: "JOTTACLOUD_LOGIN_TOKEN", value: "one-time-token", secret: true }],
+        },
+      }),
+    );
+  });
+
+  it("does not let a browser-hosted Settings connect Jottacloud", () => {
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
+        disabled={false}
+        localHost={false}
+        onConnected={vi.fn()}
+        snapshot={snapshotWith()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Connect Jottacloud" })).toBeDisabled();
+  });
+
   it("searches, hides an entry on this computer, shows hidden ones again, and marks an installed one Connected", async () => {
     const user = userEvent.setup();
     render(
