@@ -1,6 +1,6 @@
 # Application ground
 
-The picture or drawn field behind the start screens, or behind every page, and how text is kept readable over it. It is chosen in Settings › Appearance › Background. The material rules it sits under are in [DESIGN.md: Depth and material](../../DESIGN.md#shapes-and-depth).
+The picture or drawn field behind the start screens, or behind every page, and how text is kept readable over it. It is chosen in Settings › Appearance › Background. The material rules it sits under are in [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material).
 
 ## The ground
 

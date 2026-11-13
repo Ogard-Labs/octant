@@ -2263,15 +2263,15 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 - The phone app reads as a native app, not a web page: a bottom tab bar for its top places, large titles on tab roots, a centred nav bar on pushed screens, inset grouped lists, the system segmented control and sheets with a grabber. It uses the product radius scale with one 20px sheet, three count tiles that take the desktop tiles' hues and marks, and the transcript recipe: bare prose replies and a control-fill bubble for the person's message.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Motion and interaction](../../DESIGN.md#motion-and-interaction), [shadcn/Base recipes](../../DESIGN.md#shadcnbase-recipes), [Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability), and the [mobile design system](../../apps/mobile/design-system/README.md).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Motion and interaction](../../DESIGN.md#motion), [shadcn/Base recipes](../../DESIGN.md#shadcnbase-recipes), [Accessibility and reliability](../../DESIGN.md#accessibility), and the [mobile design system](../../apps/mobile/design-system/README.md).
 
 ### One theme authority and shared controls
 
 There is one runtime theme authority and one owned control layer. Feature code places and sizes shared controls but never repaints them.
 
 - Feature stylesheets add no raw colour, radius, shadow or control recipe. A repository checker enforces this and ratchets existing violations against a baseline.
-- Shared recipes space in pixels on the 4px scale: the theme sets Tailwind's spacing step to `--spacing: 4px`, so `px-2` is 8px at every interface size, while type and control heights still follow the interface size. A recipe names a step on the scale and never a half step, and a field, select and combobox share the default button's 28px height. A contract test scans every class string. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth).
-- Every in-page menu is one row: 28px (44px with a second line), a 16px icon column and 8px gap, the Menu option type, group labels in the Navigation group label role, and one separator as wide as the rows. A menu where any row has an icon reserves the column for all of them. Natively drawn desktop menus are unchanged. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth).
+- Shared recipes space in pixels on the 4px scale: the theme sets Tailwind's spacing step to `--spacing: 4px`, so `px-2` is 8px at every interface size, while type and control heights still follow the interface size. A recipe names a step on the scale and never a half step, and a field, select and combobox share the default button's 28px height. A contract test scans every class string. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing).
+- Every in-page menu is one row: 28px (44px with a second line), a 16px icon column and 8px gap, the Menu option type, group labels in the Navigation group label role, and one separator as wide as the rows. A menu where any row has an icon reserves the column for all of them. Natively drawn desktop menus are unchanged. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing).
 - Feature code composes controls only through the Octant adapters; direct imports of the recipe or primitive libraries are blocked by a repository check.
 - There is one interaction primitive backend. A recipe style's own palette is never adopted; the `--octant-*` roles stay the theme source. A style variant for a primitive state is checked against the attribute the primitive actually writes. _Here only._
 - Desktop context and dropdown menus use native OS menus through one shared adapter. Browser clients keep accessible renderer menus.
@@ -2310,7 +2310,7 @@ The user profile (optional name, email, accent and avatar) authenticates and aut
 - An avatar image is inlined in settings, downscaled to 128 px and at most 96 KB encoded. _Here only._
 - The avatar lookup by email hash is the one part that leaves the Mac. It runs only on a button press, says it sends a hash, and copies the result so the host never contacts the service again by itself. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Optional Settings details](../../DESIGN.md#optional-settings-details).
+Status: Built. Since: —. Detail: [DESIGN.md: Optional Settings details](settings.md#optional-settings-details).
 
 ### Approvals and confirmations
 
@@ -2334,7 +2334,7 @@ Accessibility is a baseline for every changed surface, not a late pass.
 - Theme, typography, density, translucency, contrast and reduced-motion settings persist through the server-authoritative journal; renderer state is presentation only.
 - A refused server command is never a silent no-op, and loading, stale, denied, empty and error states keep stable geometry.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility).
 
 ### Guarded quit
 
@@ -2344,7 +2344,7 @@ Quitting the desktop app is guarded so that open provider sessions are never dro
 - When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting (maintainer request, 2026-11-12), not built yet: today it is always on. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility).
 
 ### Window defaults, ground and drafts
 
@@ -2356,7 +2356,7 @@ A new window, its background and its drafts behave predictably.
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout), [Shapes and depth](../../DESIGN.md#shapes-and-depth), [Welcome and composer](../../DESIGN.md#welcome-and-composer) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
+Status: Built. Since: —. Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout), [Shapes and depth](../../DESIGN.md#depth-and-material), [Welcome and composer](../../DESIGN.md#welcome-and-composer) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
 ### Usage reading and provider marks
 
@@ -2367,7 +2367,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
 - Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](settings.md#usage) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
+Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](settings.md#usage) and [Iconography and provider marks](../../DESIGN.md#icons).
 
 ### Reply detail
 
@@ -2384,7 +2384,7 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 - A disclosure opened or closed by hand keeps that state while its turn stays mounted and the thread's level is unchanged; a change of that level resets every disclosure to the new level.
 - The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).
+Status: Built. Since: —. Detail: [DESIGN.md: Transcript](thread-view.md#transcript).
 
 ## Workspace
 

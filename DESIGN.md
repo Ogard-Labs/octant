@@ -1,28 +1,44 @@
 # Octant design system
 
-This is the current visual specification for Octant surfaces: desktop and web,
-mobile, public documentation, and marketing material. [Workspace behavior](docs/design/workspace.md)
-owns navigation and pane interactions; [architecture](docs/architecture.md) owns
-system and authority boundaries. Use the [design workflow](docs/design/README.md)
-to update this document in place with an approved design change.
+This is the visual specification for Octant surfaces: desktop and web, mobile,
+public documentation, and marketing material. It holds three things:
 
-Read the relevant section rather than the entire document:
+1. [Foundations](#foundations): type, colour, spacing, radii, heights, icons,
+   depth and material, motion, focus, and accessibility. Each value is a token,
+   defined once.
+2. Components: one specification for each shared adapter in
+   `apps/web/src/ui/base`.
+3. Patterns: arrangements that several screens share.
 
-- [Typography](#typography), [colour](#colour-system), and [materials](#spacing-shapes-and-depth)
-  for visual defaults and safe theme behavior.
-- [Transcript](#transcript) and [welcome/composer](#welcome-and-composer) for reading and input surfaces.
-- [Shell and layout](#shell-and-layout) for sidebar, Settings, dock, and responsive presentation.
-- [Component ownership](#component-ownership-and-composition) for shared controls.
-- [Accessibility](#accessibility-and-reliability) and the [implementation checklist](#implementation-checklist)
-  for verification of changed surfaces.
+What one screen or tool shows and does lives in the topic file that owns it.
+This document is the system those files build with; they never define a
+second palette, type scale, or control.
+
+| Screen or tool                                                                                                                                                | Owner                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Shell grid, tool row, content tabs, sidebar, icon rail, right dock, tool tiles, Environment, Browser toolbar, Board, Zen, pull requests, What's new, quitting | [Workspace: Presentation](docs/design/workspace.md#presentation)        |
+| Turn header, transcript, Reply detail, subagent and follow-up cards, plan meters, model picker, context meter, message queue                                  | [Thread view](docs/design/thread-view.md)                               |
+| Welcome screen, Code Home, first run                                                                                                                          | [Start screen](docs/design/start-screen.md)                             |
+| Settings sheet, groups and pages, Permissions, Usage                                                                                                          | [Settings](docs/design/settings.md)                                     |
+| The picture or drawn field behind pages                                                                                                                       | [Application ground](docs/design/application-ground.md)                 |
+| Canvas charts, tables, mockups, and designs                                                                                                                   | [Canvas visuals](docs/design/canvas-visuals.md)                         |
+| Moving a thread and Prepare to shut down                                                                                                                      | [Hub and spokes](docs/design/hub-and-spokes.md#moving-a-thread-screens) |
+| Browser captures strip and Draw on page                                                                                                                       | [Browser captures](docs/design/browser-captures.md)                     |
+
+[Workspace behavior](docs/design/workspace.md) owns navigation and pane
+interactions; [architecture](docs/architecture.md) owns system and authority
+boundaries. Use the [design workflow](docs/design/README.md) to update this
+document in place with an approved design change. The tokens a website or
+another app consumes are generated from the same stylesheets and described in
+[Design tokens and the app feel](docs/design/design-tokens.md).
 
 ## Product character
 
 Octant is a local-first desktop workspace for supervising Chat, Work, and Code
 threads, providers, Projects, agents, changes, and delivery. Its visual north
-star is a calm, colourful workbench that shows what is happening at a glance —
+star is a calm, colourful workbench that shows what is happening at a glance:
 counts, running work, and whose thing is whose. Colour is the default; a person
-who prefers grey chooses Mono (Settings › Appearance › Style):
+who prefers grey chooses Mono (Settings › Appearance › Style).
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
@@ -36,104 +52,100 @@ who prefers grey chooses Mono (Settings › Appearance › Style):
 - The right dock and bottom panel are contextual working regions for the active
   pane. A capable region with no selected tool shows a compact launcher; a pane
   with no valid tool exposes no dock toggle, except a new Code task waiting for
-  its thread (see [Shell and layout](#shell-and-layout)). Neither region
-  fabricates a tab or repeats another pane's content.
-- Hierarchy comes from typography (size first, then weight), spacing, cards
-  for discrete objects, and selection fills. Colour is a normal tool: a real
-  accent, status hues (amber warning, red failure, green success), coloured
-  count tiles, board marks, Project and Canvas hues, and brand marks on
-  connectors. It carries meaning, so a mark that names a state also has a shape
-  or a word, and colour never stands alone. Long reading text in the transcript
-  stays neutral for comfort. The Mono style draws the same app in greys. The
-  context ring and the parts of the context window keep their hues, amber then
-  red, in every style.
+  its thread (see [Workspace: Right dock and bottom panel](docs/design/workspace.md#right-dock-and-bottom-panel)).
+  Neither region fabricates a tab or repeats another pane's content.
+- Hierarchy comes from typography (size first, then weight), spacing, cards for
+  discrete objects, and selection fills. Colour is a normal tool: a real accent,
+  status hues (amber warning, red failure, green success), coloured count tiles,
+  board marks, Project and Canvas hues, and brand marks on connectors. It carries
+  meaning, so a mark that names a state also has a shape or a word, and colour
+  never stands alone. Long reading text in the transcript stays neutral for
+  comfort. The Mono style draws the same app in greys. The context ring and the
+  parts of the context window keep their hues, amber then red, in every style.
+- Controls are familiar, compact, keyboard reachable, and honest about loading,
+  stale, unavailable, permission, and error states.
 
-  _Rationale._ The app first shipped grey so that status and identity colour
-  would stand out, and a calm default suited a review tool. In use it read as
-  unfinished: nothing said what was running, warned, or belonged to what.
-  Colour is now the default for everyone and grey is one click away, so the
-  rules that remain are the ones that protect readers: colours come from the
-  theme, text stays readable, and keyboard focus stays clear.
+_Rationale._ A grey app read as unfinished in use: nothing said what was
+running, warned, or belonged to what. With colour the default and grey one
+choice away, the rules that remain are the ones that protect readers: colours
+come from the theme, text stays readable, and keyboard focus stays clear.
 
-- Controls are familiar, compact, keyboard reachable, and honest about
-  loading, stale, unavailable, permission, and error states.
-
-Avoid dashboard walls (counts belong in a few tiles, not a grid of them),
-neon developer styling, permanent low-frequency controls, oversized setup
-cards, pill-shaped everything, and invented data. Gradients and depth are
-ordinary tools used with judgment: the application ground, a count tile's face,
-a Project's letter tile, and a raised card are fine; a gradient that carries no
-meaning, or decoration on a control that already reads, is not. A feature that is not available must explain why and offer the
-next useful action, or stay out of the primary layout. The one thing allowed
-to be decorative is the application ground: a first-party picture or a
-person's photo, shown plain or through one print effect, or the field of
+Avoid dashboard walls (counts belong in a few tiles, not a grid of them), neon
+developer styling, permanent low-frequency controls, oversized setup cards,
+pill-shaped everything, and invented data. Gradients and depth are ordinary
+tools used with judgment: the application ground, a count tile's face, a
+Project's letter tile, and a raised card are fine; a gradient that carries no
+meaning, or decoration on a control that already reads, is not. A feature that
+is not available explains why and offers the next useful action, or stays out
+of the primary layout. The one thing allowed to be decorative is the
+[application ground](docs/design/application-ground.md): a first-party picture
+or a person's photo, shown plain or through one print effect, or the field of
 Pulsing characters, Dithered pixels, or Flowing colour, behind the start
 screens or behind every page.
 
-## Language
+## Voice
 
-This section is the part of the system that travels: every app surface, the docs
-site, and the marketing site use the same words, the same face, and the same
-hierarchy. Platform adapters may express the system through CSS or React Native,
-but they do not own a second palette or visual language.
+The words, the face, and the hierarchy travel: every app surface, the docs site,
+and the marketing site use the same ones. Platform adapters may express the
+system through CSS or React Native, but they do not own a second palette or
+visual language.
 
-### Voice
-
-- **Crafted, not vibed.** Hierarchy comes from size, then weight, then
-  colour — never capitals. One title per page. Section labels are
-  sentence-case and quiet. Nothing is uppercase except a monospace identifier
-  that already is. Weights follow the one ladder in [Scale](#scale).
+- **Crafted, not vibed.** Hierarchy comes from size, then weight, then colour,
+  never capitals. One title per page. Section labels are sentence case and
+  quiet. Nothing is uppercase except a monospace identifier that already is.
+  Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
-- **Say what happens.** A mode name never promises more than the runtime
-  does. Where a thread's provider has no reviewer, a thread set to Auto reads
-  "Ask first" and says why; Full access says it has no sandbox and no
-  prompts.
+- **Say what happens.** A mode name never promises more than the runtime does.
+  Where a thread's provider has no reviewer, a thread set to Auto reads "Ask
+  first" and says why; Full access says it has no sandbox and no prompts.
 - **One sentence of help.** A section note or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
-- **Numbers read in English.** Counts, sizes, and token figures use the
-  English separators whatever the system locale ("1,024", "4.1k"), because
-  the words around them are English: on a Norwegian Mac the dock read "4,1k
-  of 1 mill." beside a stats line reading "7.9k". A short token count in the context meter and Usage is
-  `compactTokenCount` ("41.2K", "1.2M"). Dates
-  and times still follow the locale, and a Canvas block keeps its own format.
+- **Numbers read in English.** Counts, sizes, and token figures use the English
+  separators whatever the system locale ("1,024", "4.1k"), because the words
+  around them are English: on a Norwegian Mac the dock read "4,1k of 1 mill."
+  beside a stats line reading "7.9k". A short token count in the context meter
+  and Usage is `compactTokenCount` ("41.2K", "1.2M"). Dates and times still
+  follow the locale, and a Canvas block keeps its own format.
 - **Empty states are short phrases.** An empty state's title has no closing
-  period ("Nothing archived", "No Projects match this view"); its detail line
-  is a sentence and keeps one.
-- **Name the host's computer from the host.** Copy about where something is
-  kept or runs on the host says "this Mac" and "Keychain" only when the host
-  reports macOS, and "this computer" and "credential store" otherwise. The
-  window's own platform never decides it: a browser on a Mac can drive a Linux
-  host. Until the host has reported, the neutral words show. Steps that
-  differ by platform, such as a browser's key setup, show only the host's
-  own platform's steps once it has reported, and every platform's before
-  then. The platform is
-  a host fact (see "Host platform in copy" under
+  period ("Nothing archived", "No Projects match this view"); its detail line is
+  a sentence and keeps one.
+- **Name the host's computer from the host.** Copy about where something is kept
+  or runs on the host says "this Mac" and "Keychain" only when the host reports
+  macOS, and "this computer" and "credential store" otherwise. The window's own
+  platform never decides it: a browser on a Mac can drive a Linux host. Until
+  the host has reported, the neutral words show. Steps that differ by platform,
+  such as a browser's key setup, show only the host's own platform's steps once
+  it has reported, and every platform's before then. The platform is a host fact
+  (see "Host platform in copy" under
   [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
   `Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access),
-  `delivery` (Investigation / Local implementation / Pull request / Merged).
-  The word "target" does not appear in the interface.
+  `delivery` (Investigation / Local implementation / Pull request / Merged). The
+  word "target" does not appear in the interface.
+
+## Foundations
+
+All sizes are at the default 13px interface size. Type and control heights
+scale with the Appearance interface size; spacing, icons, and radii do not.
 
 ### Face
 
 Interface text uses the platform face by default (SF Pro on a Mac):
 `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. It is
-what makes Octant read as a native app; with bundled Geist and antialiased
-smoothing the interface read as a web page, thin and grey beside the apps
-around it. Geist stays bundled as an explicit Appearance choice. Code, paths,
-branches, identifiers, and terminal text use the monospace stack. Default
-subpixel-style smoothing (no `-webkit-font-smoothing: antialiased`, which thins
-light text on a dark ground), `text-rendering: optimizeLegibility`, no synthetic
-bold.
+what makes Octant read as a native app; a bundled web face with antialiased
+smoothing read as a web page, thin and grey beside the apps around it. Geist
+stays bundled as an explicit Appearance choice. Code, paths, branches,
+identifiers, and terminal text use the monospace stack. Default subpixel-style
+smoothing (no `-webkit-font-smoothing: antialiased`, which thins light text on a
+dark ground), `text-rendering: optimizeLegibility`, no synthetic bold.
 
 ### Scale
 
-This table is the one statement of the type roles; sizes are at the default
-13px interface size. Everything scales together with the Appearance interface
-size through `--oct-text-step`; nothing is authored at 11.5 or 12.5, and
-nothing essential sits under 12px at the default. The roles live in
-`styles/surface.css`; the size tokens are listed under
+This table is the one statement of the type roles. Everything scales together
+with the Appearance interface size through `--oct-text-step`; nothing is
+authored at 11.5 or 12.5, and nothing essential sits under 12px at the default.
+The roles live in `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
 | Role                   | Size            | Weight | Leading | Colour      | Where                                                                                                                                                                                                         |
@@ -141,9 +153,9 @@ nothing essential sits under 12px at the default. The roles live in
 | Hero                   | 26              | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width)                                                                                                       |
 | Title                  | 28              | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)                                                                                                         |
 | Page title             | 14              | 600    | 1.35    | primary     | A destination or Settings page (`oct-page-title`)                                                                                                                                                             |
-| Dialog title           | 17              | 600    | 1.3     | primary     | What a dialog is about (its `h2`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)                                                                                         |
+| Dialog title           | 17              | 600    | 1.35    | primary     | What a dialog is about (its `h2`, `.octant-dialog__title`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)                                                                |
 | Reply heading          | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                                                                                                             |
-| Section label          | 14              | 600    | 1.3     | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
+| Section label          | 14              | 600    | 1.35    | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
 | Row label              | 14              | 500    | 1.35    | primary     | A setting's row, a file row, an empty state's title                                                                                                                                                           |
 | Navigation name        | 13              | 400    | 1.35    | primary     | A thread's title in the sidebar and in the title band, the account row's name, a Settings rail item and "Back to app" (`oct-nav-name`; a Settings item rests in the muted ink until hovered, focused or open) |
 | Navigation group label | 12              | 400    | 1.3     | muted       | A sidebar group heading and a Settings rail group label, in sentence case (`oct-nav-group`; a group's count stays Meta)                                                                                       |
@@ -157,39 +169,128 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text and every name in navigation (thread titles, sidebar and
-Settings rail rows, the account's name), 500 (`--oct-weight-medium`) for labels, controls, a setting's row and a menu's
-options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
-`strong`, the app's name, a destination's page title), and 700
-(`--oct-weight-title`) only for the large title. A count beside a label is Meta
-at 400; the one count at medium weight is a plan meter's figure, which stands
-with no label of its own (see Plan meters). The welcome question is a prompt to
-answer, so it is regular weight. `bun run ui:check` counts a weight above 600
-outside the title roles in `styles/surface.css` as a `heavy-weight` finding and
-ratchets it against the baseline.
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`) for labels,
+controls, a setting's row and a menu's options, 600 (`--oct-weight-strong`) for
+emphasis (section labels, card titles, `strong`, the app's name, a destination's
+page title, a dialog's title), and 700 (`--oct-weight-title`) only for the large
+title. A count beside a label is Meta at 400; the one count at medium weight is
+a plan meter's figure, which stands with no label of its own (see
+[Thread view: plan meters](docs/design/thread-view.md#turn-figures-and-plan-meters)).
+The welcome question is a prompt to answer, so it is regular weight. Avoid
+bolding whole paragraphs. `bun run ui:check` counts a weight above 600 outside
+the title roles in `styles/surface.css` as a `heavy-weight` finding and ratchets
+it against the baseline.
 
-_Rationale for the calm navigation._ Names in navigation at 14px and weight
-500 to 600 read louder than the rest of the app, not clearer. At the interface
-size and regular weight they read as a calm list, and the selected row's fill
-carries selection, not its weight. A group label is a quiet caption (12px,
-regular, muted), not a heading, so the rows it names stay the first thing read.
-An activity line in a thread ("Worked for", the turn's time) is the size of the
-text it sits between and is told apart by its muted ink, so it no longer reads
-as a smaller second voice. A reply's lines take 1.6 leading and its lists a
-16px indent so long answers breathe; the reply's size stays the person's own
-setting.
+_Rationale for the calm navigation._ Names in navigation at 14px and weight 500
+to 600 read louder than the rest of the app, not clearer. At the interface size
+and regular weight they read as a calm list, and the selected row's fill carries
+selection, not its weight. A group label is a quiet caption (12px, regular,
+muted), not a heading, so the rows it names stay the first thing read. An
+activity line in a thread is the size of the text it sits between and is told
+apart by its muted ink, so it does not read as a smaller second voice. A reply's
+lines take 1.6 leading and its lists a 16px indent so long answers breathe; the
+reply's size stays the person's own setting.
 
-A title is never the size and the weight of the text it heads. It is
-larger, heavier, or both, and has more room above it than below, so a reader
-finds the parts of a page, a dialog or a long reply without reading them. A
-fact in a list is its name in muted ink and its value in primary ink. (A
-dialog's title was the body's 15px, and a reply's headings were 15/14/14 at
-medium weight: each was one more line of the text under it.)
+A title is never the size and the weight of the text it heads. It is larger,
+heavier, or both, and has more room above it than below, so a reader finds the
+parts of a page, a dialog or a long reply without reading them. A fact in a
+list is its name in muted ink and its value in primary ink.
 
-The large title and a dialog's title use `--oct-tracking-tight` (-0.025em); the page title and
-section labels use `--oct-tracking-snug` (-0.01em), because tight tracking on 14px type closes
-the letters up; the welcome question has its own -0.012em; body and detail use none. The role
-leadings are tokens too: `--oct-leading-label` (1.35), `--oct-leading-meta` (1.4) and
-`--oct-leading-detail` (1.45) beside the heading and snug ones.
+The large title and a dialog's title use `--oct-tracking-tight` (-0.025em); the
+page title and section labels use `--oct-tracking-snug` (-0.01em), because tight
+tracking on 14px type closes the letters up; the welcome question has its own
+-0.012em; body and detail use none. Mono metadata uses positive tracking
+(`--oct-tracking-wide`). The role leadings are tokens: `--oct-leading-label`
+(1.35), `--oct-leading-meta` (1.4), `--oct-leading-detail` (1.45),
+`--oct-leading-snug` (1.3), `--oct-leading-heading` (1.14),
+`--oct-leading-tight` (1.1), `--oct-leading-body` (1.5),
+`--oct-leading-reading` (1.6), and `--oct-leading-code` (1.7). A row whose height
+is the sum of its lines sets them from the role leadings rounded to a pixel
+(`--oct-line-label`, `--oct-line-detail`, `--oct-line-meta`, `--oct-line-snug`,
+`--oct-line-tight`).
+
+### Typography
+
+| Job        | Default                                                                                             | Usage                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`                              | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
+| Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
+
+The default interface is the platform face at 13px and weight 400; transcript
+text defaults to 13px. Geist and Geist Mono are bundled
+(`@fontsource-variable/geist` and `geist-mono`): Geist Mono sets code by default
+and Geist is an Appearance choice. The stylesheet's own first-paint defaults are
+the same faces as the settings defaults, so nothing swaps when settings load.
+The editor defaults to 13px, line height 1.5, and enabled ligatures. The
+terminal defaults to 12px, line height 1.4, and disabled ligatures.
+
+Size tokens in `octant.css`, each multiplied by `--oct-text-step` so the
+Appearance interface size moves the whole ladder: `--oct-text-xs` 12px,
+`--oct-text-detail` 13px (declared in `surface.css`), `--oct-text-sm` 14px,
+`--oct-text-base` 15px, `--oct-text-lg` 17px, `--oct-text-xl` 20px,
+`--oct-text-2xl` 26px, `--oct-text-3xl` 36px, and `--oct-text-4xl` 72px. The
+large title's 28px is the `oct-title` role's own size, not `--oct-text-2xl`.
+Feature CSS reads these tokens; it does not author
+`calc(N * var(--oct-text-step))`, so the 12px floor for meta text is one
+definition. The type roles in `styles/surface.css` (`oct-title`,
+`oct-page-title`, `oct-section-label`, `oct-row-label`, `oct-row-detail`,
+`oct-nav-name`, `oct-nav-group`, `oct-menu-option`, `oct-activity-line`,
+`oct-meta`) are the only heading and label recipes; feature CSS does not author
+a new size.
+
+The persisted typography schema supports independent UI, editor, and terminal
+family, size, weight, line height, and ligatures. Families are sanitized: no
+URLs, imports, remote assets, executable payloads, or control characters.
+Missing fonts fall back to the safe stack. UI, editor, and terminal sizes are
+bounded to 8–32px; weights to 300–700; line height to 1–2.5. Appearance controls
+update the renderer optimistically and queue their server-authoritative save
+immediately; there is no separate Apply step, and a slower earlier response
+never replaces a newer visible choice.
+
+A saved stack that only ever meant "the default" reads as today's default
+(`savedUiFamily` in `packages/theme/src/typography.ts`): the system interface
+stack beginning `-apple-system, BlinkMacSystemFont`, the bundled-Geist default
+stack beginning `'Geist Variable', -apple-system`, and the JetBrains code and
+terminal stacks. The unbundled `Geist, system-ui, sans-serif` was an explicit
+pick, so it reads as bundled Geist. The Geist entry saves
+`'Geist Variable', system-ui, sans-serif`, so a Geist pick stays distinct; a
+Geist pick saved under the old default's identical string cannot be told apart
+and moves to the platform face. System interface saves the default's own stack.
+
+The runtime UI projection is absolute for ordinary application chrome. The
+bridge maps `--oct-font-display`, `--oct-font-body`, and `--oct-font-transcript`
+to the selected UI family. There are no compatibility aliases such as
+`--oct-font-ui` or `--oct-font-sans`, and feature styles do not declare a raw
+interface stack. A repository contract test scans shell, Settings, dock,
+navigation, pane tabs, and board selectors for violations. Monospace is limited
+to editor and terminal content and literal code, paths, branches, identifiers,
+or serialized theme source.
+
+Transcript settings are explicit and centred on the body size: Small is 13px,
+Medium 14px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A fresh
+install reads Small and Narrow, so a question, its reply, and the composer under
+them all read at 13px, never under the chrome around them. The column uses
+`width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome
+composers share a 768px maximum so Chat, Work, and Code start from the same
+prompt geometry independently of the reading-width preference. Canvas documents
+use the `--oct-canvas-measure` (62ch) measure.
+
+### Data visualisation
+
+Charts, metric blocks, tables, and timelines are one visual system: hue lives on
+the mark and never on the chrome, every mark pairs its hue with a second
+channel, one formatter reads every number, and a block that cannot be drawn
+falls back to its plain reading and disclosed table. The marks, scales, block
+kinds, and their states are specified in
+[Canvas visuals](docs/design/canvas-visuals.md). A design drawn in the workspace
+theme receives the workspace's semantic tokens, scheme, and bundled faces, plus a
+first-party `oct-` class kit that sets no colour of its own; its contents are in
+[Canvas visuals: design frame kit](docs/design/canvas-visuals.md#design-frame-kit),
+and mockups and designs follow
+[Canvas visuals: mockups and designs](docs/design/canvas-visuals.md#mockups-and-designs).
 
 ### Colour
 
@@ -197,76 +298,181 @@ Neutral graphite grounds, a blue accent, semantic statuses (amber warning, red
 danger, green success), and one neutral keyboard focus edge: that is the default
 preset. The bundled colour presets lean every surface toward one hue and carry
 their own accent. Text is three greys (primary, secondary, muted) and never a
-fourth; the primary ink is near-white (`#f5f5f7`) in dark and near-black
-(`#141414`) in light.
+fourth; the legacy `--oct-fg-2` alias maps directly to
+`--octant-text-secondary`. Hairlines separate; fills select. Selected and
+expanded fills carry state; keyboard focus follows [Focus](#focus). On the
+marketing site the same three greys and the same hairline carry the hierarchy on
+a white or graphite ground.
 
-_Rationale for the accent._ Blue was rendered against Purple on both grounds.
-Blue clears 4.5:1 as text and 3:1 as a fill on the light and the dark page with
-the same hue, and it stays distinct from the amber warning and the green
-success. Purple's light-page text value had to be darkened until it read close
-to the plain ink, which loses the point of an accent.
+The default values are the `System` defaults in `packages/theme/src/tokens.ts`
+and the matching renderer fallback in `apps/web/src/styles.css`, which mirrors
+them exactly; `Dark` and `Light` are the same values pinned to one mode.
 
-Appearance › Accent offers a one-click accent colour: Blue (the theme's own),
-Sky, Teal, Green, Lime, Amber, Orange, Clay, Rose, Pink, Purple, Indigo, the
-neutrals Steel, Slate, Silver, Graphite, Carbon and White, or Mono. Mono is the
-grey look: it sets Style to Mono and its ink accent. A swatch overrides the
-accent fill and the ink on it (`accent-foreground` and `primary-foreground`):
-dark ink on most, white on Slate, Graphite and light-mode Carbon, each clearing
-normal-text contrast on its fill (`accentSwatches.ts`). A fill is also a switch
-track, a usage meter and a primary button, so on the light card it must reach
-3:1: the chromatic swatches and Silver take a deeper step in light, the dark
-value with only its OKLCH lightness lowered (Lime measured 1.74:1 on the card
-before, 3.03:1 after), and the dark values are unchanged. The Appearance chips
-show the fill the current mode uses. An accent chosen before the light fills
-were deepened is read as the same swatch, at paint time, with no write to the
-saved settings. Accent text stays on the
-preset's ink, because no swatch clears normal-text contrast on the light page.
-White would vanish on the light page and Carbon on the dark one, so each takes a
-silver in that mode, written as a mode-only override: an override's optional
-`mode` limits it to the light or the dark theme.
-The accent colours switches, selected states, and sliders;
-status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
-state; keyboard focus follows the rule in "Accessibility and reliability". See
-"Colour system" for the token table. On the marketing site the same three
-greys and the same hairline carry the hierarchy on a white or graphite ground.
+| Role                   | CSS variable                                        | Dark      | Light     | Use                                                        |
+| ---------------------- | --------------------------------------------------- | --------- | --------- | ---------------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9` | Page ground: welcome, lists, Settings                      |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9` | Title bars and shell chrome                                |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground                     |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                        |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                                   |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles                  |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons                      |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e2e2e1` | Hover and highlighted rows                                 |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                        |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                             |
+| Strong divider         | `--octant-divider-strong`                           | `#8a8a8a` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                            |
+| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill         |
+| Primary foreground     | `--octant-primary-foreground`                       | `#141414` | `#ffffff` | Text on primary fill                                       |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96` | Theme compatibility and accent tints, never the indicator  |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea` | Selected rows and active controls                          |
+| Accent fill            | `--octant-accent`                                   | `#5b9cf5` | `#1f5fc7` | One primary action or active mark                          |
+| Accent foreground      | `--octant-accent-foreground`                        | `#141414` | `#ffffff` | Text on accent fill                                        |
+| Accent text            | `--octant-accent-text`                              | `#5b9cf5` | `#1f5fc7` | Accent used as text; normal-text contrast                  |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000` | Opaque by contract; the bridge mixes it to a wash          |
 
-Settings › Appearance › Style chooses between **Colour** (the default) and
-**Mono**. Colour lets the places that name something carry colour: the accent,
-the sidebar's count tiles, board column marks, a Project's accent, connector
-brand marks, and a thread's Canvases, which take the hue of what they hold (a
-plan purple, a chart or figures amber, a diagram teal, a mockup pink, a table
-or document blue). Colour draws every hue from the preset's palette roles
-(`--octant-palette-*`, read through the `--oct-colour-*` aliases in
+The ladder is deliberate: in dark the page is near-black, the sidebar a step
+darker, the reading surface a step lighter, and cards lift one more step. In
+light the sidebar and the page share one near-white ground and the reading
+surface is white; a hairline, not a grey fill, separates the sidebar from the
+workspace. Every hairline registers on the surface it separates (about 1.3:1 in
+both modes); inputs and outline buttons use the strong border so an edge is
+never guessed. An off switch and an unchecked checkbox take the strong divider,
+because they must be found at a glance on a card: 4.4:1 on a card and 4.9:1 on
+the page in light, and in dark 3:1 or more on the lifted card the Settings sheet
+draws (`#3d3d3d`, 3.15:1) and 5.3:1 on the page; every dark preset keeps the
+same floor. The same role draws a scrollbar thumb on hover and rare dividers.
+
+_Rationale for the accent._ Blue clears 4.5:1 as text and 3:1 as a fill on the
+light and the dark page with the same hue, and it stays distinct from the amber
+warning and the green success. Purple's light-page text value had to be darkened
+until it read close to the plain ink, which loses the point of an accent.
+
+**Accent swatches.** Appearance › Accent offers a one-click accent colour: Blue
+(the theme's own), Sky, Teal, Green, Lime, Amber, Orange, Clay, Rose, Pink,
+Purple, Indigo, the neutrals Steel, Slate, Silver, Graphite, Carbon and White,
+or Mono. Mono is the grey look: it sets Style to Mono and its ink accent. A
+swatch overrides the accent fill and the ink on it (`accent-foreground` and
+`primary-foreground`): dark ink on most, white on Slate, Graphite and light-mode
+Carbon, each clearing normal-text contrast on its fill (`accentSwatches.ts`). A
+fill is also a switch track, a usage meter and a primary button, so on the light
+card it reaches 3:1: the chromatic swatches and Silver take a deeper step in
+light, the dark value with only its OKLCH lightness lowered (Lime reaches 3.03:1
+on the card), and the dark values are unchanged. The Appearance chips show the
+fill the current mode uses. An accent saved before the light fills were deepened
+is read as the same swatch, at paint time, with no write to the saved settings.
+Accent text stays on the preset's ink, because no swatch clears normal-text
+contrast on the light page. White would vanish on the light page and Carbon on
+the dark one, so each takes a silver in that mode, written as a mode-only
+override: an override's optional `mode` limits it to the light or the dark
+theme. The accent colours switches, selected states, and sliders; status colours
+stay their own.
+
+**Colour and Mono.** Settings › Appearance › Style chooses between **Colour**
+(the default) and **Mono**. Colour lets the places that name something carry
+colour: the accent, the sidebar's count tiles, board column marks, a Project's
+accent, connector brand marks, and a thread's Canvases, which take the hue of
+what they hold (a plan purple, a chart or figures amber, a diagram teal, a
+mockup pink, a table or document blue). Colour draws every hue from the preset's
+palette roles (`--octant-palette-*`, read through the `--oct-colour-*` aliases in
 `styles/colour.css`), so it follows the light or dark theme and any tinted
-preset. Mono is the grey app the product shipped before colour became the
-default: the ink accent and the neutral warning trio (`MONO_STYLE_TOKENS` in
-`packages/theme/src/tokens.ts`, swapped in only for roles a preset left at the
-colour default), grey tiles and marks, and connector marks in the ink.
-
-Vivid, the earlier name for the colourful look, is folded in: a stored `vivid`
-or `default` value, or none, draws Colour, and `mono` draws Mono, so old rows
-decode and everyone moves to Colour unless they choose Mono. The root carries
+preset. Mono draws the ink accent (`#f5f5f7` dark, `#141414` light) and the
+neutral warning trio (`MONO_STYLE_TOKENS` in `packages/theme/src/tokens.ts`,
+swapped in only for roles a preset left at the colour default), grey tiles and
+marks, and connector marks in the ink. A stored `vivid` or `default` value, or
+none, draws Colour, and `mono` draws Mono. The root carries
 `data-octant-style="colour"` or `"mono"`. Increased contrast always publishes
-`mono` and resolves the Mono roles, as it did before, so it is exactly as
-readable as it was. Plain empty, loading, and informational messages draw their
-mark in neutral ink in both styles; a yellow icon on a message that is not a
-warning is wrong.
+`mono` and resolves the Mono roles. Plain empty, loading, and informational
+messages draw their mark in neutral ink in both styles; a yellow icon on a
+message that is not a warning is wrong.
 
-### Shapes and depth
+**Status.** Status roles are paired to the surface where they render. Use the
+text role for labels and the surface role for a background; never rely on hue
+alone. Routine waiting, idle, and unselected states use neutral text and marks.
+Pending approval requests use a neutral surface and muted icon, without a
+warning stripe. Warning colour is reserved for an actionable warning, not every
+thread that can be resumed. A state, empty, or error message draws its mark in
+neutral ink, whatever went wrong: its glyph and title carry the meaning, and the
+message recipe offers no coloured tone. Success, failure, diffs, provider marks,
+and categorical data may retain semantic colour alongside a label or shape.
 
-A divider handle (the sidebar's, the dock's, the bottom panel's, a pane split's)
-is a hairline in the border at rest, the strong border under the pointer, and
-the meta ink at double width while it is grabbed; keyboard focus draws the shared
-focus edge, on the visible handle when the focusable element is an invisible
-input (a pane split). None of it is the accent: a clicked divider kept a bright
-accent line lit, and a split showed no keyboard mark at all.
+| Meaning       | Surface                                                      | Text/border                                                                                                                   |
+| ------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                                                     |
+| Warning       | `--octant-warning-surface` (`#33270b` dark, `#fbe9bd` light) | `--octant-warning-text` (`#f2c75c` dark, `#5c3d00` light); border `--octant-warning-border` (`#c99a2e` dark, `#8a6218` light) |
+| Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                                                      |
+| Diff addition | No default surface                                           | `--octant-addition-text` (`#6bb299` dark, `#0f6144` light)                                                                    |
+| Diff deletion | No default surface                                           | `--octant-deletion-text` (`#e17d96` dark, `#a8102f` light)                                                                    |
 
-Radius is two numbers and a round exception. A control's outline is
-`--oct-radius-sm`; a container's is `--oct-radius-md`; a thing that is
-inherently round stays round. Three control radii had grown from two systems
-that disagreed by 2px, plus pills on some toolbars; one number for a control's
-outline and one for a container make any two neighbours agree. This table is the
-one statement; elsewhere this document names the token, not the number.
+The default warning role is amber: a surface, a border that reads at 3:1 on it,
+and text that clears 4.5:1 on the surface. Mono swaps in the neutral trio: the
+control fill, a border that reads at 3:1 on it, and the primary ink. A warning is
+told apart by its mark and its words in both.
+
+The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
+`purple`, `pink`) are for Project identity, chart marks, and provider or runtime
+status where a categorical distinction is needed. Pair every mark with a label,
+icon, pattern, or border style. The static chart series and dash patterns live
+in `octant.css`. The parts of a context window are categorical data and keep
+their hues in every style ([Thread view: context meter](docs/design/thread-view.md#context-meter)).
+
+The warm charcoal-and-brass `Octant` preset remains an optional theme. Custom
+themes may override only validated semantic roles; incomplete or low-contrast
+imports fall back safely. The theme schema keeps its focus compatibility role for
+imports, but Appearance offers no focus ring colour control, because the focus
+indicator is the neutral edge, never the theme's focus role.
+
+**Editor and terminal.** The code editor and its diff draw from the same
+resolved roles through `packages/theme/src/editorColors.ts`: the workspace
+ground, primary ink, muted line numbers, the selection role, floating widgets,
+and the two border roles of its scrollbar thumb. Under increased contrast it
+takes the same high-contrast ink as the rest of the window. Syntax colours come
+from the editor's own light or dark base, because the palette roles are checked
+only for interface contrast. The terminal draws from
+`packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
+under translucency), primary ink, the selection role, the two border roles of
+its scrollbar thumb, and the palette roles as its ANSI hues, with ANSI black and
+white kept dark and light in either mode and bright black as the muted ink. The
+projection sets a contrast floor the terminal engine enforces per cell against
+the background it is drawn on: 4.5:1 normally and 7:1 under increased contrast,
+half that for dim text; increased contrast also swaps in the high-contrast ink. A
+theme, mode, contrast, or system appearance change repaints open editors and
+terminals in place, a terminal keeping its scrollback, and so does a change in
+the sidebar material (opaque or Glass, including Glass the host resolves after
+the terminal opened) or in reduced transparency, which moves the terminal's
+cells onto or off the Glass plate.
+
+### Spacing
+
+Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px
+(`--oct-space-1` to `--oct-space-6`, `--oct-space-8`, `--oct-space-12`). 1px and
+2px exist only for hairlines and optical nudges (2px inside a segmented
+control). Off-scale pixel spacing in a stylesheet is ratcheted by
+`bun run ui:check` against the recorded baseline; a change may lower a file's
+count but never raise it. Use `gap-*` for stacks and groups; do not reintroduce
+`space-x-*` or `space-y-*` utility chains.
+
+The recipes' spacing utilities (`p-*`, `gap-*`, `m-*`) are pixels, because the
+theme sets Tailwind's spacing step to `--spacing: 4px` in
+`styles/tailwind.css`: at every interface size `px-2` is 8px. A recipe names a
+step that is on the scale (`gap-1`, `px-2`, `p-3`, `gap-4`) and never a half step
+(`px-2.5` is 10px, not 8); a contract test scans every class string for one. A
+width or height that follows the type (a menu's minimum width, a terminal's
+height) is written in rem on purpose. _Rationale._ Leaving the step in rem and
+rewriting every recipe in `--oct-space-*` tokens would have left two spacing
+systems in one file, and a larger interface size would have padded a control
+that already grew with its text, so a control at 16px would read as loose rather
+than larger.
+
+### Radii
+
+Radius is two numbers and a round exception: a control's outline is
+`--oct-radius-sm`, a container's is `--oct-radius-md`, and a thing that is
+inherently round stays round. One number for a control and one for a container
+make any two neighbours agree. This table is the one statement; elsewhere this
+document names the token, not the number.
 
 | Token                | Value  | Role                                                                                                                                                                                                                                                                                         |
 | -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,13 +481,12 @@ one statement; elsewhere this document names the token, not the number.
 | `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                             |
 | `--oct-radius-pill`  | 9999px | Only what is inherently round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round colour swatch, a meter or progress bar, a slider's thumb. Never a control                                                                                     |
 
-A tooltip is the one overlay that stays on the control token when it is a control's
-height: a one-line tooltip (`.octant-tooltip`, `.tooltip > .tip`) and a drag
-preview (`.workspace-drag-preview`) are about 24px tall, so 12px on them would
-draw a pill. They take the control radius because they are a control's height. A
-tooltip card (`.octant-tooltip--card`, `.octant-preview-card`) holds content and
-is a container. A menu, popover, disclosure and filter menu are containers at
-12px, with their rows at the control radius, inset from the popup's corner.
+A one-line tooltip (`.octant-tooltip`, `.tooltip > .tip`) and a drag preview
+(`.workspace-drag-preview`) take the control radius, because they are about 24px
+tall and 12px would draw a pill. A tooltip card (`.octant-tooltip--card`,
+`.octant-preview-card`) holds content and is a container. A menu, popover,
+disclosure and filter menu are containers at 12px, with their rows at the
+control radius, inset from the popup's corner.
 
 A part inside a control takes the control radius less the padding between them,
 never below 2px, so the outline of every control is 4px and the inner part is
@@ -289,29 +494,96 @@ concentric: a segmented switch's thumb inside its track, an item inside a toggle
 group's padded track, a clear button inside a field. A control that sits inside a
 container takes the control radius whatever the container's: the composer's
 attach and send buttons sit 8px inside its 12px corner. An object that rests
-inside a container takes the container's radius less the gap (`--oct-radius-inset`).
+inside a container takes the container's radius less the gap
+(`--oct-radius-inset`). A corner that sits within one radius of a rounded
+parent's corner is concentric with it: the parent's radius less the gap between
+them, or square when the gap is at least the radius, never the same token again,
+because two equal radii one inset apart leave a frame that swells at the corner.
+The rule governs an object inside a rounded container (a card in a card, a tile
+in a round end) and the narrow layout; from 681px up the panes are square and
+have no corner to nest (see [Depth and material](#depth-and-material)).
 
-A corner that sits within one radius of a rounded parent's corner is concentric
-with it: the parent's radius less the gap between them, or square when the gap
-is at least the radius, never the same token again. Two equal radii one inset
-apart leave a frame that swells at the corner. The rule governs an object
-inside a rounded container (a card in a card, a tile in a round end) and the
-narrow layout. It no longer governs the wide window's frame: from 681px up the
-panes are square and reach the window's right and bottom edges, so no pane has a
-corner to nest in the native window's own (see the frame and its panes below).
+Product chrome uses those tokens and nothing else: a `border-radius` is a token,
+`0`, `50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
+bare pixel literal. A rem corner also shrinks with the interface font size,
+which a token does not. The `--oct-radius-*` tokens live in `octant.css`. The
+shadcn recipes derive their scale in `tailwind.css` from `--radius`, which
+`shadcn-theme.css` sets to `--oct-radius-sm`: `rounded-md` and `rounded-lg` both
+land on the control's 4px, `rounded-xl` on the container's 12px, and
+`rounded-sm` on the step for a part inside a control (the control radius less
+2px, never below 2px), so a menu shares a corner with the popover beside it and
+no recipe class needs rewriting. Phone-only surfaces in the web renderer use the
+mobile radii (`--oct-radius-bubble`, `--oct-radius-card-m`,
+`--oct-radius-sheet`). The native phone app follows this table and adds only a
+20px bottom sheet, and it draws its chrome with the system's own patterns (tab
+bar, large titles, inset grouped lists, segmented controls);
+`apps/mobile/design-system/README.md` holds that projection.
 
-The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
-their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
-`--oct-radius-sm`: `rounded-md` and `rounded-lg` both land on the control's 4px,
-`rounded-xl` on the container's 12px, and `rounded-sm` on the step for a part
-inside a control (the control radius less 2px, never below 2px), so a menu shares
-a corner with the popover beside it and no recipe class needs rewriting.
-Phone-only surfaces in the web renderer use the mobile radii
-(`--oct-radius-bubble`, `--oct-radius-card-m`, `--oct-radius-sheet`). The
-native phone app follows this table and adds only a 20px bottom sheet, and it
-draws its chrome with the system's own patterns (tab bar, large titles, inset
-grouped lists, segmented controls); `apps/mobile/design-system/README.md`
-holds that projection.
+### Heights
+
+Controls are 20, 24, 28, or 32px, and rows 32 or 44px. Recipe controls (buttons,
+tabs, toggles, comboboxes, badges) take their height in rem so they grow with the
+interface size, rounded to a whole 2px (`h-[round(2.154rem,2px)]` is 28px at the
+13px root): a quarter-rem step is 3.25px at that root, and an odd step drawn bare
+lands between pixels.
+
+| Height | Token or recipe                                                     | Used by                                                                                                                                    |
+| ------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 20     | button `xs`, `icon-xs`                                              | The smallest button                                                                                                                        |
+| 24     | button `sm`, `icon-sm`; `--oct-tray-segment-h`                      | A row action, a chip, a tab (`OctantTabs`), a segment in a tray, a tile bar's controls                                                     |
+| 28     | button `default`, `icon`; `--oct-rail-button-h`; `--oct-menu-row-h` | A button, a field, a select, a combobox, a tray, a title band control, a panel head's icon button, a Settings control, a one-line menu row |
+| 32     | button `lg`; `--oct-nav-row-h`                                      | A large button, a navigation row, the icon rail's face, a tile bar, a secondary row under it                                               |
+| 44     | `--oct-title-rail-h`, `--oct-nav-head-h`, `--oct-menu-row-two-h`    | The title rail (title band, dock head, bottom panel bar), the account row, a two-line menu or navigation row, a touch target               |
+
+A field, a select and a combobox take the default button's 28, and a tab takes
+the small button's 24, so a row of them shares one height. A segment in a tray is
+24px inside 2px of padding, so every tray is 28px. Other shell heights:
+`--oct-rail-tab-h` 30px and `--oct-statusbar-h` 26px. Touch surfaces keep 44px
+targets. `--oct-control-height` (44px) and `--oct-control-height-sm` (34px) are
+the touch and compact field heights some surfaces still read; a new desktop
+control takes one of the recipe heights above.
+
+### Icons
+
+Lucide is the product icon library. Every interface icon is drawn at one of four
+sizes and at one stroke.
+
+| Size | Token           | Where                                                                     |
+| ---- | --------------- | ------------------------------------------------------------------------- |
+| 12   | `--oct-icon-xs` | Disclosure chevrons and status marks inside a chip                        |
+| 14   | `--oct-icon-sm` | Inside a 24px control and inline in 13px text                             |
+| 16   | `--oct-icon-md` | The default: buttons, menu rows, navigation rows, tool buttons, tile bars |
+| 20   | `--oct-icon-lg` | An empty state and a dialog header                                        |
+
+The stroke is 1.5, set once for the whole app by `IconDefaults`
+(`apps/web/src/ui/IconDefaults.tsx`) around every rendered surface. A call site
+passes a `size` from the table and no `strokeWidth`. The exceptions are drawings
+and not icons: diagram edges, the marks a person draws on a page, a glyph cut
+into a dither mask, and provider marks, which are filled artwork. The stroke is
+in the icon's own 24-unit grid, so it renders 0.75 to 1.25px across the four
+sizes. A tick or dot of 16px or less drawn inside a filled or bordered mark (a
+step marker, a done mark, a mock-up checkbox) takes `MARK_TICK_STROKE_WIDTH`
+(2.5), because 0.75px on an accent fill falls under the 3:1 bar for graphics. A
+check beside text or in a menu row is plain and takes the same 1.5. One lighter
+stroke reads as one drawing hand. `iconScaleContract.test.ts` fails on a size or
+stroke outside this section; avatars and provider marks are sized by their own
+components.
+
+In a Button, pass icons with the shadcn `data-icon` convention and let the
+recipe size them: it takes 12, 14 or 16 from `--oct-icon-xs`, `-sm` and `-md` by
+control height (20, 24, 28px and up), in pixels, because a rem size would follow
+the interface text size and land between the steps. Icons clarify labels and do
+not replace an essential label without an accessible name.
+
+Provider identity uses locally bundled, licensed provider logos selected by
+`ProviderGlyph`. This is the explicit identity-asset exception to the
+originality rule; it does not permit copying another application's interface
+assets or implementation. Keep source and license provenance with each mark.
+Never fetch a logo at runtime, use emoji, or draw an approximate brand mark.
+Unknown or private providers keep a truthful fallback. The same marks appear in
+Settings, model pickers, and thread metadata.
+
+### Depth and material
 
 Depth is one material in five levels. Every surface takes a fill one step
 lighter than what it sits on, a rim that is brighter along its top edge (two
@@ -320,97 +592,382 @@ seats it, so an object is never told from the surface under it by an outline
 alone. Each level has its tokens in `styles.css`; a surface consumes them and
 never writes its own colour.
 
-| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                                |
-| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                          |
-| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow, no corner at any width (a narrow window's sheet holds one square tile) |
-| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs`, `-sm`: top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)                                                  |
-| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks    |
-| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                            |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it             |
+| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                              |
+| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow, no corner at any width (a narrow window's sheet holds one square tile)     |
+| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs` (the card recipe), `-sm` (a Settings group, an empty state): top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`) |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks        |
+| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                                |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it                 |
 
-- **The light an edge catches is the rim** (`--octant-rim`,
-  `--octant-rim-top`, `--octant-rim-low`, `--octant-rim-float`, and the
-  control's `--octant-control-top`, `-low`, `-rim`). Glass lets light out along
-  its lower edge too, so a card and a floating surface carry a fainter
-  line inside the bottom (`--octant-rim-low`; none in light, where it cannot
-  show on a white fill). A pane carries none of it: it is flat, and its edge is
-  the one line it shares with its neighbour. In dark a shadow cannot be seen on a
-  near-black page, so the fill and the rim carry the lift (on an OLED preset
-  the panel is a step toward the ink and the sheen lifts its top) and the
+- **The light an edge catches is the rim** (`--octant-rim`, `--octant-rim-top`,
+  `--octant-rim-low`, `--octant-rim-float`, and the control's
+  `--octant-control-top`, `-low`, `-rim`). A card and a floating surface carry a
+  fainter line inside the bottom (`--octant-rim-low`; none in light, where it
+  cannot show on a white fill). A pane carries none of it: it is flat, and its
+  edge is the one line it shares with its neighbour. In dark a shadow cannot be
+  seen on a near-black page, so the fill and the rim carry the lift (on an OLED
+  preset the panel is a step toward the ink and the sheen lifts its top) and the
   shadow helps only where the surface crosses something lighter; in light the
-  top line is white and the shadows carry it. A narrow window's panel content paints
-  over an inset shadow on its box, so its rim is drawn by a pseudo-element
-  above the content and the box keeps only the seat shadow. A surface that also drew a
-  border or a second ring on the same edge showed two lines, so the rim is in
-  the shadow token and the border is gone.
+  top line is white and the shadows carry it. A narrow window's panel content
+  paints over an inset shadow on its box, so its rim is drawn by a
+  pseudo-element above the content and the box keeps only the seat shadow. The
+  rim is in the shadow token and a surface draws no border or second ring on the
+  same edge, which would show two lines.
 - **A control is a raised tile.** A filled button (default, solid, outline,
   secondary), a chip, the selected row and a switch's thumb take
   `--octant-shadow-control`: a lighter top, a light line along it, a dark line
-  under the bottom edge, a ring, and a short drop; pressing inverts it and
-  sinks it (`--octant-shadow-control-pressed`). The gradient is drawn as an
-  inset shadow (`--octant-control-lift`), so a recipe that sets its own fill
-  still gets it. The primary button is the accent as a gradient with a soft
-  accent glow under it (`--octant-accent-sheen`, `--octant-shadow-primary`).
-  The gradient moves the fill away from the label's colour for any accent: the
-  direction is taken from the published `--octant-primary-foreground`
-  (`--octant-accent-away`), not from the mode, so no stop is less legible than
-  the flat accent;
-  the composer's send is the primary once there is something to send. Ghost,
-  link, bare and the suggestion chip stay flat until pointed at, as do the
-  quiet controls of a row (the line under a composer, the microphone). A
-  toggle that is on (the dock and bottom-panel buttons in the title band, a
-  tile's open menu) is a control pressed in: a filled tile with the sunk
-  shadow, told apart from the pointed-at wash and from the deeper press.
+  under the bottom edge, a ring, and a short drop; pressing inverts it
+  (`--octant-shadow-control-pressed`). The gradient is drawn as an inset shadow
+  (`--octant-control-lift`), so a recipe that sets its own fill still gets it.
+  The primary button is the accent as a gradient with a soft accent glow under
+  it (`--octant-accent-sheen`, `--octant-shadow-primary`). The gradient moves the
+  fill away from the label's colour for any accent: the direction is taken from
+  the published `--octant-primary-foreground` (`--octant-accent-away`), not from
+  the mode, so no stop is less legible than the flat accent. Ghost, link, bare
+  and the suggestion chip stay flat until pointed at, as do the quiet controls
+  of a row (the line under a composer, the microphone). A toggle that is on (the
+  dock and bottom-panel buttons in the title band, a tile's open menu) is a
+  control pressed in: a filled tile with the sunk shadow, told apart from the
+  pointed-at wash and from the deeper press.
 - **A well is cut in**: darker than what it is in, an inner top shadow, and a
   light line under its bottom edge. What is chosen in a well is a raised control
   again (the thumb of the Work and Code switch).
-- **Floating surfaces are frosted.** In dark the fill is the float colour at
-  66% over a blur that also lifts saturation and dims what is behind it to
-  under half (`--octant-float-blur`). The dimming is what lets the fill be
-  that clear: over the app's own dark page the meta ink on a menu reads at
-  4.54:1 (4.04:1 with the old 88% fill), and with a white page behind the whole
-  menu at 2.97:1 (2.83:1 before). In light the fill is 78% and the blur draws
-  what is behind toward a pale grey first (lower contrast, then brighter),
-  since a black page behind a white menu cannot be dimmed away: 5.64:1 over
-  the app's own page (5.50:1 before) and 4.11:1 with a black page behind it
-  (4.31:1 before). The blur is not asked to frost the desktop: a packaged
-  window's native material is not re-blurred by a backdrop filter, so Glass
-  tints the panels instead (below). Reduced transparency and increased
+- **Floating surfaces are frosted.** In dark the fill is the float colour at 66%
+  over a blur that also lifts saturation and dims what is behind it to under
+  half (`--octant-float-blur`), so the meta ink on a menu reads at 4.54:1 over the
+  app's own dark page and the whole menu at 2.97:1 with a white page behind it.
+  In light the fill is 78% and the blur draws what is behind toward a pale grey
+  first, since a black page behind a white menu cannot be dimmed away: 5.64:1
+  over the app's own page and 4.11:1 with a black page behind it. A packaged
+  window's native material is not re-blurred by a backdrop filter, so Glass tints
+  the panels instead (see [Glass](#glass)). Reduced transparency and increased
   contrast take the opaque float. The sheen is a strip along the lit top edge
-  only (8px), above the first line of anything a surface holds, so the meta
-  ink on a menu's top row or a dialog's title band sits on the plain fill.
-- **Edges that do not depend on a shadow.** The rim is a shadow, and forced
-  colours drops every shadow, so a popup, a card (user bubble, approval row,
-  provider question) and a chip take a 1px system-colour border there, and a
-  pressed chip the system highlight. Increased contrast takes the strong border
-  and sets every rim to it, so a flat fill keeps a firmer edge than the soft
-  one it had.
-- **A pane has no seat shadow.** Panes share their edges, so a shadow would
-  fall on the neighbour. A dock tile is square with no
-  seat shadow in a narrow window too: there the dock is a floating sheet
-  (12px corner) holding one tool, and the tile fills it with no gap or corner
-  of its own.
-- **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
-  the raised elevation's white top line drew as a light seam on the dark tooltip
-  in light, so it takes the two shadows alone in both modes.
+  only (8px), above the first line of anything a surface holds, so the meta ink
+  on a menu's top row or a dialog's title band sits on the plain fill.
 - **What sits on a floating surface is based on that surface.** Its control
   fills, its pointed-at row and its hairlines step up from `--octant-float`
   (`--octant-float-control`, `-hover`, `-pressed`, `-line`); the page's own
-  control fills are darker than a lifted menu and showed there as dents.
+  control fills are darker than a lifted menu and show there as dents.
 - **The row a list is showing is a raised control** (`--octant-shadow-selected`,
-  the control's shadow), on the thread list, the sidebar and the Settings
-  rail. The row under the pointer stays a flat
-  wash, so "here" and "pointed at" are two states.
-- **On Window glass** the panes are a tint of the theme colour over the
-  window's native material (the sheet colour at 80%; more opaque for the
-  thread, so text stays on a quiet ground), and a card takes a light rim and a shadow that can be seen on
-  the desktop behind it (`--octant-shadow-raised-glass`); the opaque border is
-  near black and drew a heavy outline there.
-- **Where contrast matters the paint stays flat.** Increased contrast drops the
-  lift and the sheen and keeps the rims; Mono keeps the same material.
-- A shadow or a rim never decorates a flat row: plain lists, empty states
-  and headers stay on the page.
+  the control's shadow), on the thread list, the sidebar and the Settings rail.
+  The row under the pointer stays a flat wash, so "here" and "pointed at" are two
+  states.
+- **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
+  the raised elevation's white top line draws as a light seam on it in light, so
+  it takes the two shadows alone in both modes.
+- **Edges that do not depend on a shadow.** Forced colours drops every shadow, so
+  a popup, a card (user bubble, approval row, provider question) and a chip take
+  a 1px system-colour border there, and a pressed chip the system highlight.
+  Increased contrast takes the strong border and sets every rim to it, drops the
+  lift and the sheen, and keeps the rims; Mono keeps the same material.
+- **A shadow explains depth, never decoration.** Shadow tokens are
+  `--octant-shadow-hairline`, `-xs`, `-sm`, `-md`, `-lg`, `-overlay`, `-pop`,
+  `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`, and
+  `-raised-glass`. Use the smallest level that establishes a genuine layer:
+  navigation panes, plain lists, empty states in a page, headers, and open form
+  layouts stay unshadowed; the card recipe uses `-xs`; a Settings group and the
+  `OctantEmpty` box `-sm`; a filled button `-control`; welcome and follow-up
+  composers `-md` over a hairline ring; focused or promoted raised objects may use
+  `-lg`; overlays use only their overlay or pop token.
+
+A card is for a discrete object a person acts on as a whole: a count tile, a live
+running-thread card, an action tile, a board card, a provider, a Settings group of
+rows. Plain lists, empty states, and headers are never cards. Navigation panes
+stay compact hairline rails. Popovers, menus, dialogs, and hover cards use the
+floating surface and the overlay shadow, and have exactly one 1px hairline edge:
+the overlay shadow carries it for menus and popovers, and the shared dialog draws
+it as a border. A feature stylesheet sizes and places a popup and never sets its
+fill, border, or shadow.
+
+**The window frame and its panes.** The window is a frame and a grid of panes.
+The title band and the sidebar are the frame (level 0): the window surface,
+painted once, with the sidebar's rows sitting on it and no panel behind them. The
+thread stage, each tool tile in the dock, the bottom panel and the dock's overview
+are square panes (level 1) under the title band that touch each other and the
+window's right and bottom edges: no gap, no corner, no shadow. Between two
+neighbours there is one 1px line (`--octant-pane-line`: a tenth of the ink, so it
+shows on a near-black preset and on a glass tint as it does on the stock page;
+the strong border under increased contrast, and a system-colour border in forced
+colours), and one under the title band along the panes' top. Each pane draws only
+its own top and left edge, so a shared edge is never drawn twice. The window's
+own outer corners are the native window's; no pane rounds a corner. A tile is
+told apart by its name, not by a ring that would double a divider. Pane headers
+and the tool row stay in the title band; a pane header shares the title rail
+(`--oct-title-rail-h`) with the tool row, and the dock's own header is an empty
+spacer under the band, so the first tile's top line is the only line there. A
+native Browser page inside a tile is placed by the tile's measured rectangle and
+is square; the corner of the page inside the tile belongs to the web renderer
+only. A dock tile is square with no seat shadow in a narrow window too: there the
+dock is a floating sheet (12px corner) holding one tool, and the tile fills it
+with no gap or corner of its own. Behind every page the application ground lies
+on the thread's pane, under the content, square like the pane. At 680px and
+below the workspace sidebar is an overlay drawer and the frame stays flat, with
+no panels, and a scrim (`--octant-scrim`) dims the page behind it. The drawer
+starts closed on every load, closes on Escape, on a tap outside it, and on
+choosing somewhere to go, and never changes the saved wide-window choice.
+Settings keeps its own narrow layout, a drawer with a flat page, at 960px and
+below (see [Breakpoints](#breakpoints)). _Rationale._ Panes in a grid that is
+dragged, aligned and resized share edges, and a corner and a gap on each one made
+the grid read as loose cards.
+
+**Dividers.** A divider handle (the sidebar's, the dock's, the bottom panel's, a
+pane split's, a tile's) is a hairline in the border at rest, the strong border
+under the pointer, and the meta ink at double width while it is grabbed; keyboard
+focus draws the shared focus edge, on the visible handle when the focusable
+element is an invisible input (a pane split). None of it is the accent. The hit
+area is 8px wide and centred on the line, for the edge between the thread and the
+dock, between two tiles, and above the bottom panel.
+
+### Glass
+
+Frosted material (a `backdrop-filter` blur) is used only where a surface has a
+ground behind it to read through:
+
+- the window's optional glass, which is the tint over the native window material
+  behind the whole window;
+- a thread's user bubbles and composer over the application ground or window
+  glass, one material either way (agent replies stay bare prose);
+- Code Home's cards and its Up next and Continue cards, which stand on the start
+  screen's ground beside the composer and wear its material, so the ground reads
+  evenly behind every surface on the screen;
+- Zen's windows, dock, bars, and sheets (glass cards);
+- the floating Computer Use activity picture-in-picture (the Browser's live
+  preview is a card in the dock, drawn as the dock's other cards are, with no
+  frosted parts);
+- the phone's glass surfaces.
+
+Glass is a different material, not a second palette. Do not copy mobile
+atmosphere or phone radii into a flat desktop pane, and do not bring a blur onto
+a pane that has no ground under it. Its tint, stroke, and highlight are theme
+roles, and its floor is the theme's page colour at 66%, so a neutral or tinted
+preset gets no fixed warm cast under the composer. The thick and chrome tints
+poured over that floor are the theme's raised surface at 56% and 48%. Together
+the floor and tint are dense enough that the ground stays quiet behind text
+where the engine does not blur it (the packaged window over the ground).
+Reduced transparency and unsupported `backdrop-filter` resolve every one of
+them to an opaque surface.
+
+**Window glass** is the `sidebarMaterial` shell setting with the theme's
+vibrancy level, shown as the Window section's Glass control (Off, Subtle,
+Strong) and its Tint slider. It takes effect only when the host resolved the
+material translucent, so every accessibility, performance, and host-support gate
+applies; then the frame (the sidebar colour) and the panels (the workspace
+colour) are each at the Tint's opacity over the native material, and reduced
+transparency or an unsupported host leaves them opaque. A browser is such a
+host: with no native material behind the page, a browser window always paints
+the theme's opaque surfaces. The `workspaceMaterial` setting is still read and
+stored but changes nothing: the whole window is glass or none of it is. With
+Glass on, the ground and the panes are the Tint over the window's native
+material: every pane (the thread, a tile, the bottom panel, the dock's overview)
+is the same one fill (`--octant-pane-fill`), a lighter tint than the ground, so
+text reads on a saturated desktop. Reader pages inside the stage are clear.
+
+Under Glass nothing inside the shell paints the theme's opaque page, workspace,
+or card colour over a panel; every layer takes one of the shell's surfaces
+(`--octant-window-surface` for the frame and `--octant-panel-surface` for every
+panel, the thread's included), defined once on every shell in `shell.css`:
+
+- **Settings** wears the same frame and panels: the navigation and gutters are
+  the frame, the page is a panel, and a section card is the card step below.
+- **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
+  Automations, Artifacts, Image generator) are clear over the panel, and their
+  cards drawn with the raised step (`--oct-surface`) take the card step (see
+  [Workspace: Inbox page](docs/design/workspace.md#inbox-page)).
+- **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over the
+  panel: the primary text at 4%. On Window glass a card takes a light rim and a
+  shadow that can be seen on the desktop behind it
+  (`--octant-shadow-raised-glass`); the opaque border is near black and drew a
+  heavy outline there.
+- **An outline button** rests on that card step instead of the page colour
+  (`--octant-outline-rest`); its hover and pressed fills stay the control fills.
+- **Quick tools** for a Code start screen are clear in the body of the dock.
+- **The Browser** is clear on its own start page, whose rows take the card step;
+  a loaded page keeps its opaque canvas.
+- **The control fill** (a secondary button, a segmented track, a select, a chip,
+  a ghost button's hover) is the primary text at 7%, 11% hovered and 15% pressed,
+  the step the theme's control sits above its own page. What is chosen (the mode
+  in the switch, a selected row) is the primary text at 12%. A switch's track at
+  rest is the pressed control tint and its thumb, off, the primary text at 62%. A
+  toned notice's ground is its tone at 14%, and a plain notice takes the control
+  tint. A filled button and a switch that is on keep their own fills.
+- **The composer and the person's messages** are a 30% veil of the page colour
+  under the primary text at 6% (4% for chrome), with the glass hairline: over
+  the desktop the dense floor and tint read as a near-black slab. The thread's
+  container stays clear.
+- **Loading.** The shell's own loading state (Opening Settings) is clear on the
+  shell's surface. The window's own loading state, before any shell exists, is
+  clear on the document's ground (the page colour in a browser, the app ground in
+  a native window, the desktop through the glass once the host's glass is on),
+  and the first frame is drawn in the mode the last window used, remembered in
+  the renderer's storage, so a light theme never opens on the dark default. A
+  native window is shown only when its first frame is ready; a glass window is
+  created clear, and an opaque one keeps the window's own dark fill until the
+  renderer paints.
+
+Menus, popovers and dialogs sit outside the shell and keep the opaque floating
+surface. Increased contrast and reduced transparency return cards, outline
+buttons, and every fill above to the theme's own colours. The application ground
+behind it all steps down by what is on screen; its veil is in
+[Application ground](docs/design/application-ground.md).
+
+### Motion
+
+Functional feedback uses 150ms (`--oct-motion-fast`) and geometry 200ms
+(`--oct-motion-base`); an overlay leaves in 100ms (`--oct-dur-fast`). Ordinary
+transitions use `--oct-ease-standard`; overlays arrive on `--oct-ease-motion` and
+leave on `--oct-ease-color`. The spin (`--oct-motion-spin`, 900ms), pulse
+(`--oct-motion-pulse`, 1.6s), and flowing (`--oct-motion-flowing`, 36s) cycles
+are tokens too. One value with one meaning has one token: a duration, a weight
+or a space is never defined twice under two names. There is no decorative
+entrance animation and no ambient motion behind the work by default; an animated
+built-in picture, the Pulsing characters, Dithered pixels, and Flowing grounds,
+and a printed picture set to Wave are the moving grounds a person may choose, and
+reduced motion holds each on a still frame. Running state has a textual or shape
+distinction in addition to motion. `prefers-reduced-motion` and the persisted
+reduced-motion setting disable transitions and animations without removing state
+information.
+
+**Overlays** arrive and leave one way, declared once (`components.css`, Overlay
+motion): a menu, a context menu, a select or combobox list, a popover, a tooltip,
+a hover card, a dialog, Settings' sheet, and the scrim under a dialog or a sheet.
+Each fades in over 150ms and out over 100ms: nobody waits for a thing to leave. A
+popup settles from 98% at the point it is anchored to and a dialog from 98% about
+its centre; the sheet rises 8px instead, since a surface that size reads a scale
+as a zoom. Only opacity, scale and translate change, on the overlay alone, so
+nothing behind it is laid out again, and no overlay rests on a scale of its own.
+A tooltip or hover card the library closes at once, on a press of its trigger, does
+not fade over what the press opened. Under reduced motion, from the system or from
+the setting, there is no transition at all: an overlay is there or it is not. A
+recipe carries no arrival or departure classes of its own. A dialog that a
+feature renders only while it is open arrives the same way (`@starting-style`)
+and leaves through `OctantDialogPresence` (see [Dialog presence and the title bar](#dialog-presence-and-the-title-bar)).
+
+**Press and selection.** A press darkens a control's fill and moves nothing: no
+sink, no scale, on any control. Words in the chrome do not select when the pointer
+drags across them, controls keep the arrow cursor, a disabled control keeps it
+too, and the hand is for a real link. A disabled control is drawn at one shared
+opacity, `--oct-disabled-opacity` (0.75), so its label stays at 3:1 or more in
+both modes while it still reads as unavailable: no hover fill, no pointer events.
+A select's chevron is not dimmed while the select is enabled. Pictures and links
+do not lift off as drag ghosts. Reading matter opts back in, so a message, a
+diff, a value, and an error can still be copied.
+
+### Focus
+
+Keyboard focus draws one indicator, declared once in `octant.css`: a 2px inset
+outline (`outline-offset: -2px`) in `--oct-focus-edge`, the foreground at 62%, so
+it holds about 4.5:1 or better against the control's fill and the surface around
+it in both schemes, and it follows the control's own radius. It is
+`:focus-visible` only, and it shows only while a person is moving focus by
+keyboard (`data-octant-input`): a pointer press paints nothing, and a dialog
+handing focus back to its trigger paints no ring after a pointer press. In
+pointer modality a focused field shows its caret and a brighter border
+(`--octant-border-strong`). The indicator is never the hover fill, so focus and
+pointer read as different states. A control filled with the accent (the default
+button, a checked switch, a checked checkbox) inverts it to
+`--oct-focus-edge-on-accent`; an SVG mark or inline text link moves it just
+outside itself. A container that only holds the keyboard (menu, dialog, listbox,
+preview card) shows no edge; the item inside it does, and menu items keep their
+highlighted fill. A text field set inside a frame that is itself the field (the
+composer, an inline search) shows its caret inside that frame; the composer frame
+draws no focus edge. Recipes paint no focus ring, halo or second outline. Feature
+CSS never suppresses, recolours, or adds a second ring, and the
+`--octant-focus-ring` theme role is never painted as the indicator.
+
+### Accessibility
+
+- Normal text targets 4.5:1 contrast; large text 3:1; non-text marks 3:1.
+- Status, diff, provider, and activity states always include text, shape,
+  pattern, or an accessible label in addition to colour.
+- Pointer targets are at least 24px on desktop and 44px on touch.
+- Keyboard users can reach every primary action, open and dismiss every overlay,
+  navigate menus and selects, and recover focus after closing a popover or
+  dialog.
+- A control that opens a panel moves focus into it, and a control that is
+  replaced by what it did hands focus to the next logical control instead of
+  letting it fall to the page: a Tools tile focuses the tool it opened, applying
+  a working folder returns to its Working folder row (to the failure, when the
+  re-read fails) and cancelling returns to Change working folder, and Check and
+  add focuses the result's heading as every other Add endpoint step does.
+- A menu opened from the keyboard starts on its current choice, not its first
+  item; ArrowUp still opens on the last item. A group of radios is one set of
+  choices: the arrow keys move to the neighbour and select it, wrap past either
+  end, and Home and End jump to the ends (`moveWithinRadioGroup` in
+  `ui/base/radioGroupKeys.ts`). A resize separator takes Home for its minimum and
+  End for its maximum as well as the arrows.
+- Tab order follows reading order from the left: the navigation sidebar comes
+  before the window chrome, so the first Tab stop on load is never the controls
+  at the right edge. A live region that holds text and a button keeps a space
+  between them, so assistive technology does not read the two as one word.
+- A surface that takes Tab and Escape for its own use is never a keyboard trap;
+  it offers one documented way out (the terminal's is in
+  [Workspace: Terminal keyboard exit](docs/design/workspace.md#terminal-keyboard-exit)).
+- Every app-owned form declares `noValidate`; Octant owns validation copy, field
+  association, focus, and recovery instead of browser-specific bubbles.
+- Loading, unavailable, stale, denied, empty, and error states keep stable
+  geometry and explain the next action. Never turn a refused server command into
+  a silent no-op.
+- Increased contrast is one state with two triggers: the Appearance setting or
+  the system's `prefers-contrast: more`. `ThemeSettingsProvider` publishes either
+  as `data-octant-increased-contrast="true"` on the root, and every high-contrast
+  rule keys off that attribute rather than the media query, so both triggers draw
+  the same rules: the text roles take their `--octant-text-*-high-contrast`
+  values and hairlines step up to `--octant-border-strong`. Script that adapts to
+  contrast reads `useIncreasedContrast()`, not the media query.
+- Theme, typography, density, translucency, contrast, and reduced-motion settings
+  are persisted through the server-authoritative journal and applied through the
+  providers. Renderer state is presentation only.
+- Every product-owned scroll surface inherits one scrollbar, declared once in
+  `styles.css`: a thin thumb in a theme token and no painted track, in a pane, a
+  menu, a popup and a sheet alike, with a forced-colors fallback. Where the system
+  floats scrollbars over content the thumb floats; where it keeps a strip for
+  them the strip is clear. The two standard properties are the rule; the
+  `::-webkit-scrollbar` parts beside them speak only for an engine that does not
+  know the properties. Feature CSS may reserve the strip (`scrollbar-gutter`) so a
+  page does not shift when it starts to scroll, and hides a scrollbar only on the
+  named strips of tabs and icons that scroll sideways; it never sets a scrollbar
+  colour or another width. The code editor and the terminal draw their own; see
+  [Workspace: Code editor and terminal scrollbars](docs/design/workspace.md#code-editor-and-terminal-scrollbars).
+
+### Layers
+
+Layers are tokens. Page chrome stays at or below `--oct-z-overlay` (40); sticky
+parts of a page use `--oct-z-sticky` (20). Dialogs and sheets with their
+backdrops stand at `--oct-z-floating` (50), a notice at `--oct-z-toast` (55), and
+everything a person opens to aim at (menus, context menus, popovers, selects,
+comboboxes, tooltips, hover cards) at `--oct-z-popup` (60). A notice sits above a
+dialog or sheet because under its backdrop it could be neither read nor
+dismissed, and under a popup because a notice once covered an open menu and took
+the clicks meant for its items. A menu or popover opened inside a dialog or the
+narrow dock sheet appears above it, and Escape closes the innermost surface
+first. A new surface takes one of these tokens, never a number of its own, and
+nothing in the workspace goes above z-index 7.
+
+### Breakpoints
+
+The shell has two breakpoints, both `max-width` queries, so each names the widest
+viewport its behavior applies to:
+
+| At or below | Source                                                     | What changes                                                                                                                                                                                                                                     |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 960px       | `useNarrowViewport` (`useShellPresentation.ts`), shell.css | The right dock opens as one narrow modal sheet over the page (a titled dialog, no resize handle, Escape closes it and returns focus) instead of a column; the bottom panel is unavailable; the sidebar stops resizing; Settings uses its drawer. |
+| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop the Project step of their breadcrumb.                                                                                                         |
+
+Inside a surface, layouts reflow at component breakpoints rather than shell ones:
+`--oct-bp-lg` 920px (two-to-four column grids and the Project overview gutter),
+`--oct-bp-md` 720px (Settings fact lists and gutters, issue rows), and
+`--oct-bp-sm` 560px (start-screen tiles and cards to one column, compact Settings
+title bars, 44px Project rows and always-visible thread row actions). Other widths
+in feature stylesheets are local to that surface. The mobile app has a separate
+design system under `apps/mobile/design-system`.
+
+## Components and patterns
+
+The sections below hold the shared component and pattern rules as they stood before the foundations above; they are rewritten next.
+
+### Cards, buttons, and fields
 
 (Every card and popup drew the theme's one floating colour, a hair off the
 page, inside a hairline. On an OLED preset a menu was a black box outlined on
@@ -433,44 +990,6 @@ stylesheet lays a field out (width, height, type size) and never repaints it,
 so the three react alike in light and dark. A search or name field a feature
 draws for itself still takes its edge from the same role (`--input`, the strong
 border), not from the hairline or a control fill.
-
-The window is a frame and a grid of panes. The title band and the sidebar are
-the frame (level 0): the window surface, painted once, with the sidebar's rows
-sitting on it and no panel behind them. The thread stage, each tool tile in
-the dock, the bottom panel and the dock's overview are square panes (level 1)
-under the title band that touch each other and the window's right and bottom
-edges: no gap, no corner, no shadow. Between two neighbours there is one 1px
-line (`--octant-pane-line`: a tenth of the ink, so it shows on a near-black
-preset and on a glass tint as it does on the stock page; the strong border
-under increased contrast, and a system-colour border in forced colours), and one under the title band along the panes' top. Each pane draws
-only its own top and left edge, so a shared edge is never drawn twice. The
-divider's hit area is 8px wide and centred on that line, for the edge between
-the thread and the dock, between two tiles, and above the bottom panel; the
-line is the strong border under the pointer and the meta ink while it is grabbed, never the accent. A tile is told apart by its name,
-not by a ring that would double a divider. The window's own outer corners are
-the native window's; no pane rounds a corner. Rationale: panes in a grid that
-is dragged, aligned and resized share edges, and a corner and a gap on each
-one made the grid read as loose cards. (The window was once one sheet divided
-by hairlines; before that, cards on a back of the sidebar's material, and most
-recently separate rounded panels on the ground.) Pane headers and the tool row
-stay in the title band. With Glass on, the ground and the panes are the Tint
-over the window's native material: the panes are a lighter tint than the
-ground; every pane (the thread, a tile, the bottom panel, the dock's
-overview) is the same one fill (`--octant-pane-fill`), over a ground that is
-itself a tint, so text reads on a saturated desktop. Reader pages inside the
-stage are clear. Behind every page the application ground lies on the
-thread's pane, under the content, square like the pane. A pane header
-shares the title rail (`--oct-title-rail-h`) with the tool row; the dock's own
-header is an empty spacer under the band, so the first tile's top line is the
-only line there. A native
-Browser page inside a tile is placed by the tile's measured rectangle and is
-square; the corner of the page inside the tile belongs to the web renderer
-only. At 680px and below the workspace sidebar is an overlay drawer and the
-frame stays flat, with no panels, and a scrim (`--octant-scrim`) dims the
-page behind it. The drawer
-starts closed on every load, closes on Escape, on a tap outside it, and on
-choosing somewhere to go, and never changes the saved wide-window choice.
-Settings keeps its own narrow layout, a drawer with a flat page, at 960px and below (see [breakpoints](#breakpoints)).
 
 ### Page shell
 
@@ -771,7 +1290,7 @@ exists.
 **Composer popups.** Every popup the composer opens (Project, base branch,
 checkout, Create from…, access, model) uses one recipe. The face is the
 popover fill with the overlay shadow and a 12px corner, a 6px inset, and it
-arrives and leaves with the shared [overlay motion](#motion-and-interaction).
+arrives and leaves with the shared [overlay motion](#motion).
 A search field is `.octant-popover-search`: a filled
 32px field with a leading 14px icon and no border; it takes focus as the popup
 opens, so it brightens rather than drawing the keyboard edge. Rows are
@@ -786,366 +1305,8 @@ capped to the room on the side it opens on; only its list scrolls, and the
 ways to add something (New Project from folder…, from GitHub) stay pinned
 under the list.
 
-## Source of truth and CSS layers
+### Menu rows, shell frame, and alignment
 
-There is one runtime theme authority and one owned control layer:
-
-| Layer                 | Responsibility                                                                                                    | Files                                                                                                                       |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Semantic theme        | Persisted theme settings, presets, contrast validation, typography, safe fallback, export/import                  | `packages/theme/src/`, `packages/contracts/src/theme.ts`                                                                    |
-| Renderer fallback     | Startup values before the theme bootstrap is applied                                                              | `apps/web/src/styles.css` (`--octant-*`)                                                                                    |
-| Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                                                                            |
-| Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                                                                     |
-| shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css`                                                  |
-| Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                                                                          |
-| Native projection     | Maps the same semantic defaults into React Native colors; mobile-only material and touch geometry stay local      | `apps/mobile/design-system/`                                                                                                |
-| Public projection     | Emits the semantic defaults for public documentation and the marketing-site stack                                 | [octant-site guide projection](https://github.com/Ogard-Labs/octant-site/blob/main/docs/.vitepress/theme/semanticTokens.ts) |
-
-The import order in `apps/web/src/styles.css` is load-bearing:
-
-1. Tailwind v4 and its layered preflight.
-2. `octant.css` static system.
-3. `octant-bridge.css` runtime mapping.
-4. `shadcn-theme.css` semantic projection.
-5. Feature stylesheets, which may position a surface but must not repaint a
-   shared control.
-
-`--octant-*` roles own persistence and theme editing. `--oct-*` and shadcn
-variables are consumption aliases. Do not add a new raw colour, radius, shadow,
-or control recipe in a feature stylesheet.
-
-The portable projection of these layers, for a website or another app, is
-generated, not hand-kept: `bun run tokens:export` writes
-`packages/theme/tokens/tokens.css` and `tokens.json` from the stylesheets above,
-and `bun run tokens:check` fails when they are stale. How to load and use them,
-and the app-feel rules a consumer follows, are in
-[Design tokens and the app feel](docs/design/design-tokens.md).
-
-`bun run ui:check` enforces this on every `.css` file under `apps/web/src`
-(`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
-block that must depict one fixed scheme regardless of theme, such as the
-light/dark preview swatches in Settings, carries
-`/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
-`font-size` values, raw `transition`/`animation` durations, and `!important`
-outside an accessibility fallback, any `font-weight` heavier than 600 outside
-the title roles (see [Scale](#scale)), and any paint
-(colour, background, border, radius, shadow, outline) that a feature rule puts
-on a class handed to an Octant primitive (place or size a shared control,
-never repaint it; pick a recipe variant instead) ratchet against
-`scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
-re-record the lower count with `--write-baseline` so the baseline never
-overstates.
-
-The remaining control repaints are burned down by restoring each control to its
-recipe, in small batches. Each batch is its own pull request with before and
-after screenshots, and the maintainer approves the paint change before it
-merges, because removing a repaint changes what the control looks like.
-
-The `control-repaint` rule reads the classes feature code hands to an Octant
-primitive. A control marked `unstyled` is feature-owned paint by design and is
-skipped; `unstyled={false}` is not, and stays under the rule. The checker also
-skips `composer-input`, the system prompt, because that surface is
-already painted twice; the rule still holds for it — feature CSS must not
-repaint it a third time — it is simply not machine-checked.
-
-The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
-Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
-denser controls, except that recipes paint no focus ring, halo or second outline
-(the global `:focus-visible` rule is the only keyboard focus treatment, so a
-combobox's frame draws none of its own) and the badge and
-the card keep the shape and elevation set in this document. A recipe's heading
-(a card's or popover's title) takes the recipe's own type role: the page's bare
-`h1` to `h4` defaults sit in the base layer, below every utility, so they size
-reading content and never a component. This
-keeps the interaction backend accessible and editable while preserving the
-shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
-`ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
-menus use the shared `OctantContextMenu` adapter; do not add a new direct
-primitive import.
-
-Desktop context menus and ordinary dropdown menus (including More, the account
-menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
-The OS owns their font, material, spacing, highlighting, submenu behavior,
-accessibility, and light/dark appearance; renderer theme tokens do not repaint
-native menus. The account menu opens above its footer control and More beside
-its sidebar row. Activity › Custom range opens a date-range dialog.
-The existing action composition supplies labels, grouping,
-disabled and checked states, and nested actions. Native menus dismiss after
-a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
-receive the platform editing/copy menu. The Code editor and both diff sides
-use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
-Base UI menus. Native menus use macOS accessibility. Verify their actual presentation and
-selection through native accessibility in an isolated desktop fixture; renderer
-keyboard and role checks cover the browser fallback. Searchable pickers and popovers with embedded controls remain
-renderer surfaces.
-
-### Transcript
-
-Under window Glass the page is the desktop seen through the window, so nothing
-inside the shell is filled with one of the theme's opaque colours: the control
-fill (a secondary button, a segmented control, a select, a chip, a ghost
-button's hover) is the primary text at 7%, 11% hovered and 15% pressed, the
-step the theme's control sits above its own page, and the composer and the
-person's messages are a 30% veil of the page colour under the primary text at
-6%, with the glass hairline. What is chosen (the mode in the switch, a
-selected row) is the primary text at 12%; a switch's track at rest is the
-pressed control tint and its thumb, off, the primary text at 62%, so it is
-never the page's black on a dark track; a toned notice's ground is its tone at
-14%, and a plain notice takes the control tint. The shell's own loading state
-(Opening Settings) is clear on the shell's surface, where the opaque page
-colour turned the whole window black for the moment Settings took to load. The
-window's own loading state, before any shell exists, is clear on the document's
-ground (the page colour in a browser, the app ground in a native window, the
-desktop through the glass once the host's glass is on), and the first frame is
-drawn in the mode the last window used, remembered in the renderer's storage,
-so a light theme never opens on the dark default. A native window is shown
-only when its first frame is ready; a glass window is created clear, and an
-opaque one keeps the window's own dark fill until the renderer paints. On an OLED
-preset over a bright desktop the opaque fills stood as near-black blocks on
-mid-grey glass: every Settings button, each message and the composer. Menus,
-popovers and dialogs sit outside the shell and stay opaque, and reduced
-transparency keeps the theme's own fills.
-
-## Colour system
-
-The default runtime palette is neutral graphite. The following values are the
-`System` defaults in `packages/theme/src/tokens.ts` and the matching renderer
-fallback; `Dark` and `Light` are the same values pinned to one mode.
-
-### Semantic roles
-
-| Role                   | CSS variable                                        | Dark      | Light     | Use                                                        |
-| ---------------------- | --------------------------------------------------- | --------- | --------- | ---------------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9` | Page ground: welcome, lists, Settings                      |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9` | Title bars and shell chrome                                |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground                     |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                        |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                                   |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles                  |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons                      |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e2e2e1` | Hover and highlighted rows                                 |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                        |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                             |
-| Strong divider         | `--octant-divider-strong`                           | `#8a8a8a` | `#6f6f6d` | An off switch's edge, an unchecked checkbox, rare dividers |
-| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                                      |
-| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                            |
-| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill         |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                                       |
-| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96` | Theme compatibility and accent tints                       |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea` | Selected rows and active controls                          |
-| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414` | One primary action or active mark                          |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                                        |
-| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414` | Accent used as text; normal-text contrast                  |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000` | Opaque by contract; the bridge mixes it to a wash          |
-
-The ladder is deliberate: in dark the page is near-black, the sidebar a step
-darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
-reading surface is white; a hairline, not a grey fill, separates the sidebar
-from the workspace. Every hairline registers on the surface it separates
-(about 1.3:1 in both modes); inputs and outline buttons use the strong border
-so an edge is never guessed. An off switch and an unchecked checkbox are the
-exception: they must be found at a glance on a card, so they take the strong
-divider (4.4:1 on a card and 4.9:1 on the page in light; the strong border
-measured 1.65:1 and 1.85:1 there). In dark the role is lifted so the edge
-stays at 3:1 or more on the lifted card the Settings sheet draws (`#3d3d3d`,
-3.15:1; it was 2.76:1) and 5.3:1 on the page; every dark preset keeps the same
-floor. The same role draws a scrollbar thumb on hover and rare dividers, which
-become one step lighter in dark.
-The renderer fallback in
-`apps/web/src/styles.css` mirrors these values exactly.
-
-The code editor and its diff draw from the same resolved roles through the
-editor projection in `packages/theme/src/editorColors.ts`: the workspace
-ground, primary ink, muted line numbers, the selection role, floating
-widgets, and the two border roles of its scrollbar thumb. Under increased contrast it takes the same high-contrast ink as the
-rest of the window. Syntax colours come from the editor's own light or dark
-base, because the palette roles are checked only for interface contrast. A
-theme, mode, contrast, or system appearance change repaints open editors in
-place.
-
-The terminal draws from the terminal projection in
-`packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
-under translucency), primary ink, the selection role, the two border roles of
-its scrollbar thumb, and the palette roles as its ANSI hues, with ANSI black and white kept dark and light in either
-mode and bright black as the muted ink. Because the palette roles are only
-checked as interface marks, the projection also sets a contrast floor the
-terminal engine enforces per cell against the background it is drawn on:
-4.5:1 normally and 7:1 under increased contrast, half that for dim text.
-Increased contrast also swaps in the same high-contrast ink as the rest of the
-window. A theme, mode, contrast, or system appearance change repaints an open
-terminal in place, keeping its scrollback, and so does a change in the sidebar
-material (opaque or Glass, including Glass the host resolves after the terminal
-opened) or in reduced transparency, which moves the cells onto or off the Glass
-plate.
-
-Status roles are paired to the surface where they render. Use the text role
-for labels and the surface role for a background; never rely on hue alone:
-
-Routine Waiting, idle, and unselected states use neutral text and marks.
-Pending approval requests use a neutral surface and muted icon, without a
-warning stripe. Warning colour is reserved for an actionable warning, not
-every thread that can be resumed. A state, empty, or error message draws its mark in neutral ink, whatever went
-wrong: its glyph and title carry the meaning, and the message recipe offers no
-coloured tone. Success, failure, diffs, provider marks,
-and categorical data may retain semantic colour alongside a label or shape.
-
-| Meaning       | Surface                                                      | Text/border                                                                                 |
-| ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f5f5f7` dark, `#141414` light); border `--octant-warning-border` |
-| Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
-| Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
-| Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
-
-The default preset's warning role is amber (surface, a border that reads at 3:1
-on it, and text that clears 4.5:1 on the surface). The Mono style swaps in the
-neutral trio: the control fill, a border that reads at 3:1 on it, and the
-primary ink. A warning is told apart by its mark and its words in both.
-
-The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
-`purple`, `pink`) are for Project View identity, chart marks, and provider or
-runtime status where a categorical distinction is needed. Pair every mark with
-a label, icon, pattern, or border style. The static chart series and dash
-patterns live in `octant.css`.
-
-The original warm charcoal-and-brass `Octant` preset remains an optional
-theme. It is not the default neutral system. Custom themes may override only
-validated semantic roles; incomplete or low-contrast imports fall back safely.
-
-## Data visualisation
-
-Charts, metric blocks, tables, and timelines are one visual system: hue lives on
-the mark and never on the chrome, every mark pairs its hue with a second
-channel, one formatter reads every number, and a block that cannot be drawn
-falls back to its plain reading and disclosed table. The marks, scales, block
-kinds (treemap, heatmap, bar list, comparison matrix, math, metric tiles, KPI
-dashboards, tabs and columns, diagram marks, the Gantt view, tables, funnel,
-radar, sankey), and their states are specified in
-[Canvas visuals](docs/design/canvas-visuals.md).
-
-## Typography
-
-Typography has distinct jobs:
-
-| Job        | Default                                                                                             | Usage                                                                              |
-| ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`                              | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
-| Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
-| Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
-| Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
-
-The default interface is the platform face at 13px and weight 400; transcript
-text defaults to 13px. Geist and Geist Mono are bundled
-(`@fontsource-variable/geist` and `geist-mono`): Geist Mono sets code by
-default and Geist is an Appearance choice. The stylesheet's own first-paint
-defaults are the same faces as the settings defaults, so nothing swaps when
-settings load. The editor defaults to 13px, line height
-1.5, and enabled ligatures. The terminal defaults to 12px, line height 1.4,
-and disabled ligatures.
-
-A saved stack that only ever meant "the default" reads as today's default
-(`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
-interface stack beginning `-apple-system, BlinkMacSystemFont`, the bundled-Geist
-default stack that began `'Geist Variable', -apple-system`, and the JetBrains
-code and terminal stacks. The old Geist entry's unbundled
-`Geist, system-ui, sans-serif` was an explicit pick, so it reads as bundled
-Geist.
-The Geist entry now saves `'Geist Variable', system-ui, sans-serif`, so a Geist
-pick made from here on stays distinct; a Geist pick saved under the old
-default's identical string cannot be told apart and moves to the platform face.
-System interface saves the default's own stack.
-
-The persisted typography schema supports independent UI, editor, and terminal
-family, size, weight, line height, and ligatures. Families are sanitized: no
-URLs, imports, remote assets, executable payloads, or control characters. Missing
-fonts fall back to the safe stack. UI/editor/terminal sizes are bounded to
-8–32px; weights to 300–700; line height to 1–2.5.
-
-Appearance controls update the renderer optimistically and queue their
-server-authoritative save immediately. There is no separate Apply step. A
-slower earlier response never replaces a newer visible choice.
-
-The runtime UI projection is absolute for ordinary application chrome. The
-bridge maps `--oct-font-display`, `--oct-font-body`, and
-`--oct-font-transcript` to the selected UI family. There are no compatibility
-aliases such as `--oct-font-ui` or `--oct-font-sans`, and feature styles must
-not declare a raw interface stack. A repository contract test scans shell,
-Settings, dock, navigation, pane tabs, and board selectors for violations.
-Monospace is limited to editor/terminal content and literal code, paths,
-branches, identifiers, or serialized theme source.
-
-Static type tokens in `octant.css` are:
-
-- `--oct-text-xs: 12px`, `--oct-text-detail: 13px` (declared in
-  `surface.css`), `--oct-text-sm: 14px`, `--oct-text-base: 15px`, each
-  multiplied by `--oct-text-step` so the Appearance interface size moves the
-  whole ladder. Feature CSS reads these tokens; it does not author
-  `calc(N * var(--oct-text-step))`, so the 12px floor for meta text is one
-  definition.
-- `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
-  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`. The large title's 28px is the
-  `oct-title` role's own size, not `--oct-text-2xl`.
-- Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
-- Weights are the ladder in [Scale](#scale). Avoid bolding whole paragraphs.
-  The type roles in `styles/surface.css` (`oct-title`, `oct-section-label`,
-  `oct-row-label`, `oct-row-detail`, `oct-meta`) are the only heading and
-  label recipes; feature CSS does not author a new size.
-- Mono metadata uses positive tracking (`--oct-tracking-wide`); display
-  headings use restrained negative tracking.
-
-Transcript settings are explicit and centered on the body size: Small is
-13px, Medium 14px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
-fresh install reads Small and Narrow, so a question, its reply, and the
-composer under them all read at 13px, never under the chrome around them. The column uses
-`width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
-Chat, Work, and Code start from the same prompt geometry independently of the
-reading-width preference. Canvas documents use the `--oct-canvas-measure`
-(62ch) measure; mockups and designs inside a Canvas follow
-[Canvas visuals](docs/design/canvas-visuals.md#mockups-and-designs).
-
-### Design frame kit
-
-A design drawn in the workspace theme receives the workspace's semantic tokens,
-scheme, and bundled faces, plus a first-party `oct-` class kit that sets no
-colour of its own. The kit's contents are in
-[Canvas visuals](docs/design/canvas-visuals.md#design-frame-kit).
-
-## Spacing, shapes, and depth
-
-Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Off-scale pixel spacing in a stylesheet is ratcheted by `bun run ui:check` against the recorded baseline; a change may lower a file's count but never raise it. Use `gap-*`
-for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
-chains. Radii are the tokens in [Shapes and depth](#shapes-and-depth). Product
-chrome uses those tokens and nothing else: a `border-radius` is a token, `0`,
-`50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
-bare pixel literal. A rem corner also shrinks with the interface font size,
-which a token does not. Adapters own button paint.
-
-Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
-toggles, comboboxes, badges) take their height in rem so they grow with the
-interface size; at the default 13px a button is 20, 24, 28, or 32px tall. A
-quarter-rem step is 3.25px at that root, so a height never uses an odd step
-bare: it rounds to a whole 2px (`h-[round(1.75rem,2px)]`), or a control lands
-between pixels. A field, a select and a combobox take the default button's 28,
-and a tab takes the small button's 24, so a row of them shares one height.
-
-_What scales with the interface size._ Type and control heights scale; spacing,
-icons and radii do not. The recipes' spacing utilities (`p-*`, `gap-*`, `m-*`)
-are pixels, because the theme sets Tailwind's spacing step to `--spacing: 4px`
-in `styles/tailwind.css`, the same 4px scale as the stylesheets'
-`--oct-space-*`; at the default size `px-2` is 8px, never the 6.5px a
-quarter-rem step drew. A recipe names a step that is on the scale (`gap-1`,
-`px-2`, `p-3`, `gap-4`) and never a half step (`px-2.5` is 10px, not 8); a
-contract test scans every class string for one. A width or height that follows
-the type (a menu's minimum width, a terminal's height) is written in rem on
-purpose. _Rationale._ The other way to the same whole pixels was to leave the
-step in rem and rewrite every recipe in `--oct-space-*` tokens, which keeps
-the half steps' meaning but spends 95 edits and leaves two spacing systems in
-one file; a larger interface size would also have padded a control that already
-grew with its text, so a control at 16px would have read as loose rather than
-larger. Pixel spacing is the same decision the icon sizes made.
 _One menu row._ Every in-page pick-list (dropdown, context menu, select and
 combobox options, the model list, the mode menu, the Add tool menu) draws the
 same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
@@ -1337,92 +1498,89 @@ hairline-ringed cards, not floating objects. Frosted material (a
 `backdrop-filter` blur) is used only where a surface has a ground behind it to
 read through:
 
-- the window's optional glass, which is the tint over the native window
-  material behind the whole window;
-- a thread's user bubbles and composer over the application ground or window
-  glass, one material either way (agent replies stay bare prose; see
-  [Transcript](#transcript));
-- Code Home's cards and its Up next and Continue cards, which stand on the
-  start screen's ground beside the composer and wear its material, so the
-  ground reads evenly behind every surface on the screen (with the plain card
-  fill its characters ran through the cards at full strength while the
-  composer beside them was frosted);
-- Zen's windows, dock, bars, and sheets (glass cards);
-- the floating Computer Use activity picture-in-picture (the Browser's live
-  preview is no longer floating: it is a card in the dock, drawn as the dock's
-  other cards are, with no frosted parts);
-- the phone's glass surfaces.
+### Dialog presence and the title bar
 
-Its tint, stroke, and highlight are theme roles, and its floor is the theme's
-page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
-the composer. The thick and chrome tints poured over that floor are the theme's
-raised surface at 56% and 48%: as a fixed neutral grey they made the composer a
-flat grey slab on a black or tinted preset. Together the floor and tint are
-dense enough that the ground stays quiet behind text where the engine does not
-blur it (the packaged window over the ground). Under window Glass the floor and
-the tints are lighter, as the conversation rule on Glass says: a 30% veil of
-the page colour under the primary text at 6% (4% for chrome), because over the
-desktop the dense pair read as a near-black slab. Reduced transparency and unsupported `backdrop-filter` resolve
-every one of them to an opaque surface.
+A stylesheet cannot
+hold an element that is gone, so a surface leaves this way only while it stays
+mounted and is told it has closed. Settings' sheet and a dialog with an `open`
+of its own do that themselves, and such a dialog keeps `open` apart from what
+it shows: one whose words come from the state closing clears (a review, a
+comparison, Rewind) is rendered only while that state exists, like the rest.
+A dialog a feature renders only while it is
+open is wrapped in `OctantDialogPresence`, which keeps the last thing the
+feature rendered until the exit has finished and tells the dialog inside it
+has closed: a confirmation still names what it asked about after the feature
+has cleared that state, and the command palette keeps the rows it showed.
+Every confirmation, the command palette, the Code file search, the Navigator,
+the narrow dock, first run and the other dialogs a feature mounts on demand
+leave this way. Two cases still leave at once: a dialog whose owner goes with
+it (a row removed by the confirmation it showed), and one of two dialogs that
+share a presence when the other takes its place. In a window nobody can see
+there is no exit to show, so a dialog closed there is removed at once.
 
-Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
-level, shown as the Window section's Glass control (Off, Subtle, Strong) and
-its Tint slider. It takes effect only when the host resolved the material
-translucent, so every accessibility, performance, and host-support gate
-applies; then the frame (the sidebar colour) and the panels (the workspace
-colour) are each at the Tint's opacity over the native material, and reduced
-transparency or an unsupported host leaves them opaque. A browser is such a
-host: with no native material behind the page, Glass would leave the frame and
-the panels as the page colour and take the sidebar's own colour away, so a
-browser window always paints the theme's opaque surfaces. Menus, dialogs, popovers, and other controls drawn
-over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
-is still read and stored but no longer changes anything: the whole window is
-glass or none of it is.
+A dialog or a sheet that is leaving is only there to be seen. Its scrim and its controls
+take no press and no key (`inert`), so the page under it answers at once and a
+second press cannot repeat what the first did. Focus goes back to the opener
+as the exit starts, not when it ends, and when the exit ends focus is left
+where it is if the person, or a command they ran from it, has moved it
+in the meantime.
 
-Under Glass nothing inside the shell paints the theme's opaque page,
-workspace, or card colour over a panel; every layer takes one of the shell's
-surfaces (`--octant-window-surface` for the frame and `--octant-panel-surface`
-for every panel, the thread's included), defined once on every shell in
-`shell.css`:
+Native Electron title-bar regions are a hard boundary. Interactive controls
+must carry `window-no-drag` and render above the native drag target. Test title-bar
+buttons in the packaged/native surface, not only with React/jsdom.
 
-- **Settings** wears the same frame and panels: the navigation and gutters are
-  the frame, the page is a panel, and a section card is the card step below.
-- **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
-  Automations, Artifacts, Image generator) are clear over the panel, and their
-  cards drawn with the raised step (`--oct-surface`) take the card step. The
-  Inbox is the model: a display-size page title (the `oct-title` size) with its one line of state
-  on the baseline, then raised cards in a 980px left-aligned column, two
-  columns by container query and one when narrow, rows without rules (see
-  [Inbox page](docs/design/workspace.md#inbox-page)).
-- **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
-  the panel: the primary text at 4%.
-- **An outline button** rests on that card step instead of the page colour
-  (`--octant-outline-rest`); its hover and pressed fills stay the control
-  fills.
-- **Quick tools** for a Code start screen are clear in the body of the dock.
-- **The Browser** is clear on its own start page, whose rows take the card
-  step; a loaded page keeps its opaque canvas.
+On macOS the desktop window keeps Electron's native frame and uses
+`titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
+Do not set a custom `trafficLightPosition`: Electron then resizes
+`NSTitlebarContainerView` to `buttonHeight + 2 * y`, and that native overlay
+eats title-row clicks. One explicit blank drag strip reaches the physical top
+edge after the traffic lights and, when the sidebar is collapsed, after the
+measured leading cluster. Pane tabs and window controls share the compact
+visual rail at a higher stacking layer; unused spans remain drag regions.
+Collapsed-sidebar Show sidebar and New thread actions reserve their own no-drag
+space after the same traffic-light width the sidebar uses.
+Packaged smoke checks both compact geometry and real native state transitions
+for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
-A filled button and a switch that is on keep their own fills. The control fill (a
-secondary button, a segmented track, a select, a chip, a ghost button's hover)
-is a tint of the primary text at 7%, 11% hovered and 15% pressed, as the
-conversation rule on Glass says; menus, popovers, and dialogs keep the opaque
-floating surface. Increased contrast and reduced transparency return cards and
-outline buttons to their opaque colours. The ground behind it all steps down
-by what is on screen: a fifth of its strength behind any surface that shows
-text (a thread, any other pane, or a destination page), and only a start
-screen keeps more of it.
+### Confirmation and dialog behavior
 
-Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
-`--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
-`--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
-that establishes a genuine layer: navigation panes and open form layouts stay
-unshadowed; the card recipe and a Settings group use `--octant-shadow-xs`; a
-filled button uses `--octant-shadow-control`;
-compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
-and follow-up composers use `--octant-shadow-md` over a hairline ring; focused or promoted raised
-objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
-token. A shadow must explain depth, not decorate a flat row.
+Ordinary usage reset/retention, Git discard, and remote administration
+confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
+remote listener confirmation shows the address, origin, network reach, and
+certificate state without disclosing key material; revoking every device
+requires a destructive confirmation. The safe action receives initial focus;
+Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
+focus to the opener. Git confirmations consistently offer **Keep changes** and
+**Discard changes**. Destructive actions opt into the danger treatment explicitly;
+ordinary confirmations use the standard action treatment. Long paths in the
+description wrap within the shared dialog. Their existing host approvals,
+receipts, and observed-state checks remain separate and mandatory.
+
+Every dialog shares one frame. The shared popup insets its content 16px, the
+title is the 15px body step at the strong weight, and the answers sit in one
+row at the trailing edge: the answer that dismisses first, as an outline
+button, and the answer that acts last, filled (or in the destructive role),
+both at the default control height. A dialog that draws to its edges (the
+command palette, a player, a sheet with its own head and foot) sets its own
+inset with one class; no dialog sets its own title size or draws its answers
+at another height. A dialog wider than the 420px default says so with
+`--octant-dialog-width`, never with a width of its own: the shared popup caps
+any other width at the default, which had opened the rewind, synced-artifact,
+Continue elsewhere, planner-review, plugin-detail and thread-search dialogs
+narrower than they were written. Before this, dialog titles ran from 14px to
+17px at two weights, the dismissing answer was drawn bare, outlined or filled
+depending on the dialog, and a confirmation's buttons were one step shorter
+than every other dialog's.
+
+Product notices stack at the top trailing corner of the window, under the
+title bar. At the bottom trailing corner a notice covered the composer's model
+picker and Send.
+
+A dialog with a visible heading uses that heading as its accessible name through
+`labelledBy`; specialized palettes and dock dialogs without one retain the hidden
+title. Do not add a second visible header. Shared dialog popups and backdrops
+suppress entrance motion under the persisted reduced-motion setting as well as
+the OS preference.
 
 ## Shell and layout
 
@@ -1472,24 +1630,6 @@ leading, 8 trailing) with 4px between controls.
 - _A control is never a drag handle._ Each carries `window-no-drag`, and a
   tool's controls come after its name in the keyboard order, before Arrange and
   Close.
-
-### Breakpoints
-
-The shell has two breakpoints, both `max-width` queries, so each names the
-widest viewport its behavior applies to:
-
-| At or below | Source                                                     | What changes                                                                                                                                                                                                                                     |
-| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 960px       | `useNarrowViewport` (`useShellPresentation.ts`), shell.css | The right dock opens as one narrow modal sheet over the page (a titled dialog, no resize handle, Escape closes it and returns focus) instead of a column; the bottom panel is unavailable; the sidebar stops resizing; Settings uses its drawer. |
-| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop the Project step of their breadcrumb.                                                                                                         |
-
-Inside a surface, layouts reflow at component breakpoints rather than shell
-ones: `--oct-bp-lg` 920px (two-to-four column grids and the Project overview gutter),
-`--oct-bp-md` 720px (Settings fact lists and gutters, issue rows), and `--oct-bp-sm` 560px (start-screen
-tiles and cards to one column, compact Settings title bars, 44px Project
-rows and always-visible thread row actions). Other widths in feature stylesheets are local to that
-surface. The mobile app has a separate design system under
-`apps/mobile/design-system`.
 
 ### Tabs and segmented choices
 
@@ -1646,234 +1786,99 @@ hover/focus actions remain in flow or use an overflow menu so the list does not
 jump. Right-click mirrors available actions but is never the sole route to an
 essential action.
 
-## Iconography and provider marks
+## Source of truth and CSS layers
 
-Lucide is the product icon library. Every interface icon is drawn at one of
-four sizes and at one stroke.
+There is one runtime theme authority and one owned control layer:
 
-| Size | Where                                                                     |
-| ---- | ------------------------------------------------------------------------- |
-| 12   | Disclosure chevrons and status marks inside a chip                        |
-| 14   | Inside a 24px control and inline in 13px text                             |
-| 16   | The default: buttons, menu rows, navigation rows, tool buttons, tile bars |
-| 20   | An empty state and a dialog header                                        |
+| Layer                 | Responsibility                                                                                                    | Files                                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Semantic theme        | Persisted theme settings, presets, contrast validation, typography, safe fallback, export/import                  | `packages/theme/src/`, `packages/contracts/src/theme.ts`                                                                    |
+| Renderer fallback     | Startup values before the theme bootstrap is applied                                                              | `apps/web/src/styles.css` (`--octant-*`)                                                                                    |
+| Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                                                                            |
+| Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                                                                     |
+| shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css`                                                  |
+| Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                                                                          |
+| Native projection     | Maps the same semantic defaults into React Native colors; mobile-only material and touch geometry stay local      | `apps/mobile/design-system/`                                                                                                |
+| Public projection     | Emits the semantic defaults for public documentation and the marketing-site stack                                 | [octant-site guide projection](https://github.com/Ogard-Labs/octant-site/blob/main/docs/.vitepress/theme/semanticTokens.ts) |
 
-The stroke is 1.5, set once for the whole app by `IconDefaults`
-(`apps/web/src/ui/IconDefaults.tsx`) around every rendered surface. A call site
-passes a `size` from the table and no `strokeWidth`. The exceptions are
-drawings and not icons: diagram edges, the marks a person draws on a page, a
-glyph cut into a dither mask, and provider marks, which are filled artwork.
-The stroke is in the icon's own 24-unit grid, so it renders 0.75 to 1.25px
-across the four sizes. One more exception: a tick or dot of 16px or less drawn
-inside a filled or bordered mark (a step marker, a done mark, a mock-up
-checkbox) takes `MARK_TICK_STROKE_WIDTH` (2.5), because 0.75px on an accent
-fill falls under the 3:1 bar for graphics. A check beside text or in a menu row
-is plain and takes the same 1.5. Ten strokes had accumulated because nothing checked them, and one
-lighter stroke reads as one drawing hand; `iconScaleContract` now fails on a
-stroke or size outside this section.
+The import order in `apps/web/src/styles.css` is load-bearing:
 
-In a Button, pass icons with the shadcn `data-icon` convention and let the
-recipe size them: it takes 12, 14 or 16 from `--oct-icon-xs`, `-sm` and `-md`
-by control height (20, 24, 28px and up), in pixels, because a rem size would
-follow the interface text size and land between the steps. Icons clarify labels and do not replace an essential label
-without an accessible name.
+1. Tailwind v4 and its layered preflight.
+2. `octant.css` static system.
+3. `octant-bridge.css` runtime mapping.
+4. `shadcn-theme.css` semantic projection.
+5. Feature stylesheets, which may position a surface but must not repaint a
+   shared control.
 
-Provider identity uses locally bundled, licensed provider logos selected by
-`ProviderGlyph`. This is the explicit identity-asset exception to the
-originality rule; it does not permit copying another application’s UI assets or
-implementation. Keep source and license provenance with each mark. Never fetch
-a logo at runtime, use emoji, or draw an approximate brand mark. Unknown or
-private providers keep a truthful fallback. The same marks appear in Settings,
-model pickers, and thread metadata.
+`--octant-*` roles own persistence and theme editing. `--oct-*` and shadcn
+variables are consumption aliases. Do not add a new raw colour, radius, shadow,
+or control recipe in a feature stylesheet.
 
-## Motion and interaction
+The portable projection of these layers, for a website or another app, is
+generated, not hand-kept: `bun run tokens:export` writes
+`packages/theme/tokens/tokens.css` and `tokens.json` from the stylesheets above,
+and `bun run tokens:check` fails when they are stale. How to load and use them,
+and the app-feel rules a consumer follows, are in
+[Design tokens and the app feel](docs/design/design-tokens.md).
 
-Functional feedback uses 150ms (`--oct-motion-fast`) and geometry 200ms
-(`--oct-motion-base`); an overlay leaves in 100ms (`--oct-dur-fast`). One value with one meaning has one token: a duration, a weight or a space is never defined twice under two names. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work by default; an animated built-in picture, the
-Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
-set to Wave are the moving grounds a person may choose, and reduced motion holds
-each on a still frame. Running state
-must have a textual or shape distinction in addition to motion. `prefers-reduced-
-motion` and the persisted reduced-motion setting disable transitions and
-animations without removing state information.
+`bun run ui:check` enforces this on every `.css` file under `apps/web/src`
+(`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
+block that must depict one fixed scheme regardless of theme, such as the
+light/dark preview swatches in Settings, carries
+`/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
+`font-size` values, raw `transition`/`animation` durations, and `!important`
+outside an accessibility fallback, any `font-weight` heavier than 600 outside
+the title roles (see [Scale](#scale)), and any paint
+(colour, background, border, radius, shadow, outline) that a feature rule puts
+on a class handed to an Octant primitive (place or size a shared control,
+never repaint it; pick a recipe variant instead) ratchet against
+`scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
+re-record the lower count with `--write-baseline` so the baseline never
+overstates.
 
-**Overlays.** Everything that opens over the window arrives and leaves one
-way, declared once (`components.css`, Overlay motion): a menu, a context
-menu, a select or combobox list, a popover, a tooltip, a hover card, a dialog,
-Settings' sheet, and the scrim under a dialog or a sheet. It fades in over
-150ms (`--oct-motion-fast`, `--oct-ease-motion`) and out over 100ms
-(`--oct-dur-fast`, `--oct-ease-color`): nobody waits for a thing to leave. A
-popup settles from 98% at the point it is anchored to and a dialog from 98%
-about its centre; the sheet rises 8px instead, since a surface that size reads
-a scale as a zoom. Only opacity, scale and translate change, on the overlay
-alone, so nothing behind it is laid out again, and no overlay rests on a scale
-of its own. This is feedback, not a decorative entrance: before it a menu and
-a popover settled in while a context menu, a select, a tooltip, a dialog and
-the sheet appeared and vanished in one frame. A tooltip or hover card the
-library closes at once, on a press of its trigger, does not fade over what the
-press opened. Under reduced motion, from the system or from the setting, there
-is no transition at all: an overlay is there or it is not. A recipe carries no
-arrival or departure classes of its own. A dialog that a feature renders only
-while it is open arrives the same way (`@starting-style`). A stylesheet cannot
-hold an element that is gone, so a surface leaves this way only while it stays
-mounted and is told it has closed. Settings' sheet and a dialog with an `open`
-of its own do that themselves, and such a dialog keeps `open` apart from what
-it shows: one whose words come from the state closing clears (a review, a
-comparison, Rewind) is rendered only while that state exists, like the rest.
-A dialog a feature renders only while it is
-open is wrapped in `OctantDialogPresence`, which keeps the last thing the
-feature rendered until the exit has finished and tells the dialog inside it
-has closed: a confirmation still names what it asked about after the feature
-has cleared that state, and the command palette keeps the rows it showed.
-Every confirmation, the command palette, the Code file search, the Navigator,
-the narrow dock, first run and the other dialogs a feature mounts on demand
-leave this way. Two cases still leave at once: a dialog whose owner goes with
-it (a row removed by the confirmation it showed), and one of two dialogs that
-share a presence when the other takes its place. In a window nobody can see
-there is no exit to show, so a dialog closed there is removed at once.
+The remaining control repaints are burned down by restoring each control to its
+recipe, in small batches. Each batch is its own pull request with before and
+after screenshots, and the maintainer approves the paint change before it
+merges, because removing a repaint changes what the control looks like.
 
-A dialog or a sheet that is leaving is only there to be seen. Its scrim and its controls
-take no press and no key (`inert`), so the page under it answers at once and a
-second press cannot repeat what the first did. Focus goes back to the opener
-as the exit starts, not when it ends, and when the exit ends focus is left
-where it is if the person, or a command they ran from it, has moved it
-in the meantime.
+The `control-repaint` rule reads the classes feature code hands to an Octant
+primitive. A control marked `unstyled` is feature-owned paint by design and is
+skipped; `unstyled={false}` is not, and stays under the rule. The checker also
+skips `composer-input`, the system prompt, because that surface is
+already painted twice; the rule still holds for it — feature CSS must not
+repaint it a third time — it is simply not machine-checked.
 
-A press darkens a control's fill and moves nothing: no sink, no scale, on any
-control. Words in the chrome do not select when the pointer drags across them,
-controls keep the arrow cursor, a disabled control keeps it too, and the hand
-is for a real link. A disabled control is drawn at one shared opacity,
-`--oct-disabled-opacity` (0.75), so its label stays at 3:1 or more in both
-modes while it still reads as unavailable: no hover fill, no pointer events.
-A select's chevron is not dimmed while the select is enabled. Pictures and links do not lift off as drag ghosts. Reading
-matter opts back in, so a message, a diff, a value, and an error can still be
-copied. The keyboard focus edge shows only while a person is moving focus by
-keyboard (`data-octant-input`): a dialog handing focus back to its trigger paints
-no ring after a pointer press, and a focused field shows its caret and a brighter
-border.
+The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
+Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
+and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
+denser controls, except that recipes paint no focus ring, halo or second outline
+(the global `:focus-visible` rule is the only keyboard focus treatment, so a
+combobox's frame draws none of its own) and the badge and
+the card keep the shape and elevation set in this document. A recipe's heading
+(a card's or popover's title) takes the recipe's own type role: the page's bare
+`h1` to `h4` defaults sit in the base layer, below every utility, so they size
+reading content and never a component. This
+keeps the interaction backend accessible and editable while preserving the
+shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
+`ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
+menus use the shared `OctantContextMenu` adapter; do not add a new direct
+primitive import.
 
-Native Electron title-bar regions are a hard boundary. Interactive controls
-must carry `window-no-drag` and render above the native drag target. Test title-bar
-buttons in the packaged/native surface, not only with React/jsdom.
-
-On macOS the desktop window keeps Electron's native frame and uses
-`titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
-Do not set a custom `trafficLightPosition`: Electron then resizes
-`NSTitlebarContainerView` to `buttonHeight + 2 * y`, and that native overlay
-eats title-row clicks. One explicit blank drag strip reaches the physical top
-edge after the traffic lights and, when the sidebar is collapsed, after the
-measured leading cluster. Pane tabs and window controls share the compact
-visual rail at a higher stacking layer; unused spans remain drag regions.
-Collapsed-sidebar Show sidebar and New thread actions reserve their own no-drag
-space after the same traffic-light width the sidebar uses.
-Packaged smoke checks both compact geometry and real native state transitions
-for Open in, Environment, bottom panel, right dock, and sidebar recovery.
-
-### Confirmation and dialog behavior
-
-Ordinary usage reset/retention, Git discard, and remote administration
-confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
-remote listener confirmation shows the address, origin, network reach, and
-certificate state without disclosing key material; revoking every device
-requires a destructive confirmation. The safe action receives initial focus;
-Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
-focus to the opener. Git confirmations consistently offer **Keep changes** and
-**Discard changes**. Destructive actions opt into the danger treatment explicitly;
-ordinary confirmations use the standard action treatment. Long paths in the
-description wrap within the shared dialog. Their existing host approvals,
-receipts, and observed-state checks remain separate and mandatory.
-
-Every dialog shares one frame. The shared popup insets its content 16px, the
-title is the 15px body step at the strong weight, and the answers sit in one
-row at the trailing edge: the answer that dismisses first, as an outline
-button, and the answer that acts last, filled (or in the destructive role),
-both at the default control height. A dialog that draws to its edges (the
-command palette, a player, a sheet with its own head and foot) sets its own
-inset with one class; no dialog sets its own title size or draws its answers
-at another height. A dialog wider than the 420px default says so with
-`--octant-dialog-width`, never with a width of its own: the shared popup caps
-any other width at the default, which had opened the rewind, synced-artifact,
-Continue elsewhere, planner-review, plugin-detail and thread-search dialogs
-narrower than they were written. Before this, dialog titles ran from 14px to
-17px at two weights, the dismissing answer was drawn bare, outlined or filled
-depending on the dialog, and a confirmation's buttons were one step shorter
-than every other dialog's.
-
-Product notices stack at the top trailing corner of the window, under the
-title bar. At the bottom trailing corner a notice covered the composer's model
-picker and Send.
-
-A dialog with a visible heading uses that heading as its accessible name through
-`labelledBy`; specialized palettes and dock dialogs without one retain the hidden
-title. Do not add a second visible header. Shared dialog popups and backdrops
-suppress entrance motion under the persisted reduced-motion setting as well as
-the OS preference.
-
-## Accessibility and reliability
-
-- Every product-owned scroll surface inherits one scrollbar, declared once
-  in `styles.css`: a thin thumb in a theme token and no painted track, in a
-  pane, a menu, a popup and a sheet alike, with a forced-colors fallback.
-  Where the system floats scrollbars over content the thumb floats; where it
-  keeps a strip for them the strip is clear. The two standard properties are
-  the rule; the `::-webkit-scrollbar` parts beside them speak only for an
-  engine that does not know the properties. Feature CSS may reserve the strip
-  (`scrollbar-gutter`) so a page does not shift when it starts to scroll, and
-  hides a scrollbar only on the named strips of tabs and icons that scroll
-  sideways; it never sets a scrollbar colour or another width.
-- Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
-- Status, diff, provider, and activity states always include text, shape,
-  pattern, or an accessible label in addition to colour.
-- Pointer targets are at least 24px on desktop and 44px on touch.
-- Keyboard users can reach every primary action, open/dismiss every overlay,
-  navigate menus/selects, and recover focus after closing a popover or dialog.
-- A control that opens a panel moves focus into it, and a control that is
-  replaced by what it did hands focus to the next logical control instead of
-  letting it fall to the page: a Tools tile focuses the tool it opened, applying
-  a working folder returns to its Working folder row (to the failure, when
-  the re-read fails) and cancelling returns to Change working folder, and Check and add focuses the result's heading as every
-  other Add endpoint step does.
-- A menu opened from the keyboard starts on its current choice, not its first
-  item; ArrowUp still opens on the last item. A group of radios is one set of
-  choices: the arrow keys move to the neighbour and select it, wrap past either
-  end, and Home and End jump to the ends. A resize separator takes Home for its
-  minimum and End for its maximum as well as the arrows.
-- Tab order follows reading order from the left: the navigation sidebar comes
-  before the window chrome, so the first Tab stop on load is never the controls
-  at the right edge. A live region that holds text and a button keeps a space
-  between them, so assistive technology does not read the two as one word.
-- Keyboard focus draws one indicator, declared once in `octant.css`: a 2px
-  inset outline in `--oct-focus-edge`, the foreground at 62% so it holds about
-  4.5:1 or better against the control's fill and the surface around it in
-  both schemes, and it follows the control's own radius.
-  It is `:focus-visible` only, so a pointer press paints nothing, and it is
-  never the hover fill, so focus and pointer read as different states. A
-  control filled with the accent inverts it to `--oct-focus-edge-on-accent`; an
-  SVG mark or inline text link moves it just outside itself. A container that
-  only holds the keyboard (menu, dialog, listbox, preview card) shows no edge;
-  the item inside it does, and menu items keep their highlighted fill. A text
-  field set inside a frame that is itself the field (the composer, an inline
-  search) shows its caret inside that frame; the composer frame draws no focus
-  edge. Feature CSS never suppresses,
-  recolours, or adds a second ring, and the `--octant-focus-ring` theme role is
-  never painted as the indicator.
-- Every app-owned form declares `noValidate`; Octant owns validation copy,
-  field association, focus, and recovery instead of browser-specific bubbles.
-- Loading, unavailable, stale, denied, empty, and error states keep stable
-  geometry and explain the next action. Never turn a refused server command
-  into a silent no-op.
-- Increased contrast is one state with two triggers: the Appearance setting
-  or the system's `prefers-contrast: more`. `ThemeSettingsProvider` publishes
-  either as `data-octant-increased-contrast="true"` on the root, and every
-  high-contrast rule keys off that attribute rather than the media query, so
-  both triggers draw the same rules: the text roles take their
-  `--octant-text-*-high-contrast` values and hairlines step up to
-  `--octant-border-strong`. Script that adapts to contrast reads
-  `useIncreasedContrast()`, not the media query.
-- Theme, typography, density, translucency, contrast, and reduced-motion
-  settings are persisted through the server-authoritative journal and applied
-  through the providers. Renderer state is presentation only.
+Desktop context menus and ordinary dropdown menus (including More, the account
+menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
+The OS owns their font, material, spacing, highlighting, submenu behavior,
+accessibility, and light/dark appearance; renderer theme tokens do not repaint
+native menus. The account menu opens above its footer control and More beside
+its sidebar row. Activity › Custom range opens a date-range dialog.
+The existing action composition supplies labels, grouping,
+disabled and checked states, and nested actions. Native menus dismiss after
+a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing/copy menu. The Code editor and both diff sides
+use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
+Base UI menus. Native menus use macOS accessibility. Verify their actual presentation and
+selection through native accessibility in an isolated desktop fixture; renderer
+keyboard and role checks cover the browser fallback. Searchable pickers and popovers with embedded controls remain
+renderer surfaces.
 
 ## Implementation checklist
 
@@ -1907,17 +1912,7 @@ When adding or touching UI:
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
 - Glass is limited to the surfaces listed under
-  [Spacing, shapes, and depth](#spacing-shapes-and-depth); it is a different
+  [Spacing, shapes, and depth](#glass); it is a different
   material, not a second palette. Do not copy mobile atmosphere or phone radii
   into a flat desktop pane, and do not bring a blur onto a pane that has no
   ground under it.
-
-## Surface behavior
-
-### Optional Settings details
-
-The legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
-secondary, and metadata remain the only text strengths. The theme schema keeps
-its focus compatibility role for imports, but Appearance does not expose a
-Focus ring color control because the focus indicator is the neutral edge,
-never the theme's focus role.

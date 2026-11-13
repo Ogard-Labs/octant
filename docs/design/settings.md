@@ -19,7 +19,7 @@ close control in its corner, with Escape, or with a press on the window behind
 it, and focus returns to where it was. It carries no "Back to app": the person
 never left. The presentation is decided when Settings opens and kept until it
 closes. The sheet arrives and leaves with the shared
-[overlay motion](../../DESIGN.md#motion-and-interaction); it stays mounted while Settings is
+[overlay motion](../../DESIGN.md#motion); it stays mounted while Settings is
 closed so that its leaving can be seen. While Settings loads, the sheet shows
 Settings in outline on its own fill, inside its own box: a rail and a page of
 skeleton bars (`SettingsLoading`), styled with the shell and not with

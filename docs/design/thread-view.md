@@ -341,7 +341,7 @@ Neither animates, so reduced motion needs no variant. The row under the box
 ([The row under the box](../../DESIGN.md#welcome-and-composer)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
 chosen effort in muted ink and no chevron, the microphone sits just before send,
-and send is the round accent-filled button with an up arrow.
+and send is the 28px icon button with an up arrow, with the control corner: the quiet secondary tile until there is something to send, then the accent primary (see [DESIGN.md: Composer row](../../DESIGN.md#welcome-and-composer)).
 
 ## Composer behavior
 

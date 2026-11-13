@@ -216,7 +216,7 @@ its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
 answers a plain 404 when there is none. The renderer draws it as an `<img>` at
-the row's own icon size (a step of the [icon scale](../../DESIGN.md#iconography-and-provider-marks)) with a small radius; it never
+the row's own icon size (a step of the [icon scale](../../DESIGN.md#icons)) with a small radius; it never
 inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
 while it loads, when the Project has none, and when the image fails. A Project's
@@ -334,7 +334,7 @@ thread's own level, and only while that thread is on screen: a page or Settings
 covering the workspace leaves no thread in front. The palette also sets the
 default. The levels, the thread
 menu, and where the levels are kept are owned by
-[DESIGN.md: Transcript](../../DESIGN.md#transcript).
+[DESIGN.md: Transcript](thread-view.md#transcript).
 
 ### Jump to the next waiting thread
 
@@ -895,7 +895,7 @@ tool row (a minimised tool is not a tile: its card stands for it, and its button
 Stacked, a page showed four bars and named the tool
 three times. Every tile is a square pane that shares its edges with its neighbours and
 with the stage: no gap and no corner, one 1px line between two panes
-([DESIGN.md](../../DESIGN.md#shapes-and-depth) owns the material), and one
+([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material), and one
 under the title band along the top. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
 and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
@@ -1160,7 +1160,7 @@ shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility-and-reliability). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
