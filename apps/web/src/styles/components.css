@@ -2283,6 +2283,13 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   text-align: center;
 }
 
+/* The increment button is pinned to the last track: auto-placed, a stepper
+   without a suffix put it in the suffix track, the empty fourth track took its
+   30px, and the value column kept 4px of a 96px stepper. */
+.octant-number-stepper__button:last-child {
+  grid-column: 4;
+}
+
 .octant-number-stepper__input::-webkit-inner-spin-button,
 .octant-number-stepper__input::-webkit-outer-spin-button {
   margin: 0;
